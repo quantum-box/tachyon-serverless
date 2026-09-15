@@ -1,0 +1,38 @@
+# docs 索引
+
+Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）の文書一覧。読む順は上から。
+
+## 契約（先に読む）
+
+| 文書 | 内容 |
+|---|---|
+| [architecture.md](architecture.md) | crate 構成、依存方向、同期 Invoke の流れ、設定、実装者が守る決め事、P1 の非対象 |
+| [protocol.md](protocol.md) | host ↔ bridge の frame、bridge ↔ user process の Runtime API、Firecracker guest 規約（rootfs、drive、cmdline、API 順序、terminate） |
+| [threat-model.md](threat-model.md) | 信頼境界、資産、前提、guest 自己申告を根拠にしない原則、2 tenant + operator のアクセス制御マトリクス、deadline / OutcomeUnknown / Idempotency-Key / 上限の意味、process provider が守らないもの、非目標 |
+
+正本のコード: `crates/domain`（ID、entity、状態遷移、`ErrorClass`、`Limits`）、`crates/protocol`（frame、Runtime API）、`crates/provider-port`（`ExecutionProvider` ほか port）、`crates/api-types`（DTO、`ErrorCode`）。文書とコードが食い違ったらコードを正とし、文書を直す。
+
+## 決定（ADR）
+
+| 文書 | 内容 |
+|---|---|
+| [adr/0001-execution-provider-firecracker-first.md](adr/0001-execution-provider-firecracker-first.md) | Firecracker / Cloud Hypervisor / Kata の比較、Firecracker 第一・trait の背後・CH fallback・Kata は後続 adapter、残る測定 M1〜M13、fake の結果で決めない受入規則 |
+| [adr/0002-process-provider-dev-only.md](adr/0002-process-provider-dev-only.md) | 隔離なし process provider の存在理由、`profile = "production"` での拒否、証明するもの / しないもの |
+
+## 棚卸し・受入
+
+| 文書 | 内容 |
+|---|---|
+| [inventory-tachyon-apps.md](inventory-tachyon-apps.md) | tachyon-apps（commit `ae727f1f7`）の棚卸し。領域ごとの reference / adapter candidate / 不要、port への対応、能力表（すべて unverified）、baseline KVM 測定プロファイル |
+| [acceptance.md](acceptance.md) | PLT-4613〜PLT-4630 の受入条件と状態（実装済み / 未検証 / 別トラックで実装中 / 未着手）、証跡パス |
+
+## 運用・利用（他トラックが追加する）
+
+| 文書 | 内容 | 担当 |
+|---|---|---|
+| kvm.md | KVM 検証 host の要件、bootstrap / teardown スクリプト、kernel / rootfs の取得と digest 検証 | PLT-4615 |
+| api.md | 管理 API と Invoke API の使い方、認証 header、エラー応答、OpenAPI の場所 | PLT-4619 / PLT-4626 |
+| cli.md | `tsls deploy / invoke / logs / rollback / dev` の使い方と設定 | PLT-4629 |
+| evidence/ | 実機測定の生データ。`evidence/<plt-id>/` に置き、`inventory-tachyon-apps.md` §6 の profile を明記する | PLT-4621 / PLT-4630 |
+
+上の 3 文書は本索引の作成時点では存在しない。追加した PR で本表のリンクを有効にする。
