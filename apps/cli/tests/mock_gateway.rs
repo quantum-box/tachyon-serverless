@@ -32,9 +32,25 @@ struct Recorded {
     body: Vec<u8>,
 }
 
+/// What `GET /v1/provider` answers.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum ProviderMode {
+    /// The process provider (`dev_only: true`).
+    #[default]
+    DevOnly,
+    /// A microVM provider (`dev_only: false`).
+    Isolated,
+    /// The lookup fails with a platform error.
+    Failing,
+}
+
+const NO_ISOLATION: &str = "NO isolation";
+const LOOKUP_WARNING: &str = "could not determine provider isolation";
+
 #[derive(Default)]
 struct MockState {
     requests: Vec<Recorded>,
+    provider: ProviderMode,
     /// How many revision polls answer `pending` before `ready`.
     pending_polls: u32,
     /// Response for the invoke route: (status, body, invocation id header).
@@ -164,18 +180,28 @@ async fn handler(
     match (m, path.as_str()) {
         ("GET", "/healthz") => (StatusCode::OK, "ok").into_response(),
         ("GET", "/readyz") => (StatusCode::OK, "ready").into_response(),
-        ("GET", "/v1/provider") => json_response(
-            200,
-            &json!({
-                "kind": "process", "dev_only": true, "isolation": "process",
-                "capabilities": {"isolation": "process", "dev_only": true,
-                    "create_terminate": {"status": "supported"},
-                    "snapshot_create": {"status": "unsupported", "reason": "P1"}},
-                "preflight": {"provider": "process", "ok": true,
-                    "checks": [{"name": "bridge", "ok": true, "detail": "found"}]}
-            }),
-            &[],
-        ),
+        ("GET", "/v1/provider") => {
+            let (kind, isolation, dev_only) = match st.provider {
+                ProviderMode::Failing => {
+                    let (s, b) = api_error(500, "platform_error", None, None);
+                    return json_response(s, &b, &[]);
+                }
+                ProviderMode::DevOnly => ("process", "process", true),
+                ProviderMode::Isolated => ("firecracker", "microvm", false),
+            };
+            json_response(
+                200,
+                &json!({
+                    "kind": kind, "dev_only": dev_only, "isolation": isolation,
+                    "capabilities": {"isolation": isolation, "dev_only": dev_only,
+                        "create_terminate": {"status": "supported"},
+                        "snapshot_create": {"status": "unsupported", "reason": "P1"}},
+                    "preflight": {"provider": kind, "ok": true,
+                        "checks": [{"name": "bridge", "ok": true, "detail": "found"}]}
+                }),
+                &[],
+            )
+        }
         ("GET", "/v1/functions") => json_response(
             200,
             &json!({"items": [function_json(FN_HELLO, "hello"), function_json(FN_OTHER, "other")]}),
@@ -620,8 +646,15 @@ async fn invoke_query_and_colon_routes() {
         ])
         .await;
     assert_eq!(code, ExitCode::Ok);
+    // Only the invoke POSTs; the provider isolation lookup is a GET.
+    let posts = || -> Vec<String> {
+        mock.paths()
+            .into_iter()
+            .filter(|p| p.starts_with("POST "))
+            .collect()
+    };
     assert_eq!(
-        mock.paths()[0],
+        posts()[0],
         format!("POST /v1/functions/{FN_HELLO}:invoke?revision_id={REV_A}")
     );
     let (code, _, _) = mock
@@ -629,7 +662,7 @@ async fn invoke_query_and_colon_routes() {
         .await;
     assert_eq!(code, ExitCode::Ok);
     assert_eq!(
-        mock.paths()[1],
+        posts()[1],
         format!("POST /v1/functions/{FN_HELLO}/invoke?alias=canary")
     );
 }
@@ -764,7 +797,11 @@ async fn http_adapter_passes_function_status_through() {
             .iter()
             .any(|h| h[0] == "x-fn")
     );
-    let req = mock.requests().into_iter().last().unwrap();
+    let req = mock
+        .requests()
+        .into_iter()
+        .find(|r| r.path.contains("/http/"))
+        .expect("adapter request");
     assert_eq!(req.method, "POST");
     assert_eq!(
         req.path,
@@ -864,6 +901,143 @@ async fn provider_and_health() {
     let v: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["healthz"]["status"], 200);
     assert_eq!(v["readyz"]["status"], 200);
+}
+
+#[tokio::test]
+async fn invoke_warns_on_stderr_for_a_dev_only_provider() {
+    let mock = Mock::start(MockState::default()).await;
+    let (code, out, err) = mock
+        .tsls(&[
+            "functions",
+            "invoke",
+            "hello",
+            "--payload",
+            r#"{"name":"demo"}"#,
+            "--json",
+        ])
+        .await;
+    assert_eq!(code, ExitCode::Ok, "{err}");
+    assert_eq!(
+        out, "{\"message\":\"hello, demo\"}\n",
+        "stdout stays the raw body"
+    );
+    assert!(err.contains(NO_ISOLATION), "{err}");
+    assert!(err.contains(INV), "{err}");
+    // Authenticated: the real gateway puts /v1/provider behind the token.
+    let lookup = mock
+        .requests()
+        .into_iter()
+        .find(|r| r.method == "GET" && r.path == "/v1/provider")
+        .expect("provider lookup");
+    assert!(
+        lookup
+            .headers
+            .contains(&("authorization".into(), format!("Bearer {TOKEN}")))
+    );
+
+    // A failed invoke is flagged as well, with its exit code unchanged.
+    let mock = Mock::start(MockState {
+        invoke: Some(api_error(
+            502,
+            "user_error",
+            Some(INV),
+            Some("Handler.Error"),
+        )),
+        ..Default::default()
+    })
+    .await;
+    let (code, out, err) = mock.tsls(&["functions", "invoke", "hello", "--json"]).await;
+    assert_eq!(code, ExitCode::InvocationFailed, "{err}");
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["error"]["code"], "user_error");
+    assert!(err.contains(NO_ISOLATION), "{err}");
+}
+
+#[tokio::test]
+async fn invoke_does_not_warn_for_an_isolated_provider() {
+    let mock = Mock::start(MockState {
+        provider: ProviderMode::Isolated,
+        ..Default::default()
+    })
+    .await;
+    let (code, out, err) = mock.tsls(&["functions", "invoke", "hello", "--json"]).await;
+    assert_eq!(code, ExitCode::Ok, "{err}");
+    assert_eq!(out, "{\"message\":\"hello, demo\"}\n");
+    assert!(!err.contains(NO_ISOLATION), "{err}");
+    assert!(!err.contains(LOOKUP_WARNING), "{err}");
+    assert!(
+        mock.paths().contains(&"GET /v1/provider".to_string()),
+        "isolation was checked"
+    );
+}
+
+#[tokio::test]
+async fn failed_provider_lookup_warns_without_changing_the_invoke_result() {
+    let mock = Mock::start(MockState {
+        provider: ProviderMode::Failing,
+        ..Default::default()
+    })
+    .await;
+    let (code, out, err) = mock.tsls(&["functions", "invoke", "hello", "--json"]).await;
+    assert_eq!(code, ExitCode::Ok, "{err}");
+    assert_eq!(out, "{\"message\":\"hello, demo\"}\n");
+    assert!(err.contains(LOOKUP_WARNING), "{err}");
+    assert!(!err.contains(NO_ISOLATION), "{err}");
+
+    let mock = Mock::start(MockState {
+        provider: ProviderMode::Failing,
+        invoke: Some(api_error(504, "timeout", Some(INV), Some("Host.Timeout"))),
+        ..Default::default()
+    })
+    .await;
+    let (code, _, err) = mock.tsls(&["functions", "invoke", "hello"]).await;
+    assert_eq!(code, ExitCode::Timeout, "{err}");
+    assert!(err.contains(LOOKUP_WARNING), "{err}");
+}
+
+#[tokio::test]
+async fn http_adapter_warns_for_a_dev_only_provider() {
+    let args = ["functions", "http", "hello", "--path", "/", "--json"];
+
+    let mock = Mock::start(MockState::default()).await;
+    let (code, out, err) = mock.tsls(&args).await;
+    assert_eq!(code, ExitCode::Ok, "{err}");
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["body"], "ok");
+    assert!(err.contains(NO_ISOLATION), "{err}");
+
+    let mock = Mock::start(MockState {
+        provider: ProviderMode::Isolated,
+        ..Default::default()
+    })
+    .await;
+    let (code, _, err) = mock.tsls(&args).await;
+    assert_eq!(code, ExitCode::Ok, "{err}");
+    assert!(!err.contains(NO_ISOLATION), "{err}");
+    assert!(!err.contains(LOOKUP_WARNING), "{err}");
+    assert!(mock.paths().contains(&"GET /v1/provider".to_string()));
+
+    let mock = Mock::start(MockState {
+        provider: ProviderMode::Failing,
+        ..Default::default()
+    })
+    .await;
+    let (code, out, err) = mock.tsls(&args).await;
+    assert_eq!(code, ExitCode::Ok, "{err}");
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["status"], 200);
+    assert!(err.contains(LOOKUP_WARNING), "{err}");
+
+    // A gateway-side error on the adapter is flagged too and stays non-zero.
+    let (_, body) = api_error(404, "not_found", None, None);
+    let mock = Mock::start(MockState {
+        http_adapter: Some((404, body.to_string())),
+        ..Default::default()
+    })
+    .await;
+    let (code, _, err) = mock.tsls(&args).await;
+    assert_eq!(code, ExitCode::Api);
+    assert!(err.contains(NO_ISOLATION), "{err}");
 }
 
 #[tokio::test]

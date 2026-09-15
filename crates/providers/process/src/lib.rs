@@ -7,7 +7,20 @@
 //! `bridge.sock` (listener bound before spawning), `bridge.pid`,
 //! `bridge.stdout` and `bridge.stderr`. The bridge runs in its own process
 //! group so terminate can signal it and everything it started; the bridge
-//! itself kills the user process on `SIGTERM`.
+//! itself kills the user process, which it puts in a separate process group
+//! that the provider cannot reach.
+//!
+//! Terminate order: for `Completed` / `Shutdown` the host has just sent the
+//! bridge `Shutdown`, so the provider first waits `GRACEFUL_EXIT_WAIT` for the
+//! bridge to wind down on its own. After that (and immediately for every other
+//! reason) it sends `SIGTERM` to the bridge group, waits `TERMINATE_GRACE` and
+//! sends `SIGKILL`. Both windows are longer than the bridge's own
+//! SIGTERM -> SIGKILL grace for the user process, so the bridge is never
+//! killed while it still owns a user process that ignores `SIGTERM`.
+//!
+//! A pid read from a `bridge.pid` this instance did not spawn may be stale
+//! (reboot, pid wrap); it is only signalled after its argv is shown to contain
+//! the environment id.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -34,8 +47,25 @@ const SOCKET_FILE: &str = "bridge.sock";
 const PID_FILE: &str = "bridge.pid";
 const STDOUT_FILE: &str = "bridge.stdout";
 const STDERR_FILE: &str = "bridge.stderr";
-const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+/// Mirrors the runtime bridge's `SHUTDOWN_GRACE` (docs/protocol.md: on
+/// `Shutdown` the bridge sends the user process SIGTERM, waits 2 s, then
+/// SIGKILL). The bridge's SIGTERM path uses a shorter grace (1 s). Only the
+/// bridge can kill the user process, so the provider's timers must outlast it.
+const BRIDGE_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+/// `Completed` / `Shutdown`: how long to wait for the bridge to exit on its own
+/// after the host's `Shutdown` frame before signalling it.
+const GRACEFUL_EXIT_WAIT: Duration = Duration::from_millis(2500);
+/// SIGTERM -> SIGKILL grace for the bridge group. The host sends `Shutdown`
+/// before every terminate, so the bridge may already be winding down with the
+/// full `BRIDGE_SHUTDOWN_GRACE` and ignore our SIGTERM. The extra second lets
+/// it deliver SIGKILL to the user process before we SIGKILL the bridge.
+const TERMINATE_GRACE: Duration = Duration::from_secs(3);
 const KILL_WAIT: Duration = Duration::from_secs(5);
+
+// No orphaned user process: the bridge must reach its own SIGKILL of the user
+// process before the provider can SIGKILL the bridge.
+const _: () = assert!(TERMINATE_GRACE.as_millis() > BRIDGE_SHUTDOWN_GRACE.as_millis());
+const _: () = assert!(GRACEFUL_EXIT_WAIT.as_millis() > BRIDGE_SHUTDOWN_GRACE.as_millis());
 
 #[derive(Debug, Clone)]
 pub struct ProcessProviderConfig {
@@ -159,8 +189,17 @@ fn socket_bind_path(dir: &Path, id: &EnvironmentId) -> PathBuf {
     PathBuf::from(format!("/tmp/tsls-{ulid}.sock"))
 }
 
+/// A pid that names exactly one process. `0` and values that turn negative as
+/// `pid_t` would address process groups (or every process) in `kill(2)`.
+fn valid_pid(pid: u32) -> bool {
+    pid > 0 && pid <= i32::MAX as u32
+}
+
 #[cfg(unix)]
 fn signal_group(pid: u32, signal: i32) {
+    if !valid_pid(pid) {
+        return;
+    }
     // SAFETY: plain signal delivery to a pid we spawned; ESRCH is ignored.
     unsafe {
         if libc::killpg(pid as libc::pid_t, signal) != 0 {
@@ -172,11 +211,28 @@ fn signal_group(pid: u32, signal: i32) {
 #[cfg(not(unix))]
 fn signal_group(_pid: u32, _signal: i32) {}
 
+/// `killpg` without the `kill(pid)` fallback, for sweeps after the leader may
+/// already be gone: a process group id is not reused while any member lives,
+/// whereas a bare pid can be.
+#[cfg(unix)]
+fn signal_group_only(pgid: u32, signal: i32) {
+    if !valid_pid(pgid) {
+        return;
+    }
+    // SAFETY: plain signal delivery to a process group; ESRCH is ignored.
+    unsafe {
+        libc::killpg(pgid as libc::pid_t, signal);
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_group_only(_pgid: u32, _signal: i32) {}
+
 /// `kill(pid, 0)`: true while a process with this pid exists.
 #[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
     // SAFETY: signal 0 performs no delivery.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    valid_pid(pid) && unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
 #[cfg(not(unix))]
@@ -209,10 +265,142 @@ fn read_pid_file(dir: &Path) -> Option<u32> {
     std::fs::read_to_string(dir.join(PID_FILE))
         .ok()
         .and_then(|s| s.trim().parse().ok())
+        .filter(|pid| valid_pid(*pid))
 }
 
-/// Wait for a child we own: SIGTERM, grace, SIGKILL.
-async fn stop_child(pid: u32, child: &mut Child) {
+/// Whether `pid` is the bridge spawned for `environment_id`: one argv element
+/// must equal the environment id, which is always passed as
+/// `--environment-id <id>` and is unique. (The socket path is not used: a long
+/// workdir relocates it to `/tmp`.) Returns `None` when argv cannot be read
+/// (unsupported host, process gone, no permission); callers must not signal
+/// the pid then.
+fn pid_belongs_to_env(pid: u32, environment_id: &EnvironmentId) -> Option<bool> {
+    if !valid_pid(pid) {
+        return None;
+    }
+    let argv = process_argv(pid)?;
+    Some(argv_contains(&argv, environment_id.as_str()))
+}
+
+/// True when one argv element is exactly `needle` (a substring is not enough).
+fn argv_contains<A: AsRef<[u8]>>(argv: &[A], needle: &str) -> bool {
+    argv.iter().any(|arg| arg.as_ref() == needle.as_bytes())
+}
+
+/// Split `/proc/<pid>/cmdline` (NUL-terminated arguments) into argv.
+#[cfg(any(target_os = "linux", test))]
+fn parse_proc_cmdline(raw: &[u8]) -> Vec<Vec<u8>> {
+    let raw = raw.strip_suffix(&[0]).unwrap_or(raw);
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    raw.split(|b| *b == 0).map(<[u8]>::to_vec).collect()
+}
+
+/// Parse a `KERN_PROCARGS2` buffer: native-endian `int argc`, the executable
+/// path, NUL padding, then `argc` NUL-terminated arguments. The environment
+/// strings that follow are not argv and are ignored.
+#[cfg(any(target_os = "macos", test))]
+fn parse_procargs2(buf: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let argc = i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?);
+    let argc = usize::try_from(argc).ok()?;
+    let mut argv = Vec::new();
+    if argc == 0 {
+        return Some(argv);
+    }
+    let rest = &buf[4..];
+    let exec_path_end = rest.iter().position(|b| *b == 0)?;
+    let rest = &rest[exec_path_end..];
+    let args_start = rest.iter().position(|b| *b != 0)?;
+    let mut rest = &rest[args_start..];
+    for _ in 0..argc {
+        let end = rest.iter().position(|b| *b == 0)?;
+        argv.push(rest[..end].to_vec());
+        rest = &rest[end + 1..];
+    }
+    Some(argv)
+}
+
+#[cfg(target_os = "linux")]
+fn process_argv(pid: u32) -> Option<Vec<Vec<u8>>> {
+    std::fs::read(format!("/proc/{pid}/cmdline"))
+        .ok()
+        .map(|raw| parse_proc_cmdline(&raw))
+}
+
+/// The kernel's copy of the target's argv via `sysctl(KERN_PROCARGS2)`
+/// (readable for processes of the same user).
+#[cfg(target_os = "macos")]
+fn process_argv(pid: u32) -> Option<Vec<Vec<u8>>> {
+    let mut argmax: libc::c_int = 0;
+    let mut len: libc::size_t = std::mem::size_of::<libc::c_int>();
+    let mut mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    // SAFETY: `argmax` is a writable buffer of `len` bytes; no new value is set.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            (&mut argmax as *mut libc::c_int).cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 || argmax <= 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; argmax as usize];
+    let mut len: libc::size_t = buf.len();
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
+    // SAFETY: `buf` is a writable buffer of `len` bytes; the kernel writes at
+    // most `len` bytes and stores the length it wrote back into `len`.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            buf.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    buf.truncate(len);
+    parse_procargs2(&buf)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn process_argv(_pid: u32) -> Option<Vec<Vec<u8>>> {
+    None
+}
+
+/// Poll `kill(pid, 0)` until the process is gone or `limit` elapses. Returns
+/// true when it is gone.
+async fn wait_pid_gone(pid: u32, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while pid_alive(pid) {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    true
+}
+
+/// Stop a bridge we spawned. When `graceful` (the host has just sent
+/// `Shutdown`), first give it `GRACEFUL_EXIT_WAIT` to exit on its own, so the
+/// bridge finishes its user process itself. Then SIGTERM, `TERMINATE_GRACE`,
+/// SIGKILL.
+async fn stop_child(pid: u32, child: &mut Child, graceful: bool) {
+    if graceful
+        && tokio::time::timeout(GRACEFUL_EXIT_WAIT, child.wait())
+            .await
+            .is_ok()
+    {
+        return;
+    }
     signal_group(pid, SIGTERM);
     if tokio::time::timeout(TERMINATE_GRACE, child.wait())
         .await
@@ -225,20 +413,27 @@ async fn stop_child(pid: u32, child: &mut Child) {
     let _ = tokio::time::timeout(KILL_WAIT, child.wait()).await;
 }
 
-/// Wait for a process we do not own (orphan from a previous run).
-async fn stop_orphan(pid: u32) {
+/// Stop a bridge left by a previous run whose ownership the caller verified.
+/// We cannot reap it, so its pid may be recycled while we wait; ownership is
+/// checked again before every signal. Returns true when the bridge was ours
+/// and is gone.
+async fn stop_orphan(pid: u32, environment_id: &EnvironmentId, graceful: bool) -> bool {
+    if graceful && wait_pid_gone(pid, GRACEFUL_EXIT_WAIT).await {
+        return true;
+    }
+    if pid_belongs_to_env(pid, environment_id) != Some(true) {
+        return false;
+    }
     signal_group(pid, SIGTERM);
-    let deadline = Instant::now() + TERMINATE_GRACE;
-    while pid_alive(pid) && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    if wait_pid_gone(pid, TERMINATE_GRACE).await {
+        return true;
     }
-    if pid_alive(pid) {
-        signal_group(pid, SIGKILL);
-        let deadline = Instant::now() + KILL_WAIT;
-        while pid_alive(pid) && Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+    if pid_belongs_to_env(pid, environment_id) != Some(true) {
+        return false;
     }
+    warn!(pid, "orphaned bridge ignored SIGTERM; sending SIGKILL");
+    signal_group(pid, SIGKILL);
+    wait_pid_gone(pid, KILL_WAIT).await
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -568,6 +763,12 @@ impl ExecutionProvider for ProcessProvider {
     ) -> Result<TerminateReport, ProviderError> {
         let mut report = TerminateReport::default();
         let dir = self.env_dir(environment_id);
+        // The host sends `Shutdown` before these, so the bridge is expected to
+        // exit by itself (mirrors the Firecracker provider).
+        let graceful = matches!(
+            reason,
+            TerminateReason::Completed | TerminateReason::Shutdown
+        );
         match self.untrack(environment_id) {
             Some(tracked) => {
                 let mut guard = tracked.child.lock().await;
@@ -575,26 +776,44 @@ impl ExecutionProvider for ProcessProvider {
                     let running = matches!(child.try_wait(), Ok(None));
                     report.was_running = running;
                     if running {
-                        info!(environment_id = %environment_id, pid = tracked.pid, ?reason, "terminating bridge");
-                        stop_child(tracked.pid, child).await;
+                        info!(environment_id = %environment_id, pid = tracked.pid, ?reason, graceful, "terminating bridge");
+                        stop_child(tracked.pid, child, graceful).await;
                     }
-                    // Sweep anything left in the process group.
-                    signal_group(tracked.pid, SIGKILL);
+                    // Sweep anything left in the bridge's process group. The
+                    // bridge may already be reaped, so no `kill(pid)` fallback.
+                    signal_group_only(tracked.pid, SIGKILL);
                 }
                 *guard = None;
                 Self::cleanup_dir(&tracked.dir, &mut report.cleaned)?;
             }
             None => {
                 // Not tracked by this instance: maybe an orphan from a
-                // previous run whose directory still exists.
+                // previous run whose directory still exists. Its pid file may
+                // be stale, so only a pid whose argv proves it is this
+                // environment's bridge is signalled.
                 if dir.exists() {
                     if let Some(pid) = read_pid_file(&dir)
                         && pid_alive(pid)
                     {
-                        warn!(environment_id = %environment_id, pid, "terminating orphaned bridge");
-                        report.was_running = true;
-                        stop_orphan(pid).await;
-                        signal_group(pid, SIGKILL);
+                        match pid_belongs_to_env(pid, environment_id) {
+                            Some(true) => {
+                                warn!(environment_id = %environment_id, pid, "terminating orphaned bridge");
+                                report.was_running = true;
+                                if stop_orphan(pid, environment_id, graceful).await {
+                                    signal_group_only(pid, SIGKILL);
+                                }
+                            }
+                            Some(false) => warn!(
+                                environment_id = %environment_id,
+                                pid,
+                                "pid file points at an unrelated process; not killed"
+                            ),
+                            None => warn!(
+                                environment_id = %environment_id,
+                                pid,
+                                "cannot verify that the pid is this environment's bridge; not killed, removing files only"
+                            ),
+                        }
                     }
                     Self::cleanup_dir(&dir, &mut report.cleaned)?;
                 }
@@ -633,9 +852,14 @@ impl ExecutionProvider for ProcessProvider {
             return Ok(EnvironmentObservation::NotFound);
         }
         Ok(match read_pid_file(&dir) {
-            Some(pid) if pid_alive(pid) => EnvironmentObservation::Running {
-                host_pid: Some(pid),
-            },
+            // A recycled pid must not keep a stale environment "running".
+            Some(pid)
+                if pid_alive(pid) && pid_belongs_to_env(pid, environment_id) != Some(false) =>
+            {
+                EnvironmentObservation::Running {
+                    host_pid: Some(pid),
+                }
+            }
             Some(_) => EnvironmentObservation::Exited {
                 exit_code: None,
                 signal: None,
@@ -845,5 +1069,289 @@ mod tests {
         assert!(matches!(err, ProviderError::Boot(_)), "{err}");
         assert!(!dir.path().join("work").join(id.as_str()).exists());
         assert!(p.list_environments().await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn pid_file_rejects_pids_that_address_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in ["0", "2147483648", "4294967295", "-1", "abc"] {
+            std::fs::write(dir.path().join(PID_FILE), bad).unwrap();
+            assert_eq!(read_pid_file(dir.path()), None, "{bad}");
+        }
+        std::fs::write(dir.path().join(PID_FILE), "4242\n").unwrap();
+        assert_eq!(read_pid_file(dir.path()), Some(4242));
+    }
+
+    #[test]
+    fn argv_matcher_requires_an_exact_element() {
+        let id = "env_01hzzzzzzzzzzzzzzzzzzzzzz1";
+        let bridge = parse_proc_cmdline(
+            b"/opt/tsls/bridge\0--transport\0unix\0--environment-id\0env_01hzzzzzzzzzzzzzzzzzzzzzz1\0",
+        );
+        assert_eq!(bridge.len(), 5);
+        assert!(argv_contains(&bridge, id));
+        // A path or a longer token that merely contains the id is not ownership.
+        let editor =
+            parse_proc_cmdline(b"vim\0/work/env_01hzzzzzzzzzzzzzzzzzzzzzz1/bridge.stderr\0");
+        assert!(!argv_contains(&editor, id));
+        let longer = parse_proc_cmdline(b"x\0env_01hzzzzzzzzzzzzzzzzzzzzzz12\0");
+        assert!(!argv_contains(&longer, id));
+        // Zombies and kernel threads have an empty cmdline.
+        assert!(parse_proc_cmdline(b"").is_empty());
+        assert!(!argv_contains(&parse_proc_cmdline(b""), id));
+    }
+
+    #[test]
+    fn procargs2_buffer_yields_argv_only() {
+        let mut buf = 3i32.to_ne_bytes().to_vec();
+        buf.extend_from_slice(b"/opt/tsls/bridge\0\0\0\0");
+        buf.extend_from_slice(b"bridge\0--environment-id\0env_a\0");
+        buf.extend_from_slice(b"TSLS_ENV=env_b\0env_b\0");
+        let argv = parse_procargs2(&buf).unwrap();
+        assert_eq!(
+            argv,
+            vec![
+                b"bridge".to_vec(),
+                b"--environment-id".to_vec(),
+                b"env_a".to_vec()
+            ]
+        );
+        assert!(argv_contains(&argv, "env_a"));
+        assert!(
+            !argv_contains(&argv, "env_b"),
+            "environment strings are not argv"
+        );
+        // Truncated or malformed buffers are not guessed at.
+        assert_eq!(parse_procargs2(&[1, 0]), None);
+        assert_eq!(parse_procargs2(&(-1i32).to_ne_bytes()), None);
+        let mut short = 4i32.to_ne_bytes().to_vec();
+        short.extend_from_slice(b"/bin/x\0a\0b\0");
+        assert_eq!(parse_procargs2(&short), None);
+    }
+
+    /// Spawn `cmd` and reap it on a thread so `kill(pid, 0)` sees it vanish.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn spawn_reaped(
+        cmd: &mut std::process::Command,
+    ) -> (u32, std::sync::mpsc::Receiver<std::process::ExitStatus>) {
+        let mut child = cmd.spawn().unwrap();
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait().unwrap());
+        });
+        (pid, rx)
+    }
+
+    /// Wait until `pid` has exec'd and shows `needle` in its argv.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    async fn wait_for_argv(pid: u32, needle: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !process_argv(pid).is_some_and(|argv| argv_contains(&argv, needle)) {
+            assert!(
+                Instant::now() < deadline,
+                "pid {pid} never showed `{needle}` in its argv"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// An environment directory left by a previous run, pointing at `pid`.
+    fn write_orphan_dir(p: &ProcessProvider, id: &EnvironmentId, pid: u32) -> PathBuf {
+        let env_dir = p.env_dir(id);
+        std::fs::create_dir_all(&env_dir).unwrap();
+        std::fs::write(env_dir.join(PID_FILE), pid.to_string()).unwrap();
+        env_dir
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn stale_pid_file_never_kills_an_unrelated_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let id = EnvironmentId::generate();
+        // The pid was recycled: it now names some other live process of ours.
+        let (pid, exited) = spawn_reaped(std::process::Command::new("sleep").arg("30"));
+        wait_for_argv(pid, "30").await;
+        let env_dir = write_orphan_dir(&p, &id, pid);
+
+        assert_eq!(pid_belongs_to_env(pid, &id), Some(false));
+        assert!(!matches!(
+            p.observe_environment(&id).await.unwrap(),
+            EnvironmentObservation::Running { .. }
+        ));
+        let r = p
+            .terminate_environment(&id, TerminateReason::Reconcile)
+            .await
+            .unwrap();
+        assert!(!r.was_running);
+        assert!(!env_dir.exists(), "files are still cleaned up");
+        assert!(
+            exited.recv_timeout(Duration::from_millis(500)).is_err(),
+            "an unrelated process was killed"
+        );
+        assert!(pid_alive(pid));
+
+        // SAFETY: signalling our own child.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+        exited.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn orphaned_bridge_with_matching_argv_is_terminated() {
+        use std::os::unix::process::CommandExt;
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let id = EnvironmentId::generate();
+        // Stands in for a bridge from a previous run: the id is in its argv
+        // (`$0` of the shell). Two commands keep the shell from exec'ing
+        // `sleep` in its place.
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.arg("-c")
+            .arg("sleep 30; :")
+            .arg(id.as_str())
+            .process_group(0);
+        let (pid, exited) = spawn_reaped(&mut cmd);
+        wait_for_argv(pid, id.as_str()).await;
+        let env_dir = write_orphan_dir(&p, &id, pid);
+
+        assert_eq!(pid_belongs_to_env(pid, &id), Some(true));
+        assert_eq!(
+            p.observe_environment(&id).await.unwrap(),
+            EnvironmentObservation::Running {
+                host_pid: Some(pid)
+            }
+        );
+        let r = p
+            .terminate_environment(&id, TerminateReason::Reconcile)
+            .await
+            .unwrap();
+        assert!(r.was_running);
+        assert!(!env_dir.exists());
+        exited
+            .recv_timeout(Duration::from_secs(5))
+            .expect("orphaned bridge is still running");
+    }
+
+    /// Track `/bin/sh -c <script>` as if `create_environment` had spawned it as
+    /// the bridge (own process group, pid file).
+    #[cfg(unix)]
+    fn track_stub(
+        p: &ProcessProvider,
+        script: &str,
+        env: &[(&str, &Path)],
+    ) -> (EnvironmentId, u32) {
+        let id = EnvironmentId::generate();
+        let env_dir = p.env_dir(&id);
+        std::fs::create_dir_all(&env_dir).unwrap();
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c")
+            .arg(script)
+            .kill_on_drop(true)
+            .process_group(0);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let child = cmd.spawn().unwrap();
+        let pid = child.id().unwrap();
+        std::fs::write(env_dir.join(PID_FILE), pid.to_string()).unwrap();
+        p.environments.lock().unwrap().insert(
+            id.clone(),
+            Arc::new(Tracked {
+                pid,
+                dir: env_dir,
+                child: tokio::sync::Mutex::new(Some(child)),
+            }),
+        );
+        (id, pid)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn completed_terminate_lets_a_winding_down_bridge_exit_unsignalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let term_mark = dir.path().join("got-sigterm");
+        let done_mark = dir.path().join("exited-by-itself");
+        // Like a bridge that received `Shutdown` and needs 1.5 s to finish its
+        // user process. A SIGTERM would be recorded; a SIGKILL would skip the
+        // final marker.
+        let (id, _) = track_stub(
+            &p,
+            r#"trap 'echo x > "$TSLS_TERM_MARK"' TERM; sleep 1.5; echo x > "$TSLS_DONE_MARK"; exit 0"#,
+            &[
+                ("TSLS_TERM_MARK", term_mark.as_path()),
+                ("TSLS_DONE_MARK", done_mark.as_path()),
+            ],
+        );
+        let r = p
+            .terminate_environment(&id, TerminateReason::Completed)
+            .await
+            .unwrap();
+        assert!(r.was_running);
+        assert!(
+            !term_mark.exists(),
+            "SIGTERM was sent to a bridge that was exiting on its own"
+        );
+        assert!(
+            done_mark.exists(),
+            "the bridge was killed before it could exit on its own"
+        );
+        assert!(!p.env_dir(&id).exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn completed_terminate_kills_a_bridge_that_never_exits_after_the_grace() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let term_mark = dir.path().join("got-sigterm");
+        // Records SIGTERM and keeps running: only SIGKILL ends it.
+        let (id, pid) = track_stub(
+            &p,
+            r#"trap 'echo x > "$TSLS_TERM_MARK"' TERM; while :; do sleep 0.1; done"#,
+            &[("TSLS_TERM_MARK", term_mark.as_path())],
+        );
+        let started = Instant::now();
+        let r = p
+            .terminate_environment(&id, TerminateReason::Completed)
+            .await
+            .unwrap();
+        let took = started.elapsed();
+        assert!(r.was_running);
+        assert!(term_mark.exists(), "SIGTERM follows the graceful wait");
+        assert!(
+            took >= GRACEFUL_EXIT_WAIT + TERMINATE_GRACE,
+            "SIGKILL came before the graceful wait and the grace: {took:?}"
+        );
+        assert!(
+            took < GRACEFUL_EXIT_WAIT + TERMINATE_GRACE + KILL_WAIT,
+            "{took:?}"
+        );
+        assert!(!pid_alive(pid), "bridge {pid} survived");
+        assert!(!p.env_dir(&id).exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_graceful_terminate_signals_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let (id, pid) = track_stub(&p, "while :; do sleep 0.1; done", &[]);
+        let started = Instant::now();
+        let r = p
+            .terminate_environment(&id, TerminateReason::Timeout)
+            .await
+            .unwrap();
+        assert!(r.was_running);
+        assert!(
+            started.elapsed() < GRACEFUL_EXIT_WAIT,
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(!pid_alive(pid));
     }
 }
