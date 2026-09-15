@@ -15,11 +15,12 @@ fn dev_config_loads() {
     assert_eq!(cfg.profile, Profile::Dev);
     assert_eq!(cfg.provider.kind, ProviderKindConfig::Process);
     let p = cfg.provider.process.as_ref().unwrap();
-    assert_eq!(
-        p.bridge_binary,
-        PathBuf::from("target/debug/tachyon-serverless-runtime-bridge")
+    assert!(
+        p.bridge_binary.is_absolute()
+            && p.bridge_binary
+                .ends_with("target/debug/tachyon-serverless-runtime-bridge")
     );
-    assert_eq!(p.workdir, PathBuf::from("./data/process"));
+    assert!(p.workdir.is_absolute() && p.workdir.ends_with("data/process"));
     assert_eq!(cfg.identity.tokens.len(), 2);
     assert_eq!(
         cfg.identity.tokens[0].tenant_id,
@@ -42,10 +43,13 @@ fn firecracker_config_loads() {
     assert_eq!(cfg.profile, Profile::Production);
     assert_eq!(cfg.provider.kind, ProviderKindConfig::Firecracker);
     let f = cfg.provider.firecracker.as_ref().unwrap();
-    assert_eq!(f.firecracker_binary, PathBuf::from(".kvm/bin/firecracker"));
-    assert_eq!(f.kernel, PathBuf::from(".kvm/vmlinux"));
-    assert_eq!(f.rootfs, PathBuf::from(".kvm/rootfs.ext4"));
-    assert_eq!(f.workdir, PathBuf::from(".kvm/run"));
+    assert!(
+        f.firecracker_binary.is_absolute()
+            && f.firecracker_binary.ends_with(".kvm/bin/firecracker")
+    );
+    assert!(f.kernel.is_absolute() && f.kernel.ends_with(".kvm/vmlinux"));
+    assert!(f.rootfs.is_absolute() && f.rootfs.ends_with(".kvm/rootfs.ext4"));
+    assert!(f.workdir.is_absolute() && f.workdir.ends_with(".kvm/run"));
     assert_eq!(f.vsock_port, 5000);
     assert_eq!(cfg.identity.tokens.len(), 2);
 }

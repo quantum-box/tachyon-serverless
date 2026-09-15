@@ -15,10 +15,9 @@ name = "tachyon-serverless-gateway"
 path = "src/main.rs"
 
 [features]
-default = []
-# Enables construction of the real providers (process / firecracker). Off by
-# default so that the gateway compiles while those crates are still being
-# implemented; the integrator turns it on once their constructors exist.
+default = ["providers"]
+# Construction of the real providers (process / firecracker). Disable with
+# `--no-default-features` to build a gateway that only serves the API surface.
 providers = [
   "dep:tachyon-serverless-provider-process",
   "dep:tachyon-serverless-provider-firecracker",

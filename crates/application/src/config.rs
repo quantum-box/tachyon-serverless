@@ -340,9 +340,44 @@ fn default_data_dir() -> PathBuf {
 
 impl GatewayConfig {
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
-        let cfg: Self = toml::from_str(text)?;
+        let mut cfg: Self = toml::from_str(text)?;
         cfg.validate()?;
+        let base = std::env::current_dir().map_err(|source| ConfigError::Read {
+            path: PathBuf::from("."),
+            source,
+        })?;
+        cfg.absolutize_paths(&base);
         Ok(cfg)
+    }
+
+    /// Make every filesystem path absolute relative to `base`.
+    ///
+    /// Artifact paths and working directories are handed to other processes
+    /// (the runtime bridge, the user function) whose current directory differs
+    /// from the gateway's, so relative paths must be resolved once, here.
+    /// Bare command names (no path separator) are left for `PATH` lookup.
+    pub fn absolutize_paths(&mut self, base: &Path) {
+        fn abs(base: &Path, p: &mut PathBuf) {
+            if p.is_relative() {
+                *p = base.join(&*p);
+            }
+        }
+        fn abs_binary(base: &Path, p: &mut PathBuf) {
+            if p.components().count() > 1 {
+                abs(base, p);
+            }
+        }
+        abs(base, &mut self.data_dir);
+        if let Some(p) = self.provider.process.as_mut() {
+            abs_binary(base, &mut p.bridge_binary);
+            abs(base, &mut p.workdir);
+        }
+        if let Some(f) = self.provider.firecracker.as_mut() {
+            abs_binary(base, &mut f.firecracker_binary);
+            abs(base, &mut f.kernel);
+            abs(base, &mut f.rootfs);
+            abs(base, &mut f.workdir);
+        }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
@@ -519,5 +554,36 @@ value = "demo-secret-value-a"
             cfg.effective_limits().max_response_bytes,
             Limits::default().max_response_bytes
         );
+    }
+
+    #[test]
+    fn relative_paths_are_absolutized_against_base() {
+        let mut cfg = GatewayConfig::from_toml(
+            r#"
+[provider]
+kind = "process"
+[provider.process]
+bridge_binary = "target/debug/bridge"
+workdir = "./data/process"
+[provider.firecracker]
+firecracker_binary = "firecracker"
+kernel = ".kvm/vmlinux"
+rootfs = ".kvm/rootfs.ext4"
+workdir = ".kvm/run"
+"#,
+        )
+        .unwrap();
+        cfg.absolutize_paths(Path::new("/base"));
+        assert!(cfg.data_dir.is_absolute());
+        let p = cfg.provider.process.as_ref().unwrap();
+        assert!(p.bridge_binary.is_absolute());
+        assert!(p.workdir.is_absolute());
+        let f = cfg.provider.firecracker.as_ref().unwrap();
+        assert_eq!(
+            f.firecracker_binary,
+            PathBuf::from("firecracker"),
+            "bare command stays PATH-resolved"
+        );
+        assert!(f.kernel.is_absolute() && f.rootfs.is_absolute() && f.workdir.is_absolute());
     }
 }

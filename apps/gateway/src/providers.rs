@@ -1,14 +1,9 @@
 //! Provider selection for the binary.
 //!
-//! The concrete providers live in `crates/providers/{process,firecracker}`
-//! (other tracks). Their construction is gated behind the `providers` cargo
-//! feature (off by default) so the gateway library, binary and tests compile
-//! before those crates are finished. The integrator enables it with
-//! `cargo build -p tachyon-serverless-gateway --features providers`.
-//!
-//! Expected constructors:
-//! - `tachyon_serverless_provider_process::ProcessProvider::new(ProcessProviderConfig { bridge_binary: PathBuf, workdir: PathBuf })`
-//! - `tachyon_serverless_provider_firecracker::FirecrackerProvider::new(FirecrackerConfig { firecracker_binary, kernel, rootfs, workdir, vsock_port })`
+//! The concrete providers live in `crates/providers/{process,firecracker}`.
+//! Their construction is gated behind the `providers` cargo feature (on by
+//! default); `--no-default-features` yields a gateway that refuses every
+//! provider, which is only useful for API-surface builds and tests.
 //!
 //! The fake provider is intentionally not constructible from configuration.
 
@@ -41,8 +36,6 @@ fn build_from(config: &ProviderConfig) -> Result<Arc<dyn ExecutionProvider>, App
                 .process
                 .as_ref()
                 .ok_or_else(|| AppError::InvalidRequest("[provider.process] is missing".into()))?;
-            // TODO(integrator): adjust `.into()` / `?` once the constructor's
-            // return type is known (plain value vs Result).
             let provider = tachyon_serverless_provider_process::ProcessProvider::new(
                 tachyon_serverless_provider_process::ProcessProviderConfig {
                     bridge_binary: p.bridge_binary.clone(),
@@ -62,6 +55,7 @@ fn build_from(config: &ProviderConfig) -> Result<Arc<dyn ExecutionProvider>, App
                     rootfs: f.rootfs.clone(),
                     workdir: f.workdir.clone(),
                     vsock_port: f.vsock_port,
+                    ..Default::default()
                 },
             );
             Ok(Arc::new(provider))

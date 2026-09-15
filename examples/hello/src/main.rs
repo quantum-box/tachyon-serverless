@@ -17,11 +17,25 @@ async fn main() -> Result<(), SdkError> {
     if std::env::var("HELLO_FAIL_INIT").as_deref() == Ok("1") {
         tachyon_serverless_sdk::init_error("HELLO_FAIL_INIT set");
     }
+    // Init-phase log line: forwarded by the bridge with phase=init.
+    eprintln!(
+        "hello: starting (unisolated={})",
+        tachyon_serverless_sdk::is_unisolated()
+    );
     tachyon_serverless_sdk::run(handler).await
 }
 
 async fn handler(event: Event, ctx: Context) -> Result<Value, HandlerError> {
     let payload = event.json();
+    // Handler-phase log lines on both streams: forwarded with phase=handler
+    // and the attempt id, so demos can prove stdout/stderr capture.
+    println!(
+        "hello: handling invocation={} attempt={} remaining_ms={}",
+        ctx.invocation_id,
+        ctx.attempt_id,
+        ctx.remaining_time().as_millis()
+    );
+    eprintln!("hello: payload={payload}");
     if payload.get("fail").and_then(Value::as_bool) == Some(true) {
         return Err(HandlerError::with_type("Demo.Failure", "fail requested"));
     }
