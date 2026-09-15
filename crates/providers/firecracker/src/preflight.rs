@@ -39,10 +39,20 @@ struct CachedDigest {
     hex: String,
 }
 
+type InflightDigest = tokio::sync::watch::Receiver<Option<Result<String, String>>>;
+
 /// Digest cache keyed by path, invalidated when size or mtime change.
+///
+/// Computing the digest of a large kernel/rootfs can take seconds (tens of
+/// seconds in debug builds), and readiness probes are short-lived requests
+/// that get cancelled. The computation is therefore deduplicated per path
+/// and runs to completion on the blocking pool regardless of the caller:
+/// the blocking task itself populates the cache, so a cancelled probe never
+/// throws the result away or starts a second computation.
 #[derive(Debug, Default)]
 pub struct DigestCache {
-    inner: parking_lot::Mutex<HashMap<PathBuf, CachedDigest>>,
+    inner: std::sync::Arc<parking_lot::Mutex<HashMap<PathBuf, CachedDigest>>>,
+    inflight: std::sync::Arc<parking_lot::Mutex<HashMap<PathBuf, InflightDigest>>>,
 }
 
 impl DigestCache {
@@ -57,19 +67,50 @@ impl DigestCache {
         {
             return Ok(c.hex.clone());
         }
+        let mut rx = self.start_or_join(path, len, mtime);
+        loop {
+            let current = rx.borrow().clone();
+            if let Some(result) = current {
+                return result.map_err(std::io::Error::other);
+            }
+            if rx.changed().await.is_err() {
+                return Err(std::io::Error::other("digest task ended without a result"));
+            }
+        }
+    }
+
+    /// Join the in-flight computation for `path`, or start one.
+    fn start_or_join(&self, path: &Path, len: u64, mtime: Option<SystemTime>) -> InflightDigest {
+        let mut inflight = self.inflight.lock();
+        if let Some(rx) = inflight.get(path) {
+            return rx.clone();
+        }
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        inflight.insert(path.to_path_buf(), rx.clone());
+        let inner = std::sync::Arc::clone(&self.inner);
+        let inflight_map = std::sync::Arc::clone(&self.inflight);
         let p = path.to_path_buf();
-        let hex = tokio::task::spawn_blocking(move || sha256_file(&p))
-            .await
-            .map_err(|e| std::io::Error::other(format!("digest task failed: {e}")))??;
-        self.inner.lock().insert(
-            path.to_path_buf(),
-            CachedDigest {
-                len,
-                mtime,
-                hex: hex.clone(),
-            },
-        );
-        Ok(hex)
+        tokio::task::spawn_blocking(move || {
+            let result = sha256_file(&p).map_err(|e| e.to_string());
+            if let Ok(hex) = &result {
+                inner.lock().insert(
+                    p.clone(),
+                    CachedDigest {
+                        len,
+                        mtime,
+                        hex: hex.clone(),
+                    },
+                );
+            }
+            inflight_map.lock().remove(&p);
+            let _ = tx.send(Some(result));
+        });
+        rx
+    }
+
+    /// Number of digests currently being computed (test / diagnostics).
+    pub fn inflight_len(&self) -> usize {
+        self.inflight.lock().len()
     }
 }
 
@@ -367,5 +408,34 @@ mod tests {
                 .next()
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_digests_are_deduplicated_and_survive_cancellation() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("blob");
+        std::fs::write(&file, vec![7u8; 4 << 20]).unwrap();
+        let cache = std::sync::Arc::new(DigestCache::default());
+        let expected = sha256_file(&file).unwrap();
+
+        // A caller that gives up immediately must not prevent the digest from
+        // landing in the cache.
+        let c = std::sync::Arc::clone(&cache);
+        let f = file.clone();
+        let cancelled = tokio::spawn(async move { c.digest(&f).await });
+        cancelled.abort();
+        let _ = cancelled.await;
+
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let c = std::sync::Arc::clone(&cache);
+            let f = file.clone();
+            tasks.push(tokio::spawn(async move { c.digest(&f).await.unwrap() }));
+        }
+        for t in tasks {
+            assert_eq!(t.await.unwrap(), expected);
+        }
+        assert_eq!(cache.inflight_len(), 0);
+        assert_eq!(cache.digest(&file).await.unwrap(), expected);
     }
 }

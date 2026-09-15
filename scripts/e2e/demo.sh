@@ -68,6 +68,13 @@ else
   GUEST_DIR="${TSLS_GUEST_DIR:-$REPO_ROOT/target/debug}"
   BRIDGE_BIN="$REPO_ROOT/target/debug/tachyon-serverless-runtime-bridge"
 fi
+# Wall-clock budget for the timeout step: handler timeout (2s) + grace (1s)
+# + environment boot. microVM boot on nested/slow hosts can take >10s.
+if [ "$TSLS_PROVIDER" = "firecracker" ]; then
+  TIMEOUT_WALL_BUDGET_MS="${TSLS_TIMEOUT_WALL_MS:-90000}"
+else
+  TIMEOUT_WALL_BUDGET_MS="${TSLS_TIMEOUT_WALL_MS:-10000}"
+fi
 
 tsls() { "$TSLS_BIN" "$@"; }
 export -f tsls 2>/dev/null || true
@@ -379,8 +386,23 @@ invoke_cpu_burn_timeout() {
   e2e_log "timeout invoke took ${INVOKE_MS} ms"
   assert_eq 4 "$INVOKE_RC" "exit code"
   assert_json "$INVOKE_OUT" '.error.code' "timeout"
-  assert_lt "$INVOKE_MS" 10000 "wall time < 10s"
-  [ -n "$INVOKE_ID" ] && state_set inv.cpu-burn.timeout "$INVOKE_ID"
+  # Wall time includes environment boot (seconds on a microVM), so the budget
+  # is provider dependent; the host-enforced deadline is checked below from
+  # the invocation record itself.
+  assert_lt "$INVOKE_MS" "$TIMEOUT_WALL_BUDGET_MS" "wall time < ${TIMEOUT_WALL_BUDGET_MS} ms"
+  [ -n "$INVOKE_ID" ] || { echo "no invocation id" >&2; return 1; }
+  state_set inv.cpu-burn.timeout "$INVOKE_ID"
+  local detail exec_ms
+  detail="$(tsls functions invocation "$INVOKE_ID" --json)"
+  assert_json "$detail" '.status' "failed"
+  assert_json "$detail" '.error.class' "timeout"
+  # started_at -> finished_at must stay within timeout (2s) + cancel grace (1s) + slack.
+  exec_ms="$(jq -r '
+    def ms: sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 * 1000;
+    if .started_at and .finished_at then ((.finished_at | ms) - (.started_at | ms)) else -1 end' <<<"$detail")"
+  e2e_log "host-enforced execution window: ${exec_ms} ms (timeout 2000 ms + grace 1000 ms)"
+  [ "$exec_ms" -ge 0 ] || { echo "invocation has no started_at/finished_at" >&2; return 1; }
+  assert_lt "$exec_ms" 8000 "started_at..finished_at < 8s"
   return 0
 }
 

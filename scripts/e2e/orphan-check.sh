@@ -70,7 +70,7 @@ if [ "$PROVIDER" = "firecracker" ]; then
     "$(list_matching '^([^ ]*/)?firecracker( |$)' | grep -F -- "$RUN_DIR" || true)"
   if [ -d "$RUN_DIR" ]; then
     report "leftover files under $RUN_DIR (sockets/drives/workdirs must be removed on terminate)" \
-      "$(find "$RUN_DIR" -mindepth 1 -maxdepth 1 2>/dev/null || true)"
+      "$(find "$RUN_DIR" -mindepth 1 -maxdepth 1 -not -name _archive 2>/dev/null || true)"
   fi
 fi
 
