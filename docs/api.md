@@ -33,7 +33,7 @@
 | GET | `/healthz` | liveness | 200 | — |
 | GET | `/readyz` | readiness（provider preflight OK） | 200 | 503 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
-| POST | `/v1/artifacts` | 実行ファイルの生バイト (`application/octet-stream`) を upload → digest | 201 `ArtifactUploadResponse` | 401, 413 `payload_too_large` |
+| POST | `/v1/artifacts` | 実行ファイルの生バイト (`application/octet-stream`) を upload → digest | 200 `ArtifactUploadResponse` | 401, 413 `payload_too_large` |
 | POST | `/v1/functions` | Function 作成 | 201 `FunctionResponse` | 400 `invalid_request`, 409 `conflict`（同名） |
 | GET | `/v1/functions` | Function 一覧（テナント内） | 200 `ListResponse<FunctionResponse>` | — |
 | GET | `/v1/functions/{function_id}` | 取得 | 200 `FunctionResponse` | 404 |

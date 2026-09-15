@@ -38,8 +38,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// Grace used when the bridge itself receives SIGTERM (process provider
-/// terminate). Shorter than the provider's own 2 s so the user process is
-/// gone before the bridge can be SIGKILLed. A SIGTERM that arrives while the
+/// terminate). Well below the process provider's TERMINATE_GRACE (3 s) so the
+/// user process is gone before the bridge can be SIGKILLed. A SIGTERM that arrives while the
 /// bridge is already stopping the user process escalates to SIGKILL at once
 /// (see `terminate_user`).
 const SIGTERM_GRACE: Duration = Duration::from_secs(1);

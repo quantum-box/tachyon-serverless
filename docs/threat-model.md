@@ -69,11 +69,11 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | 資産 | 所在 | 損なわれ方 |
 |---|---|---|
 | A1 artifact（tenant の実行バイナリ） | `data_dir/artifacts`（digest 名） | 他 tenant による取得・実行、改竄 |
-| A2 secret 値 | `config/gateway.toml`（P1）、`HelloAck.env`（転送中）、guest プロセス環境 | ログ・API 応答・`state.json`・`BootEvidence.details` への混入、他 environment への配送 |
+| A2 secret 値 | `config/gateway.{dev,firecracker}.toml`（P1）、`HelloAck.env`（転送中）、guest プロセス環境 | ログ・API 応答・`state.json`・`BootEvidence.details` への混入、他 environment への配送 |
 | A3 invocation の入出力 | request body、`Invocation.output`（inline ≤ 上限 / digest）、guest メモリ | 他 tenant による読み取り、改竄、上限を超える蓄積 |
 | A4 ログ | `LogRecord`（invocation 単位、上限付き） | 他 tenant による読み取り、洪水による retention 破壊、secret の混入 |
 | A5 ledger（Function / Revision / Alias / Invocation / Attempt / Environment / UsageEvent） | in-memory + `state.json` | 偽の結果による上書き、guest 申告に基づく計測 |
-| A6 API token | `config/gateway.toml` | 漏洩、他 tenant への流用 |
+| A6 API token | `config/gateway.{dev,firecracker}.toml` | 漏洩、他 tenant への流用 |
 | A7 host 資源（KVM、CPU、memory、disk、fd） | provider host | orphan 環境、無制限の同時実行、暴走 handler |
 | A8 起動の証跡（`BootEvidence`、`AttemptTimings`） | Attempt | guest 申告での偽装、process provider の結果を microVM の結果と誤認 |
 
@@ -81,7 +81,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 1. gateway と provider host は P1 では同一 Linux host で、gateway プロセスのユーザーが `/dev/kvm` と `data_dir` にアクセスできる。jailer は P1 では使わない（§14）。
 2. B1 の transport 保護（TLS）は deployment の責務。P1 の既定 `listen = "127.0.0.1:8080"` は平文であり、ループバック外に露出しない前提。
-3. `config/gateway.toml` は operator だけが読める。token・secret 値の保管はファイル権限に依存する。
+3. `config/gateway.{dev,firecracker}.toml` は operator だけが読める。token・secret 値の保管はファイル権限に依存する。
 4. `IdentityProvider` は token を `Principal` に解決する以上のことをしない。IAM / policy は将来の adapter（`docs/inventory-tachyon-apps.md` §3.7）。
 5. KVM と Firecracker の隔離境界は upstream の設計を信頼する（`docs/adr/0001-execution-provider-firecracker-first.md`）。本リポジトリで hypervisor の脆弱性は扱わない。
 6. 1 環境は 1 tenant の 1 revision にしか使われず、invoke 後に破棄される（`ExecutionPolicy.concurrency_per_environment = 1`、`min_ready = 0`、destroy-after-invoke）。warm 再利用は無い。
@@ -116,7 +116,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | `POST /v1/invocations/{inv of A}:cancel` | 202 | 404 | 403 | 401 |
 | `GET /v1/invocations/{inv of A}/logs` | 200 | 404 | 403（ログ本文は tenant データ） | 401 |
 | secret 値 | API 無し（読めない） | API 無し | API 無し | — |
-| `POST /v1/artifacts`（upload） | 201（digest。A が所有者として記録される） | 201（B 自身の upload。同一 bytes なら同一 digest で、B も所有者として記録される。B が upload していない digest を revision で参照すると、存在しない digest と同じ理由で `failed`。§14-1） | 403 | 401 |
+| `POST /v1/artifacts`（upload） | 200（digest。A が所有者として記録される） | 200（B 自身の upload。同一 bytes なら同一 digest で、B も所有者として記録される。B が upload していない digest を revision で参照すると、存在しない digest と同じ理由で `failed`。§14-1） | 403 | 401 |
 | artifact 本体の取得 | API 無し | API 無し | API 無し | — |
 | `GET /v1/functions/{A}/usage` | 200 | 404 | 403 | 401 |
 | `GET /v1/provider` | 200 | 200 | 200 | 401 |
@@ -194,7 +194,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 |---|---|---|
 | request payload | 1 MiB（`max_payload_bytes`）。`max_payload_bytes + 64 KiB`（envelope）は `MAX_FRAME_BYTES` 以下でなければ設定を拒否 | 413 `payload_too_large`、invocation を作らない |
 | response payload | 6 MiB（`max_response_bytes`、`HelloAck.max_response_bytes`）。`max_response_bytes + 64 KiB` は `MAX_FRAME_BYTES` 以下でなければ設定を拒否 | bridge が `Error{response_too_large}` → `Failed{PlatformError}`（user code の責任だが分類は platform 側の制約超過） |
-| frame | 8 MiB（`MAX_FRAME_BYTES`） | 受信: `ProtocolError::FrameTooLarge`、session を閉じる → `PlatformError`。host が送る `Invoke` が encode できない: 何も書かずに `Failed{PlatformError}`（`Host.InvokeTooLarge`、§9） |
+| frame | 8 MiB（`MAX_FRAME_BYTES`） | 受信: `ProtocolError::FrameTooLarge`、session を閉じる → `PlatformError`。host が送る `Invoke` が encode できない: 何も書かずに `Failed{PlatformError}`（`Host.InvokeTooLarge`、§9）。bridge が送る frame が encode できない: session は閉じず、`Response` は `Error{response_too_large}` に置き換え、それ以外の frame は破棄して記録する |
 | inline output | config `inline_output_max` | `PayloadRef::Digest` に切り替え。`InvocationResponse.output` は `null` |
 | log 行 | 16 KiB（`max_log_line_bytes`） | char boundary で切り `truncated = true` |
 | log / invocation | 2000 行、1 MiB | 超過分を捨て `LogsResponse.dropped = true` |
@@ -239,7 +239,7 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 
 | 守られないもの | 説明 |
 |---|---|
-| filesystem | user code は gateway プロセスと同じユーザーで走り、host の filesystem（`data_dir`、`config/gateway.toml` を含む）を読める |
+| filesystem | user code は gateway プロセスと同じユーザーで走り、host の filesystem（`data_dir`、`config/gateway.{dev,firecracker}.toml` を含む）を読める |
 | network | host の network namespace をそのまま使う。`egress_none` は成立しない |
 | memory / cpu / pids | cgroup を設定しない。timeout で kill するまで資源を消費できる |
 | ephemeral storage | `/tmp` は host の `/tmp` |
@@ -255,7 +255,7 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 1. **artifact の tenant 境界（解消済み）。** `ArtifactStore`（`crates/provider-port/src/artifact.rs`）は content-addressed で tenant を持たないが、`POST /v1/artifacts` は `ArtifactService::upload` を通り、`(tenant_id, digest)` の所有を `state.json`（`artifact_owners`）に記録する。revision の作成と validation は revision の tenant が所有する digest しか解決せず、他 tenant だけが upload した digest は存在しない digest と同じ結果（`size_bytes = 0`、`failed` の理由 `artifact unavailable: artifact not found: <digest>`）になるので、digest の存在も漏れない。同じ bytes を自分で upload すれば参照できる。port の変更は無い。残り: 修正前の版で作られた Ready revision は再検証しない。テスト: `crates/application/tests/pipeline.rs::revisions_cannot_reference_another_tenants_artifact`、`apps/gateway/tests/gateway_integration.rs::foreign_artifact_digest_is_indistinguishable_from_a_missing_one`。
 2. **jailer 未使用。** P1 の firecracker プロセスは gateway と同じユーザー・同じ mount namespace で走る。VMM 脱出時の影響範囲を狭めていない。PLT-4622 以降で jailer / 専用ユーザー / seccomp を検討する。
 3. **平文 HTTP と静的 token。** B1 の保護は deployment 依存（§5-2, 5-3）。
-4. **`state.json` の権限。** invocation の入出力（inline）と log を含むため、ファイル権限は `config/gateway.toml` と同じ扱いにする。
+4. **`state.json` の権限。** invocation の入出力（inline）と log を含むため、ファイル権限は `config/gateway.{dev,firecracker}.toml` と同じ扱いにする。
 5. **hypervisor 側の DoS（fork bomb、大量 fd）。** microVM の vCPU / memory 上限は Firecracker の `machine-config` で与えるが、実効性は未測定（`docs/inventory-tachyon-apps.md` §5）。
 6. **時刻の単調性。** deadline は wall-clock。host の時刻が飛ぶと deadline 判定がずれる。P1 では `AttemptTimings` に `Instant` を使い、deadline だけ wall-clock とする。
 7. **`OutcomeUnknown` 後の副作用の可視化。** ledger は「不明」としか言えない。

@@ -11,7 +11,8 @@ pub enum Role {
     Deploy,
     /// Invoke functions and read invocation results / logs.
     Invoke,
-    /// Platform operator (provider status, all tenants read-only).
+    /// Platform operator: provider status plus own-tenant function, revision
+    /// and alias metadata, read-only (docs/threat-model.md section 7).
     Operator,
 }
 

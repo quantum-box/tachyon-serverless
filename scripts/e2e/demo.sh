@@ -519,6 +519,34 @@ collect_evidence() {
 # main
 # ---------------------------------------------------------------------------
 
+secrets_not_leaked() {
+  # T03 / PLT-4623: resolved secret values must never reach the gateway log,
+  # the evidence directory or the persisted ledger. The values themselves are
+  # never printed.
+  local values data_dir target v hits=0 checked=0
+  values="$(sed -n 's/^value *= *"\(.*\)"$/\1/p' "$CONFIG_PATH")"
+  if [ -z "$values" ]; then
+    echo "no secret bindings in $CONFIG_PATH; nothing to check" >&2
+    return 0
+  fi
+  data_dir="$(sed -n 's/^data_dir *= *"\(.*\)"$/\1/p' "$CONFIG_PATH" | head -n1)"
+  data_dir="${data_dir:-./data}"
+  case "$data_dir" in /*) ;; *) data_dir="$REPO_ROOT/${data_dir#./}" ;; esac
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    for target in "$GATEWAY_LOG" "$EVIDENCE_DIR" "$data_dir/state.json"; do
+      [ -e "$target" ] || continue
+      checked=$((checked + 1))
+      if grep -rqF -- "$v" "$target"; then
+        echo "a configured secret value was found in $target" >&2
+        hits=$((hits + 1))
+      fi
+    done
+  done <<<"$values"
+  e2e_log "secret scan: $checked locations checked, $hits leaks"
+  [ "$hits" -eq 0 ]
+}
+
 main() {
   e2e_log "run $RUN_ID (arch $ARCH, evidence $EVIDENCE_DIR)"
   if [ "$TSLS_PROVIDER" = "process" ]; then
@@ -559,6 +587,7 @@ main() {
   GATEWAY_PID=""
   e2e_log "gateway exit status $gw_rc"
   step "gateway stops on SIGTERM with exit 0" assert_eq 0 "$gw_rc" "gateway exit status"
+  step "secret values absent from gateway log, evidence and state" secrets_not_leaked
   step "no orphans after gateway shutdown" "$SCRIPT_DIR/orphan-check.sh" "$TSLS_PROVIDER" "${TSLS_FC_RUN_DIR:-$REPO_ROOT/.kvm/run}"
 
   steps_write_summary "$EVIDENCE_DIR/summary.json" \
