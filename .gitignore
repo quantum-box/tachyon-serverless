@@ -41,3 +41,6 @@ Cargo.lock.bak
 # local runtime data
 /data
 /.kvm
+
+# Claude Code worktrees
+/.claude/

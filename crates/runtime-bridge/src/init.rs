@@ -75,15 +75,15 @@ mod linux {
         flags: libc::c_ulong,
     ) -> std::io::Result<()> {
         let _ = std::fs::create_dir_all(target);
-        let source = CString::new(source)?;
+        let source_c = CString::new(source)?;
         let target_c = CString::new(target)?;
-        let fstype = CString::new(fstype)?;
+        let fstype_c = CString::new(fstype)?;
         // SAFETY: valid NUL-terminated strings; no data argument.
         let rc = unsafe {
             libc::mount(
-                source.as_ptr(),
+                source_c.as_ptr(),
                 target_c.as_ptr(),
-                fstype.as_ptr(),
+                fstype_c.as_ptr(),
                 flags,
                 std::ptr::null(),
             )
