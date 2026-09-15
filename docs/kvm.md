@@ -2,7 +2,7 @@
 
 - 対象: `crates/providers/firecracker`, `scripts/kvm/*`, `.kvm/`（実行時生成物、gitignore 済み）
 - 関連: [architecture.md](architecture.md) §3・§4、[protocol.md](protocol.md) §C
-- 状態: プロトタイプ。**この文書に書かれた手順は Linux/KVM 実機での確認が前提**であり、コードは macOS 上でユニットテスト（偽 Firecracker を使った lifecycle テストを含む）までを通している。実機での確認結果は `docs/evidence/kvm-<UTC>/` に残す。
+- 状態: プロトタイプ。aarch64 の Linux/KVM（Apple M4 上の Lima VM、nested virtualization）で smoke と E2E デモが通った記録がある（§5、`docs/evidence/kvm-20260915T080221Z/`、`docs/evidence/20260915T125610Z-firecracker/`）。**x86_64 host と bare metal では未確認。** コードは macOS 上でも偽 Firecracker を使った lifecycle テストまで通る。実機での結果は `docs/evidence/kvm-<UTC>/`（smoke）と `docs/evidence/<UTC>-firecracker/`（E2E）に残す。
 
 ## 1. 目的
 
@@ -24,7 +24,7 @@ fc-smoke / gateway ──ExecutionProvider──▶ FirecrackerProvider
 | 項目 | 要件 |
 |---|---|
 | OS / CPU | Linux x86_64 または aarch64。Firecracker は **host と同じアーキテクチャの guest だけ** を実行する |
-| KVM | `/dev/kvm` が存在し、実行ユーザーで rw であること（`sudo usermod -aG kvm $USER` して再ログイン、または `chmod 666 /dev/kvm`）。**root は不要** |
+| KVM | `/dev/kvm` が存在し、実行ユーザーで rw であること（`sudo usermod -aG kvm $USER` して再ログイン、または `chmod 666 /dev/kvm`）。**root は不要**。Lima VM では VM を起動するたびに権限が戻るので `sudo chmod 666 /dev/kvm` をやり直す（§5） |
 | ネットワーク | P1 では guest にネットワークデバイスを付けない（egress none）。**tap は作らない**ので `CAP_NET_ADMIN` も不要 |
 | jailer | 使わない。Firecracker は実行ユーザーの権限のまま動く（本番の隔離設計とは別） |
 | ツール | `curl` `sha256sum` `tar` `mkfs.ext4`（e2fsprogs ≥ 1.43、`-d` オプション） `cargo` `rustup` `gcc`（musl target のリンカドライバ） |
@@ -54,6 +54,7 @@ scripts/kvm/bootstrap.sh
 2. guest kernel: Firecracker v1.17 の getting-started と同じ方法で、S3 の `firecracker-ci/` 配下で最も新しい日付付き prefix（`YYYYMMDD-<sha>-<n>/`）から `<arch>/vmlinux-X.Y.Z` の最新版を選び `.kvm/vmlinux` に保存。URL と sha256 を `.kvm/manifest.json` に記録する。
    - 2 回目以降は manifest の sha256 と一致すれば再取得しない
    - `CI_VERSION=v1.15` のように prefix を固定、`GUEST_KERNEL_SERIES=6.1` で系列を固定できる（`firecracker-ci/v1.17/` という prefix は S3 に存在しないため、既定は日付 prefix の自動解決）
+   - 実機で確認した組み合わせは `CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1`（guest kernel 6.1.155、§5）。既定の自動解決は実機で確認していない
 3. `rustup target add <arch>-unknown-linux-musl` → `cargo build --release --target <arch>-unknown-linux-musl -p tachyon-serverless-runtime-bridge -p example-hello -p example-http-axum -p example-cpu-burn`
    - musl target は既定で static-pie。`readelf` があれば `PT_INTERP` が無いことを確認する。動的リンクになった場合は `RUSTFLAGS="-C target-feature=+crt-static"` を付けて再実行
 4. host 用の `fc-smoke` をビルド（`target/release/fc-smoke`）
@@ -80,7 +81,7 @@ scripts/kvm/smoke.sh
 | `timeout` | `example-cpu-burn` に短い deadline（既定 3 秒）で Invoke（`--timeout-demo`） | deadline で host が `Cancel(grace 1s)` → `terminate(Timeout)` → SIGKILL。`outcome=timeout`、`terminate.was_running=true`、`leftovers.process_alive=false` |
 
 cpu-burn の payload は `CPU_BURN_PAYLOAD`（既定 `{"seconds":60}`）で変更できる。
-結果は `docs/evidence/kvm-<UTC>/` に保存され、最後に PASS / FAIL を表示する。
+結果は `docs/evidence/kvm-<UTC>/` に保存され、最後に PASS / FAIL を表示する。確認済みの記録は `docs/evidence/kvm-20260915T080221Z/`。
 
 `fc-smoke` を直接使う場合:
 
@@ -111,7 +112,7 @@ vsock_port = 5000
 ```
 
 provider は相対パスをプロセスの cwd 基準で絶対化するので、gateway はリポジトリルートで起動する。
-その後 `scripts/e2e/demo.sh`（Track D）で 登録 → publish → invoke → logs → rollback を通す。
+`TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`（Track D）はこの設定で gateway を自分で起動し（`127.0.0.1:8080`）、登録 → publish → invoke → logs → timeout → rollback → 他 tenant 404 → cancel → 環境破棄を通す。別の gateway を同じポートで起動したまま実行しない。確認済みの記録は `docs/evidence/20260915T125610Z-firecracker/`（27/27 PASS）。
 `GET /v1/provider` の capabilities は次のとおり（`Unverified` は「コードはあるが実機で未計測」）。
 
 | capability | 値 |
@@ -167,41 +168,87 @@ JSON サマリの主なフィールド:
 (c) `*-console.txt` に guest kernel の起動ログと `/sbin/tachyon-init` の出力がある、の 3 点を合わせて読む。
 guest 申告値（`*_guest`, `hello.*`）は参考値で、課金・timeout の根拠は host 計測側（architecture.md §5-3）。
 
-## 5. macOS（Apple Silicon）で試す: Lima + nested virtualization（未検証）
+## 5. macOS（Apple Silicon）で試す: Lima + nested virtualization（確認済み）
 
-> **未検証**: この節は Lima の公開ドキュメントに基づく手順で、実機（M3 以降 + macOS 15 以降）での確認は行っていない。
-> 確認できたら結果をこの節に追記すること。Intel Mac / M1 / M2 では nested virtualization が使えないため対象外。
+2026-09-15 に次の環境で `scripts/kvm/smoke.sh` と `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` が通った。記録は `docs/evidence/kvm-20260915T080221Z/`（smoke）と `docs/evidence/20260915T125610Z-firecracker/`（E2E、27/27 PASS）。
 
-要件: Apple M3 以降、macOS 15 以降、Lima（`brew install lima`、`vmType: vz` で `nestedVirtualization` に対応した版）。
+| 項目 | 値 |
+|---|---|
+| host | Apple M4、macOS（Darwin 25.6.0） |
+| Lima | 2.2.0（`brew install lima`）、`vmType: vz`、nested virtualization 有効 |
+| VM | Lima の `template:ubuntu`、4 vCPU / 8 GiB / disk 40 GiB、kernel `7.0.0-28-generic` aarch64 |
+| Firecracker | v1.17.0（aarch64、bootstrap が取得） |
+| guest kernel | Firecracker CI の 6.1 系列（`CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1`。console に `Linux version 6.1.155+`） |
+| microVM | 1 vCPU / 256 MiB、rootfs と function drive は read-only、NIC なし |
+
+Lima の文書によると、vz の nested virtualization には Apple M3 以降と macOS 15 以降が必要（Intel Mac / M1 / M2 は対象外）。実際に確認したのは上の M4 だけ。
+
+### 5.1 VM を作る（macOS 側）
 
 ```sh
-# 1. Ubuntu 24.04 の VM を vz で作る（リポジトリを書き込み可で mount）
-limactl create --name tsls-kvm template://ubuntu-24.04 \
-  --vm-type vz --cpus 4 --memory 8 --disk 40 \
-  --mount "$(pwd):w" --mount-writable \
-  --set '.nestedVirtualization = true'
-
-# `--set` が使えない版では ~/.lima/tsls-kvm/lima.yaml を編集して次を追加する:
-#   vmType: vz
-#   nestedVirtualization: true
-#   mounts:
-#     - location: "<repo の絶対パス>"
-#       writable: true
-
+brew install lima                       # 2.2.0 で確認
+limactl create --name tsls-kvm template:ubuntu \
+  --vm-type vz --nested-virt --cpus 4 --memory 8 --disk 40 \
+  --mount "<repo の絶対パス>:w"
 limactl start tsls-kvm
 limactl shell tsls-kvm
-
-# 2. VM 内
-sudo apt-get update && sudo apt-get install -y build-essential e2fsprogs curl
-ls -l /dev/kvm && sudo usermod -aG kvm "$USER"   # 再ログイン（limactl shell を抜けて入り直す）
-curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain 1.95.0
-cd <mount された repo>       # パスが長いと socket 長で preflight が FAIL する。短い場所に clone し直してもよい
-scripts/kvm/preflight.sh && scripts/kvm/bootstrap.sh && scripts/kvm/smoke.sh
 ```
 
-注意:
-- Lima の共有ディレクトリ（virtiofs / reverse-sshfs）上に `.kvm/run` を置くと Unix socket が作れないことがある。その場合は VM 内のローカルディスクに clone する。
-- VM 内のパスは短く（例 `~/tsls`）。`/Users/...` を mount したままだと 107 バイト制限を超えやすい。
+`--mount` はリポジトリを VM から見えるようにするためのもの（clone 元と、evidence の持ち帰り先）。ビルドと `.kvm/` はこの共有ディレクトリ（virtiofs）の上に置かない。
+
+### 5.2 VM 内の準備（初回だけ）
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential e2fsprogs curl jq
+curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain 1.95.0
+. "$HOME/.cargo/env"
+rustup target add aarch64-unknown-linux-musl
+
+# VM のローカルディスクに clone する（virtiofs の mount 上ではビルドしない）
+git clone "<repo の絶対パス>" ~/tsls
+cd ~/tsls
+git checkout <確認するブランチ>
+```
+
+`~/tsls` なら Unix socket の最長パスは 85 バイトで、上限 107 バイトに収まる（evidence の preflight `socket_path_length`）。
+
+### 5.3 VM を起動するたびに
+
+```sh
+sudo chmod 666 /dev/kvm     # VM の再起動で権限が戻るので毎回必要
+```
+
+### 5.4 取得・smoke・E2E
+
+```sh
+cd ~/tsls
+CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1 bash scripts/kvm/bootstrap.sh
+scripts/kvm/smoke.sh
+TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
+```
+
+- bootstrap は上の kernel 指定で確認した。既定の `CI_VERSION=auto`（日付 prefix の最新 kernel）はこの環境では確認していない。
+- `demo.sh` は `config/gateway.firecracker.toml` を使って gateway を自分で起動する（§3.5）。
+- evidence は `~/tsls/docs/evidence/` にできる。macOS 側に残すときは mount 先へコピーする: `cp -R docs/evidence/<dir> "<repo の絶対パス>/docs/evidence/"`。
+
+### 5.5 実測値（nested virtualization 上の参考値。SLA ではない）
+
+上の 1 環境で 1 回ずつ実行した記録の値。nested virtualization のオーバーヘッドを含み、性能の約束でも、`docs/inventory-tachyon-apps.md` §6 の baseline（x86_64 第一、N ≥ 20、中央値・p95）の測定でもない。時間はすべて host 計測で、括弧内の guest 申告値は参考値（課金・timeout の根拠にしない。architecture.md §5-3）。
+
+| 経路 | boot | init | handler | 出典 |
+|---|---|---|---|---|
+| gateway 経由（E2E、11 attempt） | `environment_boot_ms` 3522〜4754 ms | `runtime_init_ms` 331〜410 ms（guest 申告 219〜274 ms） | hello / http-axum の `handler_ms` 73〜93 ms（guest 申告 26〜42 ms） | `docs/evidence/20260915T125610Z-firecracker/invocations.json` |
+| fc-smoke（最初の 2 回の起動） | `boot_ms` 13468 / 11036 ms | `init_ms` 1341 / 1224 ms（guest 申告 991 / 850 ms） | hello の `handler_ms` 319 ms（guest 申告 116 ms） | `docs/evidence/kvm-20260915T080221Z/hello.json`、`timeout.json` |
+
+- どちらも `console=ttyS0` でシリアルに kernel ログを出している（§6）。fc-smoke の hello では `/sbin/tachyon-init` の起動が kernel 時刻 9.04 s（`hello-console.txt`）。
+- E2E の timeout ケース（`timeout_seconds = 2`、grace 1 s）は `total_ms` 7178 ms、CLI から見た壁時計 7060 ms（boot を含む）。
+
+### 5.6 注意
+
+- ビルド、`target/`、`.kvm/`、`data/` は VM のローカルディスク（`~/tsls`）に置く。共有ディレクトリの上では作業しない。
+- VM 内のパスは短くする。`/Users/...` の mount 先で動かすと Unix socket の 107 バイト制限を超えやすい。
+- macOS 側のディスクの空きが無くなると VM 内のファイルが壊れる（§7.1）。bootstrap と `target/` で数 GiB を使う。
 
 ## 6. 既知の制約
 
@@ -240,3 +287,12 @@ smoke の場合は `docs/evidence/kvm-*/hello.stderr.txt` に出る。ログの�
 - `fc-smoke --boot-args-extra "loglevel=8"` で guest kernel のログを増やす（`config` では `boot_args_extra`）。
 - `RUST_LOG=debug` で provider の tracing（spawn / InstanceStart / terminate）を stderr に出す。
 - `fc-smoke --skip-preflight` は preflight の FAIL を無視して起動を試みる（原因を絞るとき用）。
+
+### 7.1 Lima / nested virtualization で起きたこと
+
+| 症状 | 原因 | 対処 |
+|---|---|---|
+| VM 内で ext4 の I/O error が出る。`target/` に 0 バイトのバイナリが残る。gateway が `.../data/state.json is not a valid state file ... Move it aside to start with an empty ledger.` で起動しない（`state.json` がゼロ埋め） | macOS 側のディスクが一杯になり、VM の disk への書き込みが失敗した | macOS 側の空きを作る → `limactl stop tsls-kvm && limactl start tsls-kvm` → `sudo chmod 666 /dev/kvm` → VM 内で `find target -type f -size 0 -delete` → `mv data/state.json data/state.json.broken` → bootstrap からやり直す。壊れた `state.json` を黙って捨てない仕様は `crates/application/src/repository.rs::corrupt_state_file_is_refused_with_a_hint` |
+| preflight の `kvm` が FAIL、または firecracker が `/dev/kvm` を開けない | VM を起動し直すと `/dev/kvm` の権限が戻る | `sudo chmod 666 /dev/kvm`（§5.3） |
+| guest の console に bridge の `--environment-id` 不足のエラーが出て、Hello が来ない | kernel は `init=/sbin/tachyon-init` を引数なしで起動する | 修正済み（commit `8e2fbc7`: PID 1 なら自動で `--init`）。古い rootfs を使っている場合は bootstrap を再実行して bridge と `.kvm/rootfs.ext4` を作り直す |
+| Hello は来るが、user process が Ready の前に終了する（Runtime API への接続が `ENETUNREACH`） | 起動直後の guest では loopback（`lo`）が down のまま | 修正済み（commit `c0f0ebe`: init モードで `lo` を up にする）。対処は上と同じく rootfs の作り直し |

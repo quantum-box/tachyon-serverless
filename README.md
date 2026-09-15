@@ -25,11 +25,23 @@ Tachyon のサーバーレス実行基盤の **動作プロトタイプ**。sing
 
 | 項目 | 状態 |
 |---|---|
-| フェーズ | P1（Linear PLT-4617〜PLT-4630） |
+| フェーズ | P1（Linear PLT-4617〜PLT-4630）。受入条件ごとの状態と証跡は [docs/acceptance.md](docs/acceptance.md) |
 | 実行 provider | `process`（macOS/Linux, 隔離なし）/ `firecracker`（Linux/KVM） |
+| 動作確認 | P1 の縦断（登録 → publish → invoke → logs → timeout → rollback → 他テナント 404 → cancel → 環境破棄）が **process provider（macOS）** と **実際の Firecracker microVM（Linux/KVM）** の両方で通った記録がある（下表） |
 | 同時実行 | 1 環境 1 実行、destroy-after-invoke |
 | 永続化 | in-memory + `data_dir/state.json` |
 | SLA | なし |
+
+### 動作確認の記録
+
+| 記録 | provider / 環境 | 結果 |
+|---|---|---|
+| [docs/evidence/20260915T073238Z-process](docs/evidence/20260915T073238Z-process/) | process provider、macOS（Apple Silicon）。**隔離なし** | `scripts/e2e/demo.sh` 27/27 PASS |
+| [docs/evidence/kvm-20260915T080221Z](docs/evidence/kvm-20260915T080221Z/) | Firecracker v1.17.0 microVM、aarch64 Linux/KVM（Apple M4 上の Lima VM、nested virtualization） | `scripts/kvm/smoke.sh`: hello が microVM から応答、timeout を host が強制終了、残骸なし |
+| [docs/evidence/20260915T125610Z-firecracker](docs/evidence/20260915T125610Z-firecracker/) | 同じ VM で gateway 経由（`profile = "production"`） | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` 27/27 PASS |
+
+- 1 host で 1 回ずつ実行した記録で、x86_64 の KVM host と bare metal では確認していない。記録にある時間（nested virtualization 上で boot 3.5〜4.8 s など）は参考値で、性能や SLA の約束ではない。
+- process provider の結果は隔離の証明にならない（関数は host の子プロセスとして動く）。
 
 ## アーキテクチャ
 
@@ -89,14 +101,16 @@ target/debug/tsls functions logs --function hello
 
 ## Quickstart（Linux / KVM, firecracker provider）
 
-`/dev/kvm` のある Linux ホストで Firecracker microVM を使う。kernel / rootfs / firecracker の準備（`.kvm/`）、musl での guest ビルド、smoke テストの手順は [docs/kvm.md](docs/kvm.md)。
+`/dev/kvm` のある Linux ホストで Firecracker microVM を使う。kernel / rootfs / firecracker の準備（`.kvm/`）、musl での guest ビルド、smoke テストの手順は [docs/kvm.md](docs/kvm.md)。macOS（Apple Silicon）では Lima VM の中で動かす（確認済みの手順は [docs/kvm.md](docs/kvm.md) §5）。
 
 ```sh
-cargo build --release --target x86_64-unknown-linux-musl \
-  -p tachyon-serverless-runtime-bridge -p example-hello -p example-http-axum -p example-cpu-burn
-target/debug/tachyon-serverless-gateway --config config/gateway.firecracker.toml
-TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
+# firecracker / guest kernel / rootfs を .kvm/ に用意し、bridge と examples を musl でビルド
+CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1 bash scripts/kvm/bootstrap.sh
+scripts/kvm/smoke.sh                              # gateway なしで microVM を起動（hello と timeout）
+TSLS_PROVIDER=firecracker scripts/e2e/demo.sh     # config/gateway.firecracker.toml で gateway を起動して E2E
 ```
+
+kernel の指定（`CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1`）は実機で確認した組み合わせ。`demo.sh` は gateway を自分で起動するので、別の gateway を `127.0.0.1:8080` で動かしたまま実行しない。
 
 ## E2E デモ（PLT-4630）
 
@@ -126,7 +140,9 @@ tsls provider | health | dev
 - [docs/architecture.md](docs/architecture.md) — 目的・crate 構成・invoke の流れ・設定・決め事
 - [docs/protocol.md](docs/protocol.md) — host ↔ bridge frame、Runtime API、Firecracker guest 規約
 - [docs/threat-model.md](docs/threat-model.md) — 脅威モデル（process provider の非隔離を含む）
-- [docs/kvm.md](docs/kvm.md) — Linux/KVM 環境の準備と smoke
+- [docs/kvm.md](docs/kvm.md) — Linux/KVM 環境の準備と smoke、macOS での Lima 手順と実測値
+- [docs/acceptance.md](docs/acceptance.md) — 受入条件ごとの状態（実装済み / KVM 実測あり / 未検証 / 未着手）と証跡
+- [docs/evidence/](docs/evidence/) — E2E デモと KVM smoke の実行記録
 - [docs/adr/](docs/adr/) — 設計判断の記録
 - Linear: [Tachyon Serverless — 動作プロトタイプ](https://linear.app/quantum-box/project/tachyon-serverless-動作プロトタイプ-269d7e9f95f9)
 - RFC: quantum-box/knowledge#284「Tachyon Serverless 全体設計 RFC v0.1」
@@ -146,6 +162,8 @@ apps/gateway           axum gateway
 apps/cli               tsls
 examples/*             hello / http-axum / cpu-burn
 scripts/e2e            デモと検証スクリプト
+scripts/kvm            KVM 環境の preflight / bootstrap / smoke / teardown
+docs/evidence          実行記録（E2E デモ、KVM smoke）
 ```
 
 ## 非対象
