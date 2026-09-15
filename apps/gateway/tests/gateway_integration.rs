@@ -16,8 +16,13 @@ use tachyon_serverless_provider_fake::{FakeExecutionProvider, FakeGuestScript};
 
 const TOKEN_A: &str = "dev-token-tenant-a";
 const TOKEN_B: &str = "dev-token-tenant-b";
+/// `roles = ["operator"]` on a tenant that owns nothing.
+const TOKEN_OP: &str = "dev-token-operator";
+/// `roles = ["operator"]` on tenant A.
+const TOKEN_A_OP: &str = "dev-token-operator-a";
 const TENANT_A: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzza";
 const TENANT_B: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb";
+const TENANT_OP: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzc";
 
 fn config(data_dir: &std::path::Path) -> GatewayConfig {
     let toml = format!(
@@ -47,6 +52,18 @@ token = "{TOKEN_B}"
 tenant_id = "{TENANT_B}"
 subject = "dev-b"
 roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "{TOKEN_OP}"
+tenant_id = "{TENANT_OP}"
+subject = "operator"
+roles = ["operator"]
+
+[[identity.tokens]]
+token = "{TOKEN_A_OP}"
+tenant_id = "{TENANT_A}"
+subject = "operator-a"
+roles = ["operator"]
 
 [[secrets.bindings]]
 tenant_id = "{TENANT_A}"
@@ -769,4 +786,297 @@ async fn invoke_failures_map_to_status_codes() {
     let bad_id = get(r, "/v1/functions/not-an-id", TOKEN_A).await;
     assert_eq!(bad_id.status, StatusCode::NOT_FOUND);
     assert_eq!(api.fake.created().len(), 2);
+}
+
+async fn send(router: &Router, method: Method, path: &str, token: &str, body: Body) -> Reply {
+    call(
+        router,
+        req(method, path, Some(token))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap(),
+    )
+    .await
+}
+
+/// Pins the implemented operator role (docs/threat-model.md §7): read-only
+/// metadata of the operator's own tenant plus `/v1/provider`. Other tenants'
+/// resources do not exist for it, and invocation data, logs, usage, invoke
+/// and every mutation are forbidden.
+#[tokio::test]
+async fn operator_role_is_own_tenant_read_only() {
+    let api = api(vec![FakeGuestScript::RespondOk(
+        serde_json::json!({"ok": 1}),
+    )]);
+    let r = &api.router;
+    let (function_id, revision_id) = deploy(r, "watched").await;
+    let inv = post_json(
+        r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(inv.status, StatusCode::OK);
+    let invocation_id = inv.header("x-tachyon-invocation-id").unwrap().to_string();
+
+    let metadata = [
+        format!("/v1/functions/{function_id}"),
+        format!("/v1/functions/{function_id}/revisions"),
+        format!("/v1/functions/{function_id}/revisions/{revision_id}"),
+        format!("/v1/functions/{function_id}/aliases"),
+        format!("/v1/functions/{function_id}/aliases/prod"),
+    ];
+    let invocation_data = [
+        format!("/v1/invocations/{invocation_id}"),
+        format!("/v1/functions/{function_id}/invocations"),
+        format!("/v1/functions/{function_id}/usage"),
+        format!("/v1/invocations/{invocation_id}/logs"),
+    ];
+    // Well-formed bodies, so that the role check (not body parsing) decides.
+    let revision_body = serde_json::json!({
+        "artifact": {"kind": "binary", "digest": tachyon_serverless_domain::Sha256Digest::of_bytes(b"x").to_string()},
+        "architecture": "aarch64",
+        "execution": {"timeout_seconds": 5, "initialization_timeout_seconds": 5, "max_concurrency": 1},
+        "publish_to_prod": false
+    });
+    let mutations = [
+        (
+            Method::POST,
+            "/v1/functions".to_string(),
+            serde_json::json!({"name": "by-operator"}),
+        ),
+        (
+            Method::POST,
+            "/v1/artifacts".to_string(),
+            serde_json::json!("bytes"),
+        ),
+        (
+            Method::DELETE,
+            format!("/v1/functions/{function_id}"),
+            serde_json::json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/v1/functions/{function_id}/revisions"),
+            revision_body,
+        ),
+        (
+            Method::PUT,
+            format!("/v1/functions/{function_id}/aliases/prod"),
+            serde_json::json!({"revision_id": revision_id}),
+        ),
+        (
+            Method::POST,
+            format!("/v1/functions/{function_id}/invoke"),
+            serde_json::json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/v1/functions/{function_id}:invoke"),
+            serde_json::json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/v1/functions/{function_id}/http/anything"),
+            serde_json::json!({}),
+        ),
+        (
+            Method::POST,
+            format!("/v1/invocations/{invocation_id}:cancel"),
+            serde_json::json!({}),
+        ),
+    ];
+
+    // Operator of another tenant: A's resources are not found.
+    for path in &metadata {
+        let res = get(r, path, TOKEN_OP).await;
+        assert_eq!(res.status, StatusCode::NOT_FOUND, "GET {path}");
+        assert_eq!(res.json()["error"]["code"], "not_found");
+    }
+    let list = get(r, "/v1/functions", TOKEN_OP).await;
+    assert_eq!(list.status, StatusCode::OK);
+    assert!(
+        list.json()["items"].as_array().unwrap().is_empty(),
+        "no cross-tenant listing"
+    );
+    for path in &invocation_data {
+        let res = get(r, path, TOKEN_OP).await;
+        assert_eq!(res.status, StatusCode::FORBIDDEN, "GET {path}");
+        assert_eq!(res.json()["error"]["code"], "forbidden");
+    }
+    let provider = get(r, "/v1/provider", TOKEN_OP).await;
+    assert_eq!(provider.status, StatusCode::OK);
+
+    // Operator of tenant A: metadata is readable, nothing else is.
+    for path in &metadata {
+        let res = get(r, path, TOKEN_A_OP).await;
+        assert_eq!(res.status, StatusCode::OK, "GET {path}");
+    }
+    let list = get(r, "/v1/functions", TOKEN_A_OP).await;
+    assert_eq!(list.json()["items"].as_array().unwrap().len(), 1);
+    for path in &invocation_data {
+        let res = get(r, path, TOKEN_A_OP).await;
+        assert_eq!(res.status, StatusCode::FORBIDDEN, "GET {path}");
+    }
+
+    for token in [TOKEN_OP, TOKEN_A_OP] {
+        for (method, path, body) in &mutations {
+            let res = send(r, method.clone(), path, token, json_body(body.clone())).await;
+            assert_eq!(
+                res.status,
+                StatusCode::FORBIDDEN,
+                "{method} {path} as {token}"
+            );
+        }
+    }
+    // Nothing was invoked, deleted or created by the operators.
+    assert_eq!(api.fake.created().len(), 1);
+    let still = get(r, &format!("/v1/functions/{function_id}"), TOKEN_A).await;
+    assert!(still.json()["deleted_at"].is_null());
+}
+
+async fn wait_revision_terminal(
+    router: &Router,
+    token: &str,
+    function_id: &str,
+    revision_id: &str,
+) -> serde_json::Value {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let r = get(
+            router,
+            &format!("/v1/functions/{function_id}/revisions/{revision_id}"),
+            token,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK);
+        let body = r.json();
+        match body["status"].as_str().unwrap() {
+            "ready" | "failed" => return body,
+            _ if tokio::time::Instant::now() > deadline => panic!("revision never finished"),
+            _ => tokio::time::sleep(Duration::from_millis(20)).await,
+        }
+    }
+}
+
+async fn create_binary_revision(
+    router: &Router,
+    token: &str,
+    function_id: &str,
+    digest: &str,
+) -> serde_json::Value {
+    let rev = post_json(
+        router,
+        &format!("/v1/functions/{function_id}/revisions"),
+        token,
+        serde_json::json!({
+            "artifact": {"kind": "binary", "digest": digest},
+            "architecture": "aarch64",
+            "execution": {"timeout_seconds": 5, "initialization_timeout_seconds": 5, "max_concurrency": 1},
+            "publish_to_prod": false
+        }),
+    )
+    .await;
+    assert_eq!(
+        rev.status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&rev.body)
+    );
+    let revision_id = rev.json()["id"].as_str().unwrap().to_string();
+    wait_revision_terminal(router, token, function_id, &revision_id).await
+}
+
+/// docs/threat-model.md §14-1: a revision may only reference artifacts its
+/// tenant uploaded, and a foreign digest fails exactly like a missing one.
+#[tokio::test]
+async fn foreign_artifact_digest_is_indistinguishable_from_a_missing_one() {
+    let api = api(vec![]);
+    let r = &api.router;
+    // tenant A uploads (inside `deploy`) and runs its artifact
+    deploy(r, "owner").await;
+    let bytes = b"#!/bin/sh\necho owner\n";
+    let owned = tachyon_serverless_domain::Sha256Digest::of_bytes(bytes).to_string();
+    let missing = tachyon_serverless_domain::Sha256Digest::of_bytes(b"never uploaded").to_string();
+
+    let created = post_json(
+        r,
+        "/v1/functions",
+        TOKEN_B,
+        serde_json::json!({"name": "borrower"}),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let fb = created.json()["id"].as_str().unwrap().to_string();
+
+    let foreign = create_binary_revision(r, TOKEN_B, &fb, &owned).await;
+    let unknown = create_binary_revision(r, TOKEN_B, &fb, &missing).await;
+    assert_eq!(foreign["status"], "failed");
+    assert_eq!(unknown["status"], "failed");
+    let foreign_reason = foreign["failure_reason"]
+        .as_str()
+        .unwrap()
+        .replace(&owned, "<digest>");
+    let unknown_reason = unknown["failure_reason"]
+        .as_str()
+        .unwrap()
+        .replace(&missing, "<digest>");
+    assert_eq!(foreign_reason, unknown_reason);
+    assert_eq!(
+        foreign["artifact"]["size_bytes"],
+        unknown["artifact"]["size_bytes"]
+    );
+
+    // Uploading the same bytes makes B an owner of the digest too.
+    let upload = call(
+        r,
+        req(Method::POST, "/v1/artifacts", Some(TOKEN_B))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(&bytes[..]))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(upload.status, StatusCode::OK);
+    assert_eq!(upload.json()["digest"], owned);
+    let own = create_binary_revision(r, TOKEN_B, &fb, &owned).await;
+    assert_eq!(own["status"], "ready", "{own}");
+}
+
+/// The HTTP adapter forwards the request-target path as received
+/// (percent-encoded), so encoded separators and spaces are not decoded by the
+/// gateway and cannot re-route the request inside the function.
+#[tokio::test]
+async fn http_adapter_forwards_the_raw_request_path() {
+    let cases = [
+        ("a%20b", "/a%20b", ""),
+        ("a%3Fb?x=1", "/a%3Fb", "x=1"),
+        ("a%2Fb", "/a%2Fb", ""),
+        ("a%2520b", "/a%2520b", ""),
+    ];
+    let api = api(cases.iter().map(|_| FakeGuestScript::EchoHttp).collect());
+    let r = &api.router;
+    let (function_id, _) = deploy(r, "raw-path").await;
+    for (suffix, path, query) in cases {
+        let res = call(
+            r,
+            req(
+                Method::GET,
+                &format!("/v1/functions/{function_id}/http/{suffix}"),
+                Some(TOKEN_A),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            res.status,
+            StatusCode::OK,
+            "{suffix}: {}",
+            String::from_utf8_lossy(&res.body)
+        );
+        let event = res.json();
+        assert_eq!(event["path"], path, "{suffix}");
+        assert_eq!(event["query"], query, "{suffix}");
+    }
 }

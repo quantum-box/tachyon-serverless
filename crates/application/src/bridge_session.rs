@@ -11,6 +11,12 @@
 //!
 //! Only `Response` / `Error` frames whose `(attempt_id, epoch)` match the
 //! active lease are accepted; anything else is counted as stale and ignored.
+//!
+//! A failed write does not end the read side: frames the guest queued before
+//! closing (typically `Exited`) can still be read, so an `Invoke` that could
+//! not be delivered is classified from what the guest reported rather than
+//! as a lost connection. A frame that cannot be encoded (`FrameTooLarge`) is
+//! refused before anything is written and leaves the session usable.
 //! Heartbeats are ignored. Guest-reported timings are returned as
 //! informational values only; the caller measures authoritative timings.
 //! Log frames are forwarded to the [`LogRepository`] with per-line and
@@ -103,12 +109,16 @@ pub enum SessionError {
     Timeout { stage: &'static str },
     #[error("protocol violation: {0}")]
     Protocol(String),
+    /// A host frame exceeded `MAX_FRAME_BYTES`; nothing was written.
+    #[error("frame too large: {0} bytes")]
+    FrameTooLarge(usize),
 }
 
 impl From<ProtocolError> for SessionError {
     fn from(e: ProtocolError) -> Self {
         match e {
             ProtocolError::Io(_) => Self::Disconnected,
+            ProtocolError::FrameTooLarge(size) => Self::FrameTooLarge(size),
             other => Self::Protocol(other.to_string()),
         }
     }
@@ -214,7 +224,10 @@ pub struct BridgeSession {
     /// `(attempt_id, epoch)` of the active lease; results must match.
     lease: Option<(AttemptId, u64)>,
     stale_results: u32,
+    /// No more frames can be read (EOF, IO or decode error, or closed by us).
     disconnected: bool,
+    /// A write failed; frames already queued by the guest may still be read.
+    write_closed: bool,
 }
 
 impl std::fmt::Debug for BridgeSession {
@@ -246,6 +259,7 @@ impl BridgeSession {
             lease: None,
             stale_results: 0,
             disconnected: false,
+            write_closed: false,
         };
         let deadline = Instant::now() + timeout;
         let hello = loop {
@@ -385,9 +399,17 @@ impl BridgeSession {
     }
 
     /// Send `Invoke` and arm the lease for `(attempt_id, epoch)`.
+    ///
+    /// - `FrameTooLarge` / `Protocol`: the frame could not be encoded. Nothing
+    ///   was written, the lease is not armed and the session stays usable.
+    /// - `Disconnected`: the write failed, so the guest cannot have received a
+    ///   complete `Invoke`. [`Self::wait_result`] still returns frames the
+    ///   guest queued before closing (e.g. `Exited`).
     pub async fn send_invoke(&mut self, params: InvokeParams) -> Result<(), SessionError> {
-        self.lease = Some((params.attempt_id.clone(), params.epoch));
-        self.send(&HostMessage::Invoke {
+        self.ensure_writable()?;
+        let attempt_id = params.attempt_id.clone();
+        let epoch = params.epoch;
+        let bytes = encode_message(&HostMessage::Invoke {
             invocation_id: params.invocation_id.to_string(),
             attempt_id: params.attempt_id.to_string(),
             epoch: params.epoch,
@@ -395,8 +417,9 @@ impl BridgeSession {
             deadline_ms: params.deadline_ms,
             trace_id: params.trace_id,
             payload: params.payload,
-        })
-        .await
+        })?;
+        self.lease = Some((attempt_id, epoch));
+        self.write_frame(bytes).await
     }
 
     /// Wait for the outcome of the active lease until `deadline`. Cancel-safe:
@@ -544,15 +567,27 @@ impl BridgeSession {
         self.disconnected = true;
     }
 
-    async fn send(&mut self, msg: &HostMessage) -> Result<(), SessionError> {
-        if self.disconnected {
-            return Err(SessionError::Disconnected);
+    fn ensure_writable(&self) -> Result<(), SessionError> {
+        if self.disconnected || self.write_closed {
+            Err(SessionError::Disconnected)
+        } else {
+            Ok(())
         }
+    }
+
+    async fn send(&mut self, msg: &HostMessage) -> Result<(), SessionError> {
+        self.ensure_writable()?;
         let bytes = encode_message(msg)?;
+        self.write_frame(bytes).await
+    }
+
+    async fn write_frame(&mut self, bytes: bytes::Bytes) -> Result<(), SessionError> {
+        self.ensure_writable()?;
         match self.framed.send(bytes).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                self.disconnected = true;
+                // Only the write side is known to be gone; keep reading.
+                self.write_closed = true;
                 Err(e.into())
             }
         }
@@ -910,6 +945,113 @@ mod tests {
         assert!(matches!(
             s.wait_result(Instant::now() + Duration::from_secs(1)).await,
             Outcome::Disconnected
+        ));
+    }
+
+    fn invoke_params(payload: serde_json::Value) -> InvokeParams {
+        InvokeParams {
+            invocation_id: InvocationId::generate(),
+            attempt_id: AttemptId::generate(),
+            epoch: 1,
+            event_type: "tachyon.invoke.v1".into(),
+            deadline_ms: 0,
+            trace_id: "t".into(),
+            payload,
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_invoke_write_still_reads_what_the_guest_queued() {
+        let (host, guest) = tokio::io::duplex(64 * 1024);
+        let env = EnvironmentId::generate();
+        let (_s, logs, _) = setup(&env);
+        let mut g = Guest::new(guest);
+        let e2 = env.clone();
+        let guest_task = tokio::spawn(async move {
+            g.send(&hello(&e2)).await;
+            g.recv().await.unwrap();
+            g.send(&GuestMessage::Ready { init_ms: 1 }).await;
+            g.send(&GuestMessage::Exited {
+                exit_code: Some(0),
+                signal: None,
+            })
+            .await;
+            // dropping `g` closes both directions
+        });
+        let (mut s, _) = BridgeSession::handshake(
+            Box::new(host),
+            &env,
+            1,
+            params(),
+            logs,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+        s.wait_ready(Instant::now() + Duration::from_secs(1))
+            .await
+            .unwrap();
+        guest_task.await.unwrap();
+
+        let err = s
+            .send_invoke(invoke_params(serde_json::json!({})))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SessionError::Disconnected), "{err}");
+        match s.wait_result(Instant::now() + Duration::from_secs(1)).await {
+            Outcome::GuestError {
+                kind: GuestErrorKind::Crash { exit_code, .. },
+                error_type,
+                ..
+            } => {
+                assert_eq!(error_type, "Runtime.Exited");
+                assert_eq!(exit_code, Some(0));
+            }
+            other => panic!("expected the queued Exited frame, got {other:?}"),
+        }
+        assert!(matches!(
+            s.shutdown("done").await,
+            Err(SessionError::Disconnected)
+        ));
+    }
+
+    #[tokio::test]
+    async fn oversized_invoke_is_refused_without_touching_the_session() {
+        let (host, guest) = tokio::io::duplex(64 * 1024);
+        let env = EnvironmentId::generate();
+        let (_s, logs, _) = setup(&env);
+        let mut g = Guest::new(guest);
+        let e2 = env.clone();
+        let guest_task = tokio::spawn(async move {
+            g.send(&hello(&e2)).await;
+            g.recv().await.unwrap();
+            g.send(&GuestMessage::Ready { init_ms: 1 }).await;
+            g.recv().await
+        });
+        let (mut s, _) = BridgeSession::handshake(
+            Box::new(host),
+            &env,
+            1,
+            params(),
+            logs,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+        s.wait_ready(Instant::now() + Duration::from_secs(1))
+            .await
+            .unwrap();
+        let big = "a".repeat(tachyon_serverless_protocol::MAX_FRAME_BYTES + 1);
+        let err = s
+            .send_invoke(invoke_params(serde_json::json!({ "blob": big })))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, SessionError::FrameTooLarge(_)), "{err}");
+        // Nothing was written and the session is still usable.
+        s.shutdown("done").await.unwrap();
+        assert!(matches!(
+            guest_task.await.unwrap(),
+            Some(HostMessage::Shutdown { .. })
         ));
     }
 }

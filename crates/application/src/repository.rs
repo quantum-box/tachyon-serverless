@@ -6,7 +6,7 @@
 //! in memory only and bounded per invocation by [`Limits`]. Leases are
 //! transient and never persisted. No secret ever enters the store.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -120,26 +120,51 @@ pub trait LogRepository: Send + Sync {
     fn query(&self, invocation: &InvocationId) -> LogQuery;
 }
 
+/// An idempotency key bound to an invocation that exists in the ledger.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IdempotencyOutcome {
-    /// The key was free and is now bound to the given invocation.
-    Reserved,
-    /// The key is already bound.
-    Existing {
-        invocation_id: InvocationId,
-        input_digest: Sha256Digest,
-    },
+pub struct IdempotencyBinding {
+    pub invocation_id: InvocationId,
+    pub input_digest: Sha256Digest,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdempotencyOutcome {
+    /// The invocation was inserted and its key (if any) is now bound to it.
+    Inserted,
+    /// The key is already bound to another invocation; nothing was inserted.
+    Existing(IdempotencyBinding),
+}
+
+/// Idempotency keys (docs/threat-model.md §10).
+///
+/// A key is only ever bound together with the ledger row of its invocation,
+/// in one store mutation, so a request that is rejected before acceptance
+/// (400 / 413 / 429) never consumes its key and a replay can never observe a
+/// key without its invocation.
 pub trait IdempotencyRepository: Send + Sync {
-    fn reserve(
+    /// The invocation `key` is bound to, if that invocation exists.
+    fn lookup(
         &self,
         tenant: &TenantId,
         function: &FunctionId,
         key: &str,
-        input_digest: &Sha256Digest,
-        invocation_id: &InvocationId,
-    ) -> Result<IdempotencyOutcome, RepoError>;
+    ) -> Result<Option<IdempotencyBinding>, RepoError>;
+
+    /// Atomically insert `invocation` and bind its `idempotency_key`. When
+    /// the key is already bound to an existing invocation nothing is written
+    /// and that binding is returned instead. A binding whose invocation does
+    /// not exist is stale and is replaced.
+    fn insert_bound(&self, invocation: Invocation) -> Result<IdempotencyOutcome, RepoError>;
+}
+
+/// Tenant ownership of content-addressed artifacts (docs/threat-model.md
+/// §14-1). A digest a tenant never uploaded must be indistinguishable from a
+/// digest that does not exist.
+pub trait ArtifactOwnerRepository: Send + Sync {
+    /// Record that `tenant` uploaded `digest`. Idempotent; identical bytes
+    /// uploaded by two tenants give each tenant its own ownership row.
+    fn claim(&self, tenant: &TenantId, digest: &Sha256Digest) -> Result<(), RepoError>;
+    fn is_owned_by(&self, tenant: &TenantId, digest: &Sha256Digest) -> Result<bool, RepoError>;
 }
 
 /// All repositories bundled; services take what they need.
@@ -152,6 +177,7 @@ pub struct Repositories {
     pub environments: Arc<dyn EnvironmentRepository>,
     pub logs: Arc<dyn LogRepository>,
     pub idempotency: Arc<dyn IdempotencyRepository>,
+    pub artifact_owners: Arc<dyn ArtifactOwnerRepository>,
 }
 
 impl Repositories {
@@ -163,7 +189,8 @@ impl Repositories {
             invocations: store.clone(),
             environments: store.clone(),
             logs: store.clone(),
-            idempotency: store,
+            idempotency: store.clone(),
+            artifact_owners: store,
         }
     }
 }
@@ -205,6 +232,9 @@ struct PersistedState {
     environments: BTreeMap<EnvironmentId, ExecutionEnvironment>,
     #[serde(default)]
     idempotency: Vec<(IdempotencyKey, IdempotencyEntry)>,
+    /// Tenants that uploaded each artifact digest.
+    #[serde(default)]
+    artifact_owners: BTreeMap<Sha256Digest, BTreeSet<TenantId>>,
 }
 
 #[derive(Debug, Default)]
@@ -345,7 +375,16 @@ fn write_state(path: &Path, state: &PersistedState) -> Result<(), RepoError> {
 
 /// Anything that was in flight when the previous process died cannot be
 /// resumed: mark it as a platform failure so the ledger stays consistent.
+/// Idempotency keys bound to an invocation that is not in the ledger (left
+/// behind by older versions that reserved keys before acceptance) are
+/// dropped, so a retry with such a key is accepted as a new invocation.
 fn reconcile_after_restart(state: &mut PersistedState, now: Timestamp) {
+    let PersistedState {
+        invocations,
+        idempotency,
+        ..
+    } = &mut *state;
+    idempotency.retain(|(_, entry)| invocations.contains_key(&entry.invocation_id));
     for inv in state.invocations.values_mut() {
         if !inv.status.is_terminal() {
             let _ = inv.mark_failed(
@@ -746,36 +785,92 @@ impl LogRepository for InMemoryStore {
     }
 }
 
+fn live_binding(s: &State, key: &IdempotencyKey) -> Option<IdempotencyBinding> {
+    s.idempotency
+        .get(key)
+        .filter(|e| s.durable.invocations.contains_key(&e.invocation_id))
+        .map(|e| IdempotencyBinding {
+            invocation_id: e.invocation_id.clone(),
+            input_digest: e.input_digest.clone(),
+        })
+}
+
 impl IdempotencyRepository for InMemoryStore {
-    fn reserve(
+    fn lookup(
         &self,
         tenant: &TenantId,
         function: &FunctionId,
         key: &str,
-        input_digest: &Sha256Digest,
-        invocation_id: &InvocationId,
-    ) -> Result<IdempotencyOutcome, RepoError> {
+    ) -> Result<Option<IdempotencyBinding>, RepoError> {
         let k = IdempotencyKey {
             tenant_id: tenant.clone(),
             function_id: function.clone(),
             key: key.to_string(),
         };
-        Ok(self.mutate(|s| match s.idempotency.get(&k) {
-            Some(existing) => IdempotencyOutcome::Existing {
-                invocation_id: existing.invocation_id.clone(),
-                input_digest: existing.input_digest.clone(),
-            },
-            None => {
+        Ok(live_binding(&self.state.read(), &k))
+    }
+
+    fn insert_bound(&self, invocation: Invocation) -> Result<IdempotencyOutcome, RepoError> {
+        let key = invocation
+            .idempotency_key
+            .as_ref()
+            .map(|key| IdempotencyKey {
+                tenant_id: invocation.tenant_id.clone(),
+                function_id: invocation.function_id.clone(),
+                key: key.clone(),
+            });
+        self.mutate(|s| {
+            if let Some(k) = &key
+                && let Some(existing) = live_binding(s, k)
+            {
+                return Ok(IdempotencyOutcome::Existing(existing));
+            }
+            if s.durable.invocations.contains_key(&invocation.id) {
+                return Err(RepoError::Conflict(format!(
+                    "invocation {} already exists",
+                    invocation.id
+                )));
+            }
+            if let Some(k) = key {
                 s.idempotency.insert(
                     k,
                     IdempotencyEntry {
-                        invocation_id: invocation_id.clone(),
-                        input_digest: input_digest.clone(),
+                        invocation_id: invocation.id.clone(),
+                        input_digest: invocation.input_digest.clone(),
                     },
                 );
-                IdempotencyOutcome::Reserved
             }
-        }))
+            s.durable
+                .invocations
+                .insert(invocation.id.clone(), invocation);
+            Ok(IdempotencyOutcome::Inserted)
+        })
+    }
+}
+
+impl ArtifactOwnerRepository for InMemoryStore {
+    fn claim(&self, tenant: &TenantId, digest: &Sha256Digest) -> Result<(), RepoError> {
+        if self.is_owned_by(tenant, digest)? {
+            return Ok(());
+        }
+        self.mutate(|s| {
+            s.durable
+                .artifact_owners
+                .entry(digest.clone())
+                .or_default()
+                .insert(tenant.clone());
+        });
+        Ok(())
+    }
+
+    fn is_owned_by(&self, tenant: &TenantId, digest: &Sha256Digest) -> Result<bool, RepoError> {
+        Ok(self
+            .state
+            .read()
+            .durable
+            .artifact_owners
+            .get(digest)
+            .is_some_and(|owners| owners.contains(tenant)))
     }
 }
 
@@ -857,26 +952,162 @@ mod tests {
         assert!(q.dropped);
     }
 
+    fn keyed_invocation(t: &TenantId, f: &FunctionId, key: Option<&str>) -> Invocation {
+        Invocation::accept(
+            InvocationId::generate(),
+            t.clone(),
+            f.clone(),
+            None,
+            RevisionId::generate(),
+            InvocationMode::Sync,
+            EventKind::Json,
+            Deadlines {
+                queue_deadline: now(),
+                init_deadline: None,
+                execution_deadline: None,
+                client_deadline: now(),
+            },
+            key.map(str::to_string),
+            Sha256Digest::of_bytes(b"{}"),
+            2,
+            "trace".into(),
+            now(),
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn idempotency_reserve_then_existing() {
+    fn idempotency_key_is_bound_with_its_invocation() {
         let store = InMemoryStore::new(Limits::default());
         let t = TenantId::generate();
         let f = FunctionId::generate();
-        let d = Sha256Digest::of_bytes(b"{}");
-        let inv = InvocationId::generate();
+        assert_eq!(store.lookup(&t, &f, "k").unwrap(), None);
+        let first = keyed_invocation(&t, &f, Some("k"));
+        let first_id = first.id.clone();
         assert_eq!(
-            store.reserve(&t, &f, "k", &d, &inv).unwrap(),
-            IdempotencyOutcome::Reserved
+            store.insert_bound(first).unwrap(),
+            IdempotencyOutcome::Inserted
         );
-        let again = store
-            .reserve(&t, &f, "k", &d, &InvocationId::generate())
-            .unwrap();
+        let binding = IdempotencyBinding {
+            invocation_id: first_id.clone(),
+            input_digest: Sha256Digest::of_bytes(b"{}"),
+        };
+        assert_eq!(store.lookup(&t, &f, "k").unwrap(), Some(binding.clone()));
+        assert!(
+            InvocationRepository::get(&store, &first_id)
+                .unwrap()
+                .is_some()
+        );
+
+        // A second invocation with the same key is not inserted.
+        let second = keyed_invocation(&t, &f, Some("k"));
+        let second_id = second.id.clone();
         assert_eq!(
-            again,
-            IdempotencyOutcome::Existing {
-                invocation_id: inv,
-                input_digest: d
-            }
+            store.insert_bound(second).unwrap(),
+            IdempotencyOutcome::Existing(binding)
+        );
+        assert!(
+            InvocationRepository::get(&store, &second_id)
+                .unwrap()
+                .is_none()
+        );
+        // Same key, other tenant: its own scope.
+        let other = TenantId::generate();
+        assert_eq!(
+            store
+                .insert_bound(keyed_invocation(&other, &f, Some("k")))
+                .unwrap(),
+            IdempotencyOutcome::Inserted
+        );
+        // No key: plain insert; a duplicate id conflicts.
+        let plain = keyed_invocation(&t, &f, None);
+        assert_eq!(
+            store.insert_bound(plain.clone()).unwrap(),
+            IdempotencyOutcome::Inserted
+        );
+        assert!(matches!(
+            store.insert_bound(plain),
+            Err(RepoError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn dangling_idempotency_entries_are_dropped_on_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = TenantId::generate();
+        let f = FunctionId::generate();
+        let live = keyed_invocation(&t, &f, Some("live"));
+        let live_id = live.id.clone();
+        {
+            let store =
+                InMemoryStore::with_persistence(dir.path(), Limits::default(), now()).unwrap();
+            store.insert_bound(live).unwrap();
+        }
+        // Simulate a state file written by a version that reserved keys
+        // before acceptance: a key bound to an invocation that never existed.
+        let path = dir.path().join("state.json");
+        let mut state: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        state["idempotency"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!([
+                {"tenant_id": t.to_string(), "function_id": f.to_string(), "key": "dangling"},
+                {"invocation_id": InvocationId::generate().to_string(),
+                 "input_digest": Sha256Digest::of_bytes(b"{}").to_string()}
+            ]));
+        std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+
+        let store = InMemoryStore::with_persistence(dir.path(), Limits::default(), now()).unwrap();
+        assert_eq!(store.lookup(&t, &f, "dangling").unwrap(), None);
+        assert_eq!(
+            store
+                .lookup(&t, &f, "live")
+                .unwrap()
+                .map(|b| b.invocation_id),
+            Some(live_id)
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("dangling"), "healed state is written back");
+        assert_eq!(
+            store
+                .insert_bound(keyed_invocation(&t, &f, Some("dangling")))
+                .unwrap(),
+            IdempotencyOutcome::Inserted
+        );
+    }
+
+    #[test]
+    fn artifact_ownership_is_per_tenant_and_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = TenantId::generate();
+        let b = TenantId::generate();
+        let d = Sha256Digest::of_bytes(b"binary");
+        {
+            let store =
+                InMemoryStore::with_persistence(dir.path(), Limits::default(), now()).unwrap();
+            assert!(!store.is_owned_by(&a, &d).unwrap());
+            store.claim(&a, &d).unwrap();
+            store.claim(&a, &d).unwrap();
+            assert!(store.is_owned_by(&a, &d).unwrap());
+            assert!(!store.is_owned_by(&b, &d).unwrap());
+        }
+        let store = InMemoryStore::with_persistence(dir.path(), Limits::default(), now()).unwrap();
+        assert!(store.is_owned_by(&a, &d).unwrap());
+        assert!(!store.is_owned_by(&b, &d).unwrap());
+        store.claim(&b, &d).unwrap();
+        assert!(store.is_owned_by(&b, &d).unwrap());
+    }
+
+    #[test]
+    fn state_without_artifact_owners_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("state.json"), br#"{"functions": {}}"#).unwrap();
+        let store = InMemoryStore::with_persistence(dir.path(), Limits::default(), now()).unwrap();
+        assert!(
+            !store
+                .is_owned_by(&TenantId::generate(), &Sha256Digest::of_bytes(b"x"))
+                .unwrap()
         );
     }
 

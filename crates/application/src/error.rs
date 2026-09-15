@@ -148,11 +148,14 @@ impl From<ArtifactError> for AppError {
 
 impl From<SecretError> for AppError {
     fn from(e: SecretError) -> Self {
+        // A binding that exists only for another tenant must be
+        // indistinguishable from one that does not exist at all.
         match e {
-            SecretError::NotFound(b) => {
-                Self::InvalidRequest(format!("secret binding `{b}` not found"))
+            SecretError::NotFound(binding) | SecretError::Forbidden { binding, .. } => {
+                Self::InvalidRequest(format!(
+                    "secret binding `{binding}` is not available to this tenant"
+                ))
             }
-            SecretError::Forbidden { .. } => Self::Forbidden(e.to_string()),
             SecretError::Backend(msg) => Self::Platform(format!("secret backend: {msg}")),
         }
     }
@@ -185,6 +188,19 @@ mod tests {
         assert!(body.error.invocation_id.is_some());
         assert_eq!(body.error.error_type.as_deref(), Some("Host.Timeout"));
         assert_eq!(body.error.request_id.as_deref(), Some("req"));
+    }
+
+    #[test]
+    fn foreign_and_missing_secret_bindings_are_indistinguishable() {
+        let missing: AppError = SecretError::NotFound("db".into()).into();
+        let foreign: AppError = SecretError::Forbidden {
+            binding: "db".into(),
+            tenant: tachyon_serverless_domain::TenantId::generate(),
+        }
+        .into();
+        assert_eq!(missing.code(), foreign.code());
+        assert_eq!(missing.to_string(), foreign.to_string());
+        assert!(!foreign.to_string().contains("tn_"));
     }
 
     #[test]

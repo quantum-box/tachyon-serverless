@@ -13,7 +13,7 @@ use tachyon_serverless_api_types::{ArtifactRequest, CreateRevisionRequest};
 use tachyon_serverless_domain::{
     AliasName, Architecture, ArtifactRef, Clock, EgressProfile, ExecutionPolicy, Function,
     FunctionId, FunctionRevision, IdGenerator, Limits, RUNTIME_PROTOCOL_V1, ResourceProfile,
-    RevisionId, RevisionSpec, RevisionStatus, RuntimeSpec, SecretBinding, Sha256Digest,
+    RevisionId, RevisionSpec, RevisionStatus, RuntimeSpec, SecretBinding, Sha256Digest, TenantId,
 };
 use tachyon_serverless_provider_port::{
     ArtifactLocation, ArtifactStore, ExecutionProvider, Principal,
@@ -23,6 +23,7 @@ use crate::authz::{ensure_tenant, require_deploy, require_read};
 use crate::error::AppError;
 use crate::repository::Repositories;
 use crate::services::alias::AliasService;
+use crate::services::artifact::owned_artifact;
 
 pub struct RevisionService {
     repos: Repositories,
@@ -55,21 +56,27 @@ impl RevisionService {
         }
     }
 
-    /// Build a domain spec from the API request. Binary artifacts are looked
-    /// up in the store to learn their size (a missing artifact yields size 0
-    /// and fails validation later).
+    /// Build a domain spec from the API request for a function owned by
+    /// `tenant_id`. Binary artifacts are looked up in the store to learn
+    /// their size. A missing artifact, and an artifact `tenant_id` never
+    /// uploaded, both yield size 0 and fail validation later with the same
+    /// reason (docs/threat-model.md §14-1).
     pub async fn spec_from_request(
         &self,
+        tenant_id: &TenantId,
         req: &CreateRevisionRequest,
     ) -> Result<RevisionSpec, AppError> {
         let artifact = match &req.artifact {
             ArtifactRequest::Binary { digest } => {
                 let digest = Sha256Digest::parse(digest)?;
-                let size_bytes = match self.artifacts.get(&digest).await {
-                    Ok(stored) => stored.size_bytes,
-                    Err(tachyon_serverless_provider_port::ArtifactError::NotFound(_)) => 0,
-                    Err(e) => return Err(e.into()),
-                };
+                let size_bytes =
+                    match owned_artifact(&self.repos, self.artifacts.as_ref(), tenant_id, &digest)
+                        .await
+                    {
+                        Ok(stored) => stored.size_bytes,
+                        Err(tachyon_serverless_provider_port::ArtifactError::NotFound(_)) => 0,
+                        Err(e) => return Err(e.into()),
+                    };
                 ArtifactRef::Binary { digest, size_bytes }
             }
             ArtifactRequest::OciImage { reference } => {
@@ -150,7 +157,7 @@ impl RevisionService {
                 function.id
             )));
         }
-        let spec = self.spec_from_request(req).await?;
+        let spec = self.spec_from_request(&function.tenant_id, req).await?;
         let number = self.repos.revisions.allocate_number(&function.id)?;
         let revision = FunctionRevision::new(
             RevisionId::from_ulid(self.ids.next_ulid()),
@@ -272,11 +279,12 @@ impl RevisionService {
 
         let location = match &rev.spec.artifact {
             ArtifactRef::Binary { digest, size_bytes } => {
-                let stored = self
-                    .artifacts
-                    .get(digest)
-                    .await
-                    .map_err(|e| format!("artifact unavailable: {e}"))?;
+                // A digest the revision's tenant never uploaded fails with the
+                // exact reason of a digest that does not exist.
+                let stored =
+                    owned_artifact(&self.repos, self.artifacts.as_ref(), &rev.tenant_id, digest)
+                        .await
+                        .map_err(|e| format!("artifact unavailable: {e}"))?;
                 if stored.size_bytes != *size_bytes {
                     return Err(format!(
                         "artifact size changed: spec says {} bytes, store has {}",
