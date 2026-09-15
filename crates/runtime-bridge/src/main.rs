@@ -2,7 +2,12 @@ use clap::Parser;
 use tachyon_serverless_runtime_bridge::cli::Cli;
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    // The kernel starts `init=/sbin/tachyon-init` without arguments, so PID 1
+    // implies --init (docs/protocol.md section C).
+    if std::process::id() == 1 {
+        cli.init = true;
+    }
     let init_mode = cli.init;
     tracing_subscriber::fmt()
         .with_env_filter(
