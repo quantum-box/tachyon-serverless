@@ -113,7 +113,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | `GET /v1/functions/{A}/aliases[/{alias}]` | 200 | 404 | 404 | 401 |
 | `POST /v1/functions/{A}:invoke`、`ANY /v1/functions/{A}/http/{*path}` | 200 または invocation の失敗 status（§8） | 404 | 403（operator は invoke できない） | 401 |
 | `GET /v1/functions/{A}/invocations`、`GET /v1/invocations/{inv of A}` | 200 | 404 | 403（invocation 履歴は tenant データ。`invoke` role が必要） | 401 |
-| `POST /v1/invocations/{inv of A}:cancel` | 202 | 404 | 403 | 401 |
+| `POST /v1/invocations/{inv of A}:cancel` | 200 | 404 | 403 | 401 |
 | `GET /v1/invocations/{inv of A}/logs` | 200 | 404 | 403（ログ本文は tenant データ） | 401 |
 | secret 値 | API 無し（読めない） | API 無し | API 無し | — |
 | `POST /v1/artifacts`（upload） | 200（digest。A が所有者として記録される） | 200（B 自身の upload。同一 bytes なら同一 digest で、B も所有者として記録される。B が upload していない digest を revision で参照すると、存在しない digest と同じ理由で `failed`。§14-1） | 403 | 401 |
@@ -144,7 +144,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 補足:
 
 - `execution_deadline` 到達時の手順: `Cancel{grace_ms: 1000}` → grace 後 `provider.terminate_environment(Timeout)` → `Failed{Timeout}`。terminate は guest の応答を待たない。
-- `POST :cancel` は同じ手順で `Cancelled`（invoke 応答は 499 `cancelled`、cancel 自体は 202）。
+- `POST :cancel` は同じ手順で `Cancelled`（invoke 応答は 499 `cancelled`、cancel 自体は 200）。
 - client が切断しても invoke タスクは `execution_deadline` まで追跡し、結果を ledger に残す（`docs/architecture.md` §3-11）。切断は cancel ではない。
 - timeout / cancel / init 失敗した環境は再利用しない（P1 はそもそも再利用しない）。
 - Ready 後、Attempt / Lease / `Running` を記録する前に `client_deadline` を再確認し、過ぎていれば handler を起動しない。

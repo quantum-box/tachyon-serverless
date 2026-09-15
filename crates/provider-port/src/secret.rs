@@ -51,3 +51,17 @@ pub trait SecretProvider: Send + Sync {
         binding_ref: &str,
     ) -> Result<SecretValue, SecretError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_value_debug_is_redacted() {
+        let v = SecretValue::new("s3cr3t-marker");
+        let rendered = format!("{v:?} {:?}", Some(v.clone()));
+        assert!(!rendered.contains("s3cr3t-marker"), "{rendered}");
+        assert!(rendered.contains("redacted"), "{rendered}");
+        assert_eq!(v.expose(), "s3cr3t-marker");
+    }
+}

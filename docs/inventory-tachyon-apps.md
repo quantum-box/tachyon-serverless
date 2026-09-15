@@ -92,7 +92,7 @@
 |---|---|
 | 確認したパス | `packages/secrets/src/lib.rs`、`src/interface_adapter/repository.rs`（`SecretsRepository::{get_by_path, get_by_key, save, save_with_options, delete, delete_scoped, exists, list, list_bounded}`）、`src/domain/secret_path.rs`（`{tenant_id}/providers/{provider_type}` と global）、`src/domain/secret_value.rs`（JSON 値、`Debug` は `SecretValue(***)`）、`src/interface_adapter/gateway/{local_file, aws_secrets_manager, ssm_parameter_store, vault, cached, fallback}.rs`、`docs/src/architecture/decisions/ADR-0024-secrets-backend-ssm-parameter-store.md`（ファイル名のみ確認） |
 | 分類 | **adapter candidate**（`SecretProvider`） |
-| 対応 | `binding_ref` ↔ `SecretPath`（tenant scoped）。差分: tachyon-apps の `SecretValue` は JSON（複数 field）、本リポジトリの `SecretValue`（`crates/provider-port/src/secret.rs`）は env 値 1 本の文字列。adapter は `binding_ref` に path と field の両方を符号化する必要がある。P1 は `config/gateway.toml` の `[[secrets.bindings]]` による静的解決（`docs/architecture.md` §4） |
+| 対応 | `binding_ref` ↔ `SecretPath`（tenant scoped）。差分: tachyon-apps の `SecretValue` は JSON（複数 field）、本リポジトリの `SecretValue`（`crates/provider-port/src/secret.rs`）は env 値 1 本の文字列。adapter は `binding_ref` に path と field の両方を符号化する必要がある。P1 は `config/gateway.{dev,firecracker}.toml` の `[[secrets.bindings]]` による静的解決（`docs/architecture.md` §4） |
 | 共通の不変条件 | `Debug` 出力を redact する、値をログに出さない。本リポジトリはさらに「値は `HelloAck.env` にだけ載せ、API 応答・`state.json` に書かない」（`docs/architecture.md` §5-2） |
 
 ### 3.7 `packages/auth`（`TenantId` を含む）
@@ -101,7 +101,7 @@
 |---|---|
 | 確認したパス | `platform/foundation/value_object/src/lib.rs`（`def_id!(TenantId, "tn_")`、`PlatformId` / `OperatorId` = `TenantId`）、`platform/foundation/util/src/macros/id.rs`（`def_id!`: prefix 検査と lowercase 化）、`packages/auth/domain/src/executor.rs`（`Executor{SystemUser, User, ServiceAccount, WorkloadIdentity{service_account, allowed_actions}, None}`）、`workload_identity.rs`（`wid_`）、`service_account.rs`、`api_key.rs`、`access_token.rs`、`policy.rs`、`policy_statement.rs`、`trn.rs`（`trn:<service>:<resource-type>:<resource-id>`）、`execution_mode.rs`（`ExecutionMode{Production, Sandbox}`、`SandboxRestriction`）、`multi_tenancy.rs` |
 | 分類 | **adapter candidate**（`IdentityProvider`）／**reference**（`TenantId` 形式） |
-| 対応 | 本リポジトリの `TenantId` は同じ `tn_` namespace を再利用し tenant を発行しない（`crates/domain/src/ids.rs`、test `existing_tenant_ids_parse`）。`Role{Deploy, Invoke, Operator}`（`crates/provider-port/src/identity.rs`）は placeholder で、将来は IAM の action / policy statement へ写像する。P1 は `config/gateway.toml` の静的 token（`[[identity.tokens]]`） |
+| 対応 | 本リポジトリの `TenantId` は同じ `tn_` namespace を再利用し tenant を発行しない（`crates/domain/src/ids.rs`、test `existing_tenant_ids_parse`）。`Role{Deploy, Invoke, Operator}`（`crates/provider-port/src/identity.rs`）は placeholder で、将来は IAM の action / policy statement へ写像する。P1 は `config/gateway.{dev,firecracker}.toml` の静的 token（`[[identity.tokens]]`） |
 | 差分 | tachyon-apps の `def_id!` は prefix と小文字化のみ、本リポジトリは prefix + 26 文字 Crockford lowercase を検査する。既存の実 ID（例 `tn_01hjjn348rn3t49zz6hvmfq67p`）は両方で valid |
 
 ### 3.8 `packages/audit`
@@ -159,26 +159,33 @@
 
 判定語の定義:
 
-- `verified`: §6 の baseline profile 上で、本リポジトリのスクリプト / テストにより測定し、証跡が `docs/evidence/` にある。
+- `verified`: 本リポジトリのスクリプト / テストにより実機（Linux/KVM）で確認し、証跡が `docs/evidence/` にある。§6 の baseline profile を満たさない記録で確認した場合は、そのことをセルに書く。
 - `unsupported`: その構成では機能を露出しない、または P1 の `Capabilities` で `Unsupported{reason}` を返すと決めている。
 - `unverified`: upstream に機能や設定は存在するが、本リポジトリでは測定していない。
 
-**2026-09-15 時点で測定は一切行っていない。** したがって `verified` は 1 つも無い。tachyon-apps の Kata 設定は測定の代わりにならない。
+**2026-09-16 時点の実機記録は Firecracker の 2 件だけで、どちらも §6 の baseline profile を満たさない。**
+
+- `docs/evidence/kvm-20260915T080221Z/`（`scripts/kvm/smoke.sh`。gateway を通さず hello と timeout demo を 1 回ずつ）
+- `docs/evidence/20260915T125610Z-firecracker/`（`TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`。27/27 PASS）
+- 条件: Apple M4 上の Lima VM（`vmType: vz`、nested virtualization）、Linux 7.0.0-28-generic aarch64、Firecracker v1.17.0、guest kernel は Firecracker CI の `vmlinux-6.1.155`（`CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1`、`docs/kvm.md` §5）、1 vCPU / 256 MiB、1 host で 1 回ずつ
+- nested virtualization のオーバーヘッドを含み、x86_64 でも N ≥ 20 でもない。時間の値は代表値として使わない（`docs/kvm.md` §5.5）
+
+したがって Firecracker 列の `verified` は「上の条件で動作を確認した」の意味に留まり、性能の値を含まない。Cloud Hypervisor と Kata は本リポジトリで実行していない。tachyon-apps の Kata 設定は測定の代わりにならない。
 
 | 能力 | Firecracker（prototype provider） | Cloud Hypervisor | Kata Containers（k3s、`kata-clh`） |
 |---|---|---|---|
-| create / terminate | unverified（API 順序は `docs/protocol.md` §C に定義。未実行） | unverified（REST API / `ch-remote`。未実行） | unverified（`kata-smoke-job.yaml` は存在するが本リポジトリでは実行していない。Job 削除 → shim 終了の所要時間も未測定） |
-| deadline（host 強制） | unverified（VMM 機能ではなく provider が `SIGKILL` する。kill → cleanup 完了までの時間を測る） | unverified（同上） | unverified（`activeDeadlineSeconds` は秒粒度。controller 経由の遅延を測っていない） |
-| network（egress none / restricted） | unverified（tap を作らなければ guest に NIC が無い。「本当に到達できない」ことを guest から測る） | unverified（同上） | unverified（default-deny NetworkPolicy + ADR-0030 gate は存在。ADR-0025 は public-web policy を production 未導入と記録） |
+| create / terminate | verified（上記の条件。baseline profile 外）。`docs/evidence/kvm-20260915T080221Z/hello.json`: 起動して `outcome=response`、`terminate.was_running=true`、terminate 後の observe が `not_found`、`leftovers` なし（process・env dir・socket が残らない）。E2E step 19・27（`scripts/e2e/orphan-check.sh`）が `orphan-check: clean (firecracker)`。2 回目の terminate（冪等性）は未測定 | unverified（REST API / `ch-remote`。未実行） | unverified（`kata-smoke-job.yaml` は存在するが本リポジトリでは実行していない。Job 削除 → shim 終了の所要時間も未測定） |
+| deadline（host 強制） | verified（上記の条件。baseline profile 外）。VMM 機能ではなく provider が VMM を kill する。`docs/evidence/kvm-20260915T080221Z/timeout.json`: `outcome=timeout`、`cancel_sent=true`、`terminate.was_running=true`、`leftovers` なし。E2E step 18（`timeout_seconds = 2`、504 `Host.Timeout`）。kill → cleanup 完了までの時間の単独測定（ADR-0001 M5 の条件）は無い | unverified（同上） | unverified（`activeDeadlineSeconds` は秒粒度。controller 経由の遅延を測っていない） |
+| network（egress none / restricted） | unverified（tap を作らなければ guest に NIC が無い。「本当に到達できない」ことを guest から測る。上記の実機記録は NIC なしで動いたことだけを示し、到達不能は測っていない） | unverified（同上） | unverified（default-deny NetworkPolicy + ADR-0030 gate は存在。ADR-0025 は public-web policy を production 未導入と記録） |
 | ephemeral storage 上限 | unverified（P1 は `/tmp` tmpfs。サイズ上限の指定と超過時の挙動を測る） | unverified | unverified（`ephemeral-storage` request/limit を宣言。ADR-0025 は `local-path` driver が claim ごとの bytes を強制しないと記録） |
 | pause / resume | unverified（upstream は `PATCH /vm {state: Paused/Resumed}` を提供）。P1 の `Capabilities.idle_quiesce/idle_resume` は `Unsupported` | unverified（upstream は `vm.pause` / `vm.resume` を提供） | unsupported（Kubernetes Pod API に pause は無く、RuntimeClass 経由で露出しない） |
 | snapshot / restore | unverified（upstream は `PUT /snapshot/create` / `PUT /snapshot/load` を提供。vsock / network / エントロピーに関する制約が upstream doc に記載）。P1 の `Capabilities.snapshot_create/snapshot_clone` は `Unsupported` | unverified（upstream は snapshot / restore を提供） | unsupported（RuntimeClass 経由で露出しない） |
 
-P1 の `Capabilities`（`crates/provider-port/src/execution.rs`）では、Firecracker provider であっても `idle_quiesce` / `idle_resume` / `snapshot_create` / `snapshot_clone` / `egress_restricted` / `egress_public_web` を `Unsupported` として返す（`docs/architecture.md` §1, §6）。上表の `unverified` は「後続で測定可能」の意味であり、P1 で提供する意味ではない。`create_terminate` / `enforce_deadline` / `egress_none` / `host_metering` も、測定が済むまで `Unverified{note}` で返し、`Supported` と広告しない。
+P1 の `Capabilities`（`crates/provider-port/src/execution.rs`）では、Firecracker provider であっても `idle_quiesce` / `idle_resume` / `snapshot_create` / `snapshot_clone` / `egress_restricted` / `egress_public_web` を `Unsupported` として返す（`docs/architecture.md` §1, §6）。上表の `unverified` は「後続で測定可能」の意味であり、P1 で提供する意味ではない。Firecracker provider の実装は `create_terminate` / `observe` / `enforce_deadline` を `Supported` で返す。根拠は本表の verified 記録（aarch64 の nested virtualization）で、x86_64 と bare metal は未測定。`egress_none` は NIC を構成しないが guest からの到達不能を測っていない（ADR-0001 M8）ため `Unverified`、`host_metering` / `enforce_resource_limits` も `Unverified` で返す。このうち上表で `verified` にしたのは create / terminate と deadline だけで、どちらも baseline profile 外の記録である。
 
 ## 6. Baseline KVM 測定プロファイル
 
-PLT-4615（検証環境）と PLT-4621（Firecracker provider）はこのプロファイルで測定し、`docs/evidence/plt-4621/` に生データを置く。プロファイルを変えた測定は別 evidence として区別する。
+PLT-4615（検証環境）と PLT-4621（Firecracker provider）はこのプロファイルで測定する。生データは、`scripts/kvm/smoke.sh` が `docs/evidence/kvm-<UTC>/` に、`scripts/e2e/demo.sh` が `docs/evidence/<UTC>-<provider>/` に書く。プロファイルを変えた測定は別 evidence として区別し、変えた条件（host arch、nested virtualization の有無、kernel / rootfs の digest）を読み取れるようにする。
 
 | 項目 | 値 | 根拠 |
 |---|---|---|
@@ -195,7 +202,7 @@ PLT-4615（検証環境）と PLT-4621（Firecracker provider）はこのプロ�
 | 試行 | cold start のみ（P1 は warm 無し）。N ≥ 20、中央値と p95 を記録。hello / http-axum / cpu-burn（timeout kill）の 3 サンプル | PLT-4630 |
 | evidence に含めるもの | `uname -a`、`firecracker --version`、kernel / rootfs の digest、`GET /v1/provider` の出力（`capabilities` と `preflight`）、各 attempt の `InvocationResponse` JSON | `crates/api-types::ProviderInfo` |
 
-現時点で測定は行っていない。本表は測定条件であって結果ではない。
+本表は測定条件であって結果ではない。本表どおりの測定（x86_64、N ≥ 20、中央値・p95、3 サンプル）はまだ行っていない。条件の異なる記録として `docs/evidence/kvm-20260915T080221Z/`（smoke 2 回）と `docs/evidence/20260915T125610Z-firecracker/`（E2E 1 回、11 attempt）がある。本表との違いは host arch（aarch64）、nested virtualization（Apple M4 上の Lima vz）、kernel（Firecracker CI の `CI_VERSION=v1.15` の `vmlinux-6.1.155`。本表の「v1.17 系列」ではない）、試行回数。vCPU 1 / memory 256 MiB は本表と同じ（`hello.json` の `evidence.details`）。時間の値は `docs/kvm.md` §5.5 の参考値で、代表値として使わない。
 
 ## 7. 未解決事項
 
@@ -204,4 +211,4 @@ PLT-4615（検証環境）と PLT-4621（Firecracker provider）はこのプロ�
 | 1 | `env_` prefix の衝突（§3.1 注意） | PLT-4618 |
 | 2 | `SecretProvider` adapter で `binding_ref` に path + field をどう符号化するか（§3.6） | PLT-4623 以降 |
 | 3 | Kata / Cloud Hypervisor adapter を書く場合の bridge transport（vsock が Kubernetes 経由で使えるか） | PLT-4616 の「残る測定」 |
-| 4 | `ArtifactStore` が tenant を持たないため、他 tenant が digest を知っていれば Revision から参照できる。`docs/threat-model.md` §14 に記載 | PLT-4620 |
+| 4 | 解消済み: `ArtifactStore` port は tenant を持たないままだが、`POST /v1/artifacts` が `(tenant_id, digest)` の所有を `state.json`（`artifact_owners`）に記録し、revision は自 tenant が upload した digest しか参照できない（他 tenant だけが upload した digest は存在しない digest と同じ扱い）。実装は `crates/application/src/services/artifact.rs`（`ArtifactService::upload`、`owned_artifact`）。`docs/threat-model.md` §14-1 | PLT-4620 |

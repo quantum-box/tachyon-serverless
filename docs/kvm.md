@@ -118,7 +118,8 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 | capability | 値 |
 |---|---|
 | isolation | micro_vm |
-| create_terminate / observe / enforce_deadline / egress_none | supported |
+| create_terminate / observe / enforce_deadline | supported |
+| egress_none | unverified（NIC は構成しないが guest からの到達不能は未測定、ADR-0001 M8。commit `95af2ba` までは supported と表示していた） |
 | enforce_resource_limits | unverified（vcpu / mem は machine-config で指定、ephemeral storage は未制御） |
 | host_metering | unverified |
 | egress_restricted / egress_public_web | unsupported（ネットワークデバイス未設定） |

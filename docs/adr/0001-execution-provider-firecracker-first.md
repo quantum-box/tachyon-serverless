@@ -9,7 +9,7 @@ Accepted（2026-09-15）。測定結果により「Cloud Hypervisor へ fallback
 - 目的は、public な独立リポジトリ単体で「関数登録 → publish → invoke → 環境起動 → guest bridge → handler → result / log 回収 → rollback → 環境破棄」を通すこと（`docs/architecture.md` §1）。
 - tachyon-apps には Kata Containers（handler `kata-clh` = Cloud Hypervisor）を k3s の RuntimeClass で使う設定と、Kubernetes Job で JobRun を実行する runner-controller がある（`docs/inventory-tachyon-apps.md` §3.3, §3.5）。ただし本リポジトリは tachyon-apps にも既存 cluster にも依存しない。
 - 本リポジトリの protocol は guest bridge との双方向 stream（vsock / unix socket、長さ付き JSON frame）を前提にしている（`docs/protocol.md`）。
-- 実機での測定はまだ行っていない。能力表はすべて `unverified`（`docs/inventory-tachyon-apps.md` §5）。
+- 本決定は実機での測定結果を根拠にしていない（決定時の能力表はすべて `unverified`、`docs/inventory-tachyon-apps.md` §5）。その後に取った記録と、その範囲は §「残る測定」。
 
 決めるのは「P1 で最初に実装し検証する provider」と「他の候補の位置づけ」であり、「最終的にどれが最も速いか」ではない。後者は測定してから決める。
 
@@ -47,7 +47,7 @@ Accepted（2026-09-15）。測定結果により「Cloud Hypervisor へ fallback
 2. **provider は `ExecutionProvider` trait（`crates/provider-port/src/execution.rs`）の背後に置く。** domain / application は Firecracker を import しない。Firecracker 固有の型は `crates/providers/firecracker` から出さない。
 3. **Kata / Cloud Hypervisor は後続の adapter。** それぞれ `ExecutionProvider` を実装する crate として追加でき、application は `ProviderKind` の値以外で違いを知らない。Kata adapter を書く場合は、bridge transport（vsock の共有）と結果回収経路を先に解決する（§6）。
 4. **Cloud Hypervisor は fallback。** 検証 host（PLT-4615）で Firecracker が §5 の条件で失敗した場合、Cloud Hypervisor で同じ guest 規約を試す。その場合も trait と protocol は変えない。
-5. **P1 の `Capabilities` は保守的に返す。** `idle_quiesce` / `idle_resume` / `snapshot_create` / `snapshot_clone` / `egress_restricted` / `egress_public_web` は `Unsupported{reason}`。`create_terminate` / `enforce_deadline` / `egress_none` / `host_metering` / `observe` / `enforce_resource_limits` は測定が済むまで `Unverified{note}`。`Supported` は `docs/evidence/` に証跡がある項目にだけ付ける。
+5. **P1 の `Capabilities` は保守的に返す。** `idle_quiesce` / `idle_resume` / `snapshot_create` / `snapshot_clone` / `egress_restricted` / `egress_public_web` は `Unsupported{reason}`。`Supported` は `docs/evidence/` に証跡がある項目にだけ付ける。2026-09-16 時点で Firecracker provider が `Supported` を返すのは `create_terminate` / `observe` / `enforce_deadline` で、証跡は `docs/evidence/kvm-20260915T080221Z/`（fc-smoke）と `docs/evidence/20260915T171631Z-firecracker/`（E2E 28/28）。どちらも aarch64 の nested virtualization での記録で、x86_64 と bare metal は未測定。`egress_none`（M8 未測定）/ `host_metering` / `enforce_resource_limits` は測定が済むまで `Unverified{note}`。
 6. **fake / process provider の結果は本決定を左右しない。** fake provider（`crates/providers/fake`）は pipeline の単体テスト、process provider（ADR-0002）は開発機での縦断確認のためにある。どちらも microVM の能力・時間・隔離について何も証明しない。「fake で通った」ことを根拠に Firecracker の能力を `Supported` にしない。
 
 ### Firecracker を第一にする理由
@@ -71,7 +71,7 @@ Accepted（2026-09-15）。測定結果により「Cloud Hypervisor へ fallback
 
 ## 結果（consequences）
 
-- `crates/providers/firecracker` は `firecracker` バイナリ、`vmlinux`、`rootfs.ext4` を外部から受け取る（`config/gateway.toml` の `[provider.firecracker]`）。取得と検証は PLT-4615 のスクリプト。
+- `crates/providers/firecracker` は `firecracker` バイナリ、`vmlinux`、`rootfs.ext4` を外部から受け取る（`config/gateway.{dev,firecracker}.toml` の `[provider.firecracker]`）。取得と検証は PLT-4615 のスクリプト。
 - P1 の Firecracker provider は tap を作らない。`EgressProfile::Restricted` / `PublicWeb` を要求する revision は validation で拒否する。
 - jailer は P1 で使わない（`docs/threat-model.md` §14-2）。使う場合は provider の cleanup 対象に chroot / cgroup が増える。
 - aarch64 は第二対象。kernel cmdline に `keep_bootcon` を追加する以外の差分は測定で洗い出す。
@@ -79,23 +79,25 @@ Accepted（2026-09-15）。測定結果により「Cloud Hypervisor へ fallback
 
 ## 残る測定（PLT-4615 / PLT-4621 / PLT-4622 / PLT-4627 で実施）
 
-baseline profile は `docs/inventory-tachyon-apps.md` §6。結果は `docs/evidence/plt-4621/` 以下に置く。
+baseline profile は `docs/inventory-tachyon-apps.md` §6。結果は、`scripts/kvm/smoke.sh` が `docs/evidence/kvm-<UTC>/` に、`scripts/e2e/demo.sh` が `docs/evidence/<UTC>-<provider>/` に置く。
 
-| # | 測定 | 合格の目安（数値は仮置き。測定後に更新） |
-|---|---|---|
-| M1 | `preflight`: `/dev/kvm`、`firecracker --version`、kernel / rootfs の digest、nested virtualization の有無 | すべて `ok = true` で `PreflightReport` が返る |
-| M2 | `environment_boot_ms`（create 開始 → bridge の `Hello` 受信）、N ≥ 20 | 中央値と p95 を記録。目安は無い（初回は事実の記録） |
-| M3 | `runtime_init_ms`（`Hello` → `Ready`）hello サンプル | 同上 |
-| M4 | `handler_ms` / `total_ms` hello・http-axum | 同上 |
-| M5 | timeout kill: cpu-burn を `timeout_seconds = 5` で実行 | `execution_deadline + grace(1 s)` から terminate 完了まで ≤ 2 s、`Failed{Timeout}`、orphan 0 |
-| M6 | terminate の冪等性と cleanup: 2 回目の `terminate_environment` が `was_running = false`、`cleaned` の全パスが存在しない | 100% |
-| M7 | orphan 検査: N 回の invoke 後に firecracker プロセス、uds、drive、workdir が残らない | 0 件 |
-| M8 | egress none: guest から `connect()` が失敗する（NIC が無い） | 失敗すること |
-| M9 | resource 上限: `machine-config` の vCPU / memory が guest から見える値と一致し、超過 alloc が OOM で終わる | 一致、環境が `Failed{Crash}` に分類される |
-| M10 | 同時実行: `max_concurrency = 4` で 4 並列、5 本目が queue に入る | 429 / 504 の分類が仕様どおり |
-| M11 | `OutcomeUnknown`: Running 中に firecracker プロセスを外部から kill | `OutcomeUnknown`、再実行なし、環境 terminate 済み |
-| M12 | aarch64 で M1〜M5 | 同上 |
-| M13 | 1 MiB payload / 6 MiB response の vsock 転送時間 | 記録 |
+2026-09-16 時点の記録は `docs/evidence/kvm-20260915T080221Z/`（smoke。hello と timeout demo を 1 回ずつ）と `docs/evidence/20260915T125610Z-firecracker/`（E2E 27/27、11 attempt）、レビュー指摘修正の統合後の `docs/evidence/20260915T171631Z-firecracker/`（E2E 28/28、33 attempt、`environment_boot_ms` 2777〜5706 ms）だけ。どちらも Apple M4 上の Lima VM（vz、**nested virtualization**）、Linux aarch64、Firecracker v1.17.0、Firecracker CI の guest kernel `vmlinux-6.1.155`（`CI_VERSION=v1.15`）で取った。nested virtualization のオーバーヘッドを含み、baseline profile（x86_64 第一、N ≥ 20）を満たさないため、時間の値は代表値ではない。下表の「一部実測済み」は、この条件で括弧内の範囲を確認した記録があるという意味。§「受入規則」の M1〜M8 は M6 の冪等性と M8 が未測定のため、まだ満たしていない。
+
+| # | 測定 | 合格の目安（数値は仮置き。測定後に更新） | 状況（2026-09-16） |
+|---|---|---|---|
+| M1 | `preflight`: `/dev/kvm`、`firecracker --version`、kernel / rootfs の digest、nested virtualization の有無 | すべて `ok = true` で `PreflightReport` が返る | 一部実測済み（aarch64 nested。`docs/evidence/kvm-20260915T080221Z/hello.json` と `docs/evidence/20260915T125610Z-firecracker/provider.json` の `preflight` 9 項目が ok。nested virtualization の有無は `PreflightReport` の項目に無く `docs/kvm.md` §5 に記録） / 未測定（x86_64） |
+| M2 | `environment_boot_ms`（create 開始 → bridge の `Hello` 受信）、N ≥ 20 | 中央値と p95 を記録。目安は無い（初回は事実の記録） | 一部実測済み（aarch64 nested で起動と `Hello` 受信が成立: smoke 2 回、E2E 11 attempt。値は `docs/kvm.md` §5.5 の参考値） / 未測定（N ≥ 20 の中央値・p95、x86_64） |
+| M3 | `runtime_init_ms`（`Hello` → `Ready`）hello サンプル | 同上 | 一部実測済み（M2 と同じ記録で handshake → `Ready` が成立） / 未測定（N ≥ 20 の中央値・p95、x86_64） |
+| M4 | `handler_ms` / `total_ms` hello・http-axum | 同上 | 未測定（N ≥ 20 の中央値・p95。単発の参考値だけ `docs/kvm.md` §5.5 にある） |
+| M5 | timeout kill: cpu-burn を `timeout_seconds = 5` で実行 | `execution_deadline + grace(1 s)` から terminate 完了まで ≤ 2 s、`Failed{Timeout}`、orphan 0 | 一部実測済み（host 強制 timeout → terminate → 残留なし: `docs/evidence/kvm-20260915T080221Z/timeout.json`、E2E step 18 は `timeout_seconds = 2` で 504 `Host.Timeout`） / 未測定（`timeout_seconds = 5` での「deadline + grace から terminate 完了まで ≤ 2 s」の単独測定） |
+| M6 | terminate の冪等性と cleanup: 2 回目の `terminate_environment` が `was_running = false`、`cleaned` の全パスが存在しない | 100% | 一部実測済み（1 回目の terminate の `cleaned` と、その後に process・env dir・socket が残らないこと: `hello.json`・`timeout.json` の `leftovers`） / 未測定（2 回目の `terminate_environment`） |
+| M7 | orphan 検査: N 回の invoke 後に firecracker プロセス、uds、drive、workdir が残らない | 0 件 | 一部実測済み（E2E 1 回分の invoke 後と gateway 停止後の orphan-check が clean: `docs/evidence/20260915T125610Z-firecracker/` の step 19・27） / 未測定（x86_64、回数を決めた繰り返し） |
+| M8 | egress none: guest から `connect()` が失敗する（NIC が無い） | 失敗すること | 未測定 |
+| M9 | resource 上限: `machine-config` の vCPU / memory が guest から見える値と一致し、超過 alloc が OOM で終わる | 一致、環境が `Failed{Crash}` に分類される | 未測定（`machine-config` に渡した値（1 vCPU / 256 MiB）の記録だけ） |
+| M10 | 同時実行: `max_concurrency = 4` で 4 並列、5 本目が queue に入る | 429 / 504 の分類が仕様どおり | 未測定 |
+| M11 | `OutcomeUnknown`: Running 中に firecracker プロセスを外部から kill | `OutcomeUnknown`、再実行なし、環境 terminate 済み | 未測定 |
+| M12 | aarch64 で M1〜M5 | 同上 | 一部実測済み（M1〜M3・M5 の上記の範囲。nested virtualization 上だけで、bare metal は未測定） |
+| M13 | 1 MiB payload / 6 MiB response の vsock 転送時間 | 記録 | 未測定 |
 
 ## 受入規則
 
