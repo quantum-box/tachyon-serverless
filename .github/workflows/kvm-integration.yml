@@ -1,0 +1,95 @@
+# KVM / Firecracker integration run (PLT-4630 demo with the real microVM provider).
+#
+# Security posture
+# ----------------
+# - Manual trigger only (`workflow_dispatch`). This workflow is NEVER run for
+#   pull requests: untrusted PR code must not execute on a runner with /dev/kvm.
+# - Runs on a dedicated self-hosted runner labelled `linux` + `kvm` that is
+#   provisioned for this repository only (see docs/kvm.md). As of this commit the
+#   runner is NOT yet provisioned; dispatching the workflow will queue until one
+#   with matching labels comes online.
+# - No production credentials, no cloud secrets, no access to any Tachyon
+#   service: the demo talks only to a gateway started on the runner itself, with
+#   throwaway tokens from the generated dev config. Nothing here is a deployment.
+# - The runner is expected to be ephemeral (rebuilt between runs) so that leftover
+#   VM artifacts cannot leak across jobs; `teardown` runs unconditionally anyway.
+name: KVM integration (firecracker)
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Execution provider to exercise
+        type: choice
+        options:
+          - firecracker
+        default: firecracker
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kvm-integration
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TSLS_PROVIDER: ${{ inputs.provider }}
+
+jobs:
+  e2e:
+    name: preflight / bootstrap / smoke / e2e demo
+    runs-on: [self-hosted, linux, kvm]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.95.0 with the musl target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: kvm
+
+      - name: Preflight (KVM, firecracker binary, kernel, rootfs)
+        run: |
+          set -euo pipefail
+          test -x scripts/kvm/preflight.sh || { echo "scripts/kvm/preflight.sh missing (KVM track)" >&2; exit 1; }
+          scripts/kvm/preflight.sh
+
+      - name: "Bootstrap (.kvm/: firecracker, kernel, rootfs with the bridge as /sbin/tachyon-init)"
+        run: |
+          set -euo pipefail
+          test -x scripts/kvm/bootstrap.sh || { echo "scripts/kvm/bootstrap.sh missing (KVM track)" >&2; exit 1; }
+          scripts/kvm/bootstrap.sh
+
+      - name: Smoke (boot one microVM, handshake, terminate)
+        run: |
+          set -euo pipefail
+          test -x scripts/kvm/smoke.sh || { echo "scripts/kvm/smoke.sh missing (KVM track)" >&2; exit 1; }
+          scripts/kvm/smoke.sh
+
+      - name: E2E demo (firecracker provider)
+        run: scripts/e2e/demo.sh
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ inputs.provider }}-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: docs/evidence/
+
+      - name: Teardown (kill leftover VMMs, remove .kvm/run, orphan check)
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -x scripts/kvm/teardown.sh ]; then
+            scripts/kvm/teardown.sh || true
+          fi
+          scripts/e2e/orphan-check.sh "$TSLS_PROVIDER" .kvm/run || true
