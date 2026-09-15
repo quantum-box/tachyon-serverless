@@ -6,5 +6,15 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 publish = false
+# Example: CPU-bound handler used to exercise deadlines and cancellation.
+# Payload {"seconds": N (default 1), "ignore_sigterm": bool} busy-loops N seconds of
+# wall time doing arithmetic and returns {"burned_seconds", "iterations", "cancelled"}.
+# With ignore_sigterm=true the process ignores SIGTERM so the host must SIGKILL it.
+# The example performs no network access.
+description = "Tachyon Serverless example: CPU-bound handler for timeout / cancel demos (optionally ignores SIGTERM)."
 
 [dependencies]
+tachyon-serverless-sdk = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }

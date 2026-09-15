@@ -5,5 +5,19 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+description = "Development-only ExecutionProvider that runs the runtime bridge as a local child process over a unix socket. No isolation."
 
 [dependencies]
+tachyon-serverless-domain = { workspace = true }
+tachyon-serverless-provider-port = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+tachyon-serverless-protocol = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+tempfile = { workspace = true }
