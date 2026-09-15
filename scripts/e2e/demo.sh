@@ -213,6 +213,19 @@ start_gateway() {
 }
 
 wait_gateway() {
+  # Fail fast when our gateway died during startup (e.g. the port is taken by
+  # another local server): otherwise every later step would talk to whatever
+  # process answers on that port.
+  local i
+  for i in $(seq 1 60); do
+    if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+      echo "gateway process $GATEWAY_PID exited during startup (port in use or invalid config); last log lines:" >&2
+      tail -n 30 "$GATEWAY_LOG" >&2
+      return 1
+    fi
+    curl -fsS -m 2 -o /dev/null "$API_URL/healthz" 2>/dev/null && break
+    sleep 0.5
+  done
   wait_for_http "$API_URL/healthz" 30 || { tail -n 30 "$GATEWAY_LOG" >&2; return 1; }
   wait_for_http "$API_URL/readyz" 60 || { tail -n 30 "$GATEWAY_LOG" >&2; return 1; }
   tsls health
