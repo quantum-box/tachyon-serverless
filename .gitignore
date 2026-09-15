@@ -1,0 +1,34 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# Dependencies / build outputs
+node_modules/
+dist/
+build/
+target/
+coverage/
+
+# Serverless / IaC
+.serverless/
+.aws-sam/
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*

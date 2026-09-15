@@ -1,0 +1,49 @@
+name: Bug Report
+description: バグを報告する
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        バグ報告ありがとうございます。セキュリティに関する問題は Issue ではなく SECURITY.md の手順で報告してください。
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 何が起きたか
+      description: 発生した問題と、本来期待していた動作を記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: バージョン / コミット
+      placeholder: ex. v0.1.0 / 48bd7e2
+  - type: textarea
+    id: environment
+    attributes:
+      label: 実行環境
+      description: OS、ランタイム、クラウドプロバイダーなど
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ
+      description: 関連するログを貼り付けてください。自動でコードブロックになります。
+      render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: このプロジェクトの [行動規範](https://github.com/quantum-box/tachyon-serverless/blob/main/CODE_OF_CONDUCT.md) に従います
+          required: true
