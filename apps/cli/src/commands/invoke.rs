@@ -4,6 +4,7 @@ use bytes::Bytes;
 use reqwest::Method;
 use tachyon_serverless_api_types::headers;
 
+use super::provider;
 use crate::args::InvokeArgs;
 use crate::client::{ApiClient, ApiResponse};
 use crate::error::CliError;
@@ -97,6 +98,10 @@ pub async fn invoke(
     let payload = load_payload(args)?;
     let function_id = resolve_function_id(client, &args.function).await?;
     let resp = send_invoke(client, &function_id, args, payload).await?;
+    // Every outcome (success or failure) is flagged when a provider without
+    // isolation produced it. Kept out of `print_invoke_response`: `tsls dev`
+    // calls that directly and prints its own banner.
+    provider::warn_if_dev_only(client, p).await;
     if !resp.is_success() {
         return Err(resp.into_error());
     }

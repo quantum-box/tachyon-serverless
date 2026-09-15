@@ -103,6 +103,7 @@ tsls functions invoke <fn> [--payload '<json>' | --payload-file <path>]
 - payload 省略時は `{}`。JSON として不正なら exit 1。
 - 成功: 標準出力に handler の出力（人向けは整形、`--json` は無加工）。標準エラーに `invocation inv_... trace=...`。
 - 失敗: exit は §2 の対応表。標準エラーに `error: user_error (HTTP 502): ... [type=Handler.Error] [invocation=inv_...]`、`--json` なら標準出力にエラー本文。
+- 隔離なしの警告: 応答を受け取った後に認証付きで `GET /v1/provider` を引き、`dev_only` なら成功・失敗を問わず標準エラーに `provider` と同じ「隔離なし」の警告を出す（ADR-0002 決定 4）。引けなければ標準エラーに `warning: could not determine provider isolation (...)` を出すだけで、stdout と exit code は変えない。
 
 ## 6. `functions http`
 
@@ -112,6 +113,8 @@ tsls functions http <fn> [--method GET] [--path /] [--data <body> | --data-file 
 ```
 
 `/v1/functions/{id}/http<path>` に対してリクエストし、関数の応答をそのまま表示する。人向け出力は `HTTP <status>` 行、`-v` ならヘッダ、空行、本文。`--json` は `{"status": 404, "headers": [["name","value"],...], "body": "..."}`（本文は UTF-8 として表示）。
+
+§5 と同じく、応答を受け取った後に `GET /v1/provider` を引き、`dev_only` なら（gateway 側エラーを含む）どの結果でも標準エラーに「隔離なし」の警告を出す。引けなければ警告を出すだけで、stdout と exit code は変えない。`tsls dev` は起動時のバナーで代える（§9）。
 
 ## 7. `functions logs`
 

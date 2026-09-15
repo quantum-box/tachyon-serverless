@@ -5,6 +5,7 @@
 use bytes::Bytes;
 use reqwest::Method;
 
+use super::provider;
 use crate::args::{HttpArgs, parse_header};
 use crate::client::{ApiClient, ApiResponse};
 use crate::error::CliError;
@@ -56,6 +57,8 @@ pub async fn http(
     let resp = client
         .send(method, &path, true, None, &headers, body)
         .await?;
+    // Flag every outcome produced by a provider without isolation.
+    provider::warn_if_dev_only(client, p).await;
     if is_platform_error(&resp) {
         return Err(resp.into_error());
     }

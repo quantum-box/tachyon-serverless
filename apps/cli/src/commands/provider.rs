@@ -8,6 +8,31 @@ use crate::output::{Printer, Table};
 
 pub const NO_ISOLATION_BANNER: &str = "!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!";
 
+/// Best-effort isolation warning for commands that show a function's result
+/// (`functions invoke`, `functions http`; ADR-0002 decision 4). Looks up the
+/// authenticated `GET /v1/provider` and prints [`NO_ISOLATION_BANNER`] on
+/// stderr when the provider is `dev_only`. When the lookup fails it prints a
+/// warning instead. It never touches stdout and never changes the exit code.
+pub async fn warn_if_dev_only(client: &ApiClient, p: &mut Printer<'_>) {
+    let note = match provider_info(client).await {
+        Ok(info) if info.dev_only => NO_ISOLATION_BANNER.to_string(),
+        Ok(_) => return,
+        Err(e) => {
+            let e = e.to_string();
+            format!(
+                "warning: could not determine provider isolation (GET /v1/provider: {})",
+                e.strip_prefix("error: ").unwrap_or(&e)
+            )
+        }
+    };
+    // A failed stderr write must not turn the command's outcome into an error.
+    let _ = p.note(note);
+}
+
+async fn provider_info(client: &ApiClient) -> Result<ProviderInfo, CliError> {
+    client.get("/v1/provider").await?.ok()?.json()
+}
+
 /// Render the `capabilities` object as rows `(name, status, note)`.
 pub fn capability_rows(caps: &serde_json::Value) -> Vec<(String, String, String)> {
     let mut rows = Vec::new();
