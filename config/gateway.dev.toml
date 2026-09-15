@@ -1,0 +1,52 @@
+# Tachyon Serverless gateway — 開発用設定（process provider、隔離なし）
+#
+# process provider は dev 専用です。`profile = "production"` では拒否されます。
+# ここに書く token / secret はローカル開発専用のダミー値です。本物の秘密を書かないでください。
+
+listen = "127.0.0.1:8080"
+profile = "dev"                # dev | production
+data_dir = "./data"            # artifacts/ と state.json の置き場所
+
+[provider]
+kind = "process"               # process | firecracker（fake は設定からは選べない）
+
+[provider.process]
+bridge_binary = "target/debug/tachyon-serverless-runtime-bridge"
+workdir = "./data/process"     # 環境ごとに <workdir>/<environment_id> が作られる
+
+[capacity]
+max_concurrency = 8            # gateway 全体の同時実行数
+max_queue = 32                 # 空き待ちできる invoke 数（超過は 429）
+queue_timeout_seconds = 10     # 空き待ちの上限（超過は 504 queue_timeout）
+
+[invoke]
+inline_output_max_bytes = 65536   # これ以下の出力は台帳にインライン保存
+cancel_grace_ms = 1000            # Cancel 後に guest へ与える猶予
+preflight_ttl_seconds = 30        # /readyz の preflight キャッシュ
+handshake_timeout_ms = 5000       # bridge 接続後 Hello を待つ時間
+
+# [limits]                       # 省略時は domain の既定値
+# max_payload_bytes = 1048576
+# max_artifact_bytes = 268435456
+
+[[identity.tokens]]
+token = "dev-token-tenant-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "dev-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "dev-token-tenant-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "dev-b"
+roles = ["deploy", "invoke"]
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+binding_ref = "demo-secret"
+value = "demo-secret-value-a"
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+binding_ref = "demo-secret"
+value = "demo-secret-value-b"
