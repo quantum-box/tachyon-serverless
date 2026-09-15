@@ -32,3 +32,12 @@ coverage/
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Rust
+/target
+**/target
+Cargo.lock.bak
+
+# local runtime data
+/data
+/.kvm

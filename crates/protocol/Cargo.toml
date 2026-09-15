@@ -1,0 +1,20 @@
+[package]
+name = "tachyon-serverless-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Wire protocol between the host and the guest runtime bridge, and the in-guest Runtime API contract."
+
+[dependencies]
+tachyon-serverless-domain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+tokio-util = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+futures = { workspace = true }

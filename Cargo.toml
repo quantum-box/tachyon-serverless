@@ -1,0 +1,83 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/domain",
+  "crates/protocol",
+  "crates/provider-port",
+  "crates/api-types",
+  "crates/application",
+  "crates/providers/process",
+  "crates/providers/firecracker",
+  "crates/providers/fake",
+  "crates/runtime-bridge",
+  "crates/sdk",
+  "apps/gateway",
+  "apps/cli",
+  "examples/hello",
+  "examples/http-axum",
+  "examples/cpu-burn",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/quantum-box/tachyon-serverless"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# internal crates
+tachyon-serverless-domain = { path = "crates/domain" }
+tachyon-serverless-protocol = { path = "crates/protocol" }
+tachyon-serverless-provider-port = { path = "crates/provider-port" }
+tachyon-serverless-api-types = { path = "crates/api-types" }
+tachyon-serverless-application = { path = "crates/application" }
+tachyon-serverless-provider-process = { path = "crates/providers/process" }
+tachyon-serverless-provider-firecracker = { path = "crates/providers/firecracker" }
+tachyon-serverless-provider-fake = { path = "crates/providers/fake" }
+tachyon-serverless-runtime-bridge = { path = "crates/runtime-bridge" }
+tachyon-serverless-sdk = { path = "crates/sdk" }
+
+# async / runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process", "sync", "time", "fs", "signal"] }
+tokio-util = { version = "0.7", features = ["codec", "io"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# web / http
+axum = { version = "0.8", features = ["json", "macros", "tracing", "multipart"] }
+http = "1"
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "limit", "request-id"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+base64 = "0.22"
+hex = "0.4"
+bytes = "1"
+
+# errors / logging
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+
+# ids / time / hashing
+ulid = "1"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+sha2 = "0.10"
+
+# cli
+clap = { version = "4", features = ["derive", "env"] }
+
+# openapi
+utoipa = { version = "5", features = ["chrono"] }
+
+# misc
+libc = "0.2"
+tempfile = "3"
+parking_lot = "0.12"
