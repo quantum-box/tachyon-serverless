@@ -8,6 +8,29 @@ tachyon-serverless へのコントリビュートに興味を持っていただ�
 - 既存の Issue に同じ内容がないか、事前に検索してください。
 - セキュリティに関する問題は Issue にせず、[SECURITY.md](SECURITY.md) の手順で報告してください。
 
+## 開発環境と品質ゲート
+
+Rust 1.95.0（`rust-toolchain.toml` / `mise.toml` で固定）。`mise install` で揃います。
+
+```sh
+cargo build --workspace                                    # ビルド
+cargo test --workspace                                     # テスト
+cargo fmt --all -- --check                                 # フォーマット
+cargo clippy --workspace --all-targets -- -D warnings      # lint（警告ゼロ）
+
+# guest 側（Firecracker に載せる static バイナリ）のビルド確認
+cargo build --release --target x86_64-unknown-linux-musl \
+  -p tachyon-serverless-runtime-bridge -p example-hello -p example-http-axum -p example-cpu-burn
+
+# シェルスクリプト
+shellcheck -x -P scripts/e2e scripts/e2e/*.sh
+scripts/e2e/selftest.sh                                    # e2e ヘルパの自己テスト
+scripts/e2e/demo.sh                                        # E2E デモ（process provider）
+```
+
+CI（`.github/workflows/ci.yml`）は上記と同じコマンドを実行します。PR を出す前にローカルで通してください。
+契約 crate（`crates/domain` `crates/protocol` `crates/provider-port` `crates/api-types`）の public API を変える場合は、理由を PR に書いてください。
+
 ## Pull Request
 
 1. リポジトリを fork し、`main` からブランチを作成します（例: `feat/xxx`, `fix/xxx`）。
