@@ -55,6 +55,9 @@ mod linux {
         mount("sysfs", "/sys", "sysfs", 0)?;
         mount("devtmpfs", "/dev", "devtmpfs", 0)?;
         mount("tmpfs", "/tmp", "tmpfs", 0)?;
+        // The Runtime API is served on 127.0.0.1; a fresh kernel leaves `lo`
+        // down, so the user process would get ENETUNREACH.
+        bring_up_loopback()?;
         let cmdline = std::fs::read_to_string("/proc/cmdline")?;
         let params = parse_cmdline(&cmdline);
         if let Some(dev) = &params.function_dev {
@@ -98,6 +101,36 @@ mod linux {
                 err.kind(),
                 format!("mount {fstype} on {target}: {err}"),
             ));
+        }
+        Ok(())
+    }
+
+    /// Set IFF_UP on `lo`. The kernel assigns 127.0.0.1/8 automatically once
+    /// the loopback device comes up.
+    fn bring_up_loopback() -> std::io::Result<()> {
+        let ctx = |e: std::io::Error| std::io::Error::new(e.kind(), format!("bring up lo: {e}"));
+        // SAFETY: plain socket/ioctl calls on a zeroed, correctly sized ifreq.
+        unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0);
+            if fd < 0 {
+                return Err(ctx(std::io::Error::last_os_error()));
+            }
+            let mut ifr: libc::ifreq = std::mem::zeroed();
+            for (dst, src) in ifr.ifr_name.iter_mut().zip(b"lo\0".iter()) {
+                *dst = *src as libc::c_char;
+            }
+            if libc::ioctl(fd, libc::SIOCGIFFLAGS as _, &mut ifr) < 0 {
+                let e = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(ctx(e));
+            }
+            ifr.ifr_ifru.ifru_flags |= (libc::IFF_UP | libc::IFF_RUNNING) as libc::c_short;
+            if libc::ioctl(fd, libc::SIOCSIFFLAGS as _, &ifr) < 0 {
+                let e = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(ctx(e));
+            }
+            libc::close(fd);
         }
         Ok(())
     }
