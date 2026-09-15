@@ -267,7 +267,13 @@ impl InMemoryStore {
             if text.trim().is_empty() {
                 PersistedState::default()
             } else {
-                serde_json::from_str(&text).map_err(|e| RepoError::Serialization(e.to_string()))?
+                serde_json::from_str(&text).map_err(|e| {
+                    RepoError::Serialization(format!(
+                        "{} is not a valid state file ({e}); it may have been truncated by an \
+                         unclean shutdown. Move it aside to start with an empty ledger.",
+                        path.display()
+                    ))
+                })?
             }
         } else {
             PersistedState::default()
@@ -775,6 +781,20 @@ impl IdempotencyRepository for InMemoryStore {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn corrupt_state_file_is_refused_with_a_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("state.json"), vec![0u8; 64]).unwrap();
+        let Err(err) =
+            InMemoryStore::with_persistence(dir.path(), Limits::default(), chrono::Utc::now())
+        else {
+            panic!("corrupt state must be refused");
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("not a valid state file"), "{msg}");
+        assert!(msg.contains("Move it aside"), "{msg}");
+    }
+
     use super::*;
     use chrono::TimeZone;
     use tachyon_serverless_domain::{
