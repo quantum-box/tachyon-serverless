@@ -4,6 +4,8 @@
 //! `type`. Unknown message types are a protocol error; unknown *fields* are
 //! ignored so additive changes stay compatible within a version.
 
+use std::fmt;
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder};
@@ -116,7 +118,10 @@ pub enum GuestMessage {
 }
 
 /// Messages sent by the host to the guest bridge.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// `Debug` is implemented by hand: `HelloAck.env` carries resolved secrets
+/// and renders as `<N vars, redacted>`.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
     /// Reply to `Hello`. Carries everything needed to start the user process.
@@ -158,6 +163,77 @@ pub enum HostMessage {
     Shutdown {
         reason: String,
     },
+}
+
+/// Stand-in for a secret-bearing environment list in `Debug` output.
+struct RedactedEnv(usize);
+
+impl fmt::Debug for RedactedEnv {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<{} vars, redacted>", self.0)
+    }
+}
+
+impl fmt::Debug for HostMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HostMessage::HelloAck {
+                environment_id,
+                epoch,
+                entrypoint,
+                args,
+                env,
+                working_dir,
+                init_timeout_ms,
+                max_response_bytes,
+                max_log_line_bytes,
+            } => f
+                .debug_struct("HelloAck")
+                .field("environment_id", environment_id)
+                .field("epoch", epoch)
+                .field("entrypoint", entrypoint)
+                .field("args", args)
+                .field("env", &RedactedEnv(env.len()))
+                .field("working_dir", working_dir)
+                .field("init_timeout_ms", init_timeout_ms)
+                .field("max_response_bytes", max_response_bytes)
+                .field("max_log_line_bytes", max_log_line_bytes)
+                .finish(),
+            HostMessage::HelloReject { reason } => f
+                .debug_struct("HelloReject")
+                .field("reason", reason)
+                .finish(),
+            HostMessage::Invoke {
+                invocation_id,
+                attempt_id,
+                epoch,
+                event_type,
+                deadline_ms,
+                trace_id,
+                payload,
+            } => f
+                .debug_struct("Invoke")
+                .field("invocation_id", invocation_id)
+                .field("attempt_id", attempt_id)
+                .field("epoch", epoch)
+                .field("event_type", event_type)
+                .field("deadline_ms", deadline_ms)
+                .field("trace_id", trace_id)
+                .field("payload", payload)
+                .finish(),
+            HostMessage::Cancel {
+                attempt_id,
+                grace_ms,
+            } => f
+                .debug_struct("Cancel")
+                .field("attempt_id", attempt_id)
+                .field("grace_ms", grace_ms)
+                .finish(),
+            HostMessage::Shutdown { reason } => {
+                f.debug_struct("Shutdown").field("reason", reason).finish()
+            }
+        }
+    }
 }
 
 /// Length-prefixed frame codec. Emits/consumes raw `Bytes`; use
@@ -215,6 +291,7 @@ pub fn decode_message<T: for<'de> Deserialize<'de>>(frame: &[u8]) -> Result<T, P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MAX_RESPONSE_PAYLOAD_BYTES;
     use futures::{SinkExt, StreamExt};
     use tokio_util::codec::{FramedRead, FramedWrite};
 
@@ -247,6 +324,58 @@ mod tests {
             codec.decode(&mut buf),
             Err(ProtocolError::FrameTooLarge(_))
         ));
+    }
+
+    #[test]
+    fn hello_ack_debug_redacts_env() {
+        let msg = HostMessage::HelloAck {
+            environment_id: "env_1".into(),
+            epoch: 4,
+            entrypoint: "/function/app".into(),
+            args: vec!["--flag".into()],
+            env: vec![
+                ("DEMO_SECRET".into(), "s3cr3t-value".into()),
+                ("PLAIN".into(), "visible-only-as-count".into()),
+            ],
+            working_dir: "/function".into(),
+            init_timeout_ms: 1000,
+            max_response_bytes: 2048,
+            max_log_line_bytes: 512,
+        };
+        for rendered in [format!("{msg:?}"), format!("{msg:#?}")] {
+            assert!(!rendered.contains("s3cr3t-value"), "{rendered}");
+            assert!(!rendered.contains("DEMO_SECRET"), "{rendered}");
+            assert!(!rendered.contains("visible-only-as-count"), "{rendered}");
+            assert!(rendered.contains("<2 vars, redacted>"), "{rendered}");
+            // Non-secret fields stay useful for debugging.
+            assert!(rendered.contains("/function/app"), "{rendered}");
+            assert!(rendered.contains("env_1"), "{rendered}");
+        }
+        let other = HostMessage::Cancel {
+            attempt_id: "att_9".into(),
+            grace_ms: 250,
+        };
+        assert_eq!(
+            format!("{other:?}"),
+            r#"Cancel { attempt_id: "att_9", grace_ms: 250 }"#
+        );
+    }
+
+    #[test]
+    fn response_payload_bound_leaves_room_for_the_envelope() {
+        let payload =
+            serde_json::Value::String("x".repeat(MAX_RESPONSE_PAYLOAD_BYTES as usize - 2));
+        assert_eq!(
+            serde_json::to_vec(&payload).unwrap().len() as u64,
+            MAX_RESPONSE_PAYLOAD_BYTES
+        );
+        let msg = GuestMessage::Response {
+            attempt_id: format!("att_{}", "z".repeat(200)),
+            epoch: u64::MAX,
+            payload,
+            handler_ms: Some(u64::MAX),
+        };
+        assert!(encode_message(&msg).is_ok());
     }
 
     #[test]

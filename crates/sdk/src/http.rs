@@ -16,7 +16,9 @@ use crate::SdkError;
 
 /// Dispatch one HTTP event to `router` and return the wire payload.
 ///
-/// - `uri` = `path` + `?` + `query` (when the query is non-empty)
+/// - `uri` = `path` + `?` + `query` (when the query is non-empty); `path` is
+///   the raw percent-encoded path and is passed through, only bytes that are
+///   not valid in a URI path get percent-encoded
 /// - repeated request headers are preserved in order
 /// - bodies travel base64-encoded in both directions
 pub async fn handle_http_event(
@@ -53,13 +55,69 @@ pub async fn handle_http_event(
     })
 }
 
+/// True for bytes allowed verbatim in an RFC 3986 path: `pchar` or `/`.
+fn is_path_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric()
+        || matches!(
+            b,
+            b'-' | b'.'
+                | b'_'
+                | b'~'
+                | b'!'
+                | b'$'
+                | b'&'
+                | b'\''
+                | b'('
+                | b')'
+                | b'*'
+                | b'+'
+                | b','
+                | b';'
+                | b'='
+                | b':'
+                | b'@'
+                | b'/'
+        )
+}
+
+/// Percent-encode every byte of `path` that is not a valid URI path
+/// character. Existing `%XX` escapes and `/` are kept, so a conforming path
+/// (raw and percent-encoded, docs/protocol.md section B) passes through
+/// unchanged, while a non-conforming one (spaces, non-ASCII, `?`, `#`, a lone
+/// `%`) still yields a valid request-target that cannot gain a query or a
+/// fragment.
+fn encode_path(path: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = path.as_bytes();
+    let keep = |i: usize| {
+        is_path_byte(bytes[i])
+            || (bytes[i] == b'%'
+                && i + 2 < bytes.len()
+                && bytes[i + 1].is_ascii_hexdigit()
+                && bytes[i + 2].is_ascii_hexdigit())
+    };
+    if (0..bytes.len()).all(keep) {
+        return std::borrow::Cow::Borrowed(path);
+    }
+    let mut out = String::with_capacity(bytes.len() + 16);
+    for (i, &b) in bytes.iter().enumerate() {
+        if keep(i) {
+            // Every kept byte is ASCII.
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 fn build_request(event: HttpRequestEvent) -> Result<Request<Body>, SdkError> {
     let method = Method::from_bytes(event.method.as_bytes())
         .map_err(|e| SdkError::InvalidHttpEvent(format!("method {:?}: {e}", event.method)))?;
-    let path = if event.path.starts_with('/') {
-        event.path.clone()
+    let path = encode_path(&event.path);
+    let path = if path.starts_with('/') {
+        path.into_owned()
     } else {
-        format!("/{}", event.path)
+        format!("/{path}")
     };
     let uri = if event.query.is_empty() {
         path
@@ -213,6 +271,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status, 404);
+    }
+
+    /// Router answering with the request-target it was handed.
+    fn target_router() -> Router {
+        Router::new().fallback(|uri: http::Uri| async move {
+            format!("{}|{}", uri.path(), uri.query().unwrap_or(""))
+        })
+    }
+
+    async fn routed_target(path: &str, query: &str) -> String {
+        let mut e = event("GET", path);
+        e.query = query.into();
+        let r = handle_http_event(&target_router(), e)
+            .await
+            .unwrap_or_else(|err| panic!("path {path:?} must reach the router: {err}"));
+        assert_eq!(r.status, 200);
+        String::from_utf8(BASE64.decode(&r.body_base64).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn path_reaches_the_router_as_a_valid_encoded_uri() {
+        assert_eq!(routed_target("/a b", "").await, "/a%20b|");
+        assert_eq!(routed_target("/café", "").await, "/caf%C3%A9|");
+        // Conforming (already encoded) paths pass through unchanged.
+        assert_eq!(routed_target("/a%20b", "").await, "/a%20b|");
+        assert_eq!(routed_target("/a%2Fb", "").await, "/a%2Fb|");
+        assert_eq!(
+            routed_target("/keep/-._~!$&'()*+,;=:@", "").await,
+            "/keep/-._~!$&'()*+,;=:@|"
+        );
+        // Structural characters cannot turn into a query or a fragment.
+        assert_eq!(routed_target("/x?y#z", "q=1").await, "/x%3Fy%23z|q=1");
+        assert_eq!(routed_target("/100%", "").await, "/100%25|");
+        assert_eq!(routed_target("/%zz", "").await, "/%25zz|");
+        assert_eq!(routed_target("/a<b>`c", "").await, "/a%3Cb%3E%60c|");
+    }
+
+    #[test]
+    fn encode_path_borrows_conforming_paths() {
+        assert!(matches!(
+            encode_path("/items/42%2F7"),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert_eq!(encode_path("/a\tb\u{7f}"), "/a%09b%7F");
     }
 
     #[tokio::test]

@@ -9,11 +9,13 @@ use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use tachyon_serverless_protocol::{
-    FrameCodec, GuestErrorKind, GuestMessage, HostMessage, LogPhase, LogStream, PROTOCOL_VERSION,
-    decode_message, encode_message,
+    FrameCodec, GuestErrorKind, GuestMessage, HostMessage, LogPhase, LogStream, MAX_FRAME_BYTES,
+    MAX_RESPONSE_PAYLOAD_BYTES, PROTOCOL_VERSION, decode_message, encode_message,
 };
+use tokio::io::AsyncReadExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::process::{Child, Command};
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_util::codec::Framed;
 
@@ -24,6 +26,29 @@ fn bridge_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_tachyon-serverless-runtime-bridge"))
 }
 
+/// What the host tells the bridge to run, and how the bridge is observed.
+struct Launch {
+    entrypoint: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    max_response_bytes: u64,
+    /// Run the bridge with `RUST_LOG=trace` and capture its stderr.
+    capture_stderr: bool,
+}
+
+impl Launch {
+    /// The bridge binary itself in `self-test-user` mode.
+    fn selftest(env: Vec<(String, String)>, max_response_bytes: u64) -> Self {
+        Self {
+            entrypoint: bridge_bin().to_string_lossy().into_owned(),
+            args: vec!["self-test-user".into()],
+            env,
+            max_response_bytes,
+            capture_stderr: false,
+        }
+    }
+}
+
 struct Session {
     child: Child,
     host: Framed<UnixStream, FrameCodec>,
@@ -31,10 +56,16 @@ struct Session {
     logs: Vec<GuestMessage>,
     /// Every frame received, in order (for post-mortem assertions).
     all: Vec<GuestMessage>,
+    /// Everything the bridge wrote to stderr (when captured).
+    stderr: Option<JoinHandle<Vec<u8>>>,
 }
 
 impl Session {
     async fn start(env: Vec<(String, String)>, max_response_bytes: u64) -> Self {
+        Self::start_with(Launch::selftest(env, max_response_bytes)).await
+    }
+
+    async fn start_with(launch: Launch) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let sock = dir.path().join("bridge.sock");
         let listener = UnixListener::bind(&sock).unwrap();
@@ -50,10 +81,22 @@ impl Session {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .kill_on_drop(true);
-        if std::env::var_os("BRIDGE_TEST_VERBOSE").is_none() {
+        if launch.capture_stderr {
+            cmd.env("RUST_LOG", "trace")
+                .env("NO_COLOR", "1")
+                .stderr(Stdio::piped());
+        } else if std::env::var_os("BRIDGE_TEST_VERBOSE").is_none() {
             cmd.stderr(Stdio::null());
         }
-        let child = cmd.spawn().expect("spawn bridge");
+        let mut child = cmd.spawn().expect("spawn bridge");
+        // Read continuously so a verbose bridge never blocks on a full pipe.
+        let stderr = child.stderr.take().map(|mut pipe| {
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let _ = pipe.read_to_end(&mut buf).await;
+                buf
+            })
+        });
         let (stream, _) = timeout(T, listener.accept())
             .await
             .expect("accept")
@@ -64,6 +107,7 @@ impl Session {
             _dir: dir,
             logs: Vec::new(),
             all: Vec::new(),
+            stderr,
         };
         match session.recv().await.expect("hello") {
             GuestMessage::Hello {
@@ -80,20 +124,38 @@ impl Session {
             }
             other => panic!("expected hello, got {other:?}"),
         }
+        let working_dir = session._dir.path().to_string_lossy().into_owned();
         session
             .send(HostMessage::HelloAck {
                 environment_id: ENV_ID.into(),
                 epoch: 1,
-                entrypoint: bridge_bin().to_string_lossy().into_owned(),
-                args: vec!["self-test-user".into()],
-                env,
-                working_dir: session._dir.path().to_string_lossy().into_owned(),
+                entrypoint: launch.entrypoint,
+                args: launch.args,
+                env: launch.env,
+                working_dir,
                 init_timeout_ms: 15_000,
-                max_response_bytes,
+                max_response_bytes: launch.max_response_bytes,
                 max_log_line_bytes: 4096,
             })
             .await;
         session
+    }
+
+    /// Captured bridge stderr; waits for the pipe to close (bridge exit).
+    async fn stderr_text(&mut self) -> String {
+        let task = self.stderr.take().expect("stderr was not captured");
+        let bytes = timeout(T, task).await.expect("stderr eof").unwrap();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    /// Wait until the user process has logged its pid line.
+    async fn wait_user_pid(&mut self) -> u32 {
+        loop {
+            if let Some(pid) = self.user_pid() {
+                return pid;
+            }
+            assert!(self.recv().await.is_some(), "closed before the pid line");
+        }
     }
 
     async fn send(&mut self, msg: HostMessage) {
@@ -568,6 +630,135 @@ async fn oversized_response_is_reported() {
         reason: "done".into(),
     })
     .await;
+    s.drain().await;
+    assert_eq!(s.wait_exit().await.code(), Some(0));
+}
+
+#[tokio::test]
+async fn hello_ack_env_never_reaches_bridge_logs() {
+    const MARKER: &str = "tsls-secret-marker-5d1c0e9a";
+    let mut launch = Launch::selftest(vec![("DEMO_SECRET".into(), MARKER.into())], 1 << 20);
+    launch.capture_stderr = true;
+    let mut s = Session::start_with(launch).await;
+    s.wait_ready().await;
+    s.invoke("att_secret", serde_json::json!({"name": "tachyon"}))
+        .await;
+    match s.next_significant().await {
+        Some(GuestMessage::Response { attempt_id, .. }) => assert_eq!(attempt_id, "att_secret"),
+        other => panic!("expected response, got {other:?}"),
+    }
+    s.send(HostMessage::Shutdown {
+        reason: "done".into(),
+    })
+    .await;
+    s.drain().await;
+    assert_eq!(s.wait_exit().await.code(), Some(0));
+
+    let stderr = s.stderr_text().await;
+    // The capture is real (otherwise absence would prove nothing).
+    assert!(stderr.contains("handshake complete"), "{stderr}");
+    assert!(stderr.contains("env_vars=1"), "{stderr}");
+    assert!(
+        !stderr.contains(MARKER),
+        "a HelloAck env value leaked into the bridge log:\n{stderr}"
+    );
+    assert!(
+        s.all.iter().all(|m| !format!("{m:?}").contains(MARKER)),
+        "a HelloAck env value leaked into a frame sent to the host"
+    );
+}
+
+#[tokio::test]
+async fn response_larger_than_a_frame_is_reported_not_silenced() {
+    // A host limit above what one frame can carry (e.g. a misconfigured
+    // gateway): the bridge must still answer instead of going silent.
+    let mut s = Session::start(vec![], u64::MAX).await;
+    s.wait_ready().await;
+    s.invoke(
+        "att_huge",
+        serde_json::json!({"blob_bytes": MAX_FRAME_BYTES + 1024}),
+    )
+    .await;
+    match s.next_significant().await {
+        Some(GuestMessage::Error {
+            attempt_id,
+            error,
+            error_type,
+            ..
+        }) => {
+            assert_eq!(attempt_id, "att_huge");
+            assert_eq!(error_type, "Runtime.ResponseTooLarge");
+            assert!(
+                matches!(
+                    error,
+                    GuestErrorKind::ResponseTooLarge { size_bytes, max_bytes }
+                        if max_bytes == MAX_RESPONSE_PAYLOAD_BYTES && size_bytes > max_bytes
+                ),
+                "{error:?}"
+            );
+        }
+        other => panic!("expected response_too_large, got {other:?}"),
+    }
+    // The user process got its 413 and keeps serving; frames keep flowing.
+    s.invoke("att_after", serde_json::json!(2)).await;
+    match s.next_significant().await {
+        Some(GuestMessage::Response {
+            attempt_id,
+            payload,
+            ..
+        }) => {
+            assert_eq!(attempt_id, "att_after");
+            assert_eq!(payload["echo"], 2);
+        }
+        other => panic!("expected response, got {other:?}"),
+    }
+    s.send(HostMessage::Shutdown {
+        reason: "done".into(),
+    })
+    .await;
+    s.drain().await;
+    assert_eq!(s.wait_exit().await.code(), Some(0));
+}
+
+#[tokio::test]
+async fn bridge_sigterm_during_shutdown_kills_a_sigterm_ignoring_user_at_once() {
+    // A user process that ignores SIGTERM and never exits on its own.
+    let mut s = Session::start_with(Launch {
+        entrypoint: "/bin/sh".into(),
+        args: vec![
+            "-c".into(),
+            "trap '' TERM; echo selftest pid=$$; while :; do sleep 1; done".into(),
+        ],
+        env: vec![("PATH".into(), "/bin:/usr/bin".into())],
+        max_response_bytes: 1 << 20,
+        capture_stderr: false,
+    })
+    .await;
+    let pid = s.wait_user_pid().await;
+    assert!(pid_alive(pid));
+
+    s.send(HostMessage::Shutdown {
+        reason: "completed".into(),
+    })
+    .await;
+    // Let the bridge start its 2 s SIGTERM grace, which the user ignores.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(pid_alive(pid), "the user process must ignore SIGTERM");
+
+    // The provider terminates the bridge (its SIGKILL follows later).
+    let bridge_pid = s.child.id().expect("bridge running");
+    // SAFETY: plain signal to the bridge process this test spawned.
+    unsafe {
+        libc::kill(bridge_pid as libc::pid_t, libc::SIGTERM);
+    }
+    let signalled = std::time::Instant::now();
+    while pid_alive(pid) {
+        assert!(
+            signalled.elapsed() < Duration::from_secs(1),
+            "user process {pid} outlived the bridge's SIGTERM by more than 1 s"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     s.drain().await;
     assert_eq!(s.wait_exit().await.code(), Some(0));
 }

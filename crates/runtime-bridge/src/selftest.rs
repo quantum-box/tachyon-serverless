@@ -6,6 +6,7 @@
 //! - `{"panic": true}` panics inside the handler
 //! - `{"sleep_ms": N}` sleeps N ms before answering
 //! - `{"fail": true}` returns a handler error `SelfTest.Failure`
+//! - `{"blob_bytes": N}` answers `{"blob": "xxx..."}` with N bytes of `x`
 //! - env `SELFTEST_FAIL_INIT=1` reports an init error before becoming ready
 //!
 //! The first stdout line is `selftest pid=<pid>` so tests can verify the
@@ -32,6 +33,9 @@ pub async fn run() -> i32 {
                 "SelfTest.Failure",
                 "fail requested",
             ));
+        }
+        if let Some(n) = payload.get("blob_bytes").and_then(Value::as_u64) {
+            return Ok(serde_json::json!({ "blob": "x".repeat(n as usize) }));
         }
         eprintln!("selftest handled attempt {}", ctx.attempt_id);
         Ok(serde_json::json!({

@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! GET  /runtime/v1/next                              -> 200 + event headers + JSON payload
-//! POST /runtime/v1/invocations/{attempt_id}/response -> 202
-//! POST /runtime/v1/invocations/{attempt_id}/error    -> 202
+//! POST /runtime/v1/invocations/{attempt_id}/response -> 202 (413: too large, attempt settled)
+//! POST /runtime/v1/invocations/{attempt_id}/error    -> 202 (413: too large, attempt settled)
 //! POST /runtime/v1/init/error                        -> 202
 //! POST /runtime/v1/ready                             -> 202
 //! ```
@@ -13,6 +13,12 @@
 //! bridge rejects reports for attempts it did not hand out.
 
 use serde::{Deserialize, Serialize};
+
+/// Upper bound of a `RuntimeErrorReport` body (error and init error reports).
+/// A larger report is answered `413`; for `/error` the bridge then completes
+/// the attempt itself with `Runtime.ErrorReportTooLarge`. SDKs must truncate
+/// reports so they stay below this bound.
+pub const MAX_ERROR_REPORT_BYTES: usize = 1024 * 1024;
 
 pub const PATH_NEXT: &str = "/runtime/v1/next";
 pub const PATH_READY: &str = "/runtime/v1/ready";
@@ -55,7 +61,10 @@ pub struct RuntimeErrorReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpRequestEvent {
     pub method: String,
-    /// Path without query string, always starting with `/`.
+    /// Request-target path exactly as received: still percent-encoded (never
+    /// decoded), without the query string, always starting with `/`. SDKs
+    /// pass it to the router unchanged so the router performs the only
+    /// decode (`%2F` stays distinct from `/`).
     pub path: String,
     /// Raw query string without the leading `?`. Empty when absent.
     #[serde(default)]

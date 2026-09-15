@@ -28,6 +28,18 @@ pub const DEFAULT_VSOCK_PORT: u32 = 5000;
 /// protocol violation and close the session.
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
+/// Bytes of a frame reserved for the message envelope around a payload
+/// (`type`, ids, epoch, timings). A payload of at most
+/// `MAX_FRAME_BYTES - FRAME_ENVELOPE_HEADROOM` canonical JSON bytes always
+/// fits a single frame.
+pub const FRAME_ENVELOPE_HEADROOM: usize = 64 * 1024;
+
+/// Largest response payload, measured as canonical JSON (what the `Response`
+/// frame carries), that the bridge accepts regardless of
+/// `HelloAck.max_response_bytes`. Hosts should reject limits above this when
+/// validating their configuration.
+pub const MAX_RESPONSE_PAYLOAD_BYTES: u64 = (MAX_FRAME_BYTES - FRAME_ENVELOPE_HEADROOM) as u64;
+
 /// Environment variables the bridge sets for the user process.
 pub mod env {
     /// Base URL of the Runtime API, e.g. `http://127.0.0.1:9001`.

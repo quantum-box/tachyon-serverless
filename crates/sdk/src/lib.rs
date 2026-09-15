@@ -37,7 +37,7 @@ use futures::FutureExt;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tachyon_serverless_protocol::runtime_api::{
-    self as api, HttpRequestEvent, RuntimeErrorReport, event_types, headers,
+    self as api, HttpRequestEvent, MAX_ERROR_REPORT_BYTES, RuntimeErrorReport, event_types, headers,
 };
 use tokio::sync::watch;
 
@@ -244,7 +244,7 @@ pub fn init_error(message: impl Into<String>) -> ! {
             message,
             stack_trace: None,
         };
-        if let Ok(body) = serde_json::to_vec(&report) {
+        if let Ok(body) = encode_error_report(&report) {
             let _ = client.request_blocking(
                 "POST",
                 api::PATH_INIT_ERROR,
@@ -431,7 +431,7 @@ impl Runtime {
             message,
             stack_trace,
         };
-        let body = serde_json::to_vec(&report)?;
+        let body = encode_error_report(&report)?;
         self.post_expect_accepted(&api::path_error(attempt_id), &body)
             .await
     }
@@ -439,8 +439,10 @@ impl Runtime {
     async fn post_expect_accepted(&self, path: &str, body: &[u8]) -> Result<(), SdkError> {
         let resp = self.client.post_json(path, body).await?;
         match resp.status {
-            // 202 accepted; 404/409/413 mean the bridge already settled the
-            // attempt (crash, timeout, too large): nothing more to do here.
+            // 202 accepted; 404/409 mean the bridge already settled the
+            // attempt (crash, timeout); 413 means the response or error report
+            // was too large and the bridge settled the attempt with a
+            // `*TooLarge` error: nothing more to do here.
             200..=299 | 404 | 409 | 413 => Ok(()),
             status => Err(SdkError::UnexpectedStatus {
                 status,
@@ -543,6 +545,50 @@ impl CancelSignal {
             }
         }
     }
+}
+
+/// Longest `error_type` the SDK reports, in bytes.
+const MAX_REPORTED_ERROR_TYPE_BYTES: usize = 256;
+/// Longest `message` the SDK reports, in bytes.
+const MAX_REPORTED_MESSAGE_BYTES: usize = 64 * 1024;
+/// Longest `stack_trace` the SDK reports, in bytes.
+const MAX_REPORTED_STACK_TRACE_BYTES: usize = 256 * 1024;
+/// `message` bound used, without a stack trace, when JSON escaping still
+/// inflates the report past [`MAX_ERROR_REPORT_BYTES`] (a control character
+/// escapes to six bytes).
+const FALLBACK_REPORTED_MESSAGE_BYTES: usize = 16 * 1024;
+
+/// `s` cut to at most `max` bytes on a char boundary, noting what was cut.
+fn truncate_report_field(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let cut = s.floor_char_boundary(max);
+    format!("{}...[truncated {} bytes]", &s[..cut], s.len() - cut)
+}
+
+/// Serialize an error report whose body always stays within
+/// [`MAX_ERROR_REPORT_BYTES`], so the bridge never has to reject it. Long
+/// fields keep their beginning; the stack trace is dropped only if escaping
+/// makes the bounded report still too large.
+fn encode_error_report(report: &RuntimeErrorReport) -> Result<Vec<u8>, SdkError> {
+    let bounded = |message_max: usize, keep_stack_trace: bool| {
+        serde_json::to_vec(&RuntimeErrorReport {
+            error_type: truncate_report_field(&report.error_type, MAX_REPORTED_ERROR_TYPE_BYTES),
+            message: truncate_report_field(&report.message, message_max),
+            stack_trace: report
+                .stack_trace
+                .as_deref()
+                .filter(|_| keep_stack_trace)
+                .map(|st| truncate_report_field(st, MAX_REPORTED_STACK_TRACE_BYTES)),
+        })
+    };
+    let body = bounded(MAX_REPORTED_MESSAGE_BYTES, true)?;
+    if body.len() <= MAX_ERROR_REPORT_BYTES {
+        return Ok(body);
+    }
+    // At most ~16 KiB of text escaped six times: always far below the bound.
+    Ok(bounded(FALLBACK_REPORTED_MESSAGE_BYTES, false)?)
 }
 
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
@@ -705,6 +751,88 @@ mod tests {
         let r: RuntimeErrorReport = serde_json::from_slice(&posted[1].1).unwrap();
         assert_eq!(r.error_type, "Runtime.Panic");
         assert_eq!(r.message, "boom 42");
+    }
+
+    #[tokio::test]
+    async fn oversized_handler_error_is_truncated_before_posting() {
+        let (mock, url) = start_mock(vec![("att_big", serde_json::json!({}))]).await;
+        let rt = Runtime::connect(&url, "env_test").unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            rt.run(|_event: Event, _ctx: Context| async move {
+                Err::<serde_json::Value, _>(HandlerError::new(format!(
+                    "bad input: {}",
+                    "p".repeat(2 * 1024 * 1024)
+                )))
+            }),
+        )
+        .await
+        .expect("run finished")
+        .unwrap();
+
+        let posted = mock.posted.lock().unwrap();
+        assert_eq!(posted.len(), 1, "the error report must reach the bridge");
+        assert_eq!(posted[0].0, "att_big/error");
+        assert!(posted[0].1.len() <= MAX_ERROR_REPORT_BYTES);
+        let r: RuntimeErrorReport = serde_json::from_slice(&posted[0].1).unwrap();
+        assert_eq!(r.error_type, HandlerError::DEFAULT_TYPE);
+        assert!(r.message.starts_with("bad input: ppp"));
+        assert!(r.message.ends_with("bytes]"), "truncation must be visible");
+    }
+
+    #[test]
+    fn error_reports_are_bounded() {
+        let parse = |body: &[u8]| -> RuntimeErrorReport {
+            assert!(body.len() <= MAX_ERROR_REPORT_BYTES, "{} bytes", body.len());
+            serde_json::from_slice(body).unwrap()
+        };
+
+        // Small reports are posted unchanged.
+        let small = RuntimeErrorReport {
+            error_type: "Demo.Failure".into(),
+            message: "nope".into(),
+            stack_trace: Some("at main".into()),
+        };
+        assert_eq!(parse(&encode_error_report(&small).unwrap()), small);
+
+        // Long fields keep their beginning and say they were cut.
+        let r = parse(
+            &encode_error_report(&RuntimeErrorReport {
+                error_type: "T".repeat(10_000),
+                message: "x".repeat(2 * 1024 * 1024),
+                stack_trace: Some("s".repeat(2 * 1024 * 1024)),
+            })
+            .unwrap(),
+        );
+        assert!(r.error_type.starts_with("TTT"));
+        assert!(r.error_type.len() <= MAX_REPORTED_ERROR_TYPE_BYTES + 64);
+        assert!(r.message.starts_with("xxx") && r.message.ends_with("bytes]"));
+        assert!(r.message.len() <= MAX_REPORTED_MESSAGE_BYTES + 64);
+        let st = r.stack_trace.expect("stack trace kept when it fits");
+        assert!(st.len() <= MAX_REPORTED_STACK_TRACE_BYTES + 64);
+
+        // Multi-byte text is cut on a char boundary (an odd offset here).
+        let r = parse(
+            &encode_error_report(&RuntimeErrorReport {
+                error_type: "Handler.Error".into(),
+                message: format!("a{}", "é".repeat(MAX_REPORTED_MESSAGE_BYTES)),
+                stack_trace: None,
+            })
+            .unwrap(),
+        );
+        assert!(r.message.starts_with("aé"));
+
+        // Escaping-heavy text still fits: the stack trace goes first.
+        let r = parse(
+            &encode_error_report(&RuntimeErrorReport {
+                error_type: "\u{1}".repeat(10_000),
+                message: "\u{1}".repeat(MAX_ERROR_REPORT_BYTES),
+                stack_trace: Some("\u{1}".repeat(MAX_ERROR_REPORT_BYTES)),
+            })
+            .unwrap(),
+        );
+        assert!(r.stack_trace.is_none());
+        assert!(r.message.starts_with('\u{1}'));
     }
 
     #[tokio::test]
