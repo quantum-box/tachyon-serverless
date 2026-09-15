@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Body;
@@ -17,12 +17,35 @@ use axum::http::{HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use http_body_util::{BodyExt, Limited};
-use tachyon_serverless_protocol::runtime_api::{self as api, RuntimeErrorReport, headers};
-use tachyon_serverless_protocol::{GuestErrorKind, LogPhase};
+use tachyon_serverless_protocol::runtime_api::{
+    self as api, MAX_ERROR_REPORT_BYTES, RuntimeErrorReport, headers,
+};
+use tachyon_serverless_protocol::{
+    GuestErrorKind, LogPhase, MAX_FRAME_BYTES, MAX_RESPONSE_PAYLOAD_BYTES,
+};
 use tokio::sync::{Notify, mpsc};
 
-/// Body limit for error reports and init errors (not response payloads).
-const MAX_REPORT_BYTES: usize = 1024 * 1024;
+/// Length of the canonical JSON encoding of `value`, i.e. what the
+/// `Response` frame will carry, measured without allocating it. Numbers such
+/// as `1e15` re-serialize longer than they were posted, so the raw body size
+/// alone does not bound the frame.
+fn canonical_json_len(value: &serde_json::Value) -> u64 {
+    struct Counter(u64);
+    impl std::io::Write for Counter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += buf.len() as u64;
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter(0);
+    match serde_json::to_writer(&mut counter, value) {
+        Ok(()) => counter.0,
+        Err(_) => u64::MAX,
+    }
+}
 
 /// An invocation handed to the bridge by the host.
 #[derive(Debug, Clone, PartialEq)]
@@ -369,6 +392,14 @@ enum BodyRead {
     Failed(String),
 }
 
+/// Oversized bodies declaring at most this many bytes are read and discarded
+/// before the 413 is sent. A client that writes its whole request before
+/// reading (the SDK does) then receives the answer instead of a broken pipe,
+/// and the user process keeps serving.
+const DISCARD_LIMIT_BYTES: u64 = 2 * MAX_FRAME_BYTES as u64;
+/// Upper bound on the time spent discarding an oversized body.
+const DISCARD_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Read a body bounded by `max` bytes without buffering more than that.
 async fn read_body(request: Request<Body>, max: usize) -> BodyRead {
     if let Some(len) = request
@@ -378,6 +409,9 @@ async fn read_body(request: Request<Body>, max: usize) -> BodyRead {
         .and_then(|v| v.parse::<u64>().ok())
         && len > max as u64
     {
+        if len <= DISCARD_LIMIT_BYTES {
+            discard_body(request.into_body()).await;
+        }
         return BodyRead::TooLarge { size_bytes: len };
     }
     match Limited::new(request.into_body(), max).collect().await {
@@ -396,6 +430,15 @@ async fn read_body(request: Request<Body>, max: usize) -> BodyRead {
     }
 }
 
+/// Read and drop a body (bounded in size and time) without buffering it.
+async fn discard_body(body: Body) {
+    let mut body = Limited::new(body, DISCARD_LIMIT_BYTES as usize);
+    let _ = tokio::time::timeout(DISCARD_TIMEOUT, async {
+        while let Some(Ok(_)) = body.frame().await {}
+    })
+    .await;
+}
+
 async fn post_response(
     State(api): Api,
     Path(attempt_id): Path<String>,
@@ -405,7 +448,12 @@ async fn post_response(
     if pre != AttemptLookup::InFlight {
         return lookup_status(pre).into_response();
     }
-    let max = api.limits.max_response_bytes;
+    // Never accept more than a single frame can carry, whatever the host
+    // configured.
+    let max = api
+        .limits
+        .max_response_bytes
+        .min(MAX_RESPONSE_PAYLOAD_BYTES);
     let payload = match read_body(request, max as usize).await {
         BodyRead::Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
             Ok(v) => v,
@@ -442,6 +490,25 @@ async fn post_response(
             return (StatusCode::BAD_REQUEST, format!("cannot read body: {e}")).into_response();
         }
     };
+    // Measure what will actually be framed (and what the host re-measures).
+    let canonical_len = canonical_json_len(&payload);
+    if canonical_len > max {
+        let message = format!(
+            "response of {canonical_len} bytes (canonical JSON) exceeds the limit of {max} bytes"
+        );
+        return fail_attempt(
+            &api,
+            &attempt_id,
+            GuestErrorKind::ResponseTooLarge {
+                size_bytes: canonical_len,
+                max_bytes: max,
+            },
+            "Runtime.ResponseTooLarge",
+            message,
+            StatusCode::PAYLOAD_TOO_LARGE,
+        )
+        .await;
+    }
     match api.complete(&attempt_id) {
         Ok((epoch, handler_ms)) => {
             api.emit(ApiEvent::Response {
@@ -493,7 +560,7 @@ async fn post_error(
     if pre != AttemptLookup::InFlight {
         return lookup_status(pre).into_response();
     }
-    let report = match read_body(request, MAX_REPORT_BYTES).await {
+    let report = match read_body(request, MAX_ERROR_REPORT_BYTES).await {
         BodyRead::Ok(bytes) => match serde_json::from_slice::<RuntimeErrorReport>(&bytes) {
             Ok(r) => r,
             Err(e) => {
@@ -504,8 +571,21 @@ async fn post_error(
                     .into_response();
             }
         },
-        BodyRead::TooLarge { .. } => {
-            return (StatusCode::PAYLOAD_TOO_LARGE, "error report too large").into_response();
+        BodyRead::TooLarge { size_bytes } => {
+            // The handler did fail; settle the attempt as a handler error so
+            // it is neither left in flight (host timeout) nor lost.
+            let message = format!(
+                "error report of {size_bytes} bytes exceeds the limit of {MAX_ERROR_REPORT_BYTES} bytes"
+            );
+            return fail_attempt(
+                &api,
+                &attempt_id,
+                GuestErrorKind::Handler,
+                "Runtime.ErrorReportTooLarge",
+                message,
+                StatusCode::PAYLOAD_TOO_LARGE,
+            )
+            .await;
         }
         BodyRead::Failed(e) => {
             return (StatusCode::BAD_REQUEST, format!("cannot read body: {e}")).into_response();
@@ -535,7 +615,7 @@ async fn post_error(
 }
 
 async fn post_init_error(State(api): Api, request: Request<Body>) -> Response {
-    let report = match read_body(request, MAX_REPORT_BYTES).await {
+    let report = match read_body(request, MAX_ERROR_REPORT_BYTES).await {
         BodyRead::Ok(bytes) if bytes.is_empty() => RuntimeErrorReport {
             error_type: "Runtime.InitError".into(),
             message: "user process reported an initialization error".into(),
@@ -819,6 +899,117 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn response_is_measured_as_canonical_json() {
+        // `1e15` is 4 bytes on the wire but re-serializes as
+        // `1000000000000000.0`: the raw body fits, the framed payload does not.
+        let (api, mut rx, router) = setup(4096);
+        api.dispatch(invoke("att_1")).unwrap();
+        let body = format!("[{}]", vec!["1e15"; 700].join(","));
+        assert!(body.len() <= 4096);
+        let canonical =
+            serde_json::to_vec(&serde_json::from_str::<serde_json::Value>(&body).unwrap())
+                .unwrap()
+                .len() as u64;
+        assert!(canonical > 4096);
+        let resp = router
+            .clone()
+            .oneshot(post(&api::path_response("att_1"), &body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        match rx.try_recv().expect("error event") {
+            ApiEvent::Error {
+                error, error_type, ..
+            } => {
+                assert_eq!(
+                    error,
+                    GuestErrorKind::ResponseTooLarge {
+                        size_bytes: canonical,
+                        max_bytes: 4096
+                    }
+                );
+                assert_eq!(error_type, "Runtime.ResponseTooLarge");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(api.lookup("att_1"), AttemptLookup::Completed);
+    }
+
+    #[tokio::test]
+    async fn response_limit_is_clamped_to_frame_capacity() {
+        // A host limit above what one frame can carry must not let a payload
+        // through that the session cannot send.
+        let (api, mut rx, router) = setup(64 * 1024 * 1024);
+        api.dispatch(invoke("att_1")).unwrap();
+        let body = format!(
+            "\"{}\"",
+            "a".repeat(MAX_RESPONSE_PAYLOAD_BYTES as usize - 1)
+        );
+        let resp = router
+            .clone()
+            .oneshot(post(&api::path_response("att_1"), &body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        match rx.try_recv().expect("error event") {
+            ApiEvent::Error { error, .. } => assert_eq!(
+                error,
+                GuestErrorKind::ResponseTooLarge {
+                    size_bytes: MAX_RESPONSE_PAYLOAD_BYTES + 1,
+                    max_bytes: MAX_RESPONSE_PAYLOAD_BYTES
+                }
+            ),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(api.lookup("att_1"), AttemptLookup::Completed);
+    }
+
+    #[tokio::test]
+    async fn oversized_error_report_settles_the_attempt() {
+        let (api, mut rx, router) = setup(1024);
+        api.dispatch(invoke("att_1")).unwrap();
+        let report = format!(
+            r#"{{"error_type":"Handler.Error","message":"{}"}}"#,
+            "m".repeat(MAX_ERROR_REPORT_BYTES)
+        );
+        let resp = router
+            .clone()
+            .oneshot(post(&api::path_error("att_1"), &report))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        match rx.try_recv().expect("the attempt must be completed") {
+            ApiEvent::Error {
+                attempt_id,
+                epoch,
+                error,
+                error_type,
+                message,
+                ..
+            } => {
+                assert_eq!(attempt_id, "att_1");
+                assert_eq!(epoch, 3);
+                assert_eq!(error, GuestErrorKind::Handler);
+                assert_eq!(error_type, "Runtime.ErrorReportTooLarge");
+                assert!(message.contains(&report.len().to_string()), "{message}");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(api.in_flight().is_none());
+        assert_eq!(api.lookup("att_1"), AttemptLookup::Completed);
+        // A late retry is told the attempt is already settled.
+        let resp = router
+            .clone()
+            .oneshot(post(
+                &api::path_error("att_1"),
+                r#"{"error_type":"Handler.Error","message":"short"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]

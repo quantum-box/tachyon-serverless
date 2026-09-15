@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
 use tachyon_serverless_protocol::{
-    FrameCodec, GuestErrorKind, GuestMessage, HostMessage, LogPhase, LogStream, PROTOCOL_VERSION,
-    ProtocolError, decode_message, encode_message,
+    FrameCodec, GuestErrorKind, GuestMessage, HostMessage, LogPhase, LogStream, MAX_FRAME_BYTES,
+    MAX_RESPONSE_PAYLOAD_BYTES, PROTOCOL_VERSION, ProtocolError, decode_message, encode_message,
 };
 use tokio::io::AsyncWrite;
 use tokio::net::TcpListener;
@@ -39,10 +39,14 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 /// Grace used when the bridge itself receives SIGTERM (process provider
 /// terminate). Shorter than the provider's own 2 s so the user process is
-/// gone before the bridge can be SIGKILLed.
+/// gone before the bridge can be SIGKILLed. A SIGTERM that arrives while the
+/// bridge is already stopping the user process escalates to SIGKILL at once
+/// (see `terminate_user`).
 const SIGTERM_GRACE: Duration = Duration::from_secs(1);
 const LOG_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const OUTGOING_QUEUE: usize = 256;
+/// Longest `error_type` kept when an unencodable error frame is rebuilt.
+const MAX_SUBSTITUTE_ERROR_TYPE_BYTES: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -62,6 +66,20 @@ fn host_message_name(m: &HostMessage) -> &'static str {
         HostMessage::Invoke { .. } => "invoke",
         HostMessage::Cancel { .. } => "cancel",
         HostMessage::Shutdown { .. } => "shutdown",
+    }
+}
+
+/// Variant name of an outgoing frame for logging.
+fn guest_message_name(m: &GuestMessage) -> &'static str {
+    match m {
+        GuestMessage::Hello { .. } => "hello",
+        GuestMessage::Ready { .. } => "ready",
+        GuestMessage::InitError { .. } => "init_error",
+        GuestMessage::Log { .. } => "log",
+        GuestMessage::Response { .. } => "response",
+        GuestMessage::Error { .. } => "error",
+        GuestMessage::Exited { .. } => "exited",
+        GuestMessage::Heartbeat { .. } => "heartbeat",
     }
 }
 
@@ -185,6 +203,15 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
         max_response_bytes = launch.max_response_bytes,
         "handshake complete"
     );
+    // A response must fit one frame whatever the host configured.
+    let max_response_bytes = launch.max_response_bytes.min(MAX_RESPONSE_PAYLOAD_BYTES);
+    if max_response_bytes < launch.max_response_bytes {
+        warn!(
+            requested = launch.max_response_bytes,
+            effective = max_response_bytes,
+            "hello_ack max_response_bytes exceeds what one frame can carry; clamping"
+        );
+    }
 
     // --- outgoing frame writer ------------------------------------------
     let (out_tx, out_rx) = mpsc::channel::<GuestMessage>(OUTGOING_QUEUE);
@@ -193,13 +220,7 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
     // --- runtime api server ---------------------------------------------
     let (api_tx, mut api_rx) = mpsc::channel::<ApiEvent>(64);
     let process_started_at = Instant::now();
-    let api = RuntimeApi::new(
-        api_tx,
-        ApiLimits {
-            max_response_bytes: launch.max_response_bytes,
-        },
-        process_started_at,
-    );
+    let api = RuntimeApi::new(api_tx, ApiLimits { max_response_bytes }, process_started_at);
     let listener = match TcpListener::bind(cfg.runtime_api_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -342,6 +363,9 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
                     Ok(other) => warn!("ignoring unexpected {} frame after handshake", host_message_name(&other)),
                 },
             },
+            // The writer only stops on a transport I/O error. Nothing can
+            // reach the host any more, so do not linger with a silent session.
+            _ = out_tx.closed() => break Outcome::TransportLost("frame writer stopped".into()),
             Some(event) = api_rx.recv() => match event {
                 ApiEvent::Ready { init_ms } => {
                     info!(init_ms, "user process ready");
@@ -455,13 +479,13 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
         Outcome::Shutdown(reason) => {
             info!(%reason, "shutdown received");
             api.shutdown();
-            terminate_user(pid, &mut exit_rx, SHUTDOWN_GRACE).await;
+            terminate_user(pid, &mut exit_rx, SHUTDOWN_GRACE, &mut sigterm).await;
             drain_logs(&mut log_tasks).await;
             exit_code::OK
         }
         Outcome::Terminated => {
             api.shutdown();
-            terminate_user(pid, &mut exit_rx, SIGTERM_GRACE).await;
+            terminate_user(pid, &mut exit_rx, SIGTERM_GRACE, &mut sigterm).await;
             drain_logs(&mut log_tasks).await;
             exit_code::OK
         }
@@ -505,15 +529,94 @@ async fn send_direct<W: AsyncWrite + Unpin>(
     writer.send(encode_message(msg)?).await
 }
 
+/// Serialize and send every queued frame. Returns only when the queue is
+/// closed or the transport fails: a frame that cannot be encoded is replaced
+/// (see [`unencodable_substitute`]) or dropped, never allowed to silence the
+/// frames queued behind it.
 async fn write_loop<W: AsyncWrite + Unpin>(
     mut writer: FramedWrite<W, FrameCodec>,
     mut rx: mpsc::Receiver<GuestMessage>,
 ) -> Result<(), ProtocolError> {
     while let Some(msg) = rx.recv().await {
-        let bytes = encode_message(&msg)?;
+        let bytes = match encode_message(&msg) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                let name = guest_message_name(&msg);
+                let Some(substitute) = unencodable_substitute(&msg, &e) else {
+                    error!(frame = name, "dropping unencodable frame: {e}");
+                    continue;
+                };
+                error!(
+                    frame = name,
+                    "frame cannot be encoded ({e}); sending an error frame instead"
+                );
+                match encode_message(&substitute) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        error!(frame = name, "dropping unencodable substitute frame: {e}");
+                        continue;
+                    }
+                }
+            }
+        };
+        // Encoded frames are within MAX_FRAME_BYTES, so only transport I/O
+        // can fail here: the connection is gone.
         writer.send(bytes).await?;
     }
     writer.close().await
+}
+
+/// Replacement for a frame that cannot be encoded, so the host still learns
+/// how the attempt ended instead of waiting for its deadline. `None` for
+/// frames without an attempt to settle.
+fn unencodable_substitute(msg: &GuestMessage, err: &ProtocolError) -> Option<GuestMessage> {
+    match msg {
+        GuestMessage::Response {
+            attempt_id,
+            epoch,
+            handler_ms,
+            ..
+        } => {
+            let (error, error_type) = match err {
+                ProtocolError::FrameTooLarge(size) => (
+                    GuestErrorKind::ResponseTooLarge {
+                        size_bytes: *size as u64,
+                        max_bytes: MAX_FRAME_BYTES as u64,
+                    },
+                    "Runtime.ResponseTooLarge",
+                ),
+                _ => (GuestErrorKind::Protocol, "Runtime.InvalidResponse"),
+            };
+            Some(GuestMessage::Error {
+                attempt_id: attempt_id.clone(),
+                epoch: *epoch,
+                error,
+                error_type: error_type.into(),
+                message: format!("response cannot be sent to the host: {err}"),
+                stack_trace: None,
+                handler_ms: *handler_ms,
+            })
+        }
+        GuestMessage::Error {
+            attempt_id,
+            epoch,
+            error,
+            error_type,
+            handler_ms,
+            ..
+        } => Some(GuestMessage::Error {
+            attempt_id: attempt_id.clone(),
+            epoch: *epoch,
+            error: error.clone(),
+            error_type: error_type
+                [..error_type.floor_char_boundary(MAX_SUBSTITUTE_ERROR_TYPE_BYTES)]
+                .to_string(),
+            message: format!("error report cannot be sent to the host: {err}"),
+            stack_trace: None,
+            handler_ms: *handler_ms,
+        }),
+        _ => None,
+    }
 }
 
 async fn bridge_log(
@@ -542,16 +645,26 @@ async fn wait_exit(
 }
 
 /// SIGTERM, wait `grace`, SIGKILL, wait again.
+///
+/// A SIGTERM delivered to the bridge meanwhile means its own SIGKILL is on
+/// the way (the provider terminates the environment). The user process lives
+/// in its own process group and would outlive the bridge, so escalate to
+/// SIGKILL at once instead of finishing the grace period.
 async fn terminate_user(
     pid: u32,
     exit_rx: &mut oneshot::Receiver<std::process::ExitStatus>,
     grace: Duration,
+    sigterm: &mut impl SignalSource,
 ) {
     signal_group(pid, SIGTERM);
-    if wait_exit(exit_rx, grace).await {
-        return;
+    tokio::select! {
+        biased;
+        _ = &mut *exit_rx => return,
+        _ = sigterm.recv() => {
+            warn!("bridge received SIGTERM while stopping the user process; sending SIGKILL now");
+        }
+        _ = tokio::time::sleep(grace) => warn!("user process ignored SIGTERM; sending SIGKILL"),
     }
-    warn!("user process ignored SIGTERM; sending SIGKILL");
     signal_group(pid, SIGKILL);
     wait_exit(exit_rx, SHUTDOWN_GRACE).await;
 }
@@ -602,5 +715,214 @@ impl SignalSource for Option<tokio::signal::unix::Signal> {
 impl SignalSource for Option<()> {
     fn recv(&mut self) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
         Box::pin(std::future::pending::<()>())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, DuplexStream, ReadBuf};
+    use tokio_util::codec::Framed;
+
+    const T: Duration = Duration::from_secs(10);
+
+    async fn next_frame(host: &mut FramedRead<DuplexStream, FrameCodec>) -> Option<GuestMessage> {
+        let frame = timeout(T, host.next()).await.expect("frame timeout")?;
+        Some(decode_message(&frame.expect("valid frame")).expect("decodable frame"))
+    }
+
+    #[tokio::test]
+    async fn write_loop_replaces_unencodable_frames_and_keeps_writing() {
+        let (bridge_end, host_end) = tokio::io::duplex(64 * 1024);
+        let (tx, rx) = mpsc::channel(8);
+        let writer = tokio::spawn(write_loop(FramedWrite::new(bridge_end, FrameCodec), rx));
+        let mut host = FramedRead::new(host_end, FrameCodec);
+
+        tx.send(GuestMessage::Response {
+            attempt_id: "att_big".into(),
+            epoch: 7,
+            payload: serde_json::Value::String("x".repeat(MAX_FRAME_BYTES)),
+            handler_ms: Some(5),
+        })
+        .await
+        .unwrap();
+        tx.send(GuestMessage::Heartbeat { ts_ms: 1 }).await.unwrap();
+        tx.send(GuestMessage::Error {
+            attempt_id: "att_err".into(),
+            epoch: 8,
+            error: GuestErrorKind::Handler,
+            error_type: "Handler.Error".into(),
+            message: "m".repeat(MAX_FRAME_BYTES),
+            stack_trace: Some("st".into()),
+            handler_ms: None,
+        })
+        .await
+        .unwrap();
+        tx.send(GuestMessage::Heartbeat { ts_ms: 2 }).await.unwrap();
+
+        match next_frame(&mut host).await {
+            Some(GuestMessage::Error {
+                attempt_id,
+                epoch,
+                error,
+                error_type,
+                handler_ms,
+                ..
+            }) => {
+                assert_eq!(attempt_id, "att_big");
+                assert_eq!(epoch, 7);
+                assert!(
+                    matches!(
+                        error,
+                        GuestErrorKind::ResponseTooLarge { size_bytes, max_bytes }
+                            if max_bytes == MAX_FRAME_BYTES as u64 && size_bytes > max_bytes
+                    ),
+                    "{error:?}"
+                );
+                assert_eq!(error_type, "Runtime.ResponseTooLarge");
+                assert_eq!(handler_ms, Some(5));
+            }
+            other => panic!("expected a response_too_large error frame, got {other:?}"),
+        }
+        assert_eq!(
+            next_frame(&mut host).await,
+            Some(GuestMessage::Heartbeat { ts_ms: 1 })
+        );
+        match next_frame(&mut host).await {
+            Some(GuestMessage::Error {
+                attempt_id,
+                error,
+                error_type,
+                message,
+                stack_trace,
+                ..
+            }) => {
+                assert_eq!(attempt_id, "att_err");
+                assert_eq!(error, GuestErrorKind::Handler);
+                assert_eq!(error_type, "Handler.Error");
+                assert!(message.contains("cannot be sent"), "{message}");
+                assert!(stack_trace.is_none());
+            }
+            other => panic!("expected a rebuilt error frame, got {other:?}"),
+        }
+        assert_eq!(
+            next_frame(&mut host).await,
+            Some(GuestMessage::Heartbeat { ts_ms: 2 })
+        );
+
+        drop(tx);
+        timeout(T, writer).await.unwrap().unwrap().unwrap();
+        assert!(next_frame(&mut host).await.is_none());
+    }
+
+    /// Host stream whose writes fail on demand while reads keep working: a
+    /// transport that is dead in one direction only.
+    struct WriteBroken {
+        inner: DuplexStream,
+        fail_writes: Arc<AtomicBool>,
+    }
+
+    impl WriteBroken {
+        fn broken(&self) -> Option<std::io::Error> {
+            self.fail_writes
+                .load(Ordering::SeqCst)
+                .then(|| std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    impl AsyncRead for WriteBroken {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncWrite for WriteBroken {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            let this = self.get_mut();
+            match this.broken() {
+                Some(e) => Poll::Ready(Err(e)),
+                None => Pin::new(&mut this.inner).poll_write(cx, buf),
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            let this = self.get_mut();
+            match this.broken() {
+                Some(e) => Poll::Ready(Err(e)),
+                None => Pin::new(&mut this.inner).poll_flush(cx),
+            }
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+            Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn session_ends_when_the_frame_writer_dies() {
+        const ENV: &str = "env_writer_dies";
+        let (bridge_end, host_end) = tokio::io::duplex(64 * 1024);
+        let fail_writes = Arc::new(AtomicBool::new(false));
+        let stream = WriteBroken {
+            inner: bridge_end,
+            fail_writes: fail_writes.clone(),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let working_dir = dir.path().to_string_lossy().into_owned();
+
+        // The host keeps its end open (no EOF) but every frame after the
+        // Hello fails to write.
+        let host = tokio::spawn(async move {
+            let mut host = Framed::new(host_end, FrameCodec);
+            let hello = timeout(T, host.next()).await.unwrap().unwrap().unwrap();
+            assert!(matches!(
+                decode_message::<GuestMessage>(&hello).unwrap(),
+                GuestMessage::Hello { .. }
+            ));
+            fail_writes.store(true, Ordering::SeqCst);
+            let ack = HostMessage::HelloAck {
+                environment_id: ENV.into(),
+                epoch: 1,
+                entrypoint: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 30".into()],
+                env: vec![("PATH".into(), "/bin:/usr/bin".into())],
+                working_dir,
+                init_timeout_ms: 0,
+                max_response_bytes: 1024,
+                max_log_line_bytes: 1024,
+            };
+            host.send(encode_message(&ack).unwrap()).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            drop(host);
+        });
+
+        let code = timeout(
+            T,
+            run_session(
+                Box::new(stream),
+                SessionConfig {
+                    environment_id: ENV.into(),
+                    runtime_api_addr: "127.0.0.1:0".parse().unwrap(),
+                    guest_boot_id: None,
+                    unisolated: false,
+                },
+            ),
+        )
+        .await
+        .expect("the session must end once no frame can reach the host");
+        assert_eq!(code, exit_code::TRANSPORT);
+        host.abort();
     }
 }
