@@ -24,15 +24,24 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 | 文書 | 内容 |
 |---|---|
 | [inventory-tachyon-apps.md](inventory-tachyon-apps.md) | tachyon-apps（commit `ae727f1f7`）の棚卸し。領域ごとの reference / adapter candidate / 不要、port への対応、能力表（すべて unverified）、baseline KVM 測定プロファイル |
-| [acceptance.md](acceptance.md) | PLT-4613〜PLT-4630 の受入条件と状態（実装済み / 未検証 / 別トラックで実装中 / 未着手）、証跡パス |
+| [acceptance.md](acceptance.md) | PLT-4613〜PLT-4630 の受入条件ごとの状態（実装済み / 実装済み・KVM実測あり / 未検証 / 未着手 / 対応中）と証跡（テスト名、スクリプト、evidence）、ADR-0001 の残る測定 M1〜M13 の状況、2026-09-16 のレビュー指摘 |
 
-## 運用・利用（他トラックが追加する）
+## 運用・利用
 
 | 文書 | 内容 | 担当 |
 |---|---|---|
-| kvm.md | KVM 検証 host の要件、bootstrap / teardown スクリプト、kernel / rootfs の取得と digest 検証 | PLT-4615 |
-| api.md | 管理 API と Invoke API の使い方、認証 header、エラー応答、OpenAPI の場所 | PLT-4619 / PLT-4626 |
-| cli.md | `tsls deploy / invoke / logs / rollback / dev` の使い方と設定 | PLT-4629 |
-| evidence/ | 実機測定の生データ。`evidence/<plt-id>/` に置き、`inventory-tachyon-apps.md` §6 の profile を明記する | PLT-4621 / PLT-4630 |
+| [kvm.md](kvm.md) | KVM 検証 host の要件、preflight / bootstrap / smoke / teardown、gateway での利用、証跡の読み方、macOS での Lima + nested virtualization 手順（確認済み）と実測値、失敗時の切り分け | PLT-4615 / PLT-4621 |
+| [api.md](api.md) | 管理 API と Invoke API の使い方、認証 header、エラー応答、OpenAPI の場所 | PLT-4619 / PLT-4626 |
+| [cli.md](cli.md) | `tsls deploy / invoke / logs / rollback / dev` の使い方と設定 | PLT-4629 |
 
-上の 3 文書は本索引の作成時点では存在しない。追加した PR で本表のリンクを有効にする。
+## 実行記録（evidence）
+
+`scripts/e2e/demo.sh` は `evidence/<UTC>-<provider>/`、`scripts/kvm/smoke.sh` は `evidence/kvm-<UTC>/` に書く。smoke の読み方は [kvm.md](kvm.md) §4、E2E の中身はリポジトリの [README](../README.md)「E2E デモ」。
+
+| ディレクトリ | 内容 | 結果 |
+|---|---|---|
+| [evidence/20260915T073238Z-process/](evidence/20260915T073238Z-process/) | E2E デモ、process provider（macOS arm64、隔離なし）。`summary.json`、`provider.json`、`invocations.json`、`gateway.log`、`steps/` | 27/27 PASS |
+| [evidence/kvm-20260915T080221Z/](evidence/kvm-20260915T080221Z/) | fc-smoke、Firecracker v1.17.0 microVM（aarch64、Apple M4 上の Lima VM、nested virtualization）。`summary.txt`、`hello.json`、`timeout.json`、guest console、Firecracker log | hello 応答、timeout demo、残骸なし |
+| [evidence/20260915T125610Z-firecracker/](evidence/20260915T125610Z-firecracker/) | E2E デモ、Firecracker provider（上と同じ VM、`config/gateway.firecracker.toml`） | 27/27 PASS |
+
+記録の時間は nested virtualization 上の参考値で、SLA ではない。process provider の記録は microVM の証跡として使わない。
