@@ -1,0 +1,52 @@
+# Tachyon Serverless gateway — Firecracker (Linux/KVM) 設定
+#
+# profile = "production" のため dev 専用 provider（process）は選べません。
+# .kvm/ 配下の成果物は docs/protocol.md §C の規約で用意します。
+# token / secret はデモ用のダミー値です。実運用の秘密は別の secret backend から供給してください。
+
+listen = "127.0.0.1:8080"
+profile = "production"
+data_dir = "./data"
+
+[provider]
+kind = "firecracker"
+
+[provider.firecracker]
+firecracker_binary = ".kvm/bin/firecracker"
+kernel = ".kvm/vmlinux"
+rootfs = ".kvm/rootfs.ext4"    # read-only base rootfs（/sbin/tachyon-init = runtime-bridge）
+workdir = ".kvm/run"           # 環境ごとの API socket / vsock uds / function drive / log
+vsock_port = 5000
+
+[capacity]
+max_concurrency = 8
+max_queue = 32
+queue_timeout_seconds = 10
+
+[invoke]
+inline_output_max_bytes = 65536
+cancel_grace_ms = 1000
+preflight_ttl_seconds = 30
+handshake_timeout_ms = 10000
+
+[[identity.tokens]]
+token = "dev-token-tenant-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "dev-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "dev-token-tenant-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "dev-b"
+roles = ["deploy", "invoke"]
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+binding_ref = "demo-secret"
+value = "demo-secret-value-a"
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+binding_ref = "demo-secret"
+value = "demo-secret-value-b"

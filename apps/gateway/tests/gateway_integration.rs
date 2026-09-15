@@ -1,0 +1,772 @@
+//! End-to-end test of the HTTP API against the fake provider, driven through
+//! `tower::ServiceExt::oneshot` on `router()`.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode, header};
+use base64::Engine;
+use tower::ServiceExt;
+
+use tachyon_serverless_application::{Application, BootstrapOptions, GatewayConfig};
+use tachyon_serverless_gateway::router;
+use tachyon_serverless_provider_fake::{FakeExecutionProvider, FakeGuestScript};
+
+const TOKEN_A: &str = "dev-token-tenant-a";
+const TOKEN_B: &str = "dev-token-tenant-b";
+const TENANT_A: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzza";
+const TENANT_B: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb";
+
+fn config(data_dir: &std::path::Path) -> GatewayConfig {
+    let toml = format!(
+        r#"
+listen = "127.0.0.1:0"
+profile = "dev"
+data_dir = "{data}"
+
+[provider]
+kind = "process"
+
+[provider.process]
+bridge_binary = "target/debug/tachyon-serverless-runtime-bridge"
+workdir = "{data}/process"
+
+[invoke]
+cancel_grace_ms = 100
+
+[[identity.tokens]]
+token = "{TOKEN_A}"
+tenant_id = "{TENANT_A}"
+subject = "dev-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "{TOKEN_B}"
+tenant_id = "{TENANT_B}"
+subject = "dev-b"
+roles = ["deploy", "invoke"]
+
+[[secrets.bindings]]
+tenant_id = "{TENANT_A}"
+binding_ref = "demo-secret"
+value = "demo-secret-value-a"
+"#,
+        data = data_dir.display()
+    );
+    GatewayConfig::from_toml(&toml).unwrap()
+}
+
+struct Api {
+    router: Router,
+    _dir: tempfile::TempDir,
+    fake: Arc<FakeExecutionProvider>,
+}
+
+fn api(scripts: Vec<FakeGuestScript>) -> Api {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Arc::new(FakeExecutionProvider::with_scripts(scripts));
+    let app = Application::bootstrap_with(
+        config(dir.path()),
+        fake.clone(),
+        BootstrapOptions {
+            persist_state: false,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    Api {
+        router: router(app),
+        _dir: dir,
+        fake,
+    }
+}
+
+struct Reply {
+    status: StatusCode,
+    headers: axum::http::HeaderMap,
+    body: Vec<u8>,
+}
+
+impl Reply {
+    fn json(&self) -> serde_json::Value {
+        serde_json::from_slice(&self.body).unwrap_or_else(|e| {
+            panic!(
+                "body is not JSON ({e}): {}",
+                String::from_utf8_lossy(&self.body)
+            )
+        })
+    }
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name).and_then(|v| v.to_str().ok())
+    }
+}
+
+async fn call(router: &Router, req: Request<Body>) -> Reply {
+    let res = router.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let headers = res.headers().clone();
+    let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap()
+        .to_vec();
+    Reply {
+        status,
+        headers,
+        body,
+    }
+}
+
+fn req(method: Method, path: &str, token: Option<&str>) -> axum::http::request::Builder {
+    let mut b = Request::builder().method(method).uri(path);
+    if let Some(t) = token {
+        b = b.header(header::AUTHORIZATION, format!("Bearer {t}"));
+    }
+    b
+}
+
+fn json_body(v: serde_json::Value) -> Body {
+    Body::from(serde_json::to_vec(&v).unwrap())
+}
+
+async fn get(router: &Router, path: &str, token: &str) -> Reply {
+    call(
+        router,
+        req(Method::GET, path, Some(token))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+}
+
+async fn post_json(router: &Router, path: &str, token: &str, v: serde_json::Value) -> Reply {
+    call(
+        router,
+        req(Method::POST, path, Some(token))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(json_body(v))
+            .unwrap(),
+    )
+    .await
+}
+
+/// create function -> upload artifact -> create revision -> wait ready.
+async fn deploy(router: &Router, name: &str) -> (String, String) {
+    let created = post_json(
+        router,
+        "/v1/functions",
+        TOKEN_A,
+        serde_json::json!({"name": name, "description": "e2e"}),
+    )
+    .await;
+    assert_eq!(
+        created.status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&created.body)
+    );
+    let function_id = created.json()["id"].as_str().unwrap().to_string();
+    assert_eq!(created.json()["tenant_id"], TENANT_A);
+
+    let upload = call(
+        router,
+        req(Method::POST, "/v1/artifacts", Some(TOKEN_A))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(format!("#!/bin/sh\necho {name}\n")))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        upload.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&upload.body)
+    );
+    let digest = upload.json()["digest"].as_str().unwrap().to_string();
+    assert!(digest.starts_with("sha256:"));
+
+    let rev = post_json(
+        router,
+        &format!("/v1/functions/{function_id}/revisions"),
+        TOKEN_A,
+        serde_json::json!({
+            "artifact": {"kind": "binary", "digest": digest},
+            "architecture": "aarch64",
+            "execution": {"timeout_seconds": 5, "initialization_timeout_seconds": 5, "max_concurrency": 4},
+            "env_vars": [["GREETING", "hi"]],
+            "secrets": [{"env_name": "DEMO_SECRET", "binding_ref": "demo-secret"}],
+            "publish_to_prod": true
+        }),
+    )
+    .await;
+    assert_eq!(
+        rev.status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&rev.body)
+    );
+    let revision_id = rev.json()["id"].as_str().unwrap().to_string();
+    assert_eq!(rev.json()["status"], "pending");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let r = get(
+            router,
+            &format!("/v1/functions/{function_id}/revisions/{revision_id}"),
+            TOKEN_A,
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK);
+        match r.json()["status"].as_str().unwrap() {
+            "ready" => break,
+            "failed" => panic!("revision failed: {}", r.json()["failure_reason"]),
+            _ if tokio::time::Instant::now() > deadline => panic!("revision never became ready"),
+            _ => tokio::time::sleep(Duration::from_millis(20)).await,
+        }
+    }
+    let alias = get(
+        router,
+        &format!("/v1/functions/{function_id}/aliases/prod"),
+        TOKEN_A,
+    )
+    .await;
+    assert_eq!(alias.status, StatusCode::OK);
+    assert_eq!(alias.json()["revision_id"], revision_id);
+    assert_eq!(alias.json()["generation"], 1);
+    (function_id, revision_id)
+}
+
+#[tokio::test]
+async fn full_api_roundtrip() {
+    let api = api(vec![
+        FakeGuestScript::RespondOk(serde_json::json!({"greeting": "hello"})),
+        FakeGuestScript::Echo,
+        FakeGuestScript::EchoHttp,
+        FakeGuestScript::HangForever,
+    ]);
+    let r = &api.router;
+
+    // meta
+    let h = get(r, "/healthz", "").await;
+    assert_eq!(h.status, StatusCode::OK);
+    assert!(
+        h.header("x-request-id").is_some(),
+        "request id is always assigned"
+    );
+    let ready = call(r, Request::get("/readyz").body(Body::empty()).unwrap()).await;
+    assert_eq!(ready.status, StatusCode::OK);
+    assert_eq!(ready.json()["ready"], true);
+
+    // auth
+    let anon = call(
+        r,
+        Request::get("/v1/functions").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(anon.json()["error"]["code"], "unauthorized");
+    let bad = get(r, "/v1/functions", "nope").await;
+    assert_eq!(bad.status, StatusCode::UNAUTHORIZED);
+    let mismatch = call(
+        r,
+        req(Method::GET, "/v1/functions", Some(TOKEN_A))
+            .header("x-tachyon-tenant-id", TENANT_B)
+            .header("x-request-id", "req-123")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(mismatch.status, StatusCode::FORBIDDEN);
+    assert_eq!(mismatch.header("x-request-id"), Some("req-123"));
+    assert_eq!(mismatch.json()["error"]["request_id"], "req-123");
+    let matching = call(
+        r,
+        req(Method::GET, "/v1/functions", Some(TOKEN_A))
+            .header("x-tachyon-tenant-id", TENANT_A)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(matching.status, StatusCode::OK);
+
+    let provider = get(r, "/v1/provider", TOKEN_A).await;
+    assert_eq!(provider.status, StatusCode::OK);
+    assert_eq!(provider.json()["kind"], "fake");
+    assert_eq!(provider.json()["dev_only"], true);
+
+    // deploy
+    let (function_id, revision_id) = deploy(r, "hello").await;
+    let list = get(r, "/v1/functions", TOKEN_A).await;
+    assert_eq!(list.json()["items"].as_array().unwrap().len(), 1);
+
+    // invoke (slash form)
+    let inv = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/functions/{function_id}/invoke"),
+            Some(TOKEN_A),
+        )
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("idempotency-key", "k1")
+        .body(json_body(serde_json::json!({"name": "world"})))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        inv.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&inv.body)
+    );
+    assert_eq!(inv.json(), serde_json::json!({"greeting": "hello"}));
+    let invocation_id = inv.header("x-tachyon-invocation-id").unwrap().to_string();
+    assert!(invocation_id.starts_with("inv_"));
+
+    // idempotent replay does not run the guest again
+    let replay = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/functions/{function_id}/invoke"),
+            Some(TOKEN_A),
+        )
+        .header("idempotency-key", "k1")
+        .body(json_body(serde_json::json!({"name": "world"})))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(replay.status, StatusCode::OK);
+    assert_eq!(
+        replay.header("x-tachyon-invocation-id").unwrap(),
+        invocation_id
+    );
+    assert_eq!(api.fake.created().len(), 1);
+
+    // invoke (colon form) with a pinned revision
+    let inv2 = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/functions/{function_id}:invoke?revision_id={revision_id}"),
+            Some(TOKEN_A),
+        )
+        .body(json_body(serde_json::json!({"echo": 1})))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        inv2.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&inv2.body)
+    );
+    assert_eq!(inv2.json(), serde_json::json!({"echo": 1}));
+    assert_ne!(
+        inv2.header("x-tachyon-invocation-id").unwrap(),
+        invocation_id
+    );
+
+    // invocation detail with boot evidence
+    let detail = get(r, &format!("/v1/invocations/{invocation_id}"), TOKEN_A).await;
+    assert_eq!(detail.status, StatusCode::OK);
+    let d = detail.json();
+    assert_eq!(d["status"], "succeeded");
+    assert_eq!(d["revision_id"], revision_id);
+    assert_eq!(d["alias"], "prod");
+    assert_eq!(d["output"], serde_json::json!({"greeting": "hello"}));
+    let attempts = d["attempts"].as_array().unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0]["status"], "succeeded");
+    assert!(
+        attempts[0]["boot_evidence"]["guest_boot_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("fake-boot-")
+    );
+    assert!(attempts[0]["boot_evidence"]["host_pid"].as_u64().is_some());
+    assert!(attempts[0]["timings"]["handler_ms"].as_u64().is_some());
+    assert!(
+        attempts[0]["timings"]["environment_boot_ms"]
+            .as_u64()
+            .is_some()
+    );
+
+    // logs
+    let logs = get(r, &format!("/v1/invocations/{invocation_id}/logs"), TOKEN_A).await;
+    assert_eq!(logs.status, StatusCode::OK);
+    let items = logs.json()["items"].as_array().unwrap().clone();
+    assert!(!items.is_empty());
+    assert!(
+        items
+            .iter()
+            .any(|l| l["phase"] == "handler" && l["stream"] == "stdout")
+    );
+    assert!(
+        items
+            .iter()
+            .any(|l| l["phase"] == "boot" && l["stream"] == "platform")
+    );
+    assert_eq!(logs.json()["dropped"], false);
+
+    // history + usage
+    let history = get(
+        r,
+        &format!("/v1/functions/{function_id}/invocations?limit=10"),
+        TOKEN_A,
+    )
+    .await;
+    assert_eq!(history.status, StatusCode::OK);
+    assert_eq!(history.json()["items"].as_array().unwrap().len(), 2);
+    let usage = get(r, &format!("/v1/functions/{function_id}/usage"), TOKEN_A).await;
+    assert_eq!(usage.status, StatusCode::OK);
+    assert_eq!(usage.json()["invocations"], 2);
+    assert_eq!(usage.json()["succeeded"], 2);
+    assert_eq!(usage.json()["not_billable"], true);
+
+    // HTTP adapter roundtrip
+    let http = call(
+        r,
+        req(
+            Method::PUT,
+            &format!("/v1/functions/{function_id}/http/items/42?verbose=1&x=y"),
+            Some(TOKEN_A),
+        )
+        .header("x-custom", "one")
+        .header("x-custom", "two")
+        .header(header::CONTENT_TYPE, "text/plain")
+        .body(Body::from("payload"))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        http.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&http.body)
+    );
+    assert!(
+        http.header("x-tachyon-invocation-id")
+            .unwrap()
+            .starts_with("inv_")
+    );
+    assert_eq!(http.header("x-echo-method"), Some("PUT"));
+    assert_eq!(http.header("x-echo-path"), Some("/items/42"));
+    assert_eq!(http.header("content-type"), Some("application/json"));
+    let event = http.json();
+    assert_eq!(event["method"], "PUT");
+    assert_eq!(event["path"], "/items/42");
+    assert_eq!(event["query"], "verbose=1&x=y");
+    let hdrs = event["headers"].as_array().unwrap();
+    let customs: Vec<&str> = hdrs
+        .iter()
+        .filter(|h| h[0] == "x-custom")
+        .map(|h| h[1].as_str().unwrap())
+        .collect();
+    assert_eq!(customs, vec!["one", "two"], "repeated headers preserved");
+    assert!(
+        !hdrs.iter().any(|h| h[0] == "authorization"),
+        "credential is not forwarded"
+    );
+    let body = base64::engine::general_purpose::STANDARD
+        .decode(event["body_base64"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(body, b"payload");
+    let http_inv = get(
+        r,
+        &format!(
+            "/v1/invocations/{}",
+            http.header("x-tachyon-invocation-id").unwrap()
+        ),
+        TOKEN_A,
+    )
+    .await;
+    assert_eq!(http_inv.json()["http_status"], 200);
+
+    // cross-tenant -> 404
+    let foreign = get(r, &format!("/v1/functions/{function_id}"), TOKEN_B).await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+    assert_eq!(foreign.json()["error"]["code"], "not_found");
+    let foreign_inv = get(r, &format!("/v1/invocations/{invocation_id}"), TOKEN_B).await;
+    assert_eq!(foreign_inv.status, StatusCode::NOT_FOUND);
+    let foreign_logs = get(r, &format!("/v1/invocations/{invocation_id}/logs"), TOKEN_B).await;
+    assert_eq!(foreign_logs.status, StatusCode::NOT_FOUND);
+    let foreign_invoke = post_json(
+        r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_B,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(foreign_invoke.status, StatusCode::NOT_FOUND);
+
+    // alias CAS -> 409
+    let cas = call(
+        r,
+        req(
+            Method::PUT,
+            &format!("/v1/functions/{function_id}/aliases/prod"),
+            Some(TOKEN_A),
+        )
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(json_body(
+            serde_json::json!({"revision_id": revision_id, "expected_generation": 99}),
+        ))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        cas.status,
+        StatusCode::CONFLICT,
+        "{}",
+        String::from_utf8_lossy(&cas.body)
+    );
+    assert_eq!(cas.json()["error"]["code"], "conflict");
+    let ok = call(
+        r,
+        req(
+            Method::PUT,
+            &format!("/v1/functions/{function_id}/aliases/prod"),
+            Some(TOKEN_A),
+        )
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(json_body(
+            serde_json::json!({"revision_id": revision_id, "expected_generation": 1}),
+        ))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::OK);
+    assert_eq!(ok.json()["generation"], 2);
+    let aliases = get(r, &format!("/v1/functions/{function_id}/aliases"), TOKEN_A).await;
+    assert_eq!(aliases.json()["items"].as_array().unwrap().len(), 1);
+
+    // cancel a hanging invoke through the colon endpoint
+    let hang_router = r.clone();
+    let fid = function_id.clone();
+    let hanging = tokio::spawn(async move {
+        call(
+            &hang_router,
+            req(
+                Method::POST,
+                &format!("/v1/functions/{fid}/invoke"),
+                Some(TOKEN_A),
+            )
+            .body(json_body(serde_json::json!({})))
+            .unwrap(),
+        )
+        .await
+    });
+    let running_id = {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let h = get(
+                r,
+                &format!("/v1/functions/{function_id}/invocations"),
+                TOKEN_A,
+            )
+            .await;
+            let running = h.json()["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["status"] == "running")
+                .map(|i| i["id"].as_str().unwrap().to_string());
+            if let Some(id) = running {
+                break id;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "invocation never started"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let cancelled = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/invocations/{running_id}:cancel"),
+            Some(TOKEN_A),
+        )
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        cancelled.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&cancelled.body)
+    );
+    assert_eq!(cancelled.json()["status"], "cancelled");
+    let hung = hanging.await.unwrap();
+    assert_eq!(hung.status.as_u16(), 499);
+    assert_eq!(hung.json()["error"]["code"], "cancelled");
+    assert_eq!(
+        hung.header("x-tachyon-invocation-id"),
+        Some(running_id.as_str())
+    );
+    // second cancel is idempotent (slash form)
+    let again = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/invocations/{running_id}/cancel"),
+            Some(TOKEN_A),
+        )
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::OK);
+    assert!(
+        api.fake.running().is_empty(),
+        "every environment is terminated"
+    );
+
+    // unknown colon action -> 404
+    let weird = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/functions/{function_id}:explode"),
+            Some(TOKEN_A),
+        )
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(weird.status, StatusCode::NOT_FOUND);
+
+    // delete stops invocations
+    let deleted = call(
+        r,
+        req(
+            Method::DELETE,
+            &format!("/v1/functions/{function_id}"),
+            Some(TOKEN_A),
+        )
+        .body(Body::empty())
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::OK);
+    assert!(deleted.json()["deleted_at"].is_string());
+    let after = post_json(
+        r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(after.status, StatusCode::CONFLICT);
+    assert_eq!(after.json()["error"]["code"], "function_deleted");
+
+    // openapi
+    let spec = call(
+        r,
+        Request::get("/openapi.json").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(spec.status, StatusCode::OK);
+    let doc = spec.json();
+    assert!(doc["openapi"].as_str().unwrap().starts_with("3."));
+    let paths = doc["paths"].as_object().unwrap();
+    for p in [
+        "/v1/functions",
+        "/v1/functions/{function_id}",
+        "/v1/functions/{function_id}/revisions",
+        "/v1/functions/{function_id}/invoke",
+        "/v1/functions/{function_id}/http/{path}",
+        "/v1/invocations/{invocation_id}/cancel",
+        "/v1/invocations/{invocation_id}/logs",
+        "/v1/functions/{function_id}/usage",
+    ] {
+        assert!(paths.contains_key(p), "missing path {p}");
+    }
+    assert!(doc["components"]["schemas"]["ApiErrorBody"].is_object());
+}
+
+#[tokio::test]
+async fn invoke_failures_map_to_status_codes() {
+    let api = api(vec![
+        FakeGuestScript::HandlerError {
+            error_type: "Handler.Error".into(),
+            message: "nope".into(),
+        },
+        FakeGuestScript::InitError {
+            message: "boom".into(),
+        },
+    ]);
+    let r = &api.router;
+    let (function_id, _) = deploy(r, "fails").await;
+
+    let user = post_json(
+        r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(user.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(user.json()["error"]["code"], "user_error");
+    assert_eq!(user.json()["error"]["error_type"], "Handler.Error");
+    assert!(user.header("x-tachyon-invocation-id").is_some());
+
+    let init = post_json(
+        r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(init.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(init.json()["error"]["code"], "init_error");
+
+    // payload too large -> 413 before anything runs
+    let big = vec![b'a'; 2 * 1024 * 1024];
+    let too_big = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/functions/{function_id}/invoke"),
+            Some(TOKEN_A),
+        )
+        .body(json_body(
+            serde_json::json!({"blob": String::from_utf8(big).unwrap()}),
+        ))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(too_big.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(too_big.json()["error"]["code"], "payload_too_large");
+
+    // invalid JSON -> 400
+    let bad = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/functions/{function_id}/invoke"),
+            Some(TOKEN_A),
+        )
+        .body(Body::from("{not json"))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    // unknown function -> 404, invalid id shape -> 404
+    let missing = post_json(
+        r,
+        "/v1/functions/fn_01hzzzzzzzzzzzzzzzzzzzzzzz/invoke",
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    let bad_id = get(r, "/v1/functions/not-an-id", TOKEN_A).await;
+    assert_eq!(bad_id.status, StatusCode::NOT_FOUND);
+    assert_eq!(api.fake.created().len(), 2);
+}
