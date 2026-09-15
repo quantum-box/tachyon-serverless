@@ -22,7 +22,7 @@
 |---|---|---|
 | tenant | `TenantId`（`tn_` + ULID）。本リポジトリは tenant を発行しない | `crates/domain/src/ids.rs` |
 | Principal | 認証済み呼び出し元。`{subject, tenant_id, roles}` | `crates/provider-port/src/identity.rs` |
-| Role | `Deploy`（function / revision / alias の作成・更新）、`Invoke`（invoke と invocation / logs の読み取り）、`Operator`（provider 状態、全 tenant の読み取り専用） | 同上 |
+| Role | `Deploy`（function / revision / alias の作成・更新）、`Invoke`（invoke と invocation / logs の読み取り）、`Operator`（`/v1/provider` と、自 tenant の function / revision / alias の読み取りだけ。§7） | 同上 |
 | environment | 1 回の invoke のために作られ、終了後に破棄される microVM / process | `crates/domain/src/environment.rs` |
 | bridge | guest 側 PID 1 / 子プロセスとして user code を起動し、host と frame を交換する agent | `crates/runtime-bridge`、`docs/protocol.md` |
 | Lease | `(attempt_id, epoch)` を environment に結び付ける fencing token | `ExecutionLease::accepts` |
@@ -99,26 +99,26 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 ## 7. アクセス制御マトリクス（2 tenant + operator）
 
-前提: tenant A の principal は `roles = [deploy, invoke]`、tenant B も自 tenant に対して同じ、operator は `roles = [operator]`。対象資源はすべて **tenant A が所有**する。未認証は token なし / 無効 token。
+前提: tenant A の principal は `roles = [deploy, invoke]`、tenant B も自 tenant に対して同じ、operator は `roles = [operator]` で A 以外の tenant に属する（token は必ず 1 つの tenant に紐付く）。対象資源はすべて **tenant A が所有**する。未認証は token なし / 無効 token。
 
 | 資源・操作 | tenant A（所有者） | tenant B | operator | 未認証 |
 |---|---|---|---|---|
 | `POST /v1/functions`（作成） | 201（A の tenant に作成） | 201（**B の** tenant に作成。A の資源には触れない） | 403 `forbidden`（operator は読み取り専用） | 401 `unauthorized` |
-| `GET /v1/functions`（一覧） | A の分だけ | B の分だけ（A の function は含まれない） | 全 tenant 分（`tenant_id` 付き） | 401 |
-| `GET /v1/functions/{A}` | 200 | 404 `not_found` | 200 | 401 |
+| `GET /v1/functions`（一覧） | A の分だけ | B の分だけ（A の function は含まれない） | operator 自身の tenant の分だけ（A の function は含まれない） | 401 |
+| `GET /v1/functions/{A}` | 200 | 404 `not_found` | 404 | 401 |
 | `DELETE /v1/functions/{A}` | 200（以後 invoke は 409 `function_deleted`） | 404 | 403 | 401 |
 | `POST /v1/functions/{A}/revisions` | 202（validation は非同期） | 404 | 403 | 401 |
-| `GET /v1/functions/{A}/revisions[/{rev}]` | 200（spec には secret の `binding_ref` と `env_name` だけ。値は無い） | 404 | 200 | 401 |
+| `GET /v1/functions/{A}/revisions[/{rev}]` | 200（spec には secret の `binding_ref` と `env_name` だけ。値は無い） | 404 | 404 | 401 |
 | `PUT /v1/functions/{A}/aliases/{alias}` | 200 / 409 `conflict`（generation 不一致）/ 409 `revision_not_ready` | 404 | 403 | 401 |
-| `GET /v1/functions/{A}/aliases[/{alias}]` | 200 | 404 | 200 | 401 |
+| `GET /v1/functions/{A}/aliases[/{alias}]` | 200 | 404 | 404 | 401 |
 | `POST /v1/functions/{A}:invoke`、`ANY /v1/functions/{A}/http/{*path}` | 200 または invocation の失敗 status（§8） | 404 | 403（operator は invoke できない） | 401 |
-| `GET /v1/functions/{A}/invocations`、`GET /v1/invocations/{inv of A}` | 200 | 404 | 200。ただし `output` は常に省略（tenant データ）。status / timings / boot_evidence は見える | 401 |
+| `GET /v1/functions/{A}/invocations`、`GET /v1/invocations/{inv of A}` | 200 | 404 | 403（invocation 履歴は tenant データ。`invoke` role が必要） | 401 |
 | `POST /v1/invocations/{inv of A}:cancel` | 202 | 404 | 403 | 401 |
 | `GET /v1/invocations/{inv of A}/logs` | 200 | 404 | 403（ログ本文は tenant データ） | 401 |
 | secret 値 | API 無し（読めない） | API 無し | API 無し | — |
-| `POST /v1/artifacts`（upload） | 201（digest） | 201（B 自身の upload。同一 bytes なら同一 digest。§14-1 参照） | 403 | 401 |
+| `POST /v1/artifacts`（upload） | 201（digest。A が所有者として記録される） | 201（B 自身の upload。同一 bytes なら同一 digest で、B も所有者として記録される。B が upload していない digest を revision で参照すると、存在しない digest と同じ理由で `failed`。§14-1） | 403 | 401 |
 | artifact 本体の取得 | API 無し | API 無し | API 無し | — |
-| `GET /v1/functions/{A}/usage` | 200 | 404 | 200 | 401 |
+| `GET /v1/functions/{A}/usage` | 200 | 404 | 403 | 401 |
 | `GET /v1/provider` | 200 | 200 | 200 | 401 |
 | `GET /healthz`、`GET /readyz` | 200 / 503 | 同左 | 同左 | 200 / 503（認証不要） |
 | `X-Tachyon-Tenant-Id` が token の tenant と不一致 | 403 `forbidden` | 403 | 403 | 401 |
@@ -126,7 +126,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 注:
 
 - B が A の ID（`fn_...`、`inv_...`）を推測しても 404。ID は秘密ではなく、authz の代わりにしない。
-- operator の `output` 省略と logs 403 は最小権限の規則であり、`crates/api-types` の型（`output: Option<_>`）で表現できる。実装は PLT-4619 / PLT-4628。
+- operator は P1 では **自 tenant の function / revision / alias の metadata と `/v1/provider` だけ** を読める（`require_read` と tenant 一致）。他 tenant の資源は tenant B と同じく 404、invocation 履歴・usage・logs は role 不足で 403（`invoke` が必要。自 tenant でも 403）、mutation / invoke / cancel / upload は 403。全 tenant 横断の読み取り（`tenant_id` 付き一覧、`output` を省いた invocation 閲覧）は未実装で、実装するまで付与しない（fail-safe）。テスト: `apps/gateway/tests/gateway_integration.rs::operator_role_is_own_tenant_read_only`。
 - role が足りない場合（例: `invoke` だけの principal が `POST /v1/functions`）は 403 `forbidden`。自 tenant の資源に対する権限不足は存在を隠す必要がないため 404 にしない。
 
 ## 8. deadline モデル
@@ -135,10 +135,10 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 | deadline | 定義 | 超過時の分類 | HTTP | handler の副作用 |
 |---|---|---|---|---|
-| `queue_deadline` | `accepted_at + queue_timeout`（config、既定 10 s） | `QueueTimeout` | 504 `queue_timeout` | 無し（環境未作成） |
-| `init_deadline` | 環境作成開始 + `initialization_timeout_seconds`（revision、既定 30 s、上限 120 s）。`create_environment` の `connect_timeout` もこれ | `InitError` | 502 `init_error` | handler は未実行。ただし user process の初期化コードは走った可能性がある |
-| `execution_deadline` | `Invoke` 送信時刻 + `timeout_seconds`（revision、既定 30 s、上限 15 min） | `Timeout` | 504 `timeout` | あり得る。再実行しない |
-| `client_deadline` | `accepted_at + min(x-tachyon-client-timeout-ms, timeout + init + queue)` | 単独の分類を持たない。他の 3 つはこれを超えて設定されない。到達時はその時点の phase の分類（Queued → `QueueTimeout`、Running → `Timeout`） | 同左 | phase による |
+| `queue_deadline` | `min(accepted_at + queue_timeout（config、既定 10 s）, client_deadline)` | `QueueTimeout` | 504 `queue_timeout` | 無し（環境未作成） |
+| `init_deadline` | `min(環境作成開始 + initialization_timeout_seconds（revision、既定 30 s、上限 120 s）, client_deadline)`。`create_environment` の `connect_timeout` と handshake / Ready の待ちもこれで打ち切る | `InitError` | 502 `init_error` | handler は未実行。ただし user process の初期化コードは走った可能性がある |
+| `execution_deadline` | `min(Invoke 送信時刻 + timeout_seconds（revision、既定 30 s、上限 15 min）, client_deadline)`。guest の `Invoke.deadline_ms` はこの値 | `Timeout` | 504 `timeout` | あり得る。再実行しない |
+| `client_deadline` | `accepted_at + min(x-tachyon-client-timeout-ms, timeout + init + queue)` | 他の 3 つはこれを超えて設定されない（host が clamp する）。到達時はその時点の phase で分類する: Queued → `QueueTimeout`。環境作成〜Ready 待ち、または Ready 後で handler 未送信 → `Timeout`（`Host.ClientDeadline`。handler は起動せず、環境は stop + `terminate(Cancelled)`、Attempt は作らない）。Running → `Timeout`（`Host.ClientDeadline`。`Cancel` → `terminate(Timeout)`） | 同左 | phase による（handler 起動前なら無し） |
 | 容量超過（queue が満杯） | `max_queue` 超え | — | 429 `capacity_exceeded` | 無し |
 
 補足:
@@ -147,6 +147,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 - `POST :cancel` は同じ手順で `Cancelled`（invoke 応答は 499 `cancelled`、cancel 自体は 202）。
 - client が切断しても invoke タスクは `execution_deadline` まで追跡し、結果を ledger に残す（`docs/architecture.md` §3-11）。切断は cancel ではない。
 - timeout / cancel / init 失敗した環境は再利用しない（P1 はそもそも再利用しない）。
+- Ready 後、Attempt / Lease / `Running` を記録する前に `client_deadline` を再確認し、過ぎていれば handler を起動しない。
 
 ## 9. `OutcomeUnknown` の意味
 
@@ -154,7 +155,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 入る条件:
 
-1. `Invoke` 送信後、`Response` / `Error` を受け取る前に bridge との stream が閉じた（EOF / IO error）。
+1. `Invoke` frame の書き込みが成功した後、`Response` / `Error` を受け取る前に bridge との stream が閉じた（EOF / IO error）。
 2. `observe_environment` が `Exited` / `NotFound` を返し、結果 frame が無い。
 3. gateway が再起動し、ledger に `Running` の invocation が残っている（起動時 reconcile）。
 
@@ -163,6 +164,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 - `execution_deadline` 到達 → `Timeout`（host が判定済み）。
 - bridge が `Error{kind: crash}` を送ってから閉じた → `Failed{Crash}`（結果は「crash」として確定）。
 - frame の protocol 違反 → `Failed{PlatformError}`（`docs/architecture.md` §3-9 の分類に従う）。
+- `Invoke` frame が guest に届かなかった（handler は開始していない）→ `Failed`。encode できない（`FrameTooLarge`、何も書いていない）→ `PlatformError` / `Host.InvokeTooLarge`（環境は健全なので `Stopped`）。書き込み失敗（接続断）→ guest が閉じる前に送った frame を短時間読み、`Exited` なら `Crash` / `Runtime.Exited`、無ければ `Crash` / `Host.BridgeDisconnectedBeforeInvoke`。同じ guest の挙動が書き込みの競合で分類を変えないようにするため。
 
 契約:
 
@@ -178,6 +180,8 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 - scope: `(tenant_id, function_id, key)`。tenant B が同じ key を送っても A の invocation には触れない（B の scope で新規作成）。
 - 一致（同 key、同 `input_digest`）: 既存 Invocation を返し、**再実行しない**。terminal でなければ現在の状態（`accepted` / `queued` / `running`）を返し、client は `GET /v1/invocations/{id}` で追跡する。
 - 不一致（同 key、異なる `input_digest`）: 409 `conflict`。
+- key は Invocation の ledger 行と **同じ store 更新** で結び付ける。受付前に拒否された request（400 / 413 / 429 など）は key を消費せず、同じ key での再送は新規として受け付けられる。key が既存 Invocation に結び付いていれば、容量が満杯でも 429 ではなくその記録を返す。並行した同 key の request は 1 つだけが受け付けられ、残りは同じ Invocation を返す。
+- 旧版の `state.json` に残った「Invocation の無い key」は起動時の reconcile で捨てる（404 を返し続けない）。
 - alias / revision の違いは key の一致判定に含めない（同 key なら最初に受け付けた revision の結果が返る）。
 - 保持期間: P1 は gateway プロセスの生存期間（`state.json` に保存されていればその間）。期限切れ後の再送は新規 invocation になる。これは SLA ではない。
 - Idempotency-Key は副作用の exactly-once を保証しない。`OutcomeUnknown` / `Timeout` の後の再送は、同 key なら記録を返すだけで、副作用が起きたかどうかを確定させない。
@@ -188,15 +192,16 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 | 項目 | 上限 | 超過時 |
 |---|---|---|
-| request payload | 1 MiB（`max_payload_bytes`） | 413 `payload_too_large`、invocation を作らない |
-| response payload | 6 MiB（`max_response_bytes`、`HelloAck.max_response_bytes`） | bridge が `Error{response_too_large}` → `Failed{PlatformError}`（user code の責任だが分類は platform 側の制約超過） |
-| frame | 8 MiB（`MAX_FRAME_BYTES`） | `ProtocolError::FrameTooLarge`、session を閉じる → `PlatformError` |
+| request payload | 1 MiB（`max_payload_bytes`）。`max_payload_bytes + 64 KiB`（envelope）は `MAX_FRAME_BYTES` 以下でなければ設定を拒否 | 413 `payload_too_large`、invocation を作らない |
+| response payload | 6 MiB（`max_response_bytes`、`HelloAck.max_response_bytes`）。`max_response_bytes + 64 KiB` は `MAX_FRAME_BYTES` 以下でなければ設定を拒否 | bridge が `Error{response_too_large}` → `Failed{PlatformError}`（user code の責任だが分類は platform 側の制約超過） |
+| frame | 8 MiB（`MAX_FRAME_BYTES`） | 受信: `ProtocolError::FrameTooLarge`、session を閉じる → `PlatformError`。host が送る `Invoke` が encode できない: 何も書かずに `Failed{PlatformError}`（`Host.InvokeTooLarge`、§9） |
 | inline output | config `inline_output_max` | `PayloadRef::Digest` に切り替え。`InvocationResponse.output` は `null` |
 | log 行 | 16 KiB（`max_log_line_bytes`） | char boundary で切り `truncated = true` |
 | log / invocation | 2000 行、1 MiB | 超過分を捨て `LogsResponse.dropped = true` |
 | artifact | 256 MiB | `ArtifactError::TooLarge` → 413 |
 | description | 1024 bytes | 400 `invalid_request` |
-| Idempotency-Key | 256 文字 | 400 |
+| Idempotency-Key | 256 文字 | 400（key は消費しない） |
+| trace id（`x-tachyon-trace-id` request header） | 256 bytes | 400 |
 | env 変数名 | 128 文字、`TACHYON_` prefix 禁止、重複禁止 | 400（`validate_env_name`） |
 | timeout | 1..=900 s（execution）、1..=120 s（init） | 400 |
 | memory / cpu / ephemeral | 128..=4096 MiB / 250..=2000 m / ≤ 2048 MiB | 400 |
@@ -209,7 +214,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 |---|---|---|---|
 | T01 | tenant B が A の function / invocation を ID 推測で読む | `ensure_owned_by` → 404（§6-2） | — |
 | T02 | tenant B が A の名前で invoke する | `Principal.tenant_id` は token 由来。header 不一致は 403 | token 漏洩（A6） |
-| T03 | secret 値がログ・応答・state に混入 | `SecretValue` の `Debug` redact、`HelloAck.env` にだけ載せる、`HelloAck` を log しない、`BootEvidence.details` に secret 禁止 | 実装ミス。テストで `HelloAck` の log 不在を確認する（PLT-4623） |
+| T03 | secret 値がログ・応答・state に混入 | `SecretValue` の `Debug` redact、`HelloAck.env` にだけ載せる、`HelloAck` を log しない、`BootEvidence.details` に secret 禁止 | 実装ミス。host 側は `crates/application/tests/pipeline.rs::secret_values_never_reach_host_logs`（TRACE で捕捉した host log と invocation log に値が無いこと）で確認。bridge 側の同等テストは PLT-4623 |
 | T04 | secret が別 environment に配られる | `SecretDeliveryContext{tenant_id, revision_id, environment_id, epoch}` で解決。environment 割当後にしか解決しない | — |
 | T05 | 古い / 偽の結果で ledger を上書き | `ExecutionLease::accepts(attempt_id, epoch)`（test `lease_fencing`）。deadline 判定後の frame は捨てる | — |
 | T06 | guest が `handler_ms` / `Ready` を偽って課金・timeout を操作 | §6-1。host の `AttemptTimings`、`UsageEvent{HostObserved}`、watchdog | — |
@@ -217,14 +222,14 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | T08 | 巨大 payload / response / frame による memory 枯渇 | §11 の各上限。frame 上限は codec で decode 前に拒否 | — |
 | T09 | log 洪水による retention 破壊・disk 枯渇 | invocation ごとの行数 / bytes 上限、`dropped` で観測 | — |
 | T10 | orphan 環境（process / socket / tap / drive / workdir）が残る | `terminate_environment` は冪等、`TerminateReport.cleaned` を列挙、`list_environments` で reconcile。P1 は tap を作らない | 実測（PLT-4627 の orphan テスト） |
-| T11 | artifact の差し替え・改竄 | Revision は digest 固定、`spec_digest` で `verify_integrity`、alias は generation CAS、artifact store は content-addressed | §14-1 |
+| T11 | artifact の差し替え・改竄・他 tenant の artifact の実行 | Revision は digest 固定、`spec_digest` で `verify_integrity`、alias は generation CAS、artifact store は content-addressed。upload した tenant を所有者として記録し、revision は自 tenant が upload した digest しか解決しない（§14-1） | — |
 | T12 | dev_only provider が production で使われる | `profile = "production"` は `Capabilities.dev_only` を拒否。`/v1/provider` が `dev_only` を露出 | 設定ミス |
 | T13 | `TACHYON_*` を revision の env で上書きし、bridge の挙動を変える | `validate_env_name` が `TACHYON_` prefix と重複を拒否（test `invalid_specs_are_rejected`） | — |
 | T14 | user code が bridge を乗っ取り、他 attempt の結果を送る | bridge は 1 in-flight、host は Lease 一致だけ受理。乗っ取られても host 側の判定は変わらない（§3） | guest 内の情報（自 tenant の secret / payload）は守れない。設計上受容 |
 | T15 | 別 environment の guest が他の vsock に接続する | Firecracker は VM ごとに uds path（`<uds_path>_5000`）を持ち、host は `InstanceStart` 前に listen。`Hello.environment_id` 不一致は `HelloReject` | — |
-| T16 | client 切断で invoke が放置され、資源が残る | invoke タスクは spawn され deadline まで追跡、必ず terminate | — |
+| T16 | client 切断で invoke が放置され、資源が残る | invoke タスクは spawn され deadline まで追跡、必ず terminate。driver が panic しても環境を `terminate(Crashed)` し、Lease 解放・Attempt `Failed`・環境 `Failed`・`EnvironmentStopped` を記録する | — |
 | T17 | 同時実行数の無制限化 | revision の `max_concurrency` と gateway 全体の semaphore、bounded queue → 429 / 504 | 単一 host の容量は実測前 |
-| T18 | operator の越権（他 tenant の出力 / ログ / secret 参照、invoke） | §7: operator は metadata のみ。`output` 省略、logs 403、mutation 403 | — |
+| T18 | operator の越権（他 tenant の出力 / ログ / secret 参照、invoke） | §7: operator は自 tenant の function / revision / alias metadata のみ。他 tenant は 404、invocation / usage / logs 403、mutation / invoke 403 | — |
 | T19 | `readyz` が provider 不能を隠す | `preflight` 失敗で `readyz` 503、invoke は 503 `provider_unavailable` | — |
 | T20 | OCI artifact を「実行できる」と誤認 | `ArtifactRef::OciImage` は受理するが validation で理由付き `Failed`（`Support::Unsupported`） | — |
 
@@ -247,7 +252,7 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 
 ## 14. 残存リスクと未解決事項
 
-1. **artifact の tenant 境界。** `ArtifactStore`（`crates/provider-port/src/artifact.rs`）は content-addressed で tenant を持たない。tenant B が A の artifact digest を知っていれば、`POST /v1/functions/{B}/revisions` で `{kind: binary, digest}` を参照でき、A のバイナリを B の environment で実行できる。対策案: upload 時に `(tenant_id, digest)` の所有記録を repository に残し、revision 作成時に呼び出し tenant の所有を要求する（`exists` を tenant 付きで判定）。port の変更は不要で application 側で閉じられる。担当: PLT-4620。
+1. **artifact の tenant 境界（解消済み）。** `ArtifactStore`（`crates/provider-port/src/artifact.rs`）は content-addressed で tenant を持たないが、`POST /v1/artifacts` は `ArtifactService::upload` を通り、`(tenant_id, digest)` の所有を `state.json`（`artifact_owners`）に記録する。revision の作成と validation は revision の tenant が所有する digest しか解決せず、他 tenant だけが upload した digest は存在しない digest と同じ結果（`size_bytes = 0`、`failed` の理由 `artifact unavailable: artifact not found: <digest>`）になるので、digest の存在も漏れない。同じ bytes を自分で upload すれば参照できる。port の変更は無い。残り: 修正前の版で作られた Ready revision は再検証しない。テスト: `crates/application/tests/pipeline.rs::revisions_cannot_reference_another_tenants_artifact`、`apps/gateway/tests/gateway_integration.rs::foreign_artifact_digest_is_indistinguishable_from_a_missing_one`。
 2. **jailer 未使用。** P1 の firecracker プロセスは gateway と同じユーザー・同じ mount namespace で走る。VMM 脱出時の影響範囲を狭めていない。PLT-4622 以降で jailer / 専用ユーザー / seccomp を検討する。
 3. **平文 HTTP と静的 token。** B1 の保護は deployment 依存（§5-2, 5-3）。
 4. **`state.json` の権限。** invocation の入出力（inline）と log を含むため、ファイル権限は `config/gateway.toml` と同じ扱いにする。

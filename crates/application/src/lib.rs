@@ -20,6 +20,7 @@ pub use app::{Application, BootstrapOptions, ProviderFactory};
 pub use config::{GatewayConfig, Profile, ProviderConfig, ProviderKindConfig};
 pub use error::AppError;
 pub use services::{
-    AliasService, FunctionService, HistoryService, InvocationDetail, InvokeOutcome, InvokeRequest,
-    InvokeService, LogService, ProviderService, RevisionService, UsageSummary,
+    AliasService, ArtifactService, FunctionService, HistoryService, InvocationDetail,
+    InvokeOutcome, InvokeRequest, InvokeService, LogService, ProviderService, RevisionService,
+    UsageSummary,
 };

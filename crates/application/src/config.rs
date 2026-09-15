@@ -10,7 +10,14 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use tachyon_serverless_domain::{Limits, TenantId};
+use tachyon_serverless_protocol::MAX_FRAME_BYTES;
 use tachyon_serverless_provider_port::Role;
+
+/// Frame bytes reserved for the `Invoke` / `Response` envelope (ids, event
+/// type, deadline, trace id) on top of the payload. `limits.max_payload_bytes`
+/// and `limits.max_response_bytes` plus this reserve must fit
+/// [`MAX_FRAME_BYTES`], so an accepted payload can always be framed.
+pub const FRAME_ENVELOPE_RESERVE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -466,6 +473,18 @@ impl GatewayConfig {
                 "limits.max_payload_bytes and limits.max_artifact_bytes must be > 0".into(),
             ));
         }
+        let max_frame = MAX_FRAME_BYTES as u64;
+        for (name, value) in [
+            ("limits.max_payload_bytes", limits.max_payload_bytes),
+            ("limits.max_response_bytes", limits.max_response_bytes),
+        ] {
+            if value.saturating_add(FRAME_ENVELOPE_RESERVE_BYTES) > max_frame {
+                return Err(ConfigError::Invalid(format!(
+                    "{name} ({value}) plus {FRAME_ENVELOPE_RESERVE_BYTES} bytes of envelope \
+                     headroom must fit in a protocol frame ({max_frame} bytes)"
+                )));
+            }
+        }
         if self.invoke.inline_output_max_bytes > limits.max_response_bytes {
             return Err(ConfigError::Invalid(
                 "invoke.inline_output_max_bytes must be <= limits.max_response_bytes".into(),
@@ -554,6 +573,23 @@ value = "demo-secret-value-a"
             cfg.effective_limits().max_response_bytes,
             Limits::default().max_response_bytes
         );
+    }
+
+    #[test]
+    fn limits_must_leave_frame_headroom() {
+        let max = MAX_FRAME_BYTES as u64;
+        for field in ["max_payload_bytes", "max_response_bytes"] {
+            let too_big = format!("{DEV}\n[limits]\n{field} = {max}\n");
+            let err = GatewayConfig::from_toml(&too_big).unwrap_err();
+            assert!(err.to_string().contains(field), "{err}");
+            let fits = format!(
+                "{DEV}\n[limits]\n{field} = {}\n",
+                max - FRAME_ENVELOPE_RESERVE_BYTES
+            );
+            GatewayConfig::from_toml(&fits).unwrap();
+        }
+        // the defaults fit
+        GatewayConfig::from_toml(DEV).unwrap();
     }
 
     #[test]

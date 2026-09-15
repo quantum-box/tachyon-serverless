@@ -105,13 +105,13 @@ pub async fn upload_artifact(
     tachyon_serverless_application::authz::require_deploy(&ctx.principal).ctx(&ctx.request_id)?;
     let max = state.limits.max_artifact_bytes;
     let body = read_body(req, max).await.ctx(&ctx.request_id)?;
-    if body.is_empty() {
-        return Err(GatewayError::new(
-            AppError::InvalidRequest("artifact body is empty".into()),
-            Some(ctx.request_id),
-        ));
-    }
-    let stored = state.artifacts.put(&body).await.ctx(&ctx.request_id)?;
+    // The service records the caller's tenant as an owner of the digest;
+    // revisions may only reference digests their tenant uploaded.
+    let stored = state
+        .artifact_service
+        .upload(&ctx.principal, &body)
+        .await
+        .ctx(&ctx.request_id)?;
     Ok(Json(ArtifactUploadResponse {
         digest: stored.digest.to_string(),
         size_bytes: stored.size_bytes,
@@ -608,10 +608,12 @@ const STRIPPED_RESPONSE_HEADERS: &[&str] = &[
 pub async fn http_path(
     State(state): State<AppState>,
     ctx: Ctx,
-    Path((function_id, path)): Path<(String, String)>,
+    // The `{*path}` capture is percent-decoded by axum and therefore not
+    // used for the event; see [`adapter_path`].
+    Path((function_id, _decoded_path)): Path<(String, String)>,
     req: Request,
 ) -> ApiResult<Response> {
-    run_http(state, ctx, function_id, path, req).await
+    run_http(state, ctx, function_id, req).await
 }
 
 pub async fn http_root(
@@ -620,17 +622,31 @@ pub async fn http_root(
     Path(function_id): Path<String>,
     req: Request,
 ) -> ApiResult<Response> {
-    run_http(state, ctx, function_id, String::new(), req).await
+    run_http(state, ctx, function_id, req).await
+}
+
+/// The path relative to the function root, exactly as the client sent it
+/// (still percent-encoded, without the query). Taken from the raw
+/// request-target rather than the decoded route capture so that `%2F`, `%3F`,
+/// `%23`, `%25` and spaces reach the function's router unchanged and the
+/// router performs the single decode. Leading slashes collapse to one.
+fn adapter_path(raw_path: &str) -> String {
+    let rest = raw_path
+        .strip_prefix("/v1/functions/")
+        .and_then(|s| s.split_once('/'))
+        .and_then(|(_, rest)| rest.strip_prefix("http"))
+        .unwrap_or("");
+    format!("/{}", rest.trim_start_matches('/'))
 }
 
 async fn run_http(
     state: AppState,
     ctx: Ctx,
     function_id: String,
-    rel_path: String,
     req: Request,
 ) -> ApiResult<Response> {
     let id = parse_function_id(&function_id, &ctx.request_id)?;
+    let rel_path = adapter_path(req.uri().path());
     let query = InvokeQuery {
         alias: header_str(req.headers(), "x-tachyon-alias").map(str::to_string),
         revision_id: header_str(req.headers(), "x-tachyon-revision-id").map(str::to_string),
@@ -658,7 +674,7 @@ async fn run_http(
         .ctx(&ctx.request_id)?;
     let event = HttpRequestEvent {
         method,
-        path: format!("/{}", rel_path.trim_start_matches('/')),
+        path: rel_path,
         query: raw_query,
         headers: forwarded,
         body_base64: base64::engine::general_purpose::STANDARD.encode(&body),
@@ -842,4 +858,20 @@ pub async fn usage(
         bytes_out_total: s.bytes_out_total,
         not_billable: true,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::adapter_path;
+
+    #[test]
+    fn adapter_path_keeps_percent_encoding_and_normalises_the_root() {
+        let base = "/v1/functions/fn_01hzzzzzzzzzzzzzzzzzzzzzzz/http";
+        assert_eq!(adapter_path(base), "/");
+        assert_eq!(adapter_path(&format!("{base}/")), "/");
+        assert_eq!(adapter_path(&format!("{base}/items/42")), "/items/42");
+        assert_eq!(adapter_path(&format!("{base}/a%20b")), "/a%20b");
+        assert_eq!(adapter_path(&format!("{base}/a%2Fb/c")), "/a%2Fb/c");
+        assert_eq!(adapter_path(&format!("{base}//x")), "/x");
+    }
 }

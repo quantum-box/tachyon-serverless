@@ -1,22 +1,40 @@
 //! End-to-end tests of the application layer against the fake provider.
 
+use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+
+use async_trait::async_trait;
+use futures::{SinkExt, StreamExt};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 use tachyon_serverless_api_types::{
     ArtifactRequest, CreateRevisionRequest, ExecutionRequest, ResourcesRequest,
     SecretBindingRequest,
 };
+use tachyon_serverless_application::services::invoke::MAX_TRACE_ID_BYTES;
 use tachyon_serverless_application::{
-    AppError, Application, BootstrapOptions, GatewayConfig, InvokeRequest,
+    AppError, Application, BootstrapOptions, GatewayConfig, InvokeOutcome, InvokeRequest,
 };
 use tachyon_serverless_domain::{
-    AliasName, AttemptStatus, EnvironmentState, ErrorClass, EventKind, Function, FunctionRevision,
-    InvocationStatus, RevisionStatus, TenantId,
+    AliasName, Architecture, ArtifactRef, AttemptStatus, Clock, EnvironmentId, EnvironmentState,
+    ErrorClass, EventKind, Function, FunctionRevision, InvocationId, InvocationStatus,
+    ProviderKind, RevisionStatus, Sha256Digest, TenantId, Timestamp, UsageEventType,
 };
-use tachyon_serverless_protocol::HostMessage;
-use tachyon_serverless_provider_fake::{FakeExecutionProvider, FakeGuestScript};
-use tachyon_serverless_provider_port::{ExecutionProvider, Principal, Role, TerminateReason};
+use tachyon_serverless_protocol::{
+    FrameCodec, GuestMessage, HostMessage, PROTOCOL_VERSION, decode_message, encode_message,
+};
+use tachyon_serverless_provider_fake::{
+    CustomScriptContext, FakeExecutionProvider, FakeGuestScript, FakeProviderOptions, ScriptFuture,
+};
+use tachyon_serverless_provider_port::{
+    ArtifactLocation, Capabilities, EnvironmentHandle, EnvironmentObservation, EnvironmentSpec,
+    ExecutionProvider, PreflightReport, Principal, ProviderError, Role, TerminateReason,
+    TerminateReport,
+};
 
 const TENANT_A: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzza";
 const TENANT_B: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb";
@@ -71,7 +89,7 @@ struct Harness {
     fake: Arc<FakeExecutionProvider>,
     a: Principal,
     b: Principal,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 fn principal(tenant: &str, roles: Vec<Role>) -> Principal {
@@ -83,24 +101,34 @@ fn principal(tenant: &str, roles: Vec<Role>) -> Principal {
 }
 
 fn harness(scripts: Vec<FakeGuestScript>, extra: &str) -> Harness {
+    let fake = Arc::new(FakeExecutionProvider::with_scripts(scripts));
+    harness_with(fake.clone(), fake, extra, None)
+}
+
+/// `fake` is the provider whose records the test inspects; `provider` is what
+/// the application uses (the fake itself or a decorator around it).
+fn harness_with(
+    fake: Arc<FakeExecutionProvider>,
+    provider: Arc<dyn ExecutionProvider>,
+    extra: &str,
+    clock: Option<Arc<dyn Clock>>,
+) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let config = GatewayConfig::from_toml(&config_toml(dir.path(), "dev", extra)).unwrap();
-    let fake = Arc::new(FakeExecutionProvider::with_scripts(scripts));
-    let app = Application::bootstrap_with(
-        config,
-        fake.clone(),
-        BootstrapOptions {
-            persist_state: true,
-            ..BootstrapOptions::default()
-        },
-    )
-    .unwrap();
+    let mut options = BootstrapOptions {
+        persist_state: true,
+        ..BootstrapOptions::default()
+    };
+    if let Some(clock) = clock {
+        options.clock = clock;
+    }
+    let app = Application::bootstrap_with(config, provider, options).unwrap();
     Harness {
         app,
         fake,
         a: principal(TENANT_A, vec![Role::Deploy, Role::Invoke]),
         b: principal(TENANT_B, vec![Role::Deploy, Role::Invoke]),
-        _dir: dir,
+        dir,
     }
 }
 
@@ -144,26 +172,36 @@ async fn deploy_with(
     init_timeout: u32,
     max_concurrency: u32,
 ) -> (Function, FunctionRevision) {
+    deploy_custom(h, principal, name, |req| {
+        req.execution.timeout_seconds = timeout;
+        req.execution.initialization_timeout_seconds = init_timeout;
+        req.execution.max_concurrency = max_concurrency;
+    })
+    .await
+}
+
+/// Upload an artifact through the ownership-recording service, create the
+/// function and a revision (adjusted by `customize`), and wait until it is
+/// Ready and published to `prod`.
+async fn deploy_custom(
+    h: &Harness,
+    principal: &Principal,
+    name: &str,
+    customize: impl FnOnce(&mut CreateRevisionRequest),
+) -> (Function, FunctionRevision) {
     let artifact = h
         .app
-        .artifacts
-        .put(format!("#!/bin/sh\necho {name}\n").as_bytes())
+        .artifact_service
+        .upload(principal, format!("#!/bin/sh\necho {name}\n").as_bytes())
         .await
         .unwrap();
     let function = h.app.functions.create(principal, name, "").unwrap();
+    let mut req = revision_request(artifact.digest.as_str(), 30, 30, 4);
+    customize(&mut req);
     let rev = h
         .app
         .revisions
-        .create(
-            principal,
-            &function.id,
-            &revision_request(
-                artifact.digest.as_str(),
-                timeout,
-                init_timeout,
-                max_concurrency,
-            ),
-        )
+        .create(principal, &function.id, &req)
         .await
         .unwrap();
     assert_eq!(rev.status, RevisionStatus::Pending);
@@ -661,7 +699,12 @@ async fn cross_tenant_resources_are_not_found() {
 async fn alias_cas_conflict_and_rollback() {
     let h = harness(vec![], "");
     let (function, rev1) = deploy(&h, &h.a, "cas").await;
-    let artifact = h.app.artifacts.put(b"#!/bin/sh\necho v2\n").await.unwrap();
+    let artifact = h
+        .app
+        .artifact_service
+        .upload(&h.a, b"#!/bin/sh\necho v2\n")
+        .await
+        .unwrap();
     let mut req = revision_request(artifact.digest.as_str(), 30, 30, 4);
     req.publish_to_prod = false;
     let rev2 = h
@@ -779,7 +822,11 @@ async fn revision_is_pinned_at_accept_even_if_alias_changes_mid_flight() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // publish a second revision to prod while the first invocation runs
-    let artifact = app.artifacts.put(b"#!/bin/sh\necho v2\n").await.unwrap();
+    let artifact = app
+        .artifact_service
+        .upload(&h.a, b"#!/bin/sh\necho v2\n")
+        .await
+        .unwrap();
     let rev2 = app
         .revisions
         .create(
@@ -881,4 +928,857 @@ async fn shutdown_all_cancels_in_flight_and_refuses_new_work() {
             .await,
         Err(AppError::ProviderUnavailable(_))
     ));
+}
+
+// ---------------------------------------------------------------------------
+// shared helpers for the regression tests below
+// ---------------------------------------------------------------------------
+
+fn with_status(h: &Harness, function: &Function, status: InvocationStatus) -> Option<InvocationId> {
+    h.app
+        .history
+        .list_invocations(&h.a, &function.id, 50)
+        .unwrap()
+        .iter()
+        .find(|d| d.invocation.status == status)
+        .map(|d| d.invocation.id.clone())
+}
+
+async fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !cond() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+fn failed_error(out: &InvokeOutcome) -> tachyon_serverless_domain::InvocationError {
+    match &out.invocation().status {
+        InvocationStatus::Failed { error } => error.clone(),
+        other => panic!("expected a failed invocation, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// idempotency (docs/threat-model.md §10)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn capacity_rejection_does_not_consume_the_idempotency_key() {
+    let h = harness(
+        vec![
+            FakeGuestScript::HangForever,
+            FakeGuestScript::RespondOk(serde_json::json!({"n": 2})),
+            FakeGuestScript::RespondOk(serde_json::json!({"n": 3})),
+        ],
+        "[capacity]\nmax_concurrency = 1\nmax_queue = 1\nqueue_timeout_seconds = 10\n",
+    );
+    let (function, _) = deploy_with(&h, &h.a, "keyed", 10, 5, 4).await;
+    let app = h.app.clone();
+    let hanging = tokio::spawn({
+        let req = invoke_request(&h.a, &function, serde_json::json!({}));
+        let app = app.clone();
+        async move { app.invoke.invoke(req).await }
+    });
+    wait_until("the first invocation to run", || {
+        with_status(&h, &function, InvocationStatus::Running).is_some()
+    })
+    .await;
+    let queued = tokio::spawn({
+        let req = invoke_request(&h.a, &function, serde_json::json!({}));
+        let app = app.clone();
+        async move { app.invoke.invoke(req).await }
+    });
+    wait_until("the second invocation to queue", || {
+        with_status(&h, &function, InvocationStatus::Queued).is_some()
+    })
+    .await;
+
+    let mut keyed = invoke_request(&h.a, &function, serde_json::json!({"k": 1}));
+    keyed.idempotency_key = Some("retry-me".into());
+    for attempt in 0..2 {
+        let err = app.invoke.invoke(keyed.clone()).await.err().unwrap();
+        assert!(
+            matches!(err, AppError::CapacityExceeded(_)),
+            "attempt {attempt}: {err}"
+        );
+        assert_eq!(err.http_status(), 429);
+    }
+
+    // Drain: cancel the hanging invocation; the queued one runs.
+    let hanging_id = with_status(&h, &function, InvocationStatus::Running).unwrap();
+    app.invoke.cancel(&h.a, &hanging_id).await.unwrap();
+    assert_eq!(
+        hanging.await.unwrap().unwrap().invocation().status,
+        InvocationStatus::Cancelled
+    );
+    assert!(queued.await.unwrap().unwrap().succeeded());
+
+    // The retry after backpressure executes; it is neither a 404 nor a replay.
+    let out = app.invoke.invoke(keyed.clone()).await.unwrap();
+    assert!(out.succeeded(), "{:?}", out.invocation().status);
+    assert!(!out.replayed);
+    assert_eq!(out.output, Some(serde_json::json!({"n": 3})));
+    let again = app.invoke.invoke(keyed).await.unwrap();
+    assert!(again.replayed);
+    assert_eq!(again.invocation().id, out.invocation().id);
+    assert_eq!(h.fake.created().len(), 3);
+}
+
+#[tokio::test]
+async fn invalid_idempotency_key_and_trace_id_are_rejected_without_side_effects() {
+    let h = harness(vec![], "");
+    let (function, _) = deploy(&h, &h.a, "strict").await;
+    let long_key = "k".repeat(300);
+    let mut req = invoke_request(&h.a, &function, serde_json::json!({}));
+    req.idempotency_key = Some(long_key.clone());
+    for attempt in 0..2 {
+        let err = h.app.invoke.invoke(req.clone()).await.err().unwrap();
+        assert!(
+            matches!(err, AppError::InvalidRequest(_)),
+            "attempt {attempt}: {err}"
+        );
+        assert_eq!(err.http_status(), 400);
+    }
+    let mut traced = invoke_request(&h.a, &function, serde_json::json!({}));
+    traced.trace_id = Some("t".repeat(MAX_TRACE_ID_BYTES + 1));
+    let err = h.app.invoke.invoke(traced).await.err().unwrap();
+    assert!(matches!(err, AppError::InvalidRequest(_)), "{err}");
+
+    assert!(h.fake.created().is_empty());
+    assert!(
+        h.app
+            .history
+            .list_invocations(&h.a, &function.id, 10)
+            .unwrap()
+            .is_empty()
+    );
+    let state = std::fs::read_to_string(h.app.store.persist_path().unwrap()).unwrap();
+    assert!(
+        !state.contains(&long_key),
+        "the rejected key was not stored"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_requests_with_the_same_key_run_once() {
+    let fake = Arc::new(FakeExecutionProvider::with_options(FakeProviderOptions {
+        boot_delay: Duration::from_millis(300),
+        ..FakeProviderOptions::default()
+    }));
+    fake.push_script(FakeGuestScript::RespondOk(
+        serde_json::json!({"once": true}),
+    ));
+    // A second environment would fail to boot instead of silently running.
+    fake.set_default_script(None);
+    let h = harness_with(fake.clone(), fake, "", None);
+    let (function, _) = deploy(&h, &h.a, "once").await;
+    let mut req = invoke_request(&h.a, &function, serde_json::json!({"same": 1}));
+    req.idempotency_key = Some("one-key".into());
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(8));
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let app = h.app.clone();
+            let req = req.clone();
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                app.invoke.invoke(req).await
+            })
+        })
+        .collect();
+    let mut ids = Vec::new();
+    let mut executed = 0;
+    for task in tasks {
+        let out = task
+            .await
+            .unwrap()
+            .expect("no request with the shared key may fail");
+        assert!(out.succeeded(), "{:?}", out.invocation().status);
+        assert_eq!(out.output, Some(serde_json::json!({"once": true})));
+        if !out.replayed {
+            executed += 1;
+        }
+        ids.push(out.invocation().id.clone());
+    }
+    assert_eq!(executed, 1);
+    assert!(ids.windows(2).all(|w| w[0] == w[1]), "{ids:?}");
+    assert_eq!(h.fake.created().len(), 1);
+    assert_eq!(
+        h.app
+            .history
+            .list_invocations(&h.a, &function.id, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn dangling_idempotency_key_is_healed_on_restart() {
+    let h = harness(vec![], "");
+    let (function, _) = deploy(&h, &h.a, "healed").await;
+    let payload = serde_json::json!({"retry": true});
+
+    // A state file written by a version that bound keys before acceptance:
+    // the key points at an invocation that was never recorded.
+    let path = h.app.store.persist_path().unwrap().to_path_buf();
+    let mut state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    state["idempotency"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!([
+            {"tenant_id": TENANT_A, "function_id": function.id.to_string(), "key": "stale"},
+            {"invocation_id": InvocationId::generate().to_string(),
+             "input_digest": Sha256Digest::of_bytes(&serde_json::to_vec(&payload).unwrap()).to_string()}
+        ]));
+    std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+
+    // Restart on the same data_dir.
+    let config = GatewayConfig::from_toml(&config_toml(h.dir.path(), "dev", "")).unwrap();
+    let fake = Arc::new(FakeExecutionProvider::new());
+    let app = Application::bootstrap_with(
+        config,
+        fake.clone(),
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let mut req = invoke_request(&h.a, &function, payload);
+    req.idempotency_key = Some("stale".into());
+    let out = app.invoke.invoke(req.clone()).await.unwrap();
+    assert!(out.succeeded(), "{:?}", out.invocation().status);
+    assert!(!out.replayed);
+    assert_eq!(fake.created().len(), 1);
+    let again = app.invoke.invoke(req).await.unwrap();
+    assert!(again.replayed);
+    assert_eq!(again.invocation().id, out.invocation().id);
+}
+
+// ---------------------------------------------------------------------------
+// artifact ownership (docs/threat-model.md §14-1)
+// ---------------------------------------------------------------------------
+
+async fn revision_for_digest(
+    h: &Harness,
+    principal: &Principal,
+    function: &Function,
+    digest: &Sha256Digest,
+) -> FunctionRevision {
+    let mut req = revision_request(digest.as_str(), 30, 30, 4);
+    req.publish_to_prod = false;
+    let rev = h
+        .app
+        .revisions
+        .create(principal, &function.id, &req)
+        .await
+        .unwrap();
+    assert_eq!(rev.status, RevisionStatus::Pending);
+    h.app
+        .revisions
+        .wait_terminal(&rev.id, Duration::from_secs(5))
+        .await
+        .unwrap()
+}
+
+fn failure_reason(rev: &FunctionRevision) -> String {
+    match &rev.status {
+        RevisionStatus::Failed { reason } => reason.clone(),
+        other => panic!("expected a failed revision, got {other:?}"),
+    }
+}
+
+fn artifact_size(rev: &FunctionRevision) -> u64 {
+    match &rev.spec.artifact {
+        ArtifactRef::Binary { size_bytes, .. } => *size_bytes,
+        other => panic!("expected a binary artifact, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn revisions_cannot_reference_another_tenants_artifact() {
+    let h = harness(vec![], "");
+    let (_, owner_rev) = deploy(&h, &h.a, "owner").await;
+    let ArtifactRef::Binary { digest: owned, .. } = owner_rev.spec.artifact.clone() else {
+        panic!("binary artifact expected");
+    };
+    let missing = Sha256Digest::of_bytes(b"never uploaded");
+    let borrower = h.app.functions.create(&h.b, "borrower", "").unwrap();
+
+    let foreign = revision_for_digest(&h, &h.b, &borrower, &owned).await;
+    let unknown = revision_for_digest(&h, &h.b, &borrower, &missing).await;
+    assert_eq!(
+        failure_reason(&foreign).replace(owned.as_str(), "<digest>"),
+        failure_reason(&unknown).replace(missing.as_str(), "<digest>"),
+        "a foreign digest must fail exactly like a missing one"
+    );
+    assert_eq!(artifact_size(&foreign), artifact_size(&unknown));
+
+    // Uploading the same bytes makes B an owner of the digest as well.
+    let again = h
+        .app
+        .artifact_service
+        .upload(&h.b, b"#!/bin/sh\necho owner\n")
+        .await
+        .unwrap();
+    assert_eq!(again.digest, owned);
+    let own = revision_for_digest(&h, &h.b, &borrower, &owned).await;
+    assert_eq!(own.status, RevisionStatus::Ready, "{:?}", own.status);
+    assert!(
+        h.app
+            .revisions
+            .get(&h.a, &owner_rev.function_id, &owner_rev.id)
+            .unwrap()
+            .is_ready()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// secret bindings
+// ---------------------------------------------------------------------------
+
+fn bind_secret(binding: &'static str) -> impl FnOnce(&mut CreateRevisionRequest) {
+    move |req| {
+        req.secrets = vec![SecretBindingRequest {
+            env_name: "DEMO_SECRET".into(),
+            binding_ref: binding.into(),
+        }];
+    }
+}
+
+#[tokio::test]
+async fn unavailable_secret_binding_is_an_init_error_without_booting() {
+    let extra = format!(
+        "[[secrets.bindings]]\ntenant_id = \"{TENANT_A}\"\nbinding_ref = \"only-a\"\nvalue = \"only-a-value\"\n"
+    );
+    let h = harness(vec![], &extra);
+    let (foreign_fn, _) = deploy_custom(&h, &h.b, "foreign-binding", bind_secret("only-a")).await;
+    let (missing_fn, _) =
+        deploy_custom(&h, &h.b, "missing-binding", bind_secret("nobody-has-this")).await;
+
+    let mut messages = Vec::new();
+    for (function, binding) in [(&foreign_fn, "only-a"), (&missing_fn, "nobody-has-this")] {
+        let out = h
+            .app
+            .invoke
+            .invoke(invoke_request(&h.b, function, serde_json::json!({})))
+            .await
+            .unwrap();
+        let error = failed_error(&out);
+        assert_eq!(error.class, ErrorClass::InitError, "{binding}");
+        assert_eq!(error.error_type, "Host.SecretBindingUnavailable");
+        assert_eq!(out.error().unwrap().http_status(), 502);
+        assert!(out.detail.attempts.is_empty());
+        let body = serde_json::to_string(&out.error().unwrap().to_api_body(None)).unwrap();
+        for leak in [TENANT_A, TENANT_B, "forbidden", "Forbidden", "only-a-value"] {
+            assert!(!body.contains(leak), "{leak} in {body}");
+        }
+        let logs = h
+            .app
+            .logs
+            .for_invocation(&h.b, &out.invocation().id)
+            .unwrap();
+        assert!(
+            logs.records
+                .iter()
+                .all(|r| !r.line.contains("orbidden") && !r.line.contains(TENANT_A))
+        );
+        messages.push(error.message.replace(binding, "<binding>"));
+    }
+    assert_eq!(
+        messages[0], messages[1],
+        "foreign and missing bindings must be indistinguishable"
+    );
+    assert!(
+        h.fake.created().is_empty(),
+        "no environment is booted for an unusable binding"
+    );
+    assert!(h.fake.terminated().is_empty());
+    assert!(h.fake.running().is_empty());
+    assert!(h.app.repos.environments.list_active().unwrap().is_empty());
+    assert_eq!(h.app.invoke.in_flight_count(), 0);
+}
+
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl CapturedLogs {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+    type Writer = CapturedLogs;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// docs/threat-model.md T03 (PLT-4623): the resolved secret value is handed
+/// to the guest in `HelloAck` but never appears in host logs, at any level,
+/// nor in the invocation log records.
+#[tokio::test]
+async fn secret_values_never_reach_host_logs() {
+    let captured = CapturedLogs::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(captured.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let h = harness(
+        vec![
+            FakeGuestScript::RespondOk(serde_json::json!({"ok": true})),
+            FakeGuestScript::HandlerError {
+                error_type: "Handler.Error".into(),
+                message: "nope".into(),
+            },
+            FakeGuestScript::HangForever,
+        ],
+        "",
+    );
+    let (function, _) = deploy_with(&h, &h.a, "quiet", 1, 5, 4).await;
+    let mut invocations = Vec::new();
+    for _ in 0..3 {
+        let out = h
+            .app
+            .invoke
+            .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+            .await
+            .unwrap();
+        // The guest did receive the value, so its absence below is meaningful.
+        let env_id = &out.detail.attempts[0].0.environment_id;
+        let Some(HostMessage::HelloAck { env, .. }) = h.fake.hello_ack(env_id) else {
+            panic!("guest did not receive HelloAck");
+        };
+        assert!(env.iter().any(|(_, v)| v == "demo-secret-value-a"));
+        invocations.push(out.invocation().id.clone());
+    }
+
+    let text = captured.text();
+    assert!(
+        text.contains("invocation finished"),
+        "the subscriber captured the pipeline"
+    );
+    assert!(
+        !text.contains("demo-secret-value-a"),
+        "secret value found in host logs"
+    );
+    for id in &invocations {
+        let logs = h.app.logs.for_invocation(&h.a, id).unwrap();
+        assert!(!logs.records.is_empty());
+        assert!(
+            logs.records
+                .iter()
+                .all(|r| !r.line.contains("demo-secret-value-a"))
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// undelivered Invoke
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn guest_exit_before_the_invoke_is_delivered_is_a_crash_not_outcome_unknown() {
+    let h = harness(vec![FakeGuestScript::ExitAfterReady; 3], "");
+    let (function, _) = deploy(&h, &h.a, "exits").await;
+    for _ in 0..3 {
+        let out = h
+            .app
+            .invoke
+            .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+            .await
+            .unwrap();
+        let error = failed_error(&out);
+        assert_eq!(error.class, ErrorClass::Crash);
+        assert!(
+            matches!(
+                error.error_type.as_str(),
+                "Runtime.Exited" | "Host.BridgeDisconnectedBeforeInvoke"
+            ),
+            "{}",
+            error.error_type
+        );
+        assert_eq!(out.error().unwrap().http_status(), 502);
+        let (attempt, _) = &out.detail.attempts[0];
+        assert!(
+            matches!(attempt.status, AttemptStatus::Failed { .. }),
+            "{:?}",
+            attempt.status
+        );
+        assert!(
+            !h.fake
+                .host_messages(&attempt.environment_id)
+                .iter()
+                .any(|m| matches!(m, HostMessage::Invoke { .. }))
+        );
+    }
+    let terminated = h.fake.terminated();
+    assert_eq!(terminated.len(), 3);
+    assert!(
+        terminated
+            .iter()
+            .all(|(_, r)| *r == TerminateReason::Crashed)
+    );
+    assert!(h.fake.running().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// driver panic
+// ---------------------------------------------------------------------------
+
+/// A bridge stream whose first read panics.
+struct PanickingStream;
+
+impl AsyncRead for PanickingStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        _: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        panic!("injected failure after the environment was created")
+    }
+}
+
+impl AsyncWrite for PanickingStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Poll::Ready(Ok(buf.len()))
+    }
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// Delegates to the fake provider but hands the driver a stream that panics,
+/// i.e. the driver panics after `create_environment` returned.
+struct PanicAfterCreate(Arc<FakeExecutionProvider>);
+
+#[async_trait]
+impl ExecutionProvider for PanicAfterCreate {
+    fn kind(&self) -> ProviderKind {
+        self.0.kind()
+    }
+    fn capabilities(&self) -> Capabilities {
+        self.0.capabilities()
+    }
+    async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
+        self.0.preflight().await
+    }
+    async fn validate_artifact(
+        &self,
+        artifact: &ArtifactLocation,
+        architecture: Architecture,
+    ) -> Result<(), ProviderError> {
+        self.0.validate_artifact(artifact, architecture).await
+    }
+    async fn create_environment(
+        &self,
+        spec: EnvironmentSpec,
+    ) -> Result<EnvironmentHandle, ProviderError> {
+        let mut handle = self.0.create_environment(spec).await?;
+        handle.stream = Box::new(PanickingStream);
+        Ok(handle)
+    }
+    async fn terminate_environment(
+        &self,
+        environment_id: &EnvironmentId,
+        reason: TerminateReason,
+    ) -> Result<TerminateReport, ProviderError> {
+        self.0.terminate_environment(environment_id, reason).await
+    }
+    async fn observe_environment(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<EnvironmentObservation, ProviderError> {
+        self.0.observe_environment(environment_id).await
+    }
+    async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError> {
+        self.0.list_environments().await
+    }
+}
+
+#[tokio::test]
+async fn driver_panic_after_environment_creation_still_terminates_it() {
+    let fake = Arc::new(FakeExecutionProvider::new());
+    let provider = Arc::new(PanicAfterCreate(fake.clone()));
+    let h = harness_with(fake, provider, "", None);
+    let (function, _) = deploy(&h, &h.a, "panics").await;
+    let out = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    let error = failed_error(&out);
+    assert_eq!(error.class, ErrorClass::PlatformError);
+    assert_eq!(error.error_type, "Host.DriverPanic");
+
+    let created = h.fake.created();
+    assert_eq!(created.len(), 1);
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(created[0].clone(), TerminateReason::Crashed)]
+    );
+    assert!(h.fake.running().is_empty());
+    let env = h.app.repos.environments.get(&created[0]).unwrap().unwrap();
+    assert!(
+        matches!(env.state, EnvironmentState::Failed { .. }),
+        "{:?}",
+        env.state
+    );
+    assert!(h.app.repos.environments.list_active().unwrap().is_empty());
+    assert_eq!(h.app.invoke.in_flight_count(), 0);
+    let usage = h.app.usage.events_for_invocation(&out.invocation().id);
+    let started = usage
+        .iter()
+        .find(|e| matches!(e.event_type, UsageEventType::EnvironmentStarted))
+        .expect("EnvironmentStarted recorded");
+    let stopped = usage
+        .iter()
+        .find(|e| matches!(e.event_type, UsageEventType::EnvironmentStopped))
+        .expect("EnvironmentStopped recorded after the panic");
+    assert_ne!(started.event_id, stopped.event_id);
+    assert!(stopped.sequence > started.sequence);
+}
+
+// ---------------------------------------------------------------------------
+// client deadline (docs/threat-model.md §8)
+// ---------------------------------------------------------------------------
+
+/// A wall clock that a guest script can move forward.
+struct ShiftedClock(Arc<AtomicI64>);
+
+impl Clock for ShiftedClock {
+    fn now(&self) -> Timestamp {
+        chrono::Utc::now() + chrono::Duration::milliseconds(self.0.load(Ordering::SeqCst))
+    }
+}
+
+/// Custom guest: handshake, wait `delay`, run `before_ready`, send `Ready`,
+/// then count the `Invoke` frames it receives until the host closes.
+fn scripted_ready(
+    delay: Duration,
+    before_ready: Arc<dyn Fn() + Send + Sync>,
+    invokes: Arc<AtomicUsize>,
+) -> FakeGuestScript {
+    FakeGuestScript::Custom(Arc::new(move |ctx: CustomScriptContext| -> ScriptFuture {
+        let before_ready = before_ready.clone();
+        let invokes = invokes.clone();
+        Box::pin(async move {
+            let (r, w) = tokio::io::split(ctx.stream);
+            let mut reader = FramedRead::new(r, FrameCodec);
+            let mut writer = FramedWrite::new(w, FrameCodec);
+            let hello = GuestMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                bridge_version: "test-guest".into(),
+                environment_id: ctx.environment_id.to_string(),
+                guest_boot_id: Some("test-boot".into()),
+                architecture: "aarch64".into(),
+            };
+            if writer.send(encode_message(&hello).unwrap()).await.is_err() {
+                return;
+            }
+            if !matches!(reader.next().await, Some(Ok(_))) {
+                return;
+            }
+            tokio::time::sleep(delay).await;
+            before_ready();
+            let ready = encode_message(&GuestMessage::Ready { init_ms: 1 }).unwrap();
+            if writer.send(ready).await.is_err() {
+                return;
+            }
+            while let Some(Ok(frame)) = reader.next().await {
+                if matches!(
+                    decode_message::<HostMessage>(&frame),
+                    Ok(HostMessage::Invoke { .. })
+                ) {
+                    invokes.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        })
+    }))
+}
+
+fn assert_stopped_before_dispatch(h: &Harness, out: &InvokeOutcome) {
+    let error = failed_error(out);
+    assert_eq!(error.class, ErrorClass::Timeout);
+    assert_eq!(error.error_type, "Host.ClientDeadline");
+    assert_eq!(out.error().unwrap().http_status(), 504);
+    assert!(out.detail.attempts.is_empty(), "no attempt was dispatched");
+    let created = h.fake.created();
+    assert_eq!(created.len(), 1);
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(created[0].clone(), TerminateReason::Cancelled)]
+    );
+    let env = h.app.repos.environments.get(&created[0]).unwrap().unwrap();
+    assert_eq!(env.state, EnvironmentState::Stopped);
+    let usage = h.app.usage.events_for_invocation(&out.invocation().id);
+    assert!(
+        !usage
+            .iter()
+            .any(|e| matches!(e.event_type, UsageEventType::HandlerStarted))
+    );
+    assert_eq!(h.app.invoke.in_flight_count(), 0);
+}
+
+#[tokio::test]
+async fn client_deadline_during_initialization_never_starts_the_handler() {
+    let invokes = Arc::new(AtomicUsize::new(0));
+    let h = harness(
+        vec![scripted_ready(
+            Duration::from_millis(1500),
+            Arc::new(|| {}),
+            invokes.clone(),
+        )],
+        "",
+    );
+    let (function, _) = deploy(&h, &h.a, "slow-init").await;
+    let mut req = invoke_request(&h.a, &function, serde_json::json!({}));
+    req.client_timeout_ms = Some(400);
+    let started = Instant::now();
+    let out = h.app.invoke.invoke(req).await.unwrap();
+    let elapsed = started.elapsed();
+    assert_stopped_before_dispatch(&h, &out);
+    assert!(
+        elapsed < Duration::from_millis(1400),
+        "answered at the client deadline, not after init: {elapsed:?}"
+    );
+    assert_eq!(invokes.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn client_deadline_is_checked_again_right_before_dispatch() {
+    let offset = Arc::new(AtomicI64::new(0));
+    let invokes = Arc::new(AtomicUsize::new(0));
+    // The wall clock jumps past the client deadline just before Ready.
+    let jump: Arc<dyn Fn() + Send + Sync> = {
+        let offset = offset.clone();
+        Arc::new(move || offset.store(120_000, Ordering::SeqCst))
+    };
+    let fake = Arc::new(FakeExecutionProvider::with_scripts([scripted_ready(
+        Duration::ZERO,
+        jump,
+        invokes.clone(),
+    )]));
+    let clock: Arc<dyn Clock> = Arc::new(ShiftedClock(offset));
+    let h = harness_with(fake.clone(), fake, "", Some(clock));
+    let (function, _) = deploy(&h, &h.a, "late-ready").await;
+    let mut req = invoke_request(&h.a, &function, serde_json::json!({}));
+    req.client_timeout_ms = Some(10_000);
+    let out = h.app.invoke.invoke(req).await.unwrap();
+    assert_stopped_before_dispatch(&h, &out);
+    assert_eq!(
+        invokes.load(Ordering::SeqCst),
+        0,
+        "the guest never receives an Invoke"
+    );
+}
+
+#[tokio::test]
+async fn client_deadline_clamps_the_execution_deadline() {
+    let h = harness(vec![FakeGuestScript::HangForever], "");
+    let (function, _) = deploy_with(&h, &h.a, "clamped", 30, 5, 4).await;
+    let mut req = invoke_request(&h.a, &function, serde_json::json!({}));
+    req.client_timeout_ms = Some(800);
+    let started = Instant::now();
+    let out = h.app.invoke.invoke(req).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    let error = failed_error(&out);
+    assert_eq!(error.class, ErrorClass::Timeout);
+    assert_eq!(error.error_type, "Host.ClientDeadline");
+    assert_eq!(out.error().unwrap().http_status(), 504);
+
+    let deadlines = out.invocation().deadlines;
+    assert_eq!(
+        deadlines.execution_deadline,
+        Some(deadlines.client_deadline)
+    );
+    assert!(deadlines.queue_deadline <= deadlines.client_deadline);
+    assert!(deadlines.init_deadline.unwrap() <= deadlines.client_deadline);
+
+    let (attempt, _) = &out.detail.attempts[0];
+    let msgs = h.fake.host_messages(&attempt.environment_id);
+    let guest_deadline = msgs
+        .iter()
+        .find_map(|m| match m {
+            HostMessage::Invoke { deadline_ms, .. } => Some(*deadline_ms),
+            _ => None,
+        })
+        .expect("the invoke was delivered");
+    assert_eq!(
+        guest_deadline,
+        deadlines.client_deadline.timestamp_millis() as u64,
+        "the guest observes the clamped deadline"
+    );
+    assert!(msgs.iter().any(|m| matches!(m, HostMessage::Cancel { .. })));
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(attempt.environment_id.clone(), TerminateReason::Timeout)]
+    );
+}
+
+#[tokio::test]
+async fn client_deadline_bounds_the_queue_wait() {
+    let h = harness(
+        vec![FakeGuestScript::HangForever],
+        "[capacity]\nmax_concurrency = 1\nmax_queue = 4\nqueue_timeout_seconds = 10\n",
+    );
+    let (function, _) = deploy_with(&h, &h.a, "queue-bound", 30, 5, 4).await;
+    let app = h.app.clone();
+    let hanging = tokio::spawn({
+        let req = invoke_request(&h.a, &function, serde_json::json!({}));
+        let app = app.clone();
+        async move { app.invoke.invoke(req).await }
+    });
+    wait_until("the first invocation to run", || {
+        with_status(&h, &function, InvocationStatus::Running).is_some()
+    })
+    .await;
+
+    let mut req = invoke_request(&h.a, &function, serde_json::json!({}));
+    req.client_timeout_ms = Some(500);
+    let started = Instant::now();
+    let out = app.invoke.invoke(req).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(failed_error(&out).class, ErrorClass::QueueTimeout);
+    let deadlines = out.invocation().deadlines;
+    assert_eq!(deadlines.queue_deadline, deadlines.client_deadline);
+    assert!(out.detail.attempts.is_empty());
+
+    let running = with_status(&h, &function, InvocationStatus::Running).unwrap();
+    app.invoke.cancel(&h.a, &running).await.unwrap();
+    hanging.await.unwrap().unwrap();
 }

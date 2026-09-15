@@ -17,8 +17,8 @@ use crate::local_ports::{
 use crate::repository::{InMemoryStore, Repositories};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::{
-    AliasService, FunctionService, HistoryService, InvokeService, LogService, ProviderService,
-    RevisionService,
+    AliasService, ArtifactService, FunctionService, HistoryService, InvokeService, LogService,
+    ProviderService, RevisionService,
 };
 
 /// Builds the execution provider selected by configuration. The gateway
@@ -36,7 +36,10 @@ pub struct Application {
     pub ids: Arc<dyn IdGenerator>,
     pub store: Arc<InMemoryStore>,
     pub repos: Repositories,
+    /// Content-addressed store. Tenant-facing uploads must go through
+    /// [`Application::artifact_service`], which records ownership.
     pub artifacts: Arc<dyn ArtifactStore>,
+    pub artifact_service: Arc<ArtifactService>,
     pub identity: Arc<dyn IdentityProvider>,
     pub secrets: Arc<dyn SecretProvider>,
     pub usage: Arc<InMemoryUsageSink>,
@@ -150,6 +153,7 @@ impl Application {
             ids.clone(),
         ));
         let aliases = Arc::new(AliasService::new(repos.clone(), clock.clone()));
+        let artifact_service = Arc::new(ArtifactService::new(repos.clone(), artifacts.clone()));
         let revisions = Arc::new(RevisionService::new(
             repos.clone(),
             artifacts.clone(),
@@ -194,6 +198,7 @@ impl Application {
             store,
             repos,
             artifacts,
+            artifact_service,
             identity,
             secrets,
             usage,

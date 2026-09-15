@@ -54,28 +54,41 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
   1 認証: Bearer token → Principal{tenant, roles}. 他 tenant の資源は 404。
   2 Function 取得 (deleted → 409 function_deleted)。alias→Revision 解決 (Ready でなければ 409 revision_not_ready)。
      Revision は受付時に固定される。実行中に alias を変えても版は変わらない。
-  3 payload 上限 (limits.max_payload_bytes → 413)。Idempotency-Key があれば既存 Invocation を返す
-     (同キー・異なる input digest → 409 conflict)。
-  4 Invocation(Accepted) + deadlines を作成し保存。
-     queue_deadline   = now + queue_timeout (config, default 10s)
+  3 payload 上限 (limits.max_payload_bytes → 413)、trace id ≤ 256 bytes、Idempotency-Key 1..=256 文字 (→ 400)。
+     ここまで何も記録しない (拒否された request は key を消費しない)。Idempotency-Key が既存 Invocation に
+     結び付いていれば、容量に関係なくそれを返す (同キー・異なる input digest → 409 conflict)。
+  4 Invocation(Accepted) + deadlines を組み立てる。queue / init / execution は client_deadline を超えない。
      client_deadline  = now + min(client_timeout_ms header, timeout_seconds + init + queue)
+     queue_deadline   = min(now + queue_timeout (config, default 10s), client_deadline)
   5 容量: revision.max_concurrency と gateway 全体上限の semaphore。空きがなければ bounded queue
-     (config max_queue) で queue_deadline まで待つ。溢れ → 429 capacity_exceeded。queue_deadline 超過 → 504 queue_timeout。
-  6 ExecutionEnvironment(Requested→Provisioning) を作成。provider.create_environment(spec)
-     (connect_timeout = initialization_timeout_seconds)。失敗 → InitError / PlatformError、環境 Failed。
-  7 BridgeSession: Hello 受信 → 検証 → HelloAck(entrypoint, env(+secrets), limits) 送信。
-     Ready を init_deadline まで待つ。InitError / 接続断 / timeout → 502 init_error、環境終了。
+     (config max_queue) で queue_deadline まで待つ。溢れ → 429 capacity_exceeded (ledger にも key にも残らない)。
+     queue_deadline 超過 → 504 queue_timeout。
+     Invocation の保存と Idempotency-Key の結び付けは 1 回の store 更新で行う (同 key の並行 request は
+     1 つだけが受け付けられ、残りは同じ Invocation を返す)。
+  6 ExecutionEnvironment(Requested→Provisioning) を作成し、HelloAck(entrypoint, env(+secrets), limits) を組み立てる。
+     secret binding を解決できなければ環境を作らずに 502 init_error (Host.SecretBindingUnavailable。他 tenant の
+     binding と存在しない binding は同じ応答)。secret backend の障害は 500 platform_error (Host.SecretBackend)。
+     provider.create_environment(spec) (connect_timeout = init_deadline までの残り)。失敗 → InitError / PlatformError、環境 Failed。
+  7 BridgeSession: Hello 受信 → 検証 → HelloAck 送信。Ready を init_deadline まで待つ。
+     InitError / 接続断 / timeout → 502 init_error、環境終了。
+     client_deadline で待ちを打ち切った場合と、Ready 後 (Attempt 作成前) に client_deadline を過ぎていた場合は
+     handler を起動せず 504 timeout (Host.ClientDeadline)、環境 stop + terminate(Cancelled)。
   8 Attempt(Dispatched, epoch) + Lease を作成。Invocation(Running)。Invoke frame 送信。
-     execution_deadline = dispatch 時刻 + timeout_seconds。
+     execution_deadline = min(dispatch 時刻 + timeout_seconds, client_deadline)。guest の deadline_ms も同じ値。
+     Invoke を届けられなかった場合 (handler は未開始、OutcomeUnknown にしない):
+     encode 不能 → 500 platform_error (Host.InvokeTooLarge)。書き込み失敗 → guest が閉じる前に送った
+     Exited を読めれば 502 crash (Runtime.Exited)、無ければ 502 crash (Host.BridgeDisconnectedBeforeInvoke)。
   9 Response / Error を execution_deadline まで待つ。
      - Response          → Succeeded (output inline ≤ config inline_output_max, http_status は http event のみ)
      - Error(Handler)    → Failed{user_error}     - Error(Panic)  → Failed{crash}
      - Error(Crash)      → Failed{crash}          - Error(ResponseTooLarge/Protocol) → Failed{platform_error}
      - deadline          → Cancel(grace 1s) 送信 → provider.terminate → Failed{timeout}
-     - 接続断 (結果未受信) → OutcomeUnknown（自動再実行しない）
+                           (client_deadline で打ち切った場合は error_type = Host.ClientDeadline)
+     - 接続断 (Invoke 書き込み後、結果未受信) → OutcomeUnknown（自動再実行しない）
      - cancel API       → Cancel → terminate → Cancelled
  10 Lease release、Attempt/Invocation terminal 更新、UsageEvent(host 観測)、
      provider.terminate_environment（destroy-after-invoke、冪等）。timeout/強制終了した環境は再利用しない。
+     driver が panic した場合も terminate(Crashed)、Lease 解放、Attempt / 環境 Failed、EnvironmentStopped を記録する。
  11 client 切断は完了と見なさない。invoke タスクは spawn され、切断後も deadline まで追跡し記録する。
 ```
 

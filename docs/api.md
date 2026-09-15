@@ -11,7 +11,7 @@
 | 認証 | `Authorization: Bearer <token>`。token は gateway 設定 `[[identity.tokens]]` で tenant / subject / roles に解決される。 |
 | テナント | 省略可の `x-tachyon-tenant-id` ヘッダ。token のテナントと一致しなければ 401/403。 |
 | 他テナントの資源 | 常に **404**（403 は返さない。存在を漏らさないため）。 |
-| roles | `deploy`（functions / artifacts / revisions / aliases の書き込み）、`invoke`（invoke / http / cancel）。読み取りは両方。 |
+| roles | `deploy`（functions / artifacts / revisions / aliases の書き込み）、`invoke`（invoke / http / cancel と invocation / logs / usage の読み取り）。function / revision / alias の読み取りは `deploy` / `invoke` / `operator` のどれでもよい。`operator` は自 tenant の function / revision / alias の読み取りと `/v1/provider` だけで、他 tenant の資源は 404、invocation / logs / usage と書き込み・invoke は 403（`docs/threat-model.md` §7）。 |
 
 `/healthz` `/readyz` `/openapi.json` は認証不要。`/v1/provider` も認証不要（環境情報のみ）。
 
@@ -20,11 +20,11 @@
 | ヘッダ | 方向 | 意味 |
 |---|---|---|
 | `x-tachyon-tenant-id` | req | テナント id（任意、token と一致必須） |
-| `idempotency-key` | req (invoke) | 同キー・同 input digest なら既存 Invocation を返す。同キー・異なる digest → 409 `conflict` |
-| `x-tachyon-client-timeout-ms` | req (invoke) | クライアント側の全体 deadline（相対 ms）。revision の timeout + init + queue で上限が掛かる |
+| `idempotency-key` | req (invoke) | 1..=256 文字。同キー・同 input digest なら既存 Invocation を返す（容量が満杯でも）。同キー・異なる digest → 409 `conflict`。受付前に拒否された request（400 / 413 / 429）は key を消費しない |
+| `x-tachyon-client-timeout-ms` | req (invoke) | クライアント側の全体 deadline（相対 ms）。revision の timeout + init + queue で上限が掛かる。queue / init / execution の各 deadline はこれを超えず、handler の起動前に過ぎれば handler を起動しない（504 `timeout`、`Host.ClientDeadline`） |
 | `x-request-id` | req/res | リクエスト id（省略時は gateway が採番） |
 | `x-tachyon-invocation-id` | res (invoke/http) | 受け付けた Invocation の id |
-| `x-tachyon-trace-id` | res (invoke/http) | trace id |
+| `x-tachyon-trace-id` | req/res (invoke/http) | trace id（request では任意、256 bytes 以下。超過は 400） |
 
 ## 3. エンドポイント一覧
 
@@ -136,6 +136,7 @@ ID は `<prefix>_<26 文字 lowercase ULID>`（`fn_` `rev_` `inv_` `att_` `env_`
 ### 5.2 `POST /v1/artifacts`
 
 - Request: `Content-Type: application/octet-stream`、本文は実行ファイルそのもの。firecracker provider では static Linux (musl) バイナリであること。
+- upload した tenant が digest の所有者として記録される。revision の `artifact.digest` は自 tenant が upload した digest でなければならない。他 tenant だけが upload した digest は、存在しない digest と同じく revision が `failed`（`artifact unavailable: artifact not found: <digest>`）になる。同じ bytes を自分で upload すれば参照できる。
 - Response 201:
 
 ```json
@@ -256,6 +257,8 @@ rollback は「`GET` → `previous_revision_id` を `expected_generation = gener
 
 `ANY /v1/functions/{function_id}/http/{*path}`。gateway はリクエストを `tachyon.http.v1` event（`HttpRequestEvent`: method / path / query / headers / body_base64）に変換して関数に渡し、`HttpResponsePayload`（status / headers / body）をそのまま HTTP 応答にする。関数が 404 を返せば 404 が返る。gateway 側のエラー（関数が無い、init 失敗など）だけが §4 の JSON 本文になる。
 
+event の `path` は `/http` より後ろの request-target path を **受け取ったまま**（percent-encoded のまま、decode せず、query を除く）渡す。例: `/http/a%2Fb?x=1` → `path = "/a%2Fb"`、`query = "x=1"`。decode は関数側の router が 1 回だけ行う。
+
 ### 5.8 Invocation
 
 `GET /v1/invocations/{invocation_id}` → `InvocationResponse`:
@@ -363,9 +366,12 @@ rollback は「`GET` → `previous_revision_id` を `expected_generation = gener
 | queue 溢れ | 429 | `capacity_exceeded` |
 | queue deadline 超過 | 504 | `queue_timeout` |
 | init 失敗 / init timeout | 502 | `init_error` |
+| secret binding を解決できない（他 tenant の binding と存在しない binding は同じ応答。環境は作らない） | 502 | `init_error`（`Host.SecretBindingUnavailable`） |
 | handler が Err | 502 | `user_error` |
 | panic / crash | 502 | `crash` |
+| Invoke を届ける前に user process が終了 / bridge が切断（handler は未開始） | 502 | `crash`（`Runtime.Exited` / `Host.BridgeDisconnectedBeforeInvoke`） |
 | 実行 deadline 超過 | 504 | `timeout` |
+| client deadline 到達（handler 起動前なら起動しない、実行中なら Cancel） | 504 | `timeout`（`Host.ClientDeadline`） |
 | cancel API | 499 | `cancelled` |
-| 結果不明（接続断） | 502 | `outcome_unknown` |
+| 結果不明（Invoke 送信後の接続断） | 502 | `outcome_unknown` |
 | provider / 内部 | 500 / 503 | `platform_error` / `provider_unavailable` |
