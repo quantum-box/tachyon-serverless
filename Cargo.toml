@@ -81,3 +81,5 @@ utoipa = { version = "5", features = ["chrono"] }
 libc = "0.2"
 tempfile = "3"
 parking_lot = "0.12"
+# guest vsock transport (Linux only; members reference it under a cfg(target_os = "linux") table)
+tokio-vsock = "0.7"
