@@ -1,0 +1,6 @@
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-hello (1432400 bytes, arch aarch64)
+artifact sha256:9328e8627c22b34aebdb6c313a31f6c0e67cfe3157e95fae09b852e18d7a92ea
+revision rev_01m2k14vd8xzfk0pdz7ktvw38f (#8) created: pending
+revision rev_01m2k14vd8xzfk0pdz7ktvw38f is preparing
+revision rev_01m2k14vd8xzfk0pdz7ktvw38f is ready
+error: init_error (HTTP 502): invocation inv_01m2k14vp0x36f1j04c4rcjrzd failed: Runtime.InitError: HELLO_FAIL_INIT set [type=Runtime.InitError] [invocation=inv_01m2k14vp0x36f1j04c4rcjrzd] [request=01m2k14vp0wtfbchve457rx7ae]
