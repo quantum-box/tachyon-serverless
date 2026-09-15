@@ -1,0 +1,22 @@
+preflight os                   ok   host os is linux; Firecracker requires linux
+preflight arch                 ok   host architecture aarch64
+preflight kvm                  ok   /dev/kvm is readable and writable
+preflight firecracker_binary   ok   /home/takanorifukuyama.guest/tsls/.kvm/bin/firecracker (version v1.17.0)
+preflight kernel               ok   /home/takanorifukuyama.guest/tsls/.kvm/vmlinux sha256:e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+preflight rootfs               ok   /home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4 sha256:cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906
+preflight mkfs_ext4            ok   /usr/sbin/mkfs.ext4
+preflight workdir              ok   /home/takanorifukuyama.guest/tsls/.kvm/run
+preflight socket_path_length   ok   longest socket path would be 85 bytes (max 107); ok
+artifact: /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1431008 bytes, sha256:d41d8b3bcdfb8d6f364109a77a801198403f398915d748e6c7c0f7c550fcca77)
+creating environment env_01m2j1dxemm5f2v4gzsyh2btp9 ...
+[2m2026-09-15T08:02:43.537979Z[0m [32m INFO[0m [2mtachyon_serverless_provider_firecracker::provider[0m[2m:[0m firecracker spawned [3menv_id[0m[2m=[0m"env_01m2j1dxemm5f2v4gzsyh2btp9" [3mpid[0m[2m=[0m22852 [3minstance_id[0m[2m=[0m"env-01m2j1dxemm5f2v4gzsyh2btp9"
+[2m2026-09-15T08:02:43.698321Z[0m [32m INFO[0m [2mtachyon_serverless_provider_firecracker::provider[0m[2m:[0m InstanceStart accepted [3menv_id[0m[2m=[0m"env_01m2j1dxemm5f2v4gzsyh2btp9" [3mvcpus[0m[2m=[0m1 [3mmem_mib[0m[2m=[0m256
+booted: pid=Some(22852) firecracker=v1.17.0 boot_ms=Some(11036)
+hello: protocol=1 bridge=0.1.0 env=env_01m2j1dxemm5f2v4gzsyh2btp9 boot_id=Some("5a933836-1dbe-4499-8d82-7a99c120a245") arch=aarch64
+[guest bridge init] user process started (pid 102)
+ready: init_ms(host)=Some(1224) init_ms(guest)=850
+invoke sent: attempt=att_01m2j1e9aeex4rrfq6vcws0f42 deadline_in=3s
+deadline reached after 3.013044563s; sending Cancel(grace 1s)
+[guest bridge handler] cancel requested (grace 1000 ms)
+[2m2026-09-15T08:02:59.422239Z[0m [32m INFO[0m [2mtachyon_serverless_provider_firecracker::provider[0m[2m:[0m environment terminated [3menv_id[0m[2m=[0menv_01m2j1dxemm5f2v4gzsyh2btp9 [3mreason[0m[2m=[0mTimeout [3mwas_running[0m[2m=[0mtrue
+terminated: was_running=true cleaned=11

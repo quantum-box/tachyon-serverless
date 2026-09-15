@@ -1,0 +1,25 @@
+preflight os                   ok   host os is linux; Firecracker requires linux
+preflight arch                 ok   host architecture aarch64
+preflight kvm                  ok   /dev/kvm is readable and writable
+preflight firecracker_binary   ok   /home/takanorifukuyama.guest/tsls/.kvm/bin/firecracker (version v1.17.0)
+preflight kernel               ok   /home/takanorifukuyama.guest/tsls/.kvm/vmlinux sha256:e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+preflight rootfs               ok   /home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4 sha256:cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906
+preflight mkfs_ext4            ok   /usr/sbin/mkfs.ext4
+preflight workdir              ok   /home/takanorifukuyama.guest/tsls/.kvm/run
+preflight socket_path_length   ok   longest socket path would be 85 bytes (max 107); ok
+artifact: /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-hello (1502488 bytes, sha256:14950e777dacb5b6107dc7dc639e7fdffbd9171607ed8eaf6779cb591ad731e8)
+creating environment env_01m2j1dd3xcga64sh9pfyrxyzh ...
+[2m2026-09-15T08:02:26.878041Z[0m [32m INFO[0m [2mtachyon_serverless_provider_firecracker::provider[0m[2m:[0m firecracker spawned [3menv_id[0m[2m=[0m"env_01m2j1dd3xcga64sh9pfyrxyzh" [3mpid[0m[2m=[0m22795 [3minstance_id[0m[2m=[0m"env-01m2j1dd3xcga64sh9pfyrxyzh"
+[2m2026-09-15T08:02:27.166479Z[0m [32m INFO[0m [2mtachyon_serverless_provider_firecracker::provider[0m[2m:[0m InstanceStart accepted [3menv_id[0m[2m=[0m"env_01m2j1dd3xcga64sh9pfyrxyzh" [3mvcpus[0m[2m=[0m1 [3mmem_mib[0m[2m=[0m256
+booted: pid=Some(22795) firecracker=v1.17.0 boot_ms=Some(13468)
+hello: protocol=1 bridge=0.1.0 env=env_01m2j1dd3xcga64sh9pfyrxyzh boot_id=Some("c0f8bee3-d47d-4055-8c49-ebdb1f51caf0") arch=aarch64
+[guest bridge init] user process started (pid 102)
+[guest stderr init] hello: starting (unisolated=false)
+ready: init_ms(host)=Some(1341) init_ms(guest)=991
+invoke sent: attempt=att_01m2j1dvjqzykd3cw6sr12g6ns deadline_in=30s
+[guest stdout handler] hello: handling invocation=inv_01m2j1dvjq3tryp7hcdm06nftx attempt=att_01m2j1dvjqzykd3cw6sr12g6ns remaining_ms=29381
+[guest stderr handler] hello: payload={"name":"kvm"}
+outcome: response after 319.209748ms
+shutdown: bridge connection closed=true
+[2m2026-09-15T08:02:42.191346Z[0m [32m INFO[0m [2mtachyon_serverless_provider_firecracker::provider[0m[2m:[0m environment terminated [3menv_id[0m[2m=[0menv_01m2j1dd3xcga64sh9pfyrxyzh [3mreason[0m[2m=[0mCompleted [3mwas_running[0m[2m=[0mtrue
+terminated: was_running=true cleaned=11

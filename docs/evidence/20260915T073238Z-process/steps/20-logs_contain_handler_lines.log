@@ -1,0 +1,7 @@
+2026-09-15T07:32:49.809Z [platform/boot] creating environment env_01m2hzq5n8pr9tw30ejgq011p4 with provider process
+2026-09-15T07:32:50.558Z [platform/boot] bridge connected after 741 ms (host_pid=Some(29565))
+2026-09-15T07:32:50.568Z [platform/init] user process started (pid 29623)
+2026-09-15T07:32:51.062Z [stderr/init] hello: starting (unisolated=true)
+2026-09-15T07:32:51.100Z [stderr/handler] hello: payload={"name":"demo"}
+2026-09-15T07:32:51.100Z [stdout/handler] hello: handling invocation=inv_01m2hzq5n0t3gwedk69q9fzrqf attempt=att_01m2hzq780e5wd2ad0r138j1kv remaining_ms=29972
+2026-09-15T07:32:51.125Z [platform/shutdown] environment terminated (Completed); cleaned: /tmp/tsls-01m2hzq5n8pr9tw30ejgq011p4.sock, /Users/takanorifukuyama/git/tachyon-serverless/./data/process/env_01m2hzq5n8pr9tw30ejgq011p4/bridge.sock, /Users/takanorifukuyama/git/tachyon-serverless/./data/process/env_01m2hzq5n8pr9tw30ejgq011p4/bridge.pid, /Users/takanorifukuyama/git/tachyon-serverless/./data/process/env_01m2hzq5n8pr9tw30ejgq011p4/bridge.stdout, /Users/takanorifukuyama/git/tachyon-serverless/./data/process/env_01m2hzq5n8pr9tw30ejgq011p4/bridge.stderr, /Users/takanorifukuyama/git/tachyon-serverless/./data/process/env_01m2hzq5n8pr9tw30ejgq011p4

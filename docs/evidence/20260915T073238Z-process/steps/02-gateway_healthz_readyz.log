@@ -1,0 +1,2 @@
+healthz: 200 ok
+readyz:  200 {"preflight":{"checks":[{"detail":"/Users/takanorifukuyama/git/tachyon-serverless/target/debug/tachyon-serverless-runtime-bridge is executable","name":"bridge_binary","ok":true},{"detail":"/Users/takanorifukuyama/git/tachyon-serverless/./data/process","name":"workdir_writable","ok":true},{"detail":"aarch64","name":"host_architecture","ok":true}],"ok":true,"provider":"process"},"ready":true}

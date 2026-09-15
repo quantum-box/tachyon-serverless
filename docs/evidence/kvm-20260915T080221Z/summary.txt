@@ -1,0 +1,30 @@
+tachyon-serverless KVM smoke 20260915T080221Z
+host Linux 7.0.0-28-generic aarch64  firecracker Firecracker v1.17.0
+kernel e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591  rootfs cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906
+
+== hello ==
+environment_id      env_01m2j1dd3xcga64sh9pfyrxyzh
+guest_boot_id       c0f8bee3-d47d-4055-8c49-ebdb1f51caf0
+host_pid            22795
+firecracker_version v1.17.0
+kernel_sha256       e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+rootfs_sha256       cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906
+outcome             response
+boot_ms             13468
+init_ms             1341
+handler_ms          319
+total_ms            16337
+
+== timeout ==
+environment_id      env_01m2j1dxemm5f2v4gzsyh2btp9
+guest_boot_id       5a933836-1dbe-4499-8d82-7a99c120a245
+host_pid            22852
+firecracker_version v1.17.0
+kernel_sha256       e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+rootfs_sha256       cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906
+outcome             timeout
+boot_ms             11036
+init_ms             1224
+handler_ms          null
+total_ms            17088
+
