@@ -2,7 +2,7 @@
 
 - 対象: `crates/providers/firecracker`, `scripts/kvm/*`, `.kvm/`（実行時生成物、gitignore 済み）
 - 関連: [architecture.md](architecture.md) §3・§4、[protocol.md](protocol.md) §C
-- 状態: プロトタイプ。aarch64 の Linux/KVM（Apple M4 上の Lima VM、nested virtualization）で smoke と E2E デモが通った記録がある（§5、`docs/evidence/kvm-20260915T080221Z/`、`docs/evidence/20260915T125610Z-firecracker/`）。**x86_64 host と bare metal では未確認。** コードは macOS 上でも偽 Firecracker を使った lifecycle テストまで通る。実機での結果は `docs/evidence/kvm-<UTC>/`（smoke）と `docs/evidence/<UTC>-firecracker/`（E2E）に残す。
+- 状態: プロトタイプ。aarch64 の Linux/KVM（Apple M4 上の Lima VM、nested virtualization）で smoke と E2E デモが通った記録がある（§5、`docs/evidence/kvm-20260915T080221Z/`、`docs/evidence/20260915T125610Z-firecracker/`、レビュー指摘修正後の `docs/evidence/20260915T171631Z-firecracker/`）。**x86_64 host と bare metal では未確認。** コードは macOS 上でも偽 Firecracker を使った lifecycle テストまで通る。実機での結果は `docs/evidence/kvm-<UTC>/`（smoke）と `docs/evidence/<UTC>-firecracker/`（E2E）に残す。
 
 ## 1. 目的
 
@@ -112,7 +112,7 @@ vsock_port = 5000
 ```
 
 provider は相対パスをプロセスの cwd 基準で絶対化するので、gateway はリポジトリルートで起動する。
-`TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`（Track D）はこの設定で gateway を自分で起動し（`127.0.0.1:8080`）、登録 → publish → invoke → logs → timeout → rollback → 他 tenant 404 → cancel → 環境破棄を通す。別の gateway を同じポートで起動したまま実行しない。確認済みの記録は `docs/evidence/20260915T125610Z-firecracker/`（27/27 PASS）。
+`TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`（Track D）はこの設定で gateway を自分で起動し（`127.0.0.1:8080`）、登録 → publish → invoke → logs → timeout → rollback → 他 tenant 404 → cancel → 環境破棄を通す。別の gateway を同じポートで起動したまま実行しない。host の `127.0.0.1:8080` を他のプロセスが使っている場合は、`listen` を変えた設定のコピーを `TSLS_GATEWAY_CONFIG` に、同じ URL を `TSLS_API_URL` に渡す。Lima は guest の listen port を host の localhost に転送するため、host と VM で同じ port の gateway を同時に動かさない。確認済みの記録は `docs/evidence/20260915T125610Z-firecracker/`（27/27 PASS）。
 `GET /v1/provider` の capabilities は次のとおり（`Unverified` は「コードはあるが実機で未計測」）。
 
 | capability | 値 |
@@ -170,7 +170,7 @@ guest 申告値（`*_guest`, `hello.*`）は参考値で、課金・timeout の�
 
 ## 5. macOS（Apple Silicon）で試す: Lima + nested virtualization（確認済み）
 
-2026-09-15 に次の環境で `scripts/kvm/smoke.sh` と `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` が通った。記録は `docs/evidence/kvm-20260915T080221Z/`（smoke）と `docs/evidence/20260915T125610Z-firecracker/`（E2E、27/27 PASS）。
+2026-09-15 に次の環境で `scripts/kvm/smoke.sh` と `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` が通った。記録は `docs/evidence/kvm-20260915T080221Z/`（smoke）と `docs/evidence/20260915T125610Z-firecracker/`（E2E、27/27 PASS）。2026-09-16 にレビュー指摘の修正を統合した commit `95af2ba` でも E2E が 28/28 PASS（secret 値の検査を含む、`docs/evidence/20260915T171631Z-firecracker/`）。
 
 | 項目 | 値 |
 |---|---|
@@ -239,6 +239,7 @@ TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
 | 経路 | boot | init | handler | 出典 |
 |---|---|---|---|---|
 | gateway 経由（E2E、11 attempt） | `environment_boot_ms` 3522〜4754 ms | `runtime_init_ms` 331〜410 ms（guest 申告 219〜274 ms） | hello / http-axum の `handler_ms` 73〜93 ms（guest 申告 26〜42 ms） | `docs/evidence/20260915T125610Z-firecracker/invocations.json` |
+| gateway 経由（E2E、修正統合後、33 attempt） | `environment_boot_ms` 2777〜5706 ms（中央値 3503） | `runtime_init_ms` 273〜1271 ms（中央値 358） | `handler_ms` 57〜2002 ms（中央値 77、cpu-burn を含む） | `docs/evidence/20260915T171631Z-firecracker/invocations.json` |
 | fc-smoke（最初の 2 回の起動） | `boot_ms` 13468 / 11036 ms | `init_ms` 1341 / 1224 ms（guest 申告 991 / 850 ms） | hello の `handler_ms` 319 ms（guest 申告 116 ms） | `docs/evidence/kvm-20260915T080221Z/hello.json`、`timeout.json` |
 
 - どちらも `console=ttyS0` でシリアルに kernel ログを出している（§6）。fc-smoke の hello では `/sbin/tachyon-init` の起動が kernel 時刻 9.04 s（`hello-console.txt`）。

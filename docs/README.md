@@ -43,5 +43,7 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 | [evidence/20260915T073238Z-process/](evidence/20260915T073238Z-process/) | E2E デモ、process provider（macOS arm64、隔離なし）。`summary.json`、`provider.json`、`invocations.json`、`gateway.log`、`steps/` | 27/27 PASS |
 | [evidence/kvm-20260915T080221Z/](evidence/kvm-20260915T080221Z/) | fc-smoke、Firecracker v1.17.0 microVM（aarch64、Apple M4 上の Lima VM、nested virtualization）。`summary.txt`、`hello.json`、`timeout.json`、guest console、Firecracker log | hello 応答、timeout demo、残骸なし |
 | [evidence/20260915T125610Z-firecracker/](evidence/20260915T125610Z-firecracker/) | E2E デモ、Firecracker provider（上と同じ VM、`config/gateway.firecracker.toml`） | 27/27 PASS |
+| [evidence/20260915T171415Z-process/](evidence/20260915T171415Z-process/) | E2E デモ、process provider、レビュー指摘修正の統合後（secret 値の検査ステップを含む） | 28/28 PASS |
+| [evidence/20260915T171631Z-firecracker/](evidence/20260915T171631Z-firecracker/) | E2E デモ、Firecracker provider、レビュー指摘修正の統合後 | 28/28 PASS |
 
 記録の時間は nested virtualization 上の参考値で、SLA ではない。process provider の記録は microVM の証跡として使わない。

@@ -39,6 +39,8 @@ Tachyon のサーバーレス実行基盤の **動作プロトタイプ**。sing
 | [docs/evidence/20260915T073238Z-process](docs/evidence/20260915T073238Z-process/) | process provider、macOS（Apple Silicon）。**隔離なし** | `scripts/e2e/demo.sh` 27/27 PASS |
 | [docs/evidence/kvm-20260915T080221Z](docs/evidence/kvm-20260915T080221Z/) | Firecracker v1.17.0 microVM、aarch64 Linux/KVM（Apple M4 上の Lima VM、nested virtualization） | `scripts/kvm/smoke.sh`: hello が microVM から応答、timeout を host が強制終了、残骸なし |
 | [docs/evidence/20260915T125610Z-firecracker](docs/evidence/20260915T125610Z-firecracker/) | 同じ VM で gateway 経由（`profile = "production"`） | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` 27/27 PASS |
+| [docs/evidence/20260915T171415Z-process](docs/evidence/20260915T171415Z-process/) | process provider、macOS。2026-09-16 のレビュー指摘修正を統合した後。**隔離なし** | `scripts/e2e/demo.sh` 28/28 PASS（secret 値の検査を含む） |
+| [docs/evidence/20260915T171631Z-firecracker](docs/evidence/20260915T171631Z-firecracker/) | Firecracker provider、同じ VM、レビュー指摘修正の統合後（commit `95af2ba`） | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` 28/28 PASS |
 
 - 1 host で 1 回ずつ実行した記録で、x86_64 の KVM host と bare metal では確認していない。記録にある時間（nested virtualization 上で boot 3.5〜4.8 s など）は参考値で、性能や SLA の約束ではない。
 - process provider の結果は隔離の証明にならない（関数は host の子プロセスとして動く）。
