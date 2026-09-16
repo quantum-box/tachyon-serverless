@@ -17,10 +17,10 @@ pub mod repository;
 pub mod services;
 
 pub use app::{Application, BootstrapOptions, ProviderFactory};
-pub use config::{GatewayConfig, Profile, ProviderConfig, ProviderKindConfig};
+pub use config::{GatewayConfig, Profile, ProviderConfig, ProviderKindConfig, ReconcileConfig};
 pub use error::AppError;
 pub use services::{
     AliasService, ArtifactService, FunctionService, HistoryService, InvocationDetail,
-    InvokeOutcome, InvokeRequest, InvokeService, LogService, ProviderService, RevisionService,
-    UsageSummary,
+    InvokeOutcome, InvokeRequest, InvokeService, LogService, ProviderService, ReconcileReport,
+    ReconcileService, RevisionService, UsageSummary,
 };

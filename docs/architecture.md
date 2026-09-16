@@ -122,6 +122,9 @@ max_concurrency = 8            # gateway 全体
 max_queue = 32
 queue_timeout_seconds = 10
 
+[reconcile]
+on_startup = true              # 起動時に provider の孤児環境を回収する（既定 true）
+
 [[identity.tokens]]
 token = "dev-token-tenant-a"
 tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
@@ -136,6 +139,16 @@ value = "s3cr3t-a"
 
 `tn_...` は `<prefix>_<26 文字 lowercase ULID>` 形式でなければならない（domain が検証する）。
 
+### 起動時の後始末（restart reconcile）
+
+前のプロセスが crash / kill で落ちた場合、台帳（`state.json`）も host の資源も中途半端に残る。gateway は次の順で収束させる。
+
+1. **台帳**（`crates/application/src/repository.rs::reconcile_after_restart`、store の読み込み時）。`Running` だった Invocation は `Invoke` frame を書き終えており handler が走った可能性があるため `OutcomeUnknown{Host.Restarted}`（自動再実行しない。`docs/threat-model.md` §9）。`Accepted` / `Queued` のままだったものは一度も dispatch していないので `Failed{platform_error, Host.Restarted}`。Attempt は所属する Invocation に従い、Environment は `Lost`。terminal なものは触らない。
+2. **host の資源**（`crates/application/src/services/reconcile.rs::ReconcileService`、`serve()` が listener を accept させる前に呼ぶ）。`ExecutionProvider::list_environments` を呼び、この gateway が active として知らない環境を `terminate_environment(Reconcile)` で回収する（process / socket / drive / workdir。冪等）。台帳には active なのに provider が知らない環境は `Lost` にする。
+3. **観測**。結果（found / adopted / terminated / failed / lost）を構造化ログ `startup reconcile finished` に出し、`GET /readyz` の `reconcile` にも載せる。
+
+規則: provider の列挙や terminate が失敗しても起動は止めない（warn を出して続行し、`reconcile.error` に残す）。実行中の invocation の環境は `create_environment` より前に台帳へ記録されるため必ず「知っている」側に入り、reconcile が terminate することはない。`[reconcile] on_startup = false` で 2 と 3 だけを止められる（1 は常に走る）。
+
 ## 5. 決め事（実装者が守ること）
 
 1. domain / application は `firecracker` `kube` `axum` を import しない。provider は `ExecutionProvider` だけを実装する。
@@ -148,6 +161,7 @@ value = "s3cr3t-a"
 8. 失敗の分類は `ErrorClass` を正とし、HTTP status は `api-types::ErrorCode::http_status()`。
 9. ログは invocation 単位で `Limits` の行数・bytes 上限を守り、超過分は `dropped = true` で観測できるようにする。
 10. 「動いた」証跡: 環境の `BootEvidence`（guest_boot_id, host_pid, provider details）を Invocation の attempt に残し、API と CLI で表示する。
+11. 再起動で「開始したかもしれない」ものを `Failed` にしない。dispatch 済みは `OutcomeUnknown`、未 dispatch だけ `Failed`（§4「起動時の後始末」）。孤児環境の回収は listener を開ける前に済ませる。
 
 ## 6. 非対象（P1）
 

@@ -317,6 +317,21 @@ impl InvokeConfig {
     }
 }
 
+/// Startup reconciliation (docs/architecture.md §4).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ReconcileConfig {
+    /// Ask the provider what it still runs when the gateway starts and
+    /// terminate every environment this gateway does not know as active.
+    pub on_startup: bool,
+}
+
+impl Default for ReconcileConfig {
+    fn default() -> Self {
+        Self { on_startup: true }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct GatewayConfig {
     #[serde(default = "default_listen")]
@@ -336,6 +351,8 @@ pub struct GatewayConfig {
     pub limits: LimitsOverrides,
     #[serde(default)]
     pub invoke: InvokeConfig,
+    #[serde(default)]
+    pub reconcile: ReconcileConfig,
 }
 
 fn default_listen() -> String {
@@ -590,6 +607,16 @@ value = "demo-secret-value-a"
         }
         // the defaults fit
         GatewayConfig::from_toml(DEV).unwrap();
+    }
+
+    #[test]
+    fn startup_reconcile_is_on_unless_it_is_turned_off() {
+        assert!(
+            GatewayConfig::from_toml(DEV).unwrap().reconcile.on_startup,
+            "orphan reclamation is the default"
+        );
+        let off = format!("{DEV}\n[reconcile]\non_startup = false\n");
+        assert!(!GatewayConfig::from_toml(&off).unwrap().reconcile.on_startup);
     }
 
     #[test]
