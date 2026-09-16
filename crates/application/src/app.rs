@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tachyon_serverless_domain::{Clock, IdGenerator, Limits, SystemClock, UlidGenerator};
 use tachyon_serverless_provider_port::{
-    ArtifactStore, ExecutionProvider, IdentityProvider, SecretProvider,
+    ArtifactStore, ExecutionProvider, IdentityProvider, SecretProvider, UsageSink,
 };
 
 use crate::config::{GatewayConfig, Profile, ProviderConfig};
@@ -189,9 +189,13 @@ impl Application {
         // and the `[pool]` section. Everything downstream only asks the
         // policy (docs/architecture.md §4).
         let policy = PoolPolicy::decide(&caps, &config.pool);
+        // The pool gets the usage sink because it, not the driver, is what
+        // ends a pooled environment's life (TTL sweep, drain, retire) and
+        // therefore what has to report it (docs/architecture.md §4).
         let pool = Arc::new(EnvironmentPool::new(
             repos.clone(),
             provider.clone(),
+            usage.clone() as Arc<dyn UsageSink>,
             clock.clone(),
             policy,
         ));

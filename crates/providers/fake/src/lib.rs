@@ -93,6 +93,12 @@ pub enum FakeGuestScript {
     RespondOkForever(serde_json::Value),
     /// Ready, then answer *every* `Invoke` with the invoke payload itself.
     EchoForever,
+    /// Ready, answer the first `Invoke` with this payload and then send
+    /// `Exited` *without closing the stream*: a user process that died right
+    /// after answering, while the bridge is still connected. The host only
+    /// learns about it by reading the queued frame, which is what a pooled
+    /// session has to do before it can carry another attempt.
+    RespondOkThenExit(serde_json::Value),
     /// Ready, then for every `Invoke` answer twice: first `{"stale": true}`
     /// carrying the *previous* epoch (a late frame of the attempt before),
     /// then this payload at the correct epoch. The two payloads differ so a
@@ -126,6 +132,7 @@ impl FakeGuestScript {
             Self::WrongEpochThenOk(_) => "wrong_epoch_then_ok",
             Self::RespondOkForever(_) => "respond_ok_forever",
             Self::EchoForever => "echo_forever",
+            Self::RespondOkThenExit(_) => "respond_ok_then_exit",
             Self::StaleEpochThenOkForever(_) => "stale_epoch_then_ok_forever",
             Self::Custom(_) => "custom",
         }
@@ -812,6 +819,7 @@ async fn run_guest(script: FakeGuestScript, ctx: GuestContext, stream: DuplexStr
         | FakeGuestScript::EchoHttp
         | FakeGuestScript::HandlerError { .. }
         | FakeGuestScript::Panic
+        | FakeGuestScript::RespondOkThenExit(_)
         | FakeGuestScript::WrongEpochThenOk(_) => {
             if !guest.ready().await {
                 return;
@@ -850,6 +858,17 @@ async fn run_guest(script: FakeGuestScript, ctx: GuestContext, stream: DuplexStr
                 FakeGuestScript::WrongEpochThenOk(v) => {
                     guest.respond(&inv, inv.epoch + 1000, v.clone()).await
                         && guest.respond(&inv, inv.epoch, v).await
+                }
+                // The answer and the death notice arrive back to back; the
+                // stream stays open, so only a read tells the host about it.
+                FakeGuestScript::RespondOkThenExit(v) => {
+                    guest.respond(&inv, inv.epoch, v).await
+                        && guest
+                            .send(&GuestMessage::Exited {
+                                exit_code: Some(0),
+                                signal: None,
+                            })
+                            .await
                 }
                 _ => unreachable!("handled above"),
             };

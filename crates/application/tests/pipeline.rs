@@ -2,7 +2,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -32,9 +32,9 @@ use tachyon_serverless_provider_fake::{
     CustomScriptContext, FakeExecutionProvider, FakeGuestScript, FakeProviderOptions, ScriptFuture,
 };
 use tachyon_serverless_provider_port::{
-    ArtifactLocation, Capabilities, EnvironmentHandle, EnvironmentObservation, EnvironmentSpec,
-    ExecutionProvider, PreflightReport, Principal, ProviderError, Role, TerminateReason,
-    TerminateReport,
+    ArtifactLocation, BridgeStream, Capabilities, EnvironmentHandle, EnvironmentObservation,
+    EnvironmentSpec, ExecutionProvider, PreflightReport, Principal, ProviderError, Role,
+    TerminateReason, TerminateReport, UsageSink,
 };
 
 const TENANT_A: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzza";
@@ -2596,4 +2596,459 @@ async fn a_pooled_environment_is_reclaimed_after_a_restart() {
     assert!(out.succeeded(), "{:?}", out.invocation().status);
     assert_eq!(attempt_of(&out).start_kind, StartKind::Cold);
     assert_ne!(attempt_of(&out).environment_id, pooled);
+}
+
+// ---------------------------------------------------------------------------
+// pool: what may go back into it, and what the ledger and usage say (review)
+// ---------------------------------------------------------------------------
+
+/// Every `EnvironmentStopped` recorded for `env`.
+fn stopped_events(h: &Harness, env: &EnvironmentId) -> Vec<tachyon_serverless_domain::UsageEvent> {
+    h.app
+        .usage
+        .events()
+        .into_iter()
+        .filter(|e| {
+            &e.environment_id == env && matches!(e.event_type, UsageEventType::EnvironmentStopped)
+        })
+        .collect()
+}
+
+fn assert_usage_event_ids_are_unique(h: &Harness) {
+    let events = h.app.usage.events();
+    let mut ids: Vec<String> = events.iter().map(|e| e.event_id.clone()).collect();
+    let total = ids.len();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(
+        ids.len(),
+        total,
+        "two usage events share an id, so one of them was dropped as a duplicate"
+    );
+}
+
+/// Regression (review F2): the usage events of an invocation served by a
+/// reused environment must not collide with those of the invocation that
+/// booted it — a collision silently drops the whole warm traffic from
+/// metering. A genuine re-send of one event must still de-duplicate.
+#[tokio::test]
+async fn every_invocation_on_a_reused_environment_is_metered() {
+    use tachyon_serverless_domain::StartKind;
+    let h = pool_harness(warm_fake(), POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "metered").await;
+
+    let mut invocations = Vec::new();
+    for n in 0..3 {
+        let out = h
+            .app
+            .invoke
+            .invoke(invoke_request(
+                &h.a,
+                &function,
+                serde_json::json!({ "n": n }),
+            ))
+            .await
+            .unwrap();
+        assert!(out.succeeded(), "{:?}", out.invocation().status);
+        if n > 0 {
+            assert_eq!(attempt_of(&out).start_kind, StartKind::Warm);
+        }
+        invocations.push(out.invocation().id.clone());
+    }
+    assert_eq!(
+        h.fake.created().len(),
+        1,
+        "one environment served all three"
+    );
+
+    for (n, invocation) in invocations.iter().enumerate() {
+        let events = h.app.usage.events_for_invocation(invocation);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e.event_type, UsageEventType::HandlerStarted)),
+            "invocation {n} has no HandlerStarted event"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e.event_type, UsageEventType::HandlerFinished)),
+            "invocation {n} has no HandlerFinished event"
+        );
+    }
+    assert_usage_event_ids_are_unique(&h);
+
+    // The sink still drops a genuine re-send of the same event.
+    let before = h.app.usage.events();
+    h.app.usage.record(before[0].clone()).await;
+    assert_eq!(h.app.usage.events().len(), before.len());
+
+    let usage = h.app.history.usage_summary(&h.a, &function.id).unwrap();
+    assert_eq!(usage.invocations, 3);
+    assert!(usage.bytes_out_total > 0, "warm traffic reaches metering");
+}
+
+/// Regression (review F4): the terminate reason is not the attempt's outcome.
+/// A guest that panicked ends as `Completed` there, but its process is gone:
+/// it must never be handed to the next invocation. A handler error, which the
+/// guest reported and survived, still keeps the environment.
+#[tokio::test]
+async fn an_environment_whose_guest_crashed_is_never_pooled() {
+    let fake = warm_fake();
+    fake.set_default_script(Some(FakeGuestScript::Panic));
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "panics").await;
+    let out = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(failed_error(&out).class, ErrorClass::Crash);
+    let env = attempt_of(&out).environment_id.clone();
+    assert!(
+        h.app.repos.environments.list_idle().unwrap().is_empty(),
+        "a crashed guest must not be pooled"
+    );
+    assert_eq!(environment_state(&h, &env), EnvironmentState::Stopped);
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(env.clone(), TerminateReason::Completed)]
+    );
+    assert!(h.fake.running().is_empty());
+    assert_eq!(h.app.pool.held(), 0);
+
+    // A handler error is a failure the guest reported and survived: reusable.
+    let fake = warm_fake();
+    fake.set_default_script(Some(FakeGuestScript::HandlerError {
+        error_type: "App.Boom".into(),
+        message: "boom".into(),
+    }));
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "user-error").await;
+    let out = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(failed_error(&out).class, ErrorClass::UserError);
+    let env = attempt_of(&out).environment_id.clone();
+    assert_eq!(
+        environment_state(&h, &env),
+        EnvironmentState::Idle,
+        "a handler error keeps the environment"
+    );
+    assert!(h.fake.terminated().is_empty());
+}
+
+/// Regression (review F6): a guest that exited right after answering leaves an
+/// `Exited` frame in the buffer. It carries no attempt id or epoch, so the
+/// lease cannot fence it: draining before pooling is what keeps it from
+/// settling the next invocation, and what keeps the dead environment out of
+/// the pool.
+#[tokio::test]
+async fn a_guest_that_exited_after_answering_is_not_pooled() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake();
+    fake.set_default_script(Some(FakeGuestScript::RespondOkThenExit(
+        serde_json::json!({"ok": true}),
+    )));
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "exits").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let dead = attempt_of(&first).environment_id.clone();
+    assert_ne!(
+        environment_state(&h, &dead),
+        EnvironmentState::Idle,
+        "a guest that exited must never go back into the pool"
+    );
+    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert_eq!(h.app.pool.held(), 0);
+    assert_eq!(h.fake.terminated().len(), 1);
+
+    // The next invocation boots its own environment and is not settled by the
+    // frame the previous guest left behind.
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(second.succeeded(), "{:?}", second.invocation().status);
+    assert_eq!(second.output, Some(serde_json::json!({"ok": true})));
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Cold);
+    assert_ne!(attempt_of(&second).environment_id, dead);
+}
+
+/// Regression (review F5): a pooled environment is ended by the pool, not by
+/// the driver, so the pool is what reports it. Without this the whole lifetime
+/// of every reused environment is missing from usage.
+#[tokio::test]
+async fn a_reaped_pooled_environment_reports_its_lifetime_to_usage() {
+    let offset = Arc::new(AtomicI64::new(0));
+    let clock: Arc<dyn Clock> = Arc::new(ShiftedClock(offset.clone()));
+    let h = pool_harness_with(warm_fake(), POOL_ON, Some(clock), None);
+    let (function, _) = deploy(&h, &h.a, "lifetime").await;
+
+    let out = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(out.succeeded());
+    let pooled = attempt_of(&out).environment_id.clone();
+    assert_eq!(environment_state(&h, &pooled), EnvironmentState::Idle);
+    assert!(
+        stopped_events(&h, &pooled).is_empty(),
+        "an environment in the pool has not stopped"
+    );
+
+    // Past the TTL the sweeper terminates it, and meters it.
+    offset.store(120_000, Ordering::SeqCst);
+    let swept = h.app.sweep_idle_environments().await.unwrap();
+    assert_eq!((swept.reaped, swept.failed), (1, 0));
+    assert_eq!(environment_state(&h, &pooled), EnvironmentState::Stopped);
+
+    let stopped = stopped_events(&h, &pooled);
+    assert_eq!(stopped.len(), 1, "exactly one stop event");
+    let stopped = &stopped[0];
+    assert_eq!(stopped.tenant_id, h.a.tenant_id);
+    assert_eq!(
+        stopped.evidence_quality,
+        tachyon_serverless_domain::EvidenceQuality::HostObserved
+    );
+    assert!(
+        stopped.monotonic_duration_ms.unwrap_or(0) >= 100_000,
+        "the host-observed lifetime spans the time the environment was pooled: {:?}",
+        stopped.monotonic_duration_ms
+    );
+    assert!(stopped.memory_mib > 0, "the resource profile is reported");
+    assert_usage_event_ids_are_unique(&h);
+}
+
+/// A bridge stream that pretends the guest died quietly: once armed, writes
+/// fail and reads never produce anything (not even EOF), which is how a pooled
+/// session looks when its guest is gone and nothing has been read since.
+struct DeadWhenArmed {
+    inner: Box<dyn BridgeStream>,
+    armed: Arc<AtomicBool>,
+}
+
+impl DeadWhenArmed {
+    fn gone(&self) -> bool {
+        self.armed.load(Ordering::SeqCst)
+    }
+    fn broken_pipe() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the guest is gone")
+    }
+}
+
+impl AsyncRead for DeadWhenArmed {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if self.gone() {
+            return Poll::Pending;
+        }
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for DeadWhenArmed {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        if self.gone() {
+            return Poll::Ready(Err(Self::broken_pipe()));
+        }
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        if self.gone() {
+            return Poll::Ready(Err(Self::broken_pipe()));
+        }
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        if self.gone() {
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// Delegates to the fake, but the *first* environment gets a stream the test
+/// can kill. Everything created afterwards is real, so a cold retry works.
+struct DiesWhenArmed {
+    inner: Arc<FakeExecutionProvider>,
+    armed: Arc<AtomicBool>,
+    created: AtomicUsize,
+}
+
+#[async_trait]
+impl ExecutionProvider for DiesWhenArmed {
+    fn kind(&self) -> ProviderKind {
+        self.inner.kind()
+    }
+    fn capabilities(&self) -> Capabilities {
+        self.inner.capabilities()
+    }
+    async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
+        self.inner.preflight().await
+    }
+    async fn validate_artifact(
+        &self,
+        artifact: &ArtifactLocation,
+        architecture: Architecture,
+    ) -> Result<(), ProviderError> {
+        self.inner.validate_artifact(artifact, architecture).await
+    }
+    async fn create_environment(
+        &self,
+        spec: EnvironmentSpec,
+    ) -> Result<EnvironmentHandle, ProviderError> {
+        let mut handle = self.inner.create_environment(spec).await?;
+        if self.created.fetch_add(1, Ordering::SeqCst) == 0 {
+            handle.stream = Box::new(DeadWhenArmed {
+                inner: handle.stream,
+                armed: self.armed.clone(),
+            });
+        }
+        Ok(handle)
+    }
+    async fn terminate_environment(
+        &self,
+        environment_id: &EnvironmentId,
+        reason: TerminateReason,
+    ) -> Result<TerminateReport, ProviderError> {
+        self.inner
+            .terminate_environment(environment_id, reason)
+            .await
+    }
+    async fn observe_environment(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<EnvironmentObservation, ProviderError> {
+        self.inner.observe_environment(environment_id).await
+    }
+    async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError> {
+        self.inner.list_environments().await
+    }
+}
+
+/// Regression (review F7): a warm dispatch into a guest that died while idle
+/// must not fail the invocation, because a cold start would have served it.
+/// The dead environment is retired exactly once and the invocation is
+/// dispatched once more, cold; the ledger shows both attempts and usage counts
+/// the handler once.
+#[tokio::test]
+async fn a_warm_dispatch_into_a_dead_guest_falls_back_to_a_cold_start() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake();
+    let armed = Arc::new(AtomicBool::new(false));
+    let provider = Arc::new(DiesWhenArmed {
+        inner: fake.clone(),
+        armed: armed.clone(),
+        created: AtomicUsize::new(0),
+    });
+    let h = harness_with(fake, provider, POOL_ON, None);
+    let (function, _) = deploy(&h, &h.a, "dead-warm").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let dead = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &dead), EnvironmentState::Idle);
+
+    // The guest dies without telling anyone: nothing to read, writes fail.
+    armed.store(true, Ordering::SeqCst);
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
+        .await
+        .unwrap();
+    assert!(
+        second.succeeded(),
+        "a dead pooled environment must not fail an invocation a cold start would have served: {:?}",
+        second.invocation().status
+    );
+    assert_eq!(
+        second.output,
+        Some(serde_json::json!({"n": 2})),
+        "the payload survives the retry"
+    );
+
+    let attempts = &second.detail.attempts;
+    assert_eq!(attempts.len(), 2, "the failed warm attempt and its retry");
+    assert_eq!(attempts[0].0.start_kind, StartKind::Warm);
+    assert_eq!(attempts[0].0.environment_id, dead);
+    match &attempts[0].0.status {
+        AttemptStatus::Failed { error } => {
+            assert_eq!(error.error_type, "Host.WarmEnvironmentGone");
+            assert_eq!(error.class, ErrorClass::PlatformError);
+        }
+        other => panic!("expected the warm attempt to be failed, got {other:?}"),
+    }
+    assert_eq!(attempts[1].0.start_kind, StartKind::Cold);
+    assert_eq!(attempts[1].0.status, AttemptStatus::Succeeded);
+    assert_ne!(attempts[1].0.environment_id, dead);
+    assert_eq!(second.invocation().attempt_ids.len(), 2);
+
+    // Retired exactly once, and metered exactly once.
+    let terminated: Vec<_> = h
+        .fake
+        .terminated()
+        .into_iter()
+        .filter(|(id, _)| id == &dead)
+        .collect();
+    assert_eq!(
+        terminated.len(),
+        1,
+        "the dead environment is terminated exactly once"
+    );
+    assert!(
+        matches!(
+            environment_state(&h, &dead),
+            EnvironmentState::Failed { .. }
+        ),
+        "{:?}",
+        environment_state(&h, &dead)
+    );
+    assert_eq!(stopped_events(&h, &dead).len(), 1);
+    assert_usage_event_ids_are_unique(&h);
+
+    let for_second = h.app.usage.events_for_invocation(&second.invocation().id);
+    assert_eq!(
+        for_second
+            .iter()
+            .filter(|e| matches!(e.event_type, UsageEventType::HandlerStarted))
+            .count(),
+        1,
+        "the handler ran once, so it is counted once"
+    );
+    assert_eq!(
+        for_second
+            .iter()
+            .filter(|e| matches!(e.event_type, UsageEventType::HandlerFinished))
+            .count(),
+        1
+    );
 }

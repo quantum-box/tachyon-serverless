@@ -364,6 +364,7 @@ impl InvokeService {
             attempt_id: None,
             lease_id: None,
             seq: 0,
+            epoch: 1,
         };
         tokio::spawn(driver.run(done_tx));
 
@@ -676,6 +677,18 @@ enum Dispatch {
     },
 }
 
+/// Result of one dispatch onto one environment ([`Driver::attempt`]).
+enum Attempted {
+    /// Terminal: the ledger is settled and this is the handler output.
+    Done(Option<serde_json::Value>),
+    /// The pooled environment was gone before the `Invoke` frame reached its
+    /// guest, so the handler cannot have started. The environment has been
+    /// retired and the attempt settled; the caller dispatches once more, cold.
+    /// Never produced when the caller disallowed a warm start, so a retry can
+    /// never ask for another one.
+    RetryCold,
+}
+
 /// A secret binding of the revision could not be resolved.
 struct SecretResolutionFailure {
     binding_ref: String,
@@ -755,6 +768,10 @@ struct Driver {
     lease_id: Option<LeaseId>,
     /// Last usage-event sequence number used for the environment.
     seq: u64,
+    /// Epoch of the environment this driver currently works with. It is part
+    /// of every usage event id, so the events of an attempt on a reused
+    /// environment never collide with those of the attempt before it.
+    epoch: u64,
 }
 
 async fn wait_cancel(rx: &mut watch::Receiver<Option<CancelKind>>) -> CancelKind {
@@ -961,7 +978,12 @@ impl Driver {
         bytes_out: u64,
     ) {
         let event = UsageEvent {
-            event_id: format!("{env}:{sequence}"),
+            // Unique per (environment, assignment, event). The epoch advances
+            // on every reassignment, so the events of a warm attempt never
+            // collide with those of the invocation that ran on the same
+            // environment before it — while re-sending the *same* event keeps
+            // the same id, so the sink still de-duplicates it.
+            event_id: format!("{env}:{}:{sequence}", self.epoch),
             tenant_id: self.function.tenant_id.clone(),
             environment_id: env.clone(),
             invocation_id: Some(self.invocation_id.clone()),
@@ -1029,8 +1051,6 @@ impl Driver {
     /// The whole lifecycle after acceptance. Returns the handler output on
     /// success. Every early return has already recorded the terminal state.
     async fn execute(&mut self) -> Option<serde_json::Value> {
-        let svc = self.svc.clone();
-
         // 5. capacity ------------------------------------------------------
         let _permits = match self.acquire_capacity().await {
             Ok(p) => p,
@@ -1072,6 +1092,28 @@ impl Driver {
             return None;
         }
 
+        // 6..10. one dispatch onto an environment, warm or cold ------------
+        match self.attempt(1, queue_wait_ms, true).await {
+            Attempted::Done(output) => output,
+            // The reused environment was already gone when the `Invoke` frame
+            // was written, so the handler cannot have started: retry exactly
+            // once, cold. `warm_allowed = false` makes `RetryCold` unreachable
+            // in the retry, so this can never loop.
+            Attempted::RetryCold => match self.attempt(2, queue_wait_ms, false).await {
+                Attempted::Done(output) => output,
+                Attempted::RetryCold => None,
+            },
+        }
+        // `_permits` is released here, after the last attempt finished.
+    }
+
+    /// One dispatch of this invocation onto one environment: acquire the
+    /// environment (warm when `warm_allowed` and the pool has a match, cold
+    /// otherwise), record attempt and lease, invoke, classify, and settle
+    /// everything. `number` is the attempt number in the ledger.
+    async fn attempt(&mut self, number: u32, queue_wait_ms: u64, warm_allowed: bool) -> Attempted {
+        let svc = self.svc.clone();
+
         // 6. environment ---------------------------------------------------
         // Reuse is decided before anything is created. The reuse key carries
         // the generation of the *resolved* secret bindings, so the bindings are
@@ -1097,7 +1139,7 @@ impl Driver {
                     "secret binding could not be resolved; environment not created"
                 );
                 self.fail_invocation(error);
-                return None;
+                return Attempted::Done(None);
             }
         };
         let reuse_key = reuse_key_for(
@@ -1117,12 +1159,21 @@ impl Driver {
         // every field. Everything else boots cold — which, with both shipped
         // providers, is every invocation: the pool never hands anything out
         // unless the provider reports both idle capabilities as `Supported`.
-        let warm = svc.pool.claim(&reuse_key).await;
+        let warm = match warm_allowed {
+            true => svc.pool.claim(&reuse_key).await,
+            // A retry after an undelivered warm dispatch: cold only.
+            false => None,
+        };
         let prepared = match warm {
             Some(warm) => self.prepare_warm(warm),
             None => {
-                self.prepare_cold(prospective_env_id, reuse_key, secret_env, init_timeout)
-                    .await?
+                match self
+                    .prepare_cold(prospective_env_id, reuse_key, secret_env, init_timeout)
+                    .await
+                {
+                    Some(prepared) => prepared,
+                    None => return Attempted::Done(None),
+                }
             }
         };
         let Prepared {
@@ -1140,7 +1191,7 @@ impl Driver {
         if self.client_deadline_elapsed() {
             self.stop_for_client_deadline(Some(&mut session), &mut env, &logs)
                 .await;
-            return None;
+            return Attempted::Done(None);
         }
 
         // 8. attempt + lease + invoke --------------------------------------
@@ -1154,7 +1205,7 @@ impl Driver {
                 .terminate_environment(&env_id, TerminateReason::Crashed)
                 .await;
             self.env_id = None;
-            return None;
+            return Attempted::Done(None);
         };
         let timeout = Duration::from_secs(u64::from(self.revision.spec.execution.timeout_seconds));
         let now = self.now();
@@ -1172,7 +1223,7 @@ impl Driver {
             attempt_id.clone(),
             self.invocation_id.clone(),
             tenant.clone(),
-            1,
+            number,
             env_id.clone(),
             env.epoch,
             start_kind,
@@ -1188,13 +1239,19 @@ impl Driver {
             execution_deadline_ts,
             now,
         );
-        if let Err(e) = inv.mark_running(
-            attempt_id.clone(),
-            execution_deadline_ts,
-            init_deadline_ts,
-            now,
-        ) {
-            tracing::warn!(error = %e, "cannot mark invocation running");
+        let running = match number {
+            1 => inv.mark_running(
+                attempt_id.clone(),
+                execution_deadline_ts,
+                init_deadline_ts,
+                now,
+            ),
+            // A retry after an undelivered dispatch: the invocation is already
+            // Running and keeps the `started_at` of its first dispatch.
+            _ => inv.mark_retry(attempt_id.clone(), execution_deadline_ts, init_deadline_ts),
+        };
+        if let Err(e) = running {
+            tracing::warn!(error = %e, "cannot record the invocation as running");
         }
         let _ = env.mark_busy(now);
         let _ = svc.repos.invocations.insert_attempt(attempt.clone());
@@ -1205,6 +1262,13 @@ impl Driver {
         self.save_env(&env);
 
         let deadline_ms = execution_deadline_ts.timestamp_millis().max(0) as u64;
+        // A warm dispatch may still have to be repeated cold, and then the
+        // payload is needed a second time. A cold one hands over its only copy.
+        let retryable = warm_allowed && start_kind == StartKind::Warm;
+        let payload = match retryable {
+            true => self.payload.clone(),
+            false => std::mem::take(&mut self.payload),
+        };
         let dispatched_at = Instant::now();
         let sent = session
             .send_invoke(InvokeParams {
@@ -1214,10 +1278,25 @@ impl Driver {
                 event_type: self.event_kind.event_type().to_string(),
                 deadline_ms,
                 trace_id: self.trace_id.clone(),
-                payload: std::mem::take(&mut self.payload),
+                payload,
             })
             .await;
         let dispatch = match sent {
+            // The pooled guest was already gone: nothing reached it, so the
+            // handler cannot have started (docs/threat-model.md §9). Retire
+            // the environment and let the caller dispatch once more, cold.
+            Err(SessionError::Disconnected) if retryable => {
+                self.retire_after_undelivered_warm(
+                    &mut env,
+                    &mut session,
+                    attempt,
+                    lease,
+                    &logs,
+                    queue_wait_ms,
+                )
+                .await;
+                return Attempted::RetryCold;
+            }
             Ok(()) => {
                 self.seq += 1;
                 self.emit_usage(
@@ -1471,13 +1550,31 @@ impl Driver {
         }
 
         // The environment goes back into the pool only when this attempt left
-        // it healthy: a clean end with nothing to clean up, reuse allowed by
-        // both gates, and no shutdown in progress (a pooled environment must
-        // never outlive the process holding its session). Everything else
-        // keeps destroy-after-invoke (docs/architecture.md §4).
-        let may_reuse = env_end.failure.is_none()
+        // it healthy: a clean end with nothing to clean up, an outcome that
+        // says the guest is still there, reuse allowed by both gates, and no
+        // shutdown in progress (a pooled environment must never outlive the
+        // process holding its session). Everything else keeps
+        // destroy-after-invoke (docs/architecture.md §4).
+        //
+        // The outcome matters on its own: `EnvEnd` is the *terminate reason*,
+        // and a guest panic ends as `Completed` there while leaving a process
+        // that just died behind. Only a success and a `UserError` — the
+        // handler returned an error and the guest reported it — may be reused.
+        let outcome_allows_reuse = match &result {
+            Ok(_) => true,
+            Err(e) => e.class == ErrorClass::UserError,
+        };
+        let may_reuse = outcome_allows_reuse
+            && env_end.failure.is_none()
             && env_end.reason == TerminateReason::Completed
             && !svc.draining.load(Ordering::SeqCst);
+        // Whatever the guest queued after its result belongs to *this*
+        // attempt: take it here, under this attempt's log context, before the
+        // session can carry another one. An `Exited` frame or an EOF makes the
+        // session unusable, and `release` then refuses to pool it.
+        if may_reuse {
+            session.drain_stale().await;
+        }
         let release = if may_reuse {
             svc.pool.release(&env, session)
         } else {
@@ -1499,8 +1596,7 @@ impl Driver {
                 self.env_id = None;
                 self.attempt_id = None;
                 self.lease_id = None;
-                drop(_permits);
-                return output_value;
+                return Attempted::Done(output_value);
             }
             Err(session) => *session,
         };
@@ -1555,8 +1651,7 @@ impl Driver {
         self.env_id = None;
         self.attempt_id = None;
         self.lease_id = None;
-        drop(_permits);
-        output_value
+        Attempted::Done(output_value)
     }
 
     /// Resolve the revision's secret bindings for `env_id`, in binding order.
@@ -1619,6 +1714,7 @@ impl Driver {
         // terminate it exactly as it would a cold one.
         self.env_id = Some(environment.id.clone());
         self.env_started = Some(Instant::now());
+        self.epoch = environment.epoch;
         logs.platform(
             LogPhase::Boot,
             None,
@@ -1640,6 +1736,80 @@ impl Driver {
             runtime_init_ms: 0,
             logs,
         }
+    }
+
+    /// The pooled environment's guest was gone before the `Invoke` frame could
+    /// reach it. Settle this attempt, retire the environment exactly once and
+    /// leave the driver as if nothing had been acquired, so the caller can
+    /// dispatch again from a cold start.
+    async fn retire_after_undelivered_warm(
+        &mut self,
+        env: &mut ExecutionEnvironment,
+        session: &mut BridgeSession,
+        mut attempt: InvocationAttempt,
+        mut lease: ExecutionLease,
+        logs: &LogForwarder,
+        queue_wait_ms: u64,
+    ) {
+        let svc = self.svc.clone();
+        let now = self.now();
+        let attempt_id = attempt.id.clone();
+        tracing::warn!(
+            environment_id = %env.id,
+            epoch = env.epoch,
+            "the reused environment was gone before dispatch; retrying with a cold start"
+        );
+        logs.platform(
+            LogPhase::Handler,
+            Some(&attempt_id),
+            "the reused environment was gone before the invocation could be delivered; \
+             retrying with a cold start",
+        );
+        let _ = lease.release(now);
+        let _ = svc.repos.environments.update_lease(lease);
+        attempt.timings = tachyon_serverless_domain::AttemptTimings {
+            queue_wait_ms: Some(queue_wait_ms),
+            environment_boot_ms: Some(0),
+            runtime_init_ms: Some(0),
+            total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
+            ..tachyon_serverless_domain::AttemptTimings::default()
+        };
+        let _ = attempt.fail(
+            InvocationError::new(
+                ErrorClass::PlatformError,
+                "Host.WarmEnvironmentGone",
+                "the reused environment was gone before the invocation was delivered",
+            ),
+            now,
+        );
+        let _ = svc.repos.invocations.update_attempt(attempt);
+        let _ = session.shutdown("reused environment is gone").await;
+        if let Err(e) = svc
+            .provider
+            .terminate_environment(&env.id, TerminateReason::Crashed)
+            .await
+        {
+            tracing::warn!(error = %e, environment_id = %env.id, "terminate of a gone environment failed");
+        }
+        let _ = env.mark_failed("reused environment was gone before dispatch", now);
+        self.save_env(env);
+        self.seq += 1;
+        self.emit_usage(
+            &env.id.clone(),
+            Some(&attempt_id),
+            UsageEventType::EnvironmentStopped,
+            self.seq,
+            self.env_started.map(|t| t.elapsed().as_millis() as u64),
+            0,
+            0,
+        )
+        .await;
+        // Terminated exactly once, here: the retry starts from nothing and a
+        // later panic cleanup has nothing of this environment left to reclaim.
+        self.env_id = None;
+        self.attempt_id = None;
+        self.lease_id = None;
+        self.env_started = None;
     }
 
     /// Create a fresh environment and drive it to `Ready` (the P1 path).
@@ -1673,6 +1843,7 @@ impl Driver {
         }
         // From here on a panic must still terminate the environment.
         self.env_id = Some(env_id.clone());
+        self.epoch = env.epoch;
         let _ = env.mark_provisioning(self.now());
         self.save_env(&env);
 

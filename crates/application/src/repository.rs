@@ -109,8 +109,13 @@ pub trait EnvironmentRepository: Send + Sync {
     /// The environments currently in the pool, longest idle first.
     fn list_idle(&self) -> Result<Vec<ExecutionEnvironment>, RepoError>;
 
-    /// Atomically hand out one pooled environment whose reuse key equals
-    /// `key` in *every* field, moving it to `Busy` and advancing its epoch.
+    /// Atomically hand out one **pooled** (`Idle`) environment whose reuse key
+    /// equals `key` in *every* field, moving it to `Busy` and advancing its
+    /// epoch.
+    ///
+    /// Only pool membership is handed out, i.e. only what `release_to_pool`
+    /// put there. A `Ready` environment is not in the pool: it belongs to the
+    /// cold start that created it, which is about to dispatch into it.
     ///
     /// Searching, the state change and the epoch bump all happen inside one
     /// store mutation, so of two concurrent claims exactly one can win: the
@@ -827,16 +832,21 @@ impl EnvironmentRepository for InMemoryStore {
         now: Timestamp,
     ) -> Result<Option<ExecutionEnvironment>, RepoError> {
         Ok(self.mutate(|s| {
+            // Pool membership is exactly `Idle`: `release_to_pool` is the only
+            // way in and `list_idle` the only way to enumerate it. A `Ready`
+            // row belongs to the cold start that created it and is about to
+            // dispatch into it, so it is never a candidate here even though
+            // the domain would allow the transition.
             // `values()` is ordered by id (a ULID), so the oldest match wins.
             let id = s
                 .durable
                 .environments
                 .values()
-                .find(|e| e.is_reusable() && &e.reuse_key == key)
+                .find(|e| matches!(e.state, EnvironmentState::Idle) && &e.reuse_key == key)
                 .map(|e| e.id.clone())?;
             let env = s.durable.environments.get_mut(&id)?;
-            // `reassign` refuses anything that is not Ready or Idle (so a Busy
-            // environment is never handed out) and is what advances the epoch.
+            // `reassign` is the domain guard (it refuses anything that is not
+            // Ready or Idle) and is what advances the epoch.
             env.reassign(now).ok()?;
             Some(env.clone())
         }))
@@ -1707,6 +1717,44 @@ mod tests {
             "max_total_idle is enforced across keys"
         );
         assert_eq!(store.list_idle().unwrap().len(), 4);
+    }
+
+    /// Regression (review F1): pool membership is `Idle` only. A `Ready` row
+    /// belongs to the cold start that created it and is about to dispatch into
+    /// it; handing it out would take an environment a live invocation is
+    /// using and leave its driver with a terminated guest.
+    #[test]
+    fn a_ready_environment_is_not_in_the_pool_and_is_never_claimed() {
+        let store = InMemoryStore::new(Limits::default());
+        let key = pool_key(&TenantId::generate(), &RevisionId::generate());
+        let ready = ready_environment(&key);
+        let ready_id = ready.id.clone();
+        EnvironmentRepository::insert(&store, ready).unwrap();
+
+        assert!(
+            store.list_idle().unwrap().is_empty(),
+            "a Ready environment is not pool membership"
+        );
+        assert!(
+            store.claim_for_reuse(&key, now()).unwrap().is_none(),
+            "an environment that was never released to the pool is never claimed"
+        );
+        let untouched = EnvironmentRepository::get(&store, &ready_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(untouched.state, EnvironmentState::Ready);
+        assert_eq!(
+            untouched.epoch, 1,
+            "a refused claim never advances an epoch"
+        );
+
+        // The same environment becomes claimable once it has served its
+        // attempt and been released.
+        let pooled_id = pooled(&store, &key);
+        assert_eq!(
+            store.claim_for_reuse(&key, now()).unwrap().map(|e| e.id),
+            Some(pooled_id)
+        );
     }
 
     #[test]

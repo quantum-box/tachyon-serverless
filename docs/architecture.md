@@ -176,15 +176,17 @@ invoke 後の環境を破棄せず `Idle` で残し、次の invoke に渡す仕
 | `network_policy_version` | `EgressProfile` 由来 |
 | `secret_binding_generation` | **解決後の** `(env 名, binding ref, 値)` の digest。値が rotate されれば generation が変わり、旧世代で起動した環境は再利用されない |
 
-`secret_binding_generation` のために secret は環境を作る前に解決する。解決できない binding は台帳に行を作らず・何も起動せずに `502 init_error` で終わる。digest だけが reuse key に載り、値は `HelloAck` 以外のどこにも出ない（`docs/threat-model.md` §6-4）。
+`secret_binding_generation` のために secret は環境を作る前に解決する。解決できない binding は台帳に行を作らず・何も起動せずに `502 init_error` で終わる。値は `HelloAck` 以外のどこにも出ない（`docs/threat-model.md` §6-4）。台帳（`state.json`）に載るのは「解決後の値から導いた digest」であり、**プロセスごとのランダム salt** を混ぜ、各部分を長さ prefix 付きで連結してから取る。したがって state file を読めても推測した secret と突き合わせられないし、generation はプロセス内でしか比較できない（pool はプロセス内のものなので、それで足りる）。
 
 **状態と原子性**。pool の membership は台帳側（`EnvironmentRepository`）が持つ。
 
-- `claim_for_reuse(key)`: reuse key 完全一致かつ `Ready` / `Idle` の環境を 1 つだけ `Busy` にし、**epoch を 1 進める**。探索・状態遷移・epoch 加算を 1 回の store mutation で行うので、同時に 2 つの claim が走っても勝者は 1 つ（`repository.rs` の `concurrent_claims_never_hand_the_same_environment_to_two_callers`）。`Busy` は決して配られず、`Ready` 前の環境（`Requested` / `Provisioning` / `Initializing`）にも dispatch しない。
-- `release_to_pool`: attempt が健全に終わった環境だけを `Idle` に戻す。`max_idle_per_revision` / `max_total_idle` を超える分と、epoch がずれた古い複製は拒否され、呼び出し側が今までどおり terminate する。timeout / cancel / crash / init 失敗の環境は戻さない。
+- `claim_for_reuse(key)`: reuse key 完全一致かつ **`Idle`**（＝ pool membership そのもの）の環境を 1 つだけ `Busy` にし、**epoch を 1 進める**。探索・状態遷移・epoch 加算を 1 回の store mutation で行うので、同時に 2 つの claim が走っても勝者は 1 つ（`repository.rs` の `concurrent_claims_never_hand_the_same_environment_to_two_callers`）。`Busy` は決して配られず、`Ready` 前の環境（`Requested` / `Provisioning` / `Initializing`）にも dispatch しない。`Ready` も配らない: それは cold start が今まさに dispatch しようとしている自分の環境であって、pool の持ち物ではない。
+- `release_to_pool`: attempt が健全に終わった環境だけを `Idle` に戻す。`max_idle_per_revision` / `max_total_idle` を超える分と、epoch がずれた古い複製は拒否され、呼び出し側が今までどおり terminate する。「健全」は **attempt の結果**でも判定する: 成功と `UserError`（handler が返したエラー。guest は生きている）だけが対象で、`Crash` / `InitError` / `Timeout` / `PlatformError` / `OutcomeUnknown`、cancel、shutdown 中はいずれも戻さない。戻す前に、直前の attempt が残した frame を必ず drain する（`BridgeSession::drain_stale`）: 残った `Log` は**前の** invocation に付け、`Response` / `Error` は stale として捨て、`Exited` や EOF を見たら session を使用不可にして pool 入りを拒否する。`Exited` は attempt id も epoch も持たないので、lease では fence できない。
+- pool は session と台帳の行を**同時に**公開する（`release` は session map の lock を握ったまま `release_to_pool` を呼ぶ）。行だけ見えて session が無い瞬間は存在しないので、claim 側が健全な環境を「死んでいる」と誤認して terminate することはない。
 - epoch が進むことで、前の attempt が遅れて送ってきた frame は `ExecutionLease::accepts(attempt_id, epoch)` に一致せず捨てられる（`docs/threat-model.md` T05）。再利用が入って初めてこの fencing が効く。
+- 取り出した warm 環境に `Invoke` frame を**渡せなかった**場合（idle の間に guest が死んでいた等）は、handler が始まっていないことが確定しているので、その環境を retire して **cold で 1 回だけ**やり直す。やり直しは cold 固定なので再帰しない。台帳には attempt が 2 行残り（1 行目が `Host.WarmEnvironmentGone` で失敗）、usage には死んだ環境の `EnvironmentStopped` が 1 回だけ出る。
 
-**回収**。`idle_ttl_seconds` を過ぎた環境は sweeper（gateway が `idle_ttl/2` 間隔で起動）が terminate する。graceful shutdown では TTL に関係なく全部落とす（pool の session はプロセスと運命を共にするため、跨いで生き残らせない）。再起動後は台帳上の非 terminal な環境がすべて `Lost` になり、host に残った実体は起動時 reconcile が orphan として回収する（前節）。
+**回収**。`idle_ttl_seconds` を過ぎた環境は sweeper（gateway が `idle_ttl/2` 間隔で起動）が terminate する。graceful shutdown では TTL に関係なく全部落とす（pool の session はプロセスと運命を共にするため、跨いで生き残らせない）。terminate に成功した環境だけが `Stopped` になり、そのとき pool が `UsageEvent{EnvironmentStopped}`（host 観測の生存時間。id は `<env>:<epoch>:pool-stopped`）を出す。terminate が失敗した環境は `Draining` のまま残し（`list_active` に残るので起動時 reconcile から見えるし、pool からは配られない）、次の sweep で再試行する。再起動後は台帳上の非 terminal な環境がすべて `Lost` になり、host に残った実体は起動時 reconcile が orphan として回収する（前節）。
 
 **範囲**。この pool は 1 プロセス内だけのものである。guest への open な stream（`BridgeSession`）は永続化できないため in-process に留まり、複数プロセス間の原子性（pool membership、slot、Lease 期限）は本 store では依然として表現できない。方針は `docs/adr/0003-execution-state-persistence.md`。
 

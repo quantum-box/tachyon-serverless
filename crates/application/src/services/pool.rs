@@ -27,15 +27,19 @@
 //! [`EnvironmentRepository`]: crate::repository::EnvironmentRepository
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::hash::{BuildHasher, Hasher, RandomState};
+use std::sync::{Arc, LazyLock};
 
 use parking_lot::Mutex;
 use serde::Serialize;
 
 use tachyon_serverless_domain::{
-    Clock, EnvironmentId, ExecutionEnvironment, FunctionRevision, ReuseKey, Sha256Digest, TenantId,
+    Clock, EnvironmentId, EvidenceQuality, ExecutionEnvironment, FunctionRevision, ReuseKey,
+    Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType,
 };
-use tachyon_serverless_provider_port::{Capabilities, ExecutionProvider, TerminateReason};
+use tachyon_serverless_provider_port::{
+    Capabilities, ExecutionProvider, TerminateReason, UsageSink,
+};
 
 use crate::bridge_session::BridgeSession;
 use crate::config::PoolConfig;
@@ -141,26 +145,51 @@ fn digest_u64(bytes: &[u8]) -> u64 {
         .unwrap_or(0)
 }
 
-/// Generation of a revision's *resolved* secret bindings: a digest over the
-/// `(env name, binding ref, value)` triples, in binding order.
+/// Random salt of this process, mixed into [`secret_binding_generation`].
+///
+/// `RandomState` seeds itself from the OS; two hashers built from the same one
+/// give eight bytes each without adding a dependency.
+static SECRET_GENERATION_SALT: LazyLock<[u8; 16]> = LazyLock::new(|| {
+    let state = RandomState::new();
+    let mut salt = [0u8; 16];
+    for (i, chunk) in salt.chunks_mut(8).enumerate() {
+        let mut hasher = state.build_hasher();
+        hasher.write_usize(i);
+        chunk.copy_from_slice(&hasher.finish().to_le_bytes());
+    }
+    salt
+});
+
+/// Generation of a revision's *resolved* secret bindings: a salted digest over
+/// the `(env name, binding ref, value)` triples, in binding order, each part
+/// length-prefixed so that no two different binding lists can produce the same
+/// buffer.
 ///
 /// The value has to take part, otherwise a rotated secret would silently keep
-/// reaching a guest that was started under the previous one. The values are
-/// already in memory at the call site (they go into `HelloAck`); the buffer
-/// built here is local and only the digest survives, so no secret enters the
-/// reuse key, the ledger or any log (docs/threat-model.md §6-4).
+/// reaching a guest that was started under the previous one.
+///
+/// **What this puts in the ledger.** The number lands in [`ReuseKey`] and is
+/// written to `state.json`: it is a *digest derived from resolved secret
+/// values*, not a value, and it is salted with a per-process random salt, so a
+/// reader of the state file cannot test a guessed secret against it. The
+/// values themselves stay in memory and only reach `HelloAck`
+/// (docs/threat-model.md §6-4). The generation is therefore only comparable
+/// inside this process — which is all the pool needs, because a pooled
+/// environment never outlives the process that holds its session.
 ///
 /// A revision with no bindings has generation 0.
 pub fn secret_binding_generation<'a>(
     resolved: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>,
 ) -> u64 {
-    let mut buf: Vec<u8> = Vec::new();
+    let mut buf: Vec<u8> = SECRET_GENERATION_SALT.to_vec();
     let mut any = false;
     for (env_name, binding_ref, value) in resolved {
         any = true;
         for part in [env_name, binding_ref, value] {
+            // Length-prefixed, not separated: a separator can appear inside a
+            // value, and then two different binding lists share a buffer.
+            buf.extend_from_slice(&(part.len() as u64).to_le_bytes());
             buf.extend_from_slice(part.as_bytes());
-            buf.push(0);
         }
     }
     if !any {
@@ -237,19 +266,27 @@ impl std::fmt::Debug for WarmEnvironment {
 pub struct PoolSweep {
     /// Idle environments the sweeper looked at.
     pub examined: usize,
-    /// Of those, the ones it terminated.
+    /// Environments it terminated (including retries of earlier failures).
     pub reaped: usize,
     /// Expired environments an attempt claimed before the sweeper could.
     pub raced: usize,
+    /// Environments whose terminate failed. They stay `Draining` and the next
+    /// sweep retries them.
+    pub failed: usize,
 }
 
 pub struct EnvironmentPool {
     repos: Repositories,
     provider: Arc<dyn ExecutionProvider>,
+    usage: Arc<dyn UsageSink>,
     clock: Arc<dyn Clock>,
     policy: PoolPolicy,
     /// Live guest connections of the pooled environments. Never persisted.
     sessions: Mutex<HashMap<EnvironmentId, BridgeSession>>,
+    /// Environments this process took out of the pool but could not terminate.
+    /// Their rows stay `Draining`, so no attempt can take them, and the next
+    /// sweep tries again.
+    pending_termination: Mutex<Vec<EnvironmentId>>,
 }
 
 impl std::fmt::Debug for EnvironmentPool {
@@ -265,15 +302,18 @@ impl EnvironmentPool {
     pub fn new(
         repos: Repositories,
         provider: Arc<dyn ExecutionProvider>,
+        usage: Arc<dyn UsageSink>,
         clock: Arc<dyn Clock>,
         policy: PoolPolicy,
     ) -> Self {
         Self {
             repos,
             provider,
+            usage,
             clock,
             policy,
             sessions: Mutex::new(HashMap::new()),
+            pending_termination: Mutex::new(Vec::new()),
         }
     }
 
@@ -311,23 +351,33 @@ impl EnvironmentPool {
             // most one caller can ever take the session below.
             let session = self.sessions.lock().remove(&environment.id);
             match session {
-                Some(session) if session.is_usable() => {
-                    tracing::debug!(
-                        environment_id = %environment.id,
-                        epoch = environment.epoch,
-                        "reusing a pooled environment"
-                    );
-                    return Some(WarmEnvironment {
-                        environment,
-                        session,
-                    });
+                Some(mut session) => {
+                    // Anything the guest queued while the environment was idle
+                    // (or left over from the attempt before) belongs to the
+                    // past, not to the attempt about to be dispatched. This
+                    // also detects a guest that died while idle: it makes the
+                    // session unusable instead of letting the next attempt run
+                    // into it.
+                    session.drain_stale().await;
+                    if session.is_usable() {
+                        tracing::debug!(
+                            environment_id = %environment.id,
+                            epoch = environment.epoch,
+                            "reusing a pooled environment"
+                        );
+                        return Some(WarmEnvironment {
+                            environment,
+                            session,
+                        });
+                    }
+                    drop(session);
+                    self.retire(environment, "the pooled guest is gone").await;
                 }
                 // The row says pooled but there is no live guest behind it:
-                // its session died while idle, or the row outlived the
-                // process that held it. Retire it and try the next candidate.
-                gone => {
-                    drop(gone);
-                    self.retire(environment, "pooled environment has no usable session")
+                // the row outlived the process that held its session. Retire
+                // it and try the next candidate.
+                None => {
+                    self.retire(environment, "pooled environment has no session")
                         .await;
                 }
             }
@@ -350,13 +400,20 @@ impl EnvironmentPool {
             return Err(Box::new(session));
         }
         let now = self.clock.now();
+        // The sessions lock is held *across* the ledger mutation: the moment
+        // the row becomes `Idle` it is claimable, and a claimer that finds it
+        // without its session would treat a healthy environment as dead and
+        // terminate it. Holding the lock makes the row and its session appear
+        // together. `claim` never holds this lock while taking the ledger's,
+        // so the two orders cannot deadlock.
+        let mut sessions = self.sessions.lock();
         match self
             .repos
             .environments
             .release_to_pool(env, self.policy.limits, now)
         {
             Ok(Some(pooled)) => {
-                self.sessions.lock().insert(pooled.id.clone(), session);
+                sessions.insert(pooled.id.clone(), session);
                 tracing::debug!(
                     environment_id = %pooled.id,
                     epoch = pooled.epoch,
@@ -385,18 +442,31 @@ impl EnvironmentPool {
     async fn reap(&self, everything: bool) -> PoolSweep {
         let now = self.clock.now();
         let ttl = self.policy.idle_ttl;
+        let mut report = PoolSweep::default();
+        // Environments an earlier sweep could not terminate are still on the
+        // host. Their rows stayed `Draining`, so no attempt can take them and
+        // nothing lists them any more: this process keeps their ids and tries
+        // again here.
+        let pending: Vec<EnvironmentId> = std::mem::take(&mut self.pending_termination.lock());
+        for id in pending {
+            if self
+                .terminate_and_settle(&id, "retrying a failed termination")
+                .await
+            {
+                report.reaped += 1;
+            } else {
+                report.failed += 1;
+            }
+        }
         let idle = match self.repos.environments.list_idle() {
             Ok(v) => v,
             Err(e) => {
                 tracing::warn!(error = %e, "cannot list idle environments");
-                return PoolSweep::default();
+                return report;
             }
         };
-        let mut report = PoolSweep {
-            examined: idle.len(),
-            ..PoolSweep::default()
-        };
-        for mut env in idle {
+        report.examined = idle.len();
+        for env in idle {
             if !everything && !env.idle_expired(now, ttl) {
                 continue;
             }
@@ -417,58 +487,161 @@ impl EnvironmentPool {
                     continue;
                 }
             }
-            let session = self.sessions.lock().remove(&env.id);
-            if let Some(mut session) = session {
-                let _ = session.shutdown("idle timeout").await;
+            if self.terminate_and_settle(&env.id, "idle timeout").await {
+                report.reaped += 1;
+                tracing::info!(environment_id = %env.id, "idle environment reaped");
+            } else {
+                report.failed += 1;
             }
-            if let Err(e) = self
-                .provider
-                .terminate_environment(&env.id, TerminateReason::Shutdown)
-                .await
-            {
-                tracing::warn!(error = %e, environment_id = %env.id, "terminating an idle environment failed");
-            }
-            if env.mark_stopped(self.clock.now()).is_ok()
-                && let Err(e) = self.repos.environments.update(env.clone())
-            {
-                tracing::warn!(error = %e, environment_id = %env.id, "cannot record a reaped environment");
-            }
-            report.reaped += 1;
-            tracing::info!(environment_id = %env.id, "idle environment reaped");
         }
-        if report.reaped > 0 || report.raced > 0 {
+        if report.reaped > 0 || report.raced > 0 || report.failed > 0 {
             tracing::info!(
                 examined = report.examined,
                 reaped = report.reaped,
                 raced = report.raced,
+                failed = report.failed,
                 "idle sweep finished"
             );
         }
         report
     }
 
+    /// Terminate one environment the pool owns (its row is `Draining`) and
+    /// settle it. `true` when it is really gone.
+    ///
+    /// Only a terminate that actually succeeded is recorded as a clean stop.
+    /// When it fails the host may still be running the environment, so the row
+    /// stays `Draining`: out of the pool, but still in `list_active`, so the
+    /// startup reconcile of the next process still sees an owner instead of an
+    /// environment nobody admits to. The id is kept for the next sweep.
+    async fn terminate_and_settle(&self, id: &EnvironmentId, reason: &str) -> bool {
+        let session = self.sessions.lock().remove(id);
+        if let Some(mut session) = session {
+            let _ = session.shutdown(reason).await;
+        }
+        if let Err(e) = self
+            .provider
+            .terminate_environment(id, TerminateReason::Shutdown)
+            .await
+        {
+            tracing::warn!(
+                error = %e,
+                environment_id = %id,
+                reason,
+                "terminating a pooled environment failed; it stays draining for the next sweep"
+            );
+            self.pending_termination.lock().push(id.clone());
+            return false;
+        }
+        let now = self.clock.now();
+        match self.repos.environments.get(id) {
+            Ok(Some(mut env)) => {
+                if env.mark_stopped(now).is_ok()
+                    && let Err(e) = self.repos.environments.update(env.clone())
+                {
+                    tracing::warn!(error = %e, environment_id = %id, "cannot record a reaped environment");
+                }
+                self.emit_stopped(&env, now).await;
+            }
+            Ok(None) => {
+                tracing::warn!(environment_id = %id, "terminated an environment the ledger no longer has")
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, environment_id = %id, "cannot load a reaped environment")
+            }
+        }
+        true
+    }
+
     /// Terminate a pooled environment we cannot use and settle its row.
     async fn retire(&self, mut env: ExecutionEnvironment, reason: &'static str) {
         tracing::warn!(environment_id = %env.id, reason, "retiring a pooled environment");
-        if let Err(e) = self
+        let terminated = self
             .provider
             .terminate_environment(&env.id, TerminateReason::Reconcile)
-            .await
-        {
-            tracing::warn!(error = %e, environment_id = %env.id, "terminating a retired environment failed");
-        }
-        if env.mark_failed(reason, self.clock.now()).is_ok()
+            .await;
+        let now = self.clock.now();
+        let settled = match &terminated {
+            Ok(_) => env.mark_failed(reason, now),
+            // It may still be on the host: `Lost` says so, and the startup
+            // reconcile of the next process reclaims it.
+            Err(e) => {
+                tracing::warn!(error = %e, environment_id = %env.id, "terminating a retired environment failed");
+                env.mark_lost(format!("{reason}; terminate failed: {e}"), now)
+            }
+        };
+        if settled.is_ok()
             && let Err(e) = self.repos.environments.update(env.clone())
         {
             tracing::warn!(error = %e, environment_id = %env.id, "cannot record a retired environment");
         }
+        self.emit_stopped(&env, now).await;
+    }
+
+    /// Report the end of a pooled environment's life to usage.
+    ///
+    /// The driver deliberately emits nothing when it hands an environment to
+    /// the pool (it did not stop), so this is the only `EnvironmentStopped`
+    /// such an environment ever gets: without it the whole warm part of its
+    /// lifetime would never reach metering.
+    ///
+    /// `monotonic_duration_ms` is the host-observed lifetime, from the ledger's
+    /// `created_at` to now — the environment outlived every single attempt on
+    /// it, so no attempt's stopwatch can measure it. The id is
+    /// `<environment>:<epoch>:pool-stopped`, which never collides with the
+    /// driver's `<environment>:<epoch>:<sequence>` (a sequence is a number) and
+    /// is stable, so a re-send of the same event still de-duplicates.
+    async fn emit_stopped(&self, env: &ExecutionEnvironment, now: Timestamp) {
+        let resources = self
+            .repos
+            .revisions
+            .get(&env.revision_id)
+            .ok()
+            .flatten()
+            .map(|r| r.spec.resources)
+            .unwrap_or_default();
+        self.usage
+            .record(UsageEvent {
+                event_id: format!("{}:{}:pool-stopped", env.id, env.epoch),
+                tenant_id: env.tenant_id.clone(),
+                environment_id: env.id.clone(),
+                invocation_id: None,
+                attempt_id: None,
+                event_type: UsageEventType::EnvironmentStopped,
+                sequence: env.epoch,
+                observed_at: now,
+                monotonic_duration_ms: Some((now - env.created_at).num_milliseconds().max(0) as u64),
+                memory_mib: resources.memory_mib,
+                cpu_millis: resources.cpu_millis,
+                bytes_in: 0,
+                bytes_out: 0,
+                meter_version: 1,
+                evidence_quality: EvidenceQuality::HostObserved,
+            })
+            .await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tachyon_serverless_provider_port::{IsolationLevel, Support};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use futures::{SinkExt, StreamExt};
+    use tokio_util::codec::{FramedRead, FramedWrite};
+
+    use crate::bridge_session::{HelloAckParams, LogContext, LogForwarder};
+    use crate::repository::{EnvironmentRepository, InMemoryStore, RepoError};
+    use tachyon_serverless_domain::{
+        Architecture, BootEvidence, EnvironmentState, ExecutionLease, LeaseId, Limits,
+        ProviderKind, RevisionId, SystemClock,
+    };
+    use tachyon_serverless_protocol::{FrameCodec, GuestMessage, PROTOCOL_VERSION, encode_message};
+    use tachyon_serverless_provider_port::{
+        ArtifactLocation, EnvironmentHandle, EnvironmentObservation, EnvironmentSpec,
+        IsolationLevel, PreflightReport, ProviderError, Support, TerminateReport,
+    };
 
     fn caps(idle_quiesce: Support, idle_resume: Support) -> Capabilities {
         Capabilities {
@@ -585,6 +758,442 @@ mod tests {
         assert_ne!(
             secret_binding_generation([("A", "a", "1"), ("B", "b", "2")]),
             secret_binding_generation([("B", "b", "2"), ("A", "a", "1")])
+        );
+    }
+
+    /// Regression (review F8): what the ledger stores is a *salted* digest,
+    /// and the parts cannot be re-cut into a different binding list.
+    #[test]
+    fn the_secret_generation_is_salted_and_unambiguous() {
+        // A separator can appear inside a value; a length prefix cannot be
+        // forged that way.
+        assert_ne!(
+            secret_binding_generation([("A", "B\0C", "D")]),
+            secret_binding_generation([("A", "B", "C\0D")]),
+            "two different binding lists must never share a generation"
+        );
+
+        // The stored number is not a digest of the resolved values alone, so
+        // nobody holding state.json can test a guessed secret against it.
+        let unsalted = {
+            let mut buf = Vec::new();
+            for part in ["DB", "db-binding", "s3cr3t"] {
+                buf.extend_from_slice(part.as_bytes());
+                buf.push(0);
+            }
+            digest_u64(&buf)
+        };
+        assert_ne!(
+            secret_binding_generation([("DB", "db-binding", "s3cr3t")]),
+            unsalted,
+            "the digest of the values themselves must not be what is stored"
+        );
+
+        // It still does its job inside the process: stable, and superseded by
+        // a rotation.
+        assert_eq!(
+            secret_binding_generation([("DB", "db-binding", "s3cr3t")]),
+            secret_binding_generation([("DB", "db-binding", "s3cr3t")])
+        );
+        assert_ne!(
+            secret_binding_generation([("DB", "db-binding", "s3cr3t")]),
+            secret_binding_generation([("DB", "db-binding", "rotated")])
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // a pool with a real ledger, a stub provider and live sessions
+    // -----------------------------------------------------------------------
+
+    /// Records terminate calls and can be made to fail them. Nothing in these
+    /// tests creates an environment through the provider.
+    struct StubProvider {
+        terminated: Mutex<Vec<EnvironmentId>>,
+        fail_terminate: AtomicBool,
+    }
+
+    impl StubProvider {
+        fn new() -> Self {
+            Self {
+                terminated: Mutex::new(Vec::new()),
+                fail_terminate: AtomicBool::new(false),
+            }
+        }
+        fn fail_terminate(&self, fail: bool) {
+            self.fail_terminate.store(fail, Ordering::SeqCst);
+        }
+        fn terminated(&self) -> Vec<EnvironmentId> {
+            self.terminated.lock().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ExecutionProvider for StubProvider {
+        fn kind(&self) -> ProviderKind {
+            ProviderKind::Fake
+        }
+        fn capabilities(&self) -> Capabilities {
+            caps(Support::Supported, Support::Supported)
+        }
+        async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
+            unimplemented!("the pool never preflights")
+        }
+        async fn validate_artifact(
+            &self,
+            _: &ArtifactLocation,
+            _: Architecture,
+        ) -> Result<(), ProviderError> {
+            unimplemented!("the pool never validates artifacts")
+        }
+        async fn create_environment(
+            &self,
+            _: EnvironmentSpec,
+        ) -> Result<EnvironmentHandle, ProviderError> {
+            unimplemented!("the pool never creates environments")
+        }
+        async fn terminate_environment(
+            &self,
+            id: &EnvironmentId,
+            _: TerminateReason,
+        ) -> Result<TerminateReport, ProviderError> {
+            self.terminated.lock().push(id.clone());
+            if self.fail_terminate.load(Ordering::SeqCst) {
+                return Err(ProviderError::Internal("terminate failed".into()));
+            }
+            Ok(TerminateReport {
+                was_running: true,
+                cleaned: vec![id.to_string()],
+            })
+        }
+        async fn observe_environment(
+            &self,
+            _: &EnvironmentId,
+        ) -> Result<EnvironmentObservation, ProviderError> {
+            unimplemented!("the pool never observes")
+        }
+        async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError> {
+            unimplemented!("the pool never lists")
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingSink(Mutex<Vec<UsageEvent>>);
+
+    impl RecordingSink {
+        fn events(&self) -> Vec<UsageEvent> {
+            self.0.lock().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl UsageSink for RecordingSink {
+        async fn record(&self, event: UsageEvent) {
+            self.0.lock().push(event);
+        }
+    }
+
+    /// An `EnvironmentRepository` that runs a hook right after the store has
+    /// published the `Idle` row — exactly the window a claimer could use.
+    struct ReleaseHook {
+        inner: Arc<InMemoryStore>,
+        after_release: Box<dyn Fn() + Send + Sync>,
+    }
+
+    impl EnvironmentRepository for ReleaseHook {
+        fn insert(&self, env: ExecutionEnvironment) -> Result<(), RepoError> {
+            EnvironmentRepository::insert(&*self.inner, env)
+        }
+        fn get(&self, id: &EnvironmentId) -> Result<Option<ExecutionEnvironment>, RepoError> {
+            EnvironmentRepository::get(&*self.inner, id)
+        }
+        fn update(&self, env: ExecutionEnvironment) -> Result<(), RepoError> {
+            EnvironmentRepository::update(&*self.inner, env)
+        }
+        fn list_active(&self) -> Result<Vec<ExecutionEnvironment>, RepoError> {
+            self.inner.list_active()
+        }
+        fn list_idle(&self) -> Result<Vec<ExecutionEnvironment>, RepoError> {
+            self.inner.list_idle()
+        }
+        fn claim_for_reuse(
+            &self,
+            key: &ReuseKey,
+            now: Timestamp,
+        ) -> Result<Option<ExecutionEnvironment>, RepoError> {
+            self.inner.claim_for_reuse(key, now)
+        }
+        fn release_to_pool(
+            &self,
+            env: &ExecutionEnvironment,
+            limits: PoolLimits,
+            now: Timestamp,
+        ) -> Result<Option<ExecutionEnvironment>, RepoError> {
+            let released = self.inner.release_to_pool(env, limits, now);
+            (self.after_release)();
+            released
+        }
+        fn take_idle_for_termination(
+            &self,
+            id: &EnvironmentId,
+            now: Timestamp,
+        ) -> Result<bool, RepoError> {
+            self.inner.take_idle_for_termination(id, now)
+        }
+        fn insert_lease(&self, lease: ExecutionLease) -> Result<(), RepoError> {
+            self.inner.insert_lease(lease)
+        }
+        fn get_lease(&self, id: &LeaseId) -> Result<Option<ExecutionLease>, RepoError> {
+            self.inner.get_lease(id)
+        }
+        fn update_lease(&self, lease: ExecutionLease) -> Result<(), RepoError> {
+            self.inner.update_lease(lease)
+        }
+    }
+
+    fn policy_on() -> PoolPolicy {
+        PoolPolicy::decide(
+            &caps(Support::Supported, Support::Supported),
+            &PoolConfig {
+                enabled: true,
+                max_idle_per_revision: 2,
+                // Everything idle is expired, so a sweep reaps immediately.
+                idle_ttl_seconds: 0,
+                max_total_idle: 4,
+            },
+        )
+    }
+
+    fn reuse_key() -> ReuseKey {
+        ReuseKey {
+            tenant_id: TenantId::generate(),
+            revision_id: RevisionId::generate(),
+            execution_role_version: 1,
+            configuration_version: 1,
+            resource_profile_digest: "rp".into(),
+            runtime_profile: "tachyon.runtime.v1".into(),
+            network_policy_version: 1,
+            secret_binding_generation: 1,
+        }
+    }
+
+    fn now() -> Timestamp {
+        chrono::Utc::now()
+    }
+
+    /// A `Busy` environment in the store, as a finished attempt leaves it.
+    fn busy_row(store: &Arc<InMemoryStore>, key: &ReuseKey) -> ExecutionEnvironment {
+        let mut env = ExecutionEnvironment::request(
+            EnvironmentId::generate(),
+            key.tenant_id.clone(),
+            key.revision_id.clone(),
+            ProviderKind::Fake,
+            key.clone(),
+            now(),
+        );
+        env.mark_provisioning(now()).unwrap();
+        env.mark_initializing(BootEvidence::default(), now())
+            .unwrap();
+        env.mark_ready(now()).unwrap();
+        env.mark_busy(now()).unwrap();
+        EnvironmentRepository::insert(&**store, env.clone()).unwrap();
+        env
+    }
+
+    /// The same, already in the pool.
+    fn idle_row(store: &Arc<InMemoryStore>, key: &ReuseKey) -> EnvironmentId {
+        let mut env = busy_row(store, key);
+        env.mark_idle(now()).unwrap();
+        let id = env.id.clone();
+        EnvironmentRepository::update(&**store, env).unwrap();
+        id
+    }
+
+    fn state_of(store: &Arc<InMemoryStore>, id: &EnvironmentId) -> EnvironmentState {
+        EnvironmentRepository::get(&**store, id)
+            .unwrap()
+            .unwrap()
+            .state
+    }
+
+    /// A session whose guest answers the handshake and then stays connected
+    /// and quiet: one the pool may hand out.
+    async fn live_session(
+        store: &Arc<InMemoryStore>,
+        env_id: &EnvironmentId,
+        epoch: u64,
+    ) -> BridgeSession {
+        let (host, guest) = tokio::io::duplex(64 * 1024);
+        let id = env_id.to_string();
+        tokio::spawn(async move {
+            let (r, w) = tokio::io::split(guest);
+            let mut reader = FramedRead::new(r, FrameCodec);
+            let mut writer = FramedWrite::new(w, FrameCodec);
+            let hello = GuestMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                bridge_version: "pool-test".into(),
+                environment_id: id,
+                guest_boot_id: Some("boot".into()),
+                architecture: "aarch64".into(),
+            };
+            if writer.send(encode_message(&hello).unwrap()).await.is_err() {
+                return;
+            }
+            while let Some(Ok(_)) = reader.next().await {}
+        });
+        let logs = LogForwarder::new(
+            store.clone(),
+            Arc::new(SystemClock),
+            LogContext {
+                tenant_id: TenantId::generate(),
+                environment_id: env_id.clone(),
+                invocation_id: None,
+                max_line_bytes: 64,
+            },
+        );
+        let (session, _) = BridgeSession::handshake(
+            Box::new(host),
+            env_id,
+            epoch,
+            HelloAckParams {
+                entrypoint: "/function/app".into(),
+                args: vec![],
+                env: vec![],
+                working_dir: "/tmp".into(),
+                init_timeout: Duration::from_secs(1),
+                max_response_bytes: 1024,
+                max_log_line_bytes: 64,
+            },
+            logs,
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("the guest completes the handshake");
+        session
+    }
+
+    /// Regression (review F3): a claimer must never find the `Idle` row
+    /// without the session behind it. The row and its session are published
+    /// together, so a claim that races a release either waits for it or misses
+    /// it — it never takes a healthy environment for dead and terminates it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_claim_racing_a_release_never_takes_a_row_without_its_session() {
+        let store = Arc::new(InMemoryStore::new(Limits::default()));
+        let key = reuse_key();
+        let env = busy_row(&store, &key);
+        let session = live_session(&store, &env.id, env.epoch).await;
+
+        // The claimer runs exactly in the window after the row is published.
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<Option<EnvironmentId>>();
+        // The hook is shared, so the receiver needs a lock around it.
+        let done_rx = Mutex::new(done_rx);
+        let mut repos = Repositories::in_memory(store.clone());
+        repos.environments = Arc::new(ReleaseHook {
+            inner: store.clone(),
+            after_release: Box::new(move || {
+                let _ = go_tx.send(());
+                // Before the fix the claimer answers here, having taken the
+                // row without its session; after it, it is still blocked.
+                let _ = done_rx.lock().recv_timeout(Duration::from_millis(500));
+            }),
+        });
+        let provider = Arc::new(StubProvider::new());
+        let pool = Arc::new(EnvironmentPool::new(
+            repos,
+            provider.clone(),
+            Arc::new(RecordingSink::default()),
+            Arc::new(SystemClock),
+            policy_on(),
+        ));
+
+        let claimer = {
+            let pool = pool.clone();
+            let key = key.clone();
+            tokio::spawn(async move {
+                go_rx.recv().expect("the release signals the claimer");
+                let claimed = pool.claim(&key).await;
+                let id = claimed.as_ref().map(|w| w.environment.id.clone());
+                let _ = done_tx.send(id.clone());
+                (id, claimed.map(|w| w.environment.epoch))
+            })
+        };
+
+        let pooled = pool.release(&env, session).expect("the environment pools");
+        assert_eq!(pooled.state, EnvironmentState::Idle);
+        let (claimed_id, claimed_epoch) = claimer.await.unwrap();
+        assert_eq!(
+            claimed_id,
+            Some(env.id.clone()),
+            "the claimer got the pooled environment together with its session"
+        );
+        assert_eq!(claimed_epoch, Some(env.epoch + 1));
+        assert!(
+            provider.terminated().is_empty(),
+            "a healthy environment was terminated by a claim that saw the row without its session"
+        );
+        assert_eq!(pool.held(), 0, "the claimer took the session with the row");
+    }
+
+    /// Regression (review F9 and F5): a terminate that failed is not recorded
+    /// as a clean stop. The row stays `Draining` — out of the pool, still in
+    /// `list_active` so the startup reconcile sees an owner — and the next
+    /// sweep retries it. Only a real termination is metered.
+    #[tokio::test]
+    async fn a_failed_terminate_keeps_the_environment_for_the_next_sweep() {
+        let store = Arc::new(InMemoryStore::new(Limits::default()));
+        let key = reuse_key();
+        let id = idle_row(&store, &key);
+        let provider = Arc::new(StubProvider::new());
+        let sink = Arc::new(RecordingSink::default());
+        let pool = EnvironmentPool::new(
+            Repositories::in_memory(store.clone()),
+            provider.clone(),
+            sink.clone(),
+            Arc::new(SystemClock),
+            policy_on(),
+        );
+
+        provider.fail_terminate(true);
+        let swept = pool.sweep().await;
+        assert_eq!((swept.examined, swept.reaped, swept.failed), (1, 0, 1));
+        assert_eq!(
+            state_of(&store, &id),
+            EnvironmentState::Draining,
+            "a failed terminate must not be recorded as a clean stop"
+        );
+        assert!(
+            EnvironmentRepository::list_active(&*store)
+                .unwrap()
+                .iter()
+                .any(|e| e.id == id),
+            "the row stays in the active set, so the startup reconcile still sees an owner"
+        );
+        assert!(
+            sink.events().is_empty(),
+            "nothing stopped, so nothing is metered"
+        );
+        assert!(
+            store.list_idle().unwrap().is_empty(),
+            "and it is out of the pool either way"
+        );
+
+        // The next sweep retries it, and now the host lets go.
+        provider.fail_terminate(false);
+        let swept = pool.sweep().await;
+        assert_eq!((swept.examined, swept.reaped, swept.failed), (0, 1, 0));
+        assert_eq!(state_of(&store, &id), EnvironmentState::Stopped);
+        assert_eq!(provider.terminated().len(), 2, "it was retried once");
+
+        let events = sink.events();
+        assert_eq!(events.len(), 1, "one stop event for one environment");
+        assert_eq!(events[0].event_type, UsageEventType::EnvironmentStopped);
+        assert_eq!(events[0].environment_id, id);
+        assert_eq!(events[0].tenant_id, key.tenant_id);
+        assert!(events[0].monotonic_duration_ms.is_some());
+        assert!(
+            events[0].event_id.ends_with(":pool-stopped"),
+            "{}",
+            events[0].event_id
         );
     }
 }
