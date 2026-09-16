@@ -1,0 +1,3 @@
+2026-09-15T17:02:27.154178972 [env-01m2j1dd3xcga64sh9pfyrxyzh:main] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-15T17:02:27.156825675 [env-01m2j1dd3xcga64sh9pfyrxyzh:main] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-15T17:02:27.158836694 [env-01m2j1dd3xcga64sh9pfyrxyzh:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding

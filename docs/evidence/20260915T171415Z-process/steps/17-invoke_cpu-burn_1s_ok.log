@@ -1,0 +1,2 @@
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2k1040x6jbgngrzymg1gn8k trace=inv_01m2k1040x6jbgngrzymg1gn8k

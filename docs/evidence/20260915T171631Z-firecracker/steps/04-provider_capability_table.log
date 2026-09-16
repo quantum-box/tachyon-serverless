@@ -1,0 +1,28 @@
+kind       firecracker
+isolation  micro_vm
+dev_only   false
+capabilities:
+CAPABILITY               STATUS       NOTE
+create_terminate         supported
+egress_none              supported
+egress_public_web        unsupported  no network device is configured in P1
+egress_restricted        unsupported  no network device is configured in P1
+enforce_deadline         supported
+enforce_resource_limits  unverified   vcpu/mem via machine-config; ephemeral storage not enforced
+host_metering            unverified   host-side timings only; no cgroup/KVM stats
+idle_quiesce             unsupported  not implemented in P1
+idle_resume              unsupported  not implemented in P1
+observe                  supported
+snapshot_clone           unsupported  not implemented in P1
+snapshot_create          unsupported  not implemented in P1
+preflight: ok=true
+CHECK               OK    DETAIL
+os                  true  host os is linux; Firecracker requires linux
+arch                true  host architecture aarch64
+kvm                 true  /dev/kvm is readable and writable
+firecracker_binary  true  /home/takanorifukuyama.guest/tsls/.kvm/bin/firecracker (version v1.17.0)
+kernel              true  /home/takanorifukuyama.guest/tsls/.kvm/vmlinux sha256:e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+rootfs              true  /home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4 sha256:c8cdbcd9301c8edb104f14da36d99a754cf530dd6a9c99aa4dc5b6518cccf4f2
+mkfs_ext4           true  /usr/sbin/mkfs.ext4
+workdir             true  /home/takanorifukuyama.guest/tsls/.kvm/run
+socket_path_length  true  longest socket path would be 85 bytes (max 107); ok

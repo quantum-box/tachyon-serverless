@@ -1,0 +1,26 @@
+id           inv_01m2jj7md2nr06na5n1n37b5x5
+function     fn_01m2jj7jafhtqbw7be5fhrmyr3
+revision     rev_01m2jj7jr860sdz1dev7cp632d
+alias        prod
+mode         sync
+status       succeeded
+error        -
+http_status  -
+trace_id     inv_01m2jj7md2nr06na5n1n37b5x5
+input        sha256:d7d234f759ec34fd6298b7e32318614760070aaef9f4e92ced928324b49a0602 (15 bytes)
+accepted_at  2026-09-15T12:56:23.202Z
+started_at   2026-09-15T12:56:28.484Z
+finished_at  2026-09-15T12:56:28.558Z
+deadlines    queue=2026-09-15T12:56:33.202Z init=2026-09-15T12:56:53.375Z execution=2026-09-15T12:56:58.484Z client=2026-09-15T12:57:33.202Z
+output:
+{
+  "greeting": "v1",
+  "message": "hello, demo",
+  "secret_present": true,
+  "unisolated": false
+}
+attempts: 1
+  #1 att_01m2jj7sj4h7t4evmqfx0015hy env=env_01m2jj7md3awtp7v2hgyqgerxa epoch=1 status=succeeded start=cold
+     timings: queue_wait=0 ms boot=4754 ms init=353 ms handler=73 ms response=0 ms total=5355 ms
+     boot_evidence: host_pid=7116 guest_boot_id=f3ccab45-81e7-4e84-a170-0a1737160ae7 details={"boot_ms":4754,"bridge_version":"0.1.0","console_log":"/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2jj7md3awtp7v2hgyqgerxa/console.log","env_dir":"/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2jj7md3awtp7v2hgyqgerxa","firecracker_version":"v1.17.0","function_drive_bytes":10485760,"guest_architecture":"aarch64","guest_handler_ms":26,"guest_init_ms":232,"instance_id":"env-01m2jj7md3awtp7v2hgyqgerxa","kernel_path":"/home/takanorifukuyama.guest/tsls/.kvm/vmlinux","kernel_sha256":"e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591","mem_mib":256,"provider":"firecracker","rootfs_path":"/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4","rootfs_sha256":"cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906","vcpus":1,"vsock_port":5000}
+     dispatched_at=2026-09-15T12:56:28.484Z finished_at=2026-09-15T12:56:28.558Z

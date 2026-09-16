@@ -1,0 +1,170 @@
+//! `provider` (capability table) and `health` (/healthz, /readyz).
+
+use tachyon_serverless_api_types::ProviderInfo;
+
+use crate::client::ApiClient;
+use crate::error::{CliError, ExitCode};
+use crate::output::{Printer, Table};
+
+pub const NO_ISOLATION_BANNER: &str = "!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!";
+
+/// Best-effort isolation warning for commands that show a function's result
+/// (`functions invoke`, `functions http`; ADR-0002 decision 4). Looks up the
+/// authenticated `GET /v1/provider` and prints [`NO_ISOLATION_BANNER`] on
+/// stderr when the provider is `dev_only`. When the lookup fails it prints a
+/// warning instead. It never touches stdout and never changes the exit code.
+pub async fn warn_if_dev_only(client: &ApiClient, p: &mut Printer<'_>) {
+    let note = match provider_info(client).await {
+        Ok(info) if info.dev_only => NO_ISOLATION_BANNER.to_string(),
+        Ok(_) => return,
+        Err(e) => {
+            let e = e.to_string();
+            format!(
+                "warning: could not determine provider isolation (GET /v1/provider: {})",
+                e.strip_prefix("error: ").unwrap_or(&e)
+            )
+        }
+    };
+    // A failed stderr write must not turn the command's outcome into an error.
+    let _ = p.note(note);
+}
+
+async fn provider_info(client: &ApiClient) -> Result<ProviderInfo, CliError> {
+    client.get("/v1/provider").await?.ok()?.json()
+}
+
+/// Render the `capabilities` object as rows `(name, status, note)`.
+pub fn capability_rows(caps: &serde_json::Value) -> Vec<(String, String, String)> {
+    let mut rows = Vec::new();
+    let Some(map) = caps.as_object() else {
+        return rows;
+    };
+    for (k, v) in map {
+        if k == "isolation" || k == "dev_only" {
+            continue;
+        }
+        match v {
+            serde_json::Value::Object(o) => {
+                let status = o
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let note = o
+                    .get("reason")
+                    .or_else(|| o.get("note"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                rows.push((k.clone(), status, note));
+            }
+            other => rows.push((k.clone(), other.to_string(), String::new())),
+        }
+    }
+    rows
+}
+
+pub async fn provider(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), CliError> {
+    let resp = client.get_unauth("/v1/provider").await?.ok()?;
+    if p.json {
+        return p.raw(&resp.body_text());
+    }
+    let info: ProviderInfo = resp.json()?;
+    if info.dev_only {
+        p.note(NO_ISOLATION_BANNER)?;
+    }
+    p.kv(&[
+        ("kind", info.kind.clone()),
+        ("isolation", info.isolation.clone()),
+        ("dev_only", info.dev_only.to_string()),
+    ])?;
+    let mut t = Table::new(&["CAPABILITY", "STATUS", "NOTE"]);
+    for (name, status, note) in capability_rows(&info.capabilities) {
+        t.row(vec![name, status, note]);
+    }
+    p.line("capabilities:")?;
+    p.table(&t)?;
+    let ok = info
+        .preflight
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| "?".into());
+    p.line(format!("preflight: ok={ok}"))?;
+    if let Some(checks) = info.preflight.get("checks").and_then(|c| c.as_array()) {
+        let mut t = Table::new(&["CHECK", "OK", "DETAIL"]);
+        for c in checks {
+            t.row(vec![
+                c.get("name").and_then(|v| v.as_str()).unwrap_or("?").into(),
+                c.get("ok")
+                    .and_then(|v| v.as_bool())
+                    .map(|b| b.to_string())
+                    .unwrap_or_else(|| "?".into()),
+                c.get("detail")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .into(),
+            ]);
+        }
+        p.table(&t)?;
+    }
+    Ok(())
+}
+
+pub async fn health(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), CliError> {
+    let healthz = client.get_unauth("/healthz").await?;
+    let readyz = client.get_unauth("/readyz").await?;
+    let body_value = |s: String| -> serde_json::Value {
+        serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
+    };
+    if p.json {
+        let v = serde_json::json!({
+            "healthz": {"status": healthz.status, "body": body_value(healthz.body_text())},
+            "readyz": {"status": readyz.status, "body": body_value(readyz.body_text())},
+        });
+        p.raw(&v.to_string())?;
+    } else {
+        p.line(format!(
+            "healthz: {} {}",
+            healthz.status,
+            healthz.body_text().trim()
+        ))?;
+        p.line(format!(
+            "readyz:  {} {}",
+            readyz.status,
+            readyz.body_text().trim()
+        ))?;
+    }
+    if !healthz.is_success() || !readyz.is_success() {
+        return Err(CliError::failed(
+            ExitCode::Platform,
+            format!(
+                "gateway not healthy (healthz={}, readyz={})",
+                healthz.status, readyz.status
+            ),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_rows_flatten_support_objects() {
+        let caps = serde_json::json!({
+            "isolation": "process",
+            "dev_only": true,
+            "create_terminate": {"status": "supported"},
+            "snapshot_create": {"status": "unsupported", "reason": "P1"},
+            "egress_none": {"status": "unverified", "note": "no tap"},
+        });
+        let rows = capability_rows(&caps);
+        assert_eq!(rows.len(), 3);
+        assert!(rows.contains(&("create_terminate".into(), "supported".into(), String::new())));
+        assert!(rows.contains(&("snapshot_create".into(), "unsupported".into(), "P1".into())));
+        assert!(rows.contains(&("egress_none".into(), "unverified".into(), "no tap".into())));
+    }
+}

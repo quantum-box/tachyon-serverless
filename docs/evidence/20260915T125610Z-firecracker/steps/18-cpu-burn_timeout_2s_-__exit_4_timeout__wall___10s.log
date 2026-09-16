@@ -1,0 +1,8 @@
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1431008 bytes, arch aarch64)
+artifact sha256:d41d8b3bcdfb8d6f364109a77a801198403f398915d748e6c7c0f7c550fcca77
+revision rev_01m2jj8znczggr7c76y84x8mhn (#2) created: pending
+revision rev_01m2jj8znczggr7c76y84x8mhn is preparing
+revision rev_01m2jj8znczggr7c76y84x8mhn is ready
+error: timeout (HTTP 504): invocation inv_01m2jj8zxxeya9n7mtyjyq8qf4 failed: Host.Timeout: handler did not finish within 2 s [type=Host.Timeout] [invocation=inv_01m2jj8zxxeya9n7mtyjyq8qf4] [request=01m2jj8zxxy65e2xn3ep8edbre]
+[e2e] timeout invoke took 7060 ms
+[e2e] host-enforced execution window: 3000 ms (timeout 2000 ms + grace 1000 ms)

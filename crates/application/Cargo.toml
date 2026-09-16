@@ -1,0 +1,33 @@
+[package]
+name = "tachyon-serverless-application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Application layer: configuration, repositories, local ports, host-side bridge session and the invoke pipeline."
+
+[dependencies]
+tachyon-serverless-domain = { workspace = true }
+tachyon-serverless-protocol = { workspace = true }
+tachyon-serverless-provider-port = { workspace = true }
+tachyon-serverless-api-types = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tachyon-serverless-provider-fake = { workspace = true }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }

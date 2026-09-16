@@ -30,5 +30,19 @@ coverage/
 
 # Logs
 *.log
+# demo / KVM evidence keeps its logs (no secrets are ever logged by design)
+!docs/evidence/**/*.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Rust
+/target
+**/target
+Cargo.lock.bak
+
+# local runtime data
+/data
+/.kvm
+
+# Claude Code worktrees
+/.claude/

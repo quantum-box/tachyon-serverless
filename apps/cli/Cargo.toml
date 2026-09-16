@@ -1,0 +1,33 @@
+[package]
+name = "tachyon-serverless-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "tsls: command line client for the Tachyon Serverless prototype gateway."
+
+[lib]
+name = "tachyon_serverless_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tsls"
+path = "src/main.rs"
+
+[dependencies]
+tachyon-serverless-api-types = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
+tempfile = { workspace = true }
+libc = { workspace = true }
+ulid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }

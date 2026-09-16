@@ -1,0 +1,7 @@
+uploading /Users/takanorifukuyama/git/tachyon-serverless/target/debug/example-hello (3497968 bytes, arch aarch64)
+artifact sha256:d7084c70d99c29dfe88216a11a0cea2d66e9fb3132b0582f7f87fd0feffa9103
+revision rev_01m2k100zwwfv7262sa1z7wsgk (#11) created: pending
+revision rev_01m2k100zwwfv7262sa1z7wsgk is preparing
+revision rev_01m2k100zwwfv7262sa1z7wsgk is ready
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: init_error (HTTP 502): invocation inv_01m2k10191ndzxy5jcaaq0vm8z failed: Runtime.InitError: HELLO_FAIL_INIT set [type=Runtime.InitError] [invocation=inv_01m2k10191ndzxy5jcaaq0vm8z] [request=01m2k10191jq5r046s3h3t022a]

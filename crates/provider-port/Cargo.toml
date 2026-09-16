@@ -1,0 +1,16 @@
+[package]
+name = "tachyon-serverless-provider-port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Port traits that hide execution providers (Firecracker, process, fake) and external systems (artifacts, secrets, identity, usage) from the application layer."
+
+[dependencies]
+tachyon-serverless-domain = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

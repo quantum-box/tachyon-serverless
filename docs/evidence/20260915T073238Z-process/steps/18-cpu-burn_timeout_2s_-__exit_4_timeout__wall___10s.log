@@ -1,0 +1,7 @@
+uploading /Users/takanorifukuyama/git/tachyon-serverless/target/debug/example-cpu-burn (3503840 bytes, arch aarch64)
+artifact sha256:c68b5e457943ef4ce616c0e51ba2cd2c0520c764dc6ea4214d3d71ae709fdbbf
+revision rev_01m2hzqhcx1nwgpfthxvtdbzjf (#6) created: pending
+revision rev_01m2hzqhcx1nwgpfthxvtdbzjf is preparing
+revision rev_01m2hzqhcx1nwgpfthxvtdbzjf is ready
+error: timeout (HTTP 504): invocation inv_01m2hzqj07z6ykkzmz3ta1sk7y failed: Host.Timeout: handler did not finish within 2 s [type=Host.Timeout] [invocation=inv_01m2hzqj07z6ykkzmz3ta1sk7y] [request=01m2hzqj077gaxg8x0x28k3jdt]
+[e2e] timeout invoke took 3682 ms

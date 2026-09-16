@@ -1,0 +1,6 @@
+uploading /Users/takanorifukuyama/git/tachyon-serverless/target/debug/example-hello (3477584 bytes, arch aarch64)
+artifact sha256:f56a745517fdabb1719cea235c76da47ed19e83ace8f4d803b532823a13cdd5b
+revision rev_01m2hzq9jr7rrw0h7hesr72bze (#8) created: pending
+revision rev_01m2hzq9jr7rrw0h7hesr72bze is preparing
+revision rev_01m2hzq9jr7rrw0h7hesr72bze is ready
+error: init_error (HTTP 502): invocation inv_01m2hzqa52t23ffhj9pbz0pv59 failed: Runtime.InitError: HELLO_FAIL_INIT set [type=Runtime.InitError] [invocation=inv_01m2hzqa52t23ffhj9pbz0pv59] [request=01m2hzqa52a0ye843e8x7jyf32]

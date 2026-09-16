@@ -1,0 +1,185 @@
+{
+  "ok": true,
+  "mode": "timeout-demo",
+  "error": null,
+  "environment_id": "env_01m2j1dxemm5f2v4gzsyh2btp9",
+  "preflight": {
+    "provider": "firecracker",
+    "ok": true,
+    "checks": [
+      {
+        "name": "os",
+        "ok": true,
+        "detail": "host os is linux; Firecracker requires linux"
+      },
+      {
+        "name": "arch",
+        "ok": true,
+        "detail": "host architecture aarch64"
+      },
+      {
+        "name": "kvm",
+        "ok": true,
+        "detail": "/dev/kvm is readable and writable"
+      },
+      {
+        "name": "firecracker_binary",
+        "ok": true,
+        "detail": "/home/takanorifukuyama.guest/tsls/.kvm/bin/firecracker (version v1.17.0)"
+      },
+      {
+        "name": "kernel",
+        "ok": true,
+        "detail": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux sha256:e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591"
+      },
+      {
+        "name": "rootfs",
+        "ok": true,
+        "detail": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4 sha256:cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906"
+      },
+      {
+        "name": "mkfs_ext4",
+        "ok": true,
+        "detail": "/usr/sbin/mkfs.ext4"
+      },
+      {
+        "name": "workdir",
+        "ok": true,
+        "detail": "/home/takanorifukuyama.guest/tsls/.kvm/run"
+      },
+      {
+        "name": "socket_path_length",
+        "ok": true,
+        "detail": "longest socket path would be 85 bytes (max 107); ok"
+      }
+    ]
+  },
+  "capabilities": {
+    "isolation": "micro_vm",
+    "create_terminate": {
+      "status": "supported"
+    },
+    "observe": {
+      "status": "supported"
+    },
+    "enforce_deadline": {
+      "status": "supported"
+    },
+    "enforce_resource_limits": {
+      "status": "unverified",
+      "note": "vcpu/mem via machine-config; ephemeral storage not enforced"
+    },
+    "egress_none": {
+      "status": "supported"
+    },
+    "egress_restricted": {
+      "status": "unsupported",
+      "reason": "no network device is configured in P1"
+    },
+    "egress_public_web": {
+      "status": "unsupported",
+      "reason": "no network device is configured in P1"
+    },
+    "host_metering": {
+      "status": "unverified",
+      "note": "host-side timings only; no cgroup/KVM stats"
+    },
+    "idle_quiesce": {
+      "status": "unsupported",
+      "reason": "not implemented in P1"
+    },
+    "idle_resume": {
+      "status": "unsupported",
+      "reason": "not implemented in P1"
+    },
+    "snapshot_create": {
+      "status": "unsupported",
+      "reason": "not implemented in P1"
+    },
+    "snapshot_clone": {
+      "status": "unsupported",
+      "reason": "not implemented in P1"
+    },
+    "dev_only": false
+  },
+  "hello": {
+    "architecture": "aarch64",
+    "bridge_version": "0.1.0",
+    "environment_id": "env_01m2j1dxemm5f2v4gzsyh2btp9",
+    "guest_boot_id": "5a933836-1dbe-4499-8d82-7a99c120a245",
+    "protocol_version": 1,
+    "type": "hello"
+  },
+  "evidence": {
+    "guest_boot_id": "5a933836-1dbe-4499-8d82-7a99c120a245",
+    "host_pid": 22852,
+    "details": {
+      "boot_ms": 11036,
+      "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/console.log",
+      "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9",
+      "firecracker_version": "v1.17.0",
+      "function_drive_bytes": 10485760,
+      "instance_id": "env-01m2j1dxemm5f2v4gzsyh2btp9",
+      "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+      "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+      "mem_mib": 256,
+      "provider": "firecracker",
+      "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+      "rootfs_sha256": "cbdaa7560ff0d6eedcfac548f5ae767ccbec30068c4ded5df48db69c36fab906",
+      "vcpus": 1,
+      "vsock_port": 5000
+    }
+  },
+  "timings": {
+    "boot_ms": 11036,
+    "init_ms": 1224,
+    "init_ms_guest": 850,
+    "handler_ms": null,
+    "handler_ms_guest": null,
+    "total_ms": 17088
+  },
+  "outcome": "timeout",
+  "response": null,
+  "error_frame": null,
+  "cancel_sent": true,
+  "logs": [
+    {
+      "stream": "bridge",
+      "phase": "init",
+      "attempt_id": null,
+      "ts_ms": 1789459374926,
+      "line": "user process started (pid 102)"
+    },
+    {
+      "stream": "bridge",
+      "phase": "handler",
+      "attempt_id": "att_01m2j1e9aeex4rrfq6vcws0f42",
+      "ts_ms": 1789459378912,
+      "line": "cancel requested (grace 1000 ms)"
+    }
+  ],
+  "terminate": {
+    "was_running": true,
+    "cleaned": [
+      "process-group:22852",
+      "archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2j1dxemm5f2v4gzsyh2btp9/console.log",
+      "archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2j1dxemm5f2v4gzsyh2btp9/fc.log",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/fc.sock",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/v.sock",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/v.sock_5000",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/function.ext4",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/fc.pid",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/stage/app",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9/stage",
+      "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2j1dxemm5f2v4gzsyh2btp9"
+    ]
+  },
+  "observation_after_terminate": {
+    "state": "not_found"
+  },
+  "leftovers": {
+    "process_alive": false,
+    "env_dir_exists": false,
+    "sockets": []
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "example-http-axum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+# Example: an axum Router served through `tachyon_serverless_sdk::serve_http`.
+# The gateway wraps each HTTP request as a `tachyon.http.v1` event; the SDK turns it
+# into an `http::Request` and calls the router in-process (no local TCP listener).
+# Routes: GET / -> "ok", GET /headers -> request headers as JSON, POST /echo -> body
+# echoed with the same content-type, GET /status/{code} -> that status, GET /env ->
+# {"greeting": $GREETING}. The example performs no network access.
+description = "Tachyon Serverless example: axum Router served via serve_http (tachyon.http.v1 events)."
+
+[dependencies]
+tachyon-serverless-sdk = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tachyon-serverless-protocol = { workspace = true }
+base64 = { workspace = true }
