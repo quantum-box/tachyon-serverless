@@ -58,6 +58,11 @@ pub const API_SOCKET_WAIT: Duration = Duration::from_secs(2);
 pub const API_TIMEOUT: Duration = Duration::from_secs(10);
 /// Firecracker vsock guest CID (host is always 2).
 pub const GUEST_CID: u32 = 3;
+/// microVM states set through `PATCH /vm` (docs/protocol.md §C; the API is the
+/// one listed for Firecracker in `docs/adr/0001` under "pause / resume").
+pub const VM_STATE_PAUSED: &str = "Paused";
+/// See [`VM_STATE_PAUSED`].
+pub const VM_STATE_RESUMED: &str = "Resumed";
 const CONSOLE_TAIL_BYTES: usize = 4096;
 const FC_LOG_TAIL_BYTES: usize = 2048;
 
@@ -124,8 +129,21 @@ impl FirecrackerProvider {
             egress_restricted: Support::unsupported("no network device is configured in P1"),
             egress_public_web: Support::unsupported("no network device is configured in P1"),
             host_metering: Support::unverified("host-side timings only; no cgroup/KVM stats"),
-            idle_quiesce: Support::unsupported("not implemented in P1"),
-            idle_resume: Support::unsupported("not implemented in P1"),
+            // PLT-4633: implemented (`PATCH /vm`), deliberately *not*
+            // `Supported`. Nobody has measured a pause/resume cycle on KVM
+            // yet, and a capability without a measurement must not advertise
+            // itself as warm-capable (docs/architecture.md §4). Until
+            // `scripts/kvm/measure-warm.sh` has run and its evidence is
+            // recorded, reuse only happens for an operator who explicitly sets
+            // `[pool] allow_unverified_idle` to take that measurement.
+            idle_quiesce: Support::unverified(
+                "PATCH /vm {\"state\":\"Paused\"} is implemented but not measured on KVM; \
+                 measure with scripts/kvm/measure-warm.sh before reporting it as supported",
+            ),
+            idle_resume: Support::unverified(
+                "PATCH /vm {\"state\":\"Resumed\"} is implemented but not measured on KVM; \
+                 measure with scripts/kvm/measure-warm.sh before reporting it as supported",
+            ),
             snapshot_create: Support::unsupported("not implemented in P1"),
             snapshot_clone: Support::unsupported("not implemented in P1"),
             dev_only: false,
@@ -463,6 +481,80 @@ impl FirecrackerProvider {
         }
     }
 
+    /// Whether the Firecracker process of this environment is still running.
+    ///
+    /// A paused microVM is a *running* VMM process with its vCPUs stopped, so
+    /// this is exactly the question "is there anything left to pause or
+    /// resume". Asked before every `PATCH /vm` so a dead VMM is reported as
+    /// such instead of as an API error at a socket nobody is listening on.
+    async fn vmm_alive(&self, environment_id: &EnvironmentId, paths: &EnvPaths) -> bool {
+        if let Some(t) = self.running.lock().await.get_mut(environment_id) {
+            return matches!(t.child.try_wait(), Ok(None));
+        }
+        // Not spawned by this process (a previous gateway run): the pid file
+        // is all we have.
+        read_pid_file(&paths.pid_file).is_some_and(pid_alive)
+    }
+
+    /// `PATCH /vm {"state": <state>}` on one environment's API socket.
+    ///
+    /// The three ways this can fail are answered separately, because the
+    /// caller (the environment pool) has to tell "this environment is gone" —
+    /// retire it and start cold — from "the request itself was refused".
+    ///
+    /// 1. the environment is not one of ours any more -> `NotFound`;
+    /// 2. the VMM process is dead -> `Internal`, naming the pid file;
+    /// 3. the API socket is gone -> `Internal`, naming the socket.
+    ///
+    /// A VM that is *already* in the requested state is success: quiesce and
+    /// resume are idempotent by contract, and that is the state the caller
+    /// asked for.
+    async fn set_vm_state(
+        &self,
+        environment_id: &EnvironmentId,
+        state: &'static str,
+    ) -> Result<(), ProviderError> {
+        let paths = self.paths_for(environment_id);
+        if !paths.dir.exists() && !self.running.lock().await.contains_key(environment_id) {
+            return Err(ProviderError::NotFound(environment_id.clone()));
+        }
+        if !self.vmm_alive(environment_id, &paths).await {
+            return Err(ProviderError::Internal(format!(
+                "cannot set the state of {environment_id} to {state}: \
+                 the firecracker process is gone (pid file {})",
+                paths.pid_file.display()
+            )));
+        }
+        if !paths.api_sock.exists() {
+            return Err(ProviderError::Internal(format!(
+                "cannot set the state of {environment_id} to {state}: \
+                 the firecracker API socket {} is gone",
+                paths.api_sock.display()
+            )));
+        }
+        let api = ApiClient::new(&paths.api_sock, API_TIMEOUT);
+        match api
+            .patch("/vm", &serde_json::json!({ "state": state }))
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(crate::api::ApiError::Status { status, body, .. })
+                if is_already_in_state(&body) =>
+            {
+                tracing::debug!(
+                    env_id = %environment_id,
+                    state,
+                    status,
+                    "the microVM was already in the requested state"
+                );
+                Ok(())
+            }
+            Err(e) => Err(ProviderError::Internal(format!(
+                "PATCH /vm {{\"state\":\"{state}\"}} for {environment_id}: {e}"
+            ))),
+        }
+    }
+
     /// Kill a tracked child, waiting for a self-initiated poweroff first when
     /// `graceful`. Returns whether it was still running when we started.
     async fn stop_tracked(&self, t: &mut Tracked, graceful: bool) -> bool {
@@ -480,6 +572,21 @@ impl FirecrackerProvider {
         let _ = t.child.wait().await;
         was_running
     }
+}
+
+/// Whether a `PATCH /vm` fault means "the microVM is already in the state you
+/// asked for".
+///
+/// Matched on the fault message rather than the status code because
+/// Firecracker answers `400 Bad Request` for every refused state change, so
+/// the code alone cannot tell "already paused" from "cannot pause". Quiesce
+/// and resume are idempotent by contract
+/// ([`ExecutionProvider::idle_quiesce`]), and a retry that finds the VM
+/// already in the requested state has got what it asked for.
+fn is_already_in_state(fault: &str) -> bool {
+    let fault = fault.to_ascii_lowercase();
+    fault.contains("already")
+        && (fault.contains("paus") || fault.contains("resum") || fault.contains("running"))
 }
 
 /// Validate an inspected ELF against the revision's and the host's architecture.
@@ -677,6 +784,34 @@ impl ExecutionProvider for FirecrackerProvider {
         })
     }
 
+    /// Pause the microVM: `PATCH /vm {"state": "Paused"}`.
+    ///
+    /// The vsock device and the open bridge connection survive a pause — the
+    /// guest simply stops being scheduled — so the pooled session stays valid
+    /// and no handshake is repeated when it is resumed.
+    async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        let started = Instant::now();
+        self.set_vm_state(environment_id, VM_STATE_PAUSED).await?;
+        tracing::debug!(
+            env_id = %environment_id,
+            ms = started.elapsed().as_millis() as u64,
+            "microVM paused"
+        );
+        Ok(())
+    }
+
+    /// Resume the microVM: `PATCH /vm {"state": "Resumed"}`.
+    async fn idle_resume(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        let started = Instant::now();
+        self.set_vm_state(environment_id, VM_STATE_RESUMED).await?;
+        tracing::debug!(
+            env_id = %environment_id,
+            ms = started.elapsed().as_millis() as u64,
+            "microVM resumed"
+        );
+        Ok(())
+    }
+
     async fn observe_environment(
         &self,
         environment_id: &EnvironmentId,
@@ -781,14 +916,75 @@ mod tests {
         assert!(matches!(c.egress_restricted, Support::Unsupported { .. }));
         assert!(matches!(c.egress_public_web, Support::Unsupported { .. }));
         assert!(matches!(c.host_metering, Support::Unverified { .. }));
-        for s in [
-            &c.idle_quiesce,
-            &c.idle_resume,
-            &c.snapshot_create,
-            &c.snapshot_clone,
-        ] {
+        for s in [&c.snapshot_create, &c.snapshot_clone] {
             assert!(matches!(s, Support::Unsupported { .. }));
         }
+        // PLT-4633: pause/resume is implemented but nobody has measured it on
+        // KVM, so it stays `Unverified` and the environment pool keeps this
+        // provider on destroy-after-invoke by default (docs/architecture.md
+        // §4). Turning these into `Supported` is a separate, reviewed change
+        // that needs evidence under docs/evidence/.
+        for s in [&c.idle_quiesce, &c.idle_resume] {
+            assert!(matches!(s, Support::Unverified { .. }), "{s:?}");
+            assert!(!s.is_supported());
+        }
+        let Support::Unverified { note } = &c.idle_quiesce else {
+            unreachable!("checked above");
+        };
+        assert!(note.contains("measure-warm.sh"), "{note}");
+    }
+
+    #[test]
+    fn a_vm_already_in_the_requested_state_is_not_a_failure() {
+        for fault in [
+            r#"{"fault_message":"The microVM is already paused."}"#,
+            r#"{"fault_message":"Vm is already Resumed"}"#,
+            r#"{"fault_message":"the vm is already running"}"#,
+        ] {
+            assert!(is_already_in_state(fault), "{fault}");
+        }
+        for fault in [
+            r#"{"fault_message":"The requested operation is not supported: Paused"}"#,
+            r#"{"fault_message":"Internal error"}"#,
+            "",
+        ] {
+            assert!(!is_already_in_state(fault), "{fault}");
+        }
+    }
+
+    /// Nothing can be paused or resumed once the environment is gone, and the
+    /// error says which environment it was.
+    #[tokio::test]
+    async fn idle_quiesce_and_resume_report_a_missing_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let id = EnvironmentId::generate();
+        assert!(matches!(
+            p.idle_quiesce(&id).await,
+            Err(ProviderError::NotFound(missing)) if missing == id
+        ));
+        assert!(matches!(
+            p.idle_resume(&id).await,
+            Err(ProviderError::NotFound(missing)) if missing == id
+        ));
+    }
+
+    /// A directory without a live VMM behind it is not something to pause: the
+    /// error names the dead process rather than timing out on a socket nobody
+    /// listens on.
+    #[tokio::test]
+    async fn idle_quiesce_reports_a_dead_vmm_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let id = EnvironmentId::generate();
+        let paths = p.paths_for(&id);
+        std::fs::create_dir_all(&paths.dir).unwrap();
+        write_pid_file(&paths.pid_file, u32::MAX / 2).unwrap();
+        let err = p.idle_quiesce(&id).await.unwrap_err();
+        assert!(
+            matches!(&err, ProviderError::Internal(m) if m.contains("firecracker process is gone")),
+            "{err}"
+        );
     }
 
     #[test]

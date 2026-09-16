@@ -2026,13 +2026,23 @@ async fn startup_reconcile_can_be_turned_off() {
 /// Reuse on, with room for two idle environments per reuse key.
 const POOL_ON: &str = "[pool]\nenabled = true\nmax_idle_per_revision = 2\nidle_ttl_seconds = 60\nmax_total_idle = 8\n";
 
+/// The same, plus the switch that accepts an idle capability nobody measured,
+/// so that the measurement can be taken (PLT-4633).
+const POOL_MEASURING: &str = "[pool]\nenabled = true\nallow_unverified_idle = true\nmax_idle_per_revision = 2\nidle_ttl_seconds = 60\nmax_total_idle = 8\n";
+
 /// A fake that reports both idle capabilities as `Supported` and whose guests
 /// serve any number of sequential attempts, i.e. the only provider in this
 /// repository that the pool will ever hand anything out for.
 fn warm_fake() -> Arc<FakeExecutionProvider> {
+    warm_fake_with(FakeProviderOptions::default())
+}
+
+/// The same, with the idle knobs a test needs: a resume that costs something,
+/// a quiesce that fails, a resume that fails.
+fn warm_fake_with(options: FakeProviderOptions) -> Arc<FakeExecutionProvider> {
     let fake = Arc::new(FakeExecutionProvider::with_options(FakeProviderOptions {
         warm_capable: true,
-        ..FakeProviderOptions::default()
+        ..options
     }));
     fake.set_default_script(Some(FakeGuestScript::EchoForever));
     fake
@@ -2420,6 +2430,16 @@ impl ExecutionProvider for UnverifiedIdle {
             tachyon_serverless_provider_port::Support::unverified("not measured on real hardware");
         caps
     }
+    // Delegated, not defaulted: this decorator changes what the provider
+    // *reports*, never what it can do. Taking the port's default here would
+    // make every resume fail and hide the capability gate behind a provider
+    // that is simply broken.
+    async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.0.idle_quiesce(environment_id).await
+    }
+    async fn idle_resume(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.0.idle_resume(environment_id).await
+    }
     async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
         self.0.preflight().await
     }
@@ -2454,19 +2474,15 @@ impl ExecutionProvider for UnverifiedIdle {
     }
 }
 
-/// Acceptance 4: an unverified idle capability disables reuse even with the
-/// pool switched on, and the environment is destroyed after the invocation.
-/// The same holds for `Unsupported`, which is what both shipped providers
-/// report, so this is the behaviour of the whole product today.
-#[tokio::test]
-async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invoke() {
-    use tachyon_serverless_domain::StartKind;
-
-    // Unverified: the code exists but nothing was measured. Not enough.
+/// A harness whose provider reports both idle capabilities as `Unverified`:
+/// the code exists but nobody measured it. That is exactly the state the
+/// Firecracker provider is in (docs/adr/0001 §5), so this is what the shipped
+/// microVM provider does under a given `[pool]` section.
+fn unverified_harness(extra: &str) -> Harness {
     let fake = warm_fake();
     let provider = Arc::new(UnverifiedIdle(fake.clone()));
     let dir = tempfile::tempdir().unwrap();
-    let config = GatewayConfig::from_toml(&config_toml(dir.path(), "dev", POOL_ON)).unwrap();
+    let config = GatewayConfig::from_toml(&config_toml(dir.path(), "dev", extra)).unwrap();
     let app = Application::bootstrap_with(
         config,
         provider,
@@ -2476,13 +2492,25 @@ async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invo
         },
     )
     .unwrap();
-    let h = Harness {
+    Harness {
         app,
         fake,
         a: principal(TENANT_A, vec![Role::Deploy, Role::Invoke]),
         b: principal(TENANT_B, vec![Role::Deploy, Role::Invoke]),
         dir,
-    };
+    }
+}
+
+/// Acceptance 4: an unverified idle capability disables reuse even with the
+/// pool switched on, and the environment is destroyed after the invocation.
+/// The same holds for `Unsupported`, which is what both shipped providers
+/// report, so this is the behaviour of the whole product today.
+#[tokio::test]
+async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invoke() {
+    use tachyon_serverless_domain::StartKind;
+
+    // Unverified: the code exists but nothing was measured. Not enough.
+    let h = unverified_harness(POOL_ON);
     assert!(!h.app.pool.policy().reuse_enabled());
     let (function, _) = deploy(&h, &h.a, "unverified").await;
     for _ in 0..2 {
@@ -2597,6 +2625,300 @@ async fn a_pooled_environment_is_reclaimed_after_a_restart() {
     assert!(out.succeeded(), "{:?}", out.invocation().status);
     assert_eq!(attempt_of(&out).start_kind, StartKind::Cold);
     assert_ne!(attempt_of(&out).environment_id, pooled);
+}
+
+// ---------------------------------------------------------------------------
+// idle quiesce / resume and the measurement gate (PLT-4633)
+// ---------------------------------------------------------------------------
+
+/// Acceptance 1 and 2: the environment is quiesced when it enters the pool and
+/// resumed when it is claimed, the readiness check follows the resume, and the
+/// warm attempt reports what that cost instead of reporting zero.
+#[tokio::test]
+async fn a_warm_start_is_quiesced_resumed_and_reports_what_that_cost() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake_with(FakeProviderOptions {
+        // A resume that costs something measurable: a warm attempt that
+        // reported 0 ms for it would be hiding real work.
+        resume_delay: Duration::from_millis(25),
+        ..FakeProviderOptions::default()
+    });
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "warm-timings").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let cold = attempt_of(&first);
+    let env_id = cold.environment_id.clone();
+    assert_eq!(cold.start_kind, StartKind::Cold);
+    assert_eq!(
+        cold.timings.resume_ms, None,
+        "a cold start resumes nothing, and says so instead of reporting 0"
+    );
+    assert_eq!(cold.timings.readiness_ms, None);
+    assert_eq!(
+        h.fake.quiesced(),
+        vec![env_id.clone()],
+        "quiesced on the way into the pool"
+    );
+    assert_eq!(
+        h.fake.paused(),
+        vec![env_id.clone()],
+        "and it really is paused while it waits"
+    );
+    assert!(h.fake.resumed().is_empty());
+
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
+        .await
+        .unwrap();
+    assert!(second.succeeded(), "{:?}", second.invocation().status);
+    assert_eq!(second.output, Some(serde_json::json!({"n": 2})));
+    let warm = attempt_of(&second);
+    assert_eq!(warm.start_kind, StartKind::Warm);
+    assert_eq!(warm.environment_id, env_id);
+    assert_eq!(
+        h.fake.resumed(),
+        vec![env_id.clone()],
+        "resumed when it was claimed, exactly once"
+    );
+    assert_eq!(
+        warm.timings.environment_boot_ms,
+        Some(0),
+        "nothing booted on a warm start"
+    );
+    assert_eq!(warm.timings.runtime_init_ms, Some(0));
+    let resume_ms = warm
+        .timings
+        .resume_ms
+        .expect("a warm start records its resume");
+    assert!(
+        resume_ms >= 20,
+        "the resume took at least 25 ms but was reported as {resume_ms} ms"
+    );
+    assert!(
+        warm.timings.readiness_ms.is_some(),
+        "the readiness check is recorded too"
+    );
+
+    // The same numbers reach the API surface.
+    let api = tachyon_serverless_api_types::TimingsResponse::from(&warm.timings);
+    assert_eq!(api.resume_ms, Some(resume_ms));
+    assert_eq!(api.readiness_ms, warm.timings.readiness_ms);
+
+    // Back in the pool, quiesced again for the next one.
+    assert_eq!(h.fake.quiesced().len(), 2);
+    assert_eq!(h.fake.paused(), vec![env_id]);
+    assert_eq!(h.fake.created().len(), 1, "one environment served both");
+}
+
+/// Acceptance 3, the resume half: a resume that fails retires the environment
+/// exactly once and the invocation is served by a cold start instead. Nothing
+/// is ever dispatched into an environment whose resume was not confirmed.
+#[tokio::test]
+async fn a_failed_resume_falls_back_to_a_cold_start_and_retires_the_environment_once() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake_with(FakeProviderOptions {
+        fail_resume: Some("the vmm refused to resume".into()),
+        ..FakeProviderOptions::default()
+    });
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "resume-fails").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    assert!(first.succeeded());
+    let retired = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &retired), EnvironmentState::Idle);
+
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
+        .await
+        .unwrap();
+    assert!(
+        second.succeeded(),
+        "the invocation still succeeds, cold: {:?}",
+        second.invocation().status
+    );
+    assert_eq!(second.output, Some(serde_json::json!({"n": 2})));
+    let attempt = attempt_of(&second);
+    assert_eq!(attempt.start_kind, StartKind::Cold);
+    assert_ne!(attempt.environment_id, retired);
+    assert_eq!(attempt.epoch, 1, "a fresh environment, not the retired one");
+    assert_eq!(
+        attempt.number, 1,
+        "the fallback is not a retry: nothing was ever dispatched into the pooled one"
+    );
+
+    assert_eq!(h.fake.resumed(), vec![retired.clone()], "tried once");
+    assert_eq!(
+        h.fake
+            .terminated()
+            .iter()
+            .filter(|(id, _)| id == &retired)
+            .count(),
+        1,
+        "retired exactly once"
+    );
+    assert!(
+        matches!(
+            environment_state(&h, &retired),
+            EnvironmentState::Failed { .. }
+        ),
+        "{:?}",
+        environment_state(&h, &retired)
+    );
+    assert_eq!(
+        stopped_events(&h, &retired).len(),
+        1,
+        "metered once, when it was really gone"
+    );
+    assert_eq!(h.fake.created().len(), 2);
+    // The retired one is gone; the cold environment that served the fallback
+    // is itself quiesced and pooled afterwards, so reuse keeps working.
+    assert_eq!(h.app.pool.held(), 1);
+    assert_eq!(
+        environment_state(&h, &attempt.environment_id),
+        EnvironmentState::Idle
+    );
+    assert_usage_event_ids_are_unique(&h);
+}
+
+/// Acceptance 3, the quiesce half: an environment that cannot be quiesced is
+/// not pooled at all. The invocation keeps destroy-after-invoke, which is the
+/// behaviour of the whole product today.
+#[tokio::test]
+async fn an_environment_that_cannot_be_quiesced_is_terminated_instead_of_pooled() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake_with(FakeProviderOptions {
+        fail_quiesce: Some("the vmm refused to pause".into()),
+        ..FakeProviderOptions::default()
+    });
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "quiesce-fails").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let env = attempt_of(&first).environment_id.clone();
+    assert_eq!(h.fake.quiesced(), vec![env.clone()], "it was attempted");
+    assert!(
+        h.fake.paused().is_empty(),
+        "and it did not take, so nothing is paused"
+    );
+    assert_eq!(
+        environment_state(&h, &env),
+        EnvironmentState::Stopped,
+        "destroy-after-invoke, exactly as before reuse existed"
+    );
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(env.clone(), TerminateReason::Completed)]
+    );
+    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert_eq!(h.app.pool.held(), 0);
+    assert!(h.fake.running().is_empty());
+
+    // So the next invocation boots its own, and never sees the first one.
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
+        .await
+        .unwrap();
+    assert!(second.succeeded());
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Cold);
+    assert_ne!(attempt_of(&second).environment_id, env);
+    assert_eq!(h.fake.created().len(), 2);
+}
+
+/// Acceptance 4: an unverified idle capability is gated off by default; the
+/// measurement switch opens it; and neither the API nor the startup log ever
+/// presents the resulting run as a verified warm configuration.
+#[tokio::test]
+async fn an_unverified_provider_is_gated_off_by_default_and_only_measurable_with_the_switch() {
+    use tachyon_serverless_domain::StartKind;
+
+    // Default: `[pool] enabled = true` is not enough on its own.
+    let gated = unverified_harness(POOL_ON);
+    assert!(!gated.app.pool.policy().reuse_enabled());
+    let info = gated.app.provider_service.info().await.unwrap();
+    assert!(!info.reuse.enabled);
+    assert!(!info.reuse.verified);
+    assert_eq!(info.reuse.idle_quiesce, "unverified");
+    assert_eq!(info.reuse.idle_resume, "unverified");
+    assert!(
+        info.reuse
+            .reason
+            .contains("allow_unverified_idle is not set"),
+        "{}",
+        info.reuse.reason
+    );
+
+    // With the switch, reuse runs. That the *startup log* also says so is
+    // asserted in its own test binary (`tests/bootstrap_log.rs`): it needs the
+    // global tracing subscriber, and a thread-local one would make the
+    // assertion depend on what other tests in this process touched first.
+    let h = unverified_harness(POOL_MEASURING);
+    assert!(h.app.pool.policy().reuse_enabled());
+    assert!(
+        !h.app.pool.policy().idle_verified(),
+        "running is not the same as measured"
+    );
+    let info = h.app.provider_service.info().await.unwrap();
+    assert!(info.reuse.enabled);
+    assert!(
+        !info.reuse.verified,
+        "an unverified configuration is never displayed as a warm success"
+    );
+    assert!(
+        info.reuse.reason.contains("measurement run"),
+        "{}",
+        info.reuse.reason
+    );
+
+    // And reuse really happens, so the measurement can be taken.
+    let (function, _) = deploy(&h, &h.a, "measuring").await;
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    assert!(first.succeeded());
+    let env_id = attempt_of(&first).environment_id.clone();
+    assert_eq!(attempt_of(&first).start_kind, StartKind::Cold);
+    assert_eq!(h.fake.quiesced(), vec![env_id.clone()]);
+
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
+        .await
+        .unwrap();
+    assert!(second.succeeded());
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Warm);
+    assert_eq!(attempt_of(&second).environment_id, env_id);
+    assert_eq!(h.fake.resumed(), vec![env_id]);
+    assert!(attempt_of(&second).timings.resume_ms.is_some());
+    assert_eq!(h.fake.created().len(), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -2961,6 +3283,12 @@ impl ExecutionProvider for DiesWhenArmed {
         self.inner
             .terminate_environment(environment_id, reason)
             .await
+    }
+    async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.inner.idle_quiesce(environment_id).await
+    }
+    async fn idle_resume(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.inner.idle_resume(environment_id).await
     }
     async fn observe_environment(
         &self,

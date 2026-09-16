@@ -15,7 +15,7 @@ public な独立リポジトリ単体で、次を通す。
 
 - 実行 provider は **Firecracker (Linux/KVM)** を第一候補とし、`ExecutionProvider` trait の背後に隠す。
 - macOS などの開発機では **process provider**（隔離なし、dev 専用）で同じ縦断を確認できる。process provider の成功は microVM の成功ではない。gateway は `profile = "production"` で dev_only provider を拒否する。
-- P1 は 1 環境 1 同時実行、destroy-after-invoke。環境 pool（warm 再利用）は §4「環境 pool と再利用キー」の 2 重 gate の背後にあり、既定では働かない。firecracker / process はどちらも `idle_quiesce` / `idle_resume` を `Unsupported` と報告するので、同梱の provider では destroy-after-invoke のまま。snapshot は未対応（Capability に `Unsupported` と明示）。
+- P1 は 1 環境 1 同時実行、destroy-after-invoke。環境 pool（warm 再利用）は §4「環境 pool と再利用キー」の 2 重 gate の背後にあり、既定では働かない。process は `idle_quiesce` / `idle_resume` を `Unsupported`、firecracker は PLT-4633 で実装済みだが実機未計測のため `Unverified` と報告するので、**既定の設定では同梱のどちらの provider でも destroy-after-invoke のまま**である。snapshot は未対応（Capability に `Unsupported` と明示）。
 
 ## 2. crate 構成と依存方向
 
@@ -132,6 +132,7 @@ enabled = false                # 環境再利用（warm）。既定 off
 max_idle_per_revision = 1      # reuse key ごとに idle で残す環境数
 idle_ttl_seconds = 60          # これを超えて idle な環境は sweeper が破棄する
 max_total_idle = 8             # 全 reuse key 合計の idle 上限
+allow_unverified_idle = false  # 計測専用。未計測（Unverified）の idle capability を受け入れる。既定 off
 
 [[identity.tokens]]
 token = "dev-token-tenant-a"
@@ -161,10 +162,27 @@ value = "s3cr3t-a"
 
 invoke 後の環境を破棄せず `Idle` で残し、次の invoke に渡す仕組み（`crates/application/src/services/pool.rs`）。**2 つの gate が両方開いたときだけ**働く。
 
-1. **capability**: provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と報告すること。`Unverified`（コードはあるが実機で測っていない）では足りない。firecracker / process はどちらも `Unsupported` なので、同梱の provider では何も pool されない（`docs/adr/0001` §5）。
+1. **capability**: provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と報告すること。`Unverified`（コードはあるが実機で測っていない）では足りない。process は `Unsupported`、firecracker は `Unverified` なので、既定では同梱のどちらでも何も pool されない（`docs/adr/0001` §5）。
 2. **設定**: `[pool] enabled = true`。既定は `false`。
 
-どちらかが閉じていれば `EnvironmentPool` は「再利用しない」としか答えず、invoke pipeline は P1 と同じ destroy-after-invoke になる。理由は起動ログと `PoolPolicy::disabled_reason()` に出る。
+どちらかが閉じていれば `EnvironmentPool` は「再利用しない」としか答えず、invoke pipeline は P1 と同じ destroy-after-invoke になる。理由は起動ログと `PoolPolicy::disabled_reason()` / `PoolPolicy::reason()` に出る。
+
+### idle 休止・再開と計測 gate（PLT-4633）
+
+gate が開いているとき、pool は環境の**休止と再開そのもの**も持つ。
+
+- **pool に入るとき（`release`）**: 台帳の行を `Idle` にする**前**に `ExecutionProvider::idle_quiesce` を呼ぶ。行が `Idle` になった瞬間から claim できてしまい、claim 側は必ず resume するので、公開時点で休止済みでなければならないからである。休止に失敗した環境は **pool に入れない**。session を呼び出し側に返し、呼び出し側は今までどおり terminate する（＝ P1 と同じ destroy-after-invoke）。
+- **pool から出すとき（`claim`）**: `idle_resume` → **readiness 検査**（`BridgeSession::drain_stale` と使用可否の確認）の順で行う。休止中の guest は自分について何も答えられないので、検査は再開の後でなければならない。**再開が確認できなかった環境には決して dispatch しない**: 既存の「guest が死んでいた」経路と同じく retire（`Draining` → terminate → `Failed`、計測は 1 回）し、cold start に落ちる。
+- **timing**: warm start は boot も init もしないので `environment_boot_ms` / `runtime_init_ms` は 0 で正しい。代わりに実際に掛かった `resume_ms` と `readiness_ms` を `AttemptTimings` に記録し、API（`attempts[].timings`）と CLI に出す。0 で埋めて「warm は無料」に見せることはしない。値はミリ秒に**切り上げ**る（起きた仕事を 0 と報告しないため）。
+- Firecracker 側の実装は `PATCH /vm {"state": "Paused"|"Resumed"}`（`docs/protocol.md` §C）。冪等で、VMM プロセスが死んでいる / API socket が無い / 環境が無い場合はそれぞれ別の error になる。
+
+**計測 gate（`allow_unverified_idle`）。** capability を `Supported` にするには実機の計測が要るが、計測するには再利用が動いていなければならない。この鶏と卵を解くのが `[pool] allow_unverified_idle`（既定 `false`）で、これを立てたときだけ `Unverified` が capability gate を通る。`Unsupported`（コードが無い）は通らない。
+
+この switch は「未検証の構成を検証済みにする」ものでは**ない**。したがって:
+
+- `GET /v1/provider` は `reuse` を返す（`enabled` / `verified` / `reason` / `idle_quiesce` / `idle_resume`）。switch で動いている間は `enabled = true` かつ **`verified = false`**、`reason` は「計測のための実行であって検証済みの warm 構成ではない」と述べる。
+- 起動ログは `environment_reuse` / `reuse_verified` / `reuse_reason` を必ず出し、switch で動いている場合はさらに `warn` を 1 行出す。
+- 計測は `scripts/kvm/measure-warm.sh`（`docs/kvm.md` §3.7）で取り、証跡は `docs/evidence/warm-<UTC>/` に残す。`Unverified` → `Supported` への昇格は、その証跡を引用した別の変更である（`docs/adr/0001` §「決定」5）。
 
 **再利用キー**（`ReuseKey`、RFC §5.3）は 8 field の複合キーで、**全 field が一致した環境だけ**が再利用される。1 field でも違えば別環境になる。
 
@@ -213,6 +231,6 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 
 ## 6. 非対象（P1）
 
-idle 休止、snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted/public-web、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。
+snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted/public-web、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。
 
-warm 再利用は実装済み（§4「環境 pool と再利用キー」）だが、provider が `idle_quiesce` / `idle_resume` を `Supported` と報告しない限り働かない。firecracker / process はどちらも `Unsupported` を返すため、同梱の構成では P1 と同じ destroy-after-invoke であり、それを `crates/application/tests/pipeline.rs` が検査する。
+warm 再利用と idle 休止・再開は実装済み（§4「環境 pool と再利用キー」「idle 休止・再開と計測 gate」）だが、provider が `idle_quiesce` / `idle_resume` を `Supported` と報告しない限り働かない。process は `Unsupported`、firecracker は実機未計測の `Unverified` を返すため、**既定の構成では P1 と同じ destroy-after-invoke** であり、それを `crates/application/tests/pipeline.rs` が検査する。firecracker で再利用を動かせるのは計測用の `[pool] allow_unverified_idle` を明示的に立てたときだけで、その構成は API とログで一貫して「未検証」と表示される。

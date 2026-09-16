@@ -5,12 +5,22 @@
 //! 1. the provider reports `idle_quiesce` *and* `idle_resume` as
 //!    [`Support::Supported`](tachyon_serverless_provider_port::Support).
 //!    `Unverified` is deliberately not enough: a runtime profile whose idle
-//!    behaviour has not been measured keeps destroy-after-invoke; and
+//!    behaviour has not been measured keeps destroy-after-invoke — unless an
+//!    operator sets `[pool] allow_unverified_idle` in order to *take* that
+//!    measurement, and then [`PoolPolicy::idle_verified`] stays false so
+//!    nothing can report the run as a verified warm setup; and
 //! 2. `[pool] enabled = true` in the gateway configuration.
 //!
-//! Both shipped providers report `Unsupported` (docs/adr/0001 §5), so with
-//! them this module only ever decides "no" and the invoke pipeline behaves
-//! exactly as it did in P1.
+//! With the shipped providers and the default configuration this module only
+//! ever decides "no" — the process provider reports `Unsupported`, the
+//! Firecracker provider `Unverified` (docs/adr/0001 §5) — and the invoke
+//! pipeline behaves exactly as it did in P1.
+//!
+//! When reuse is on, this module also owns the provider side of an idle
+//! environment: it is quiesced on the way into the pool and resumed on the way
+//! out, the resume is followed by a readiness check, and an environment whose
+//! resume was not confirmed is retired instead of being dispatched into
+//! (PLT-4633).
 //!
 //! The pool has two halves.
 //!
@@ -29,16 +39,18 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde::Serialize;
 
+use tachyon_serverless_api_types::ReuseInfo;
 use tachyon_serverless_domain::{
     Clock, EnvironmentId, EvidenceQuality, ExecutionEnvironment, FunctionRevision, ReuseKey,
     Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType,
 };
 use tachyon_serverless_provider_port::{
-    Capabilities, ExecutionProvider, TerminateReason, UsageSink,
+    Capabilities, ExecutionProvider, Support, TerminateReason, UsageSink,
 };
 
 use crate::bridge_session::BridgeSession;
@@ -72,28 +84,87 @@ impl ReuseDisabled {
     }
 }
 
+/// How one idle capability was judged when the policy was decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdleGate {
+    /// `Supported`: implemented *and* measured. The only state that makes a
+    /// warm configuration a verified one.
+    Verified,
+    /// `Unverified`, accepted only because `[pool] allow_unverified_idle` is
+    /// set: reuse runs so that the measurement can be taken.
+    Measuring,
+    /// Not usable: `Unsupported`, or `Unverified` without the switch.
+    Blocked,
+}
+
+impl IdleGate {
+    fn of(support: &Support, allow_unverified: bool) -> Self {
+        if support.is_supported() {
+            Self::Verified
+        } else if support.is_unverified() && allow_unverified {
+            Self::Measuring
+        } else {
+            Self::Blocked
+        }
+    }
+}
+
 /// The reuse decision for one (provider, configuration) pair. Computed once at
 /// bootstrap; every reuse path consults it first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolPolicy {
     disabled: Option<ReuseDisabled>,
+    /// Reuse is on *and* both idle capabilities were reported as `Supported`.
+    verified: bool,
+    /// One sentence naming the gate that decided this, for the bootstrap log
+    /// and `GET /v1/provider`.
+    reason: &'static str,
     limits: PoolLimits,
     idle_ttl: chrono::Duration,
 }
 
 impl PoolPolicy {
     pub fn decide(caps: &Capabilities, cfg: &PoolConfig) -> Self {
+        let quiesce = IdleGate::of(&caps.idle_quiesce, cfg.allow_unverified_idle);
+        let resume = IdleGate::of(&caps.idle_resume, cfg.allow_unverified_idle);
         let disabled = if !cfg.enabled {
             Some(ReuseDisabled::Configuration)
-        } else if !caps.idle_quiesce.is_supported() {
+        } else if quiesce == IdleGate::Blocked {
             Some(ReuseDisabled::IdleQuiesceNotSupported)
-        } else if !caps.idle_resume.is_supported() {
+        } else if resume == IdleGate::Blocked {
             Some(ReuseDisabled::IdleResumeNotSupported)
         } else {
             None
         };
+        let verified =
+            disabled.is_none() && quiesce == IdleGate::Verified && resume == IdleGate::Verified;
+        // Only point at the switch when the switch would actually help, i.e.
+        // the capability that blocked this is `Unverified` (code exists,
+        // nobody measured it) rather than `Unsupported` (no code at all).
+        let blocked_on_unverified = match disabled {
+            Some(ReuseDisabled::IdleQuiesceNotSupported) => caps.idle_quiesce.is_unverified(),
+            Some(ReuseDisabled::IdleResumeNotSupported) => caps.idle_resume.is_unverified(),
+            _ => false,
+        };
+        let reason = match (disabled, verified, blocked_on_unverified) {
+            (None, true, _) => {
+                "the provider reports both idle capabilities as supported and [pool] enabled is true"
+            }
+            (None, false, _) => {
+                "[pool] allow_unverified_idle accepts an idle capability nobody has measured: \
+                 this is a measurement run, not a verified warm configuration"
+            }
+            (Some(ReuseDisabled::Configuration), ..) => "[pool] enabled is false",
+            (Some(_), _, true) => {
+                "the provider reports an idle capability as unverified and \
+                 [pool] allow_unverified_idle is not set"
+            }
+            (Some(_), _, false) => "the provider does not support idle quiesce and resume",
+        };
         Self {
             disabled,
+            verified,
+            reason,
             limits: PoolLimits {
                 max_idle_per_key: cfg.max_idle_per_revision,
                 max_total_idle: cfg.max_total_idle,
@@ -106,6 +177,8 @@ impl PoolPolicy {
     pub fn off() -> Self {
         Self {
             disabled: Some(ReuseDisabled::Configuration),
+            verified: false,
+            reason: "[pool] enabled is false",
             limits: PoolLimits {
                 max_idle_per_key: 0,
                 max_total_idle: 0,
@@ -118,8 +191,37 @@ impl PoolPolicy {
         self.disabled.is_none()
     }
 
+    /// True only when reuse is on **and** both idle capabilities were reported
+    /// as `Supported`, i.e. measured on real hardware.
+    ///
+    /// False while reuse runs on `[pool] allow_unverified_idle`, and that
+    /// distinction is the point of the switch: such a run exists to *produce*
+    /// the measurement, so no API response, log line or piece of evidence may
+    /// present it as a warm success (PLT-4633 acceptance 4).
+    pub fn idle_verified(&self) -> bool {
+        self.verified
+    }
+
     pub fn disabled_reason(&self) -> Option<ReuseDisabled> {
         self.disabled
+    }
+
+    /// One sentence an operator can act on, on the enabled and the disabled
+    /// path alike.
+    pub fn reason(&self) -> &'static str {
+        self.reason
+    }
+
+    /// What `GET /v1/provider` reports about reuse: what the gateway does,
+    /// whether it was ever measured, why, and the two capabilities behind it.
+    pub fn info(&self, caps: &Capabilities) -> ReuseInfo {
+        ReuseInfo {
+            enabled: self.reuse_enabled(),
+            verified: self.idle_verified(),
+            reason: self.reason.to_string(),
+            idle_quiesce: caps.idle_quiesce.status_str().to_string(),
+            idle_resume: caps.idle_resume.status_str().to_string(),
+        }
     }
 
     pub fn limits(&self) -> PoolLimits {
@@ -259,15 +361,43 @@ pub fn environment_lifetime_ms(env: &ExecutionEnvironment, now: Timestamp) -> u6
     (now - env.created_at).num_milliseconds().max(0) as u64
 }
 
+/// What a warm start actually cost, measured on the host.
+///
+/// A warm start does not boot and does not initialize, so those two timings
+/// are legitimately zero for it — but resuming the environment and checking
+/// that it is fit to be dispatched into is real work, and an attempt that
+/// reported nothing but zeros would make warm look free. These two numbers are
+/// what let evidence compare warm against cold honestly (PLT-4633).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WarmStartTimings {
+    /// `ExecutionProvider::idle_resume`, host-observed.
+    pub resume_ms: u64,
+    /// The readiness check that follows the resume: the stale drain and the
+    /// usability check that must both pass before anything is dispatched.
+    pub readiness_ms: u64,
+}
+
+/// Milliseconds, rounded **up**.
+///
+/// Work that happened is never reported as zero: a resume that took 300 µs is
+/// reported as 1 ms, not as 0. Cold timings keep truncating (`as_millis`)
+/// because they are hundreds of milliseconds and a sub-millisecond boot does
+/// not exist; a resume can genuinely be that fast.
+fn ceil_ms(d: Duration) -> u64 {
+    d.as_micros().div_ceil(1000) as u64
+}
+
 /// A pooled environment handed to an attempt: the ledger row — already `Busy`
-/// at its new epoch — the live session of its guest, and the usage sequence
-/// the environment has reached, so the attempt continues the environment's own
+/// at its new epoch — the live session of its guest, the usage sequence the
+/// environment has reached, so the attempt continues the environment's own
 /// event count instead of starting a second one
-/// ([`UsageEvent::sequence`](tachyon_serverless_domain::UsageEvent)).
+/// ([`UsageEvent::sequence`](tachyon_serverless_domain::UsageEvent)), and what
+/// taking it out of the pool cost.
 pub struct WarmEnvironment {
     pub environment: ExecutionEnvironment,
     pub session: BridgeSession,
     pub sequence: u64,
+    pub timings: WarmStartTimings,
 }
 
 /// What the pool holds for one idle environment: the live guest connection,
@@ -399,23 +529,54 @@ impl EnvironmentPool {
                     mut session,
                     sequence,
                 }) => {
-                    // Anything the guest queued while the environment was idle
+                    // The environment was quiesced on its way into the pool,
+                    // so nothing can run in it until the provider says it is
+                    // back. A resume that was not confirmed is never dispatched
+                    // into: the environment is retired exactly like a dead
+                    // guest and the caller starts a cold one instead
+                    // (PLT-4633 acceptance 3).
+                    let resume_started = Instant::now();
+                    if let Err(e) = self.provider.idle_resume(&environment.id).await {
+                        tracing::warn!(
+                            error = %e,
+                            environment_id = %environment.id,
+                            epoch = environment.epoch,
+                            "resuming a pooled environment failed; retiring it and starting cold"
+                        );
+                        drop(session);
+                        self.retire(environment, "idle resume failed", sequence)
+                            .await;
+                        continue;
+                    }
+                    let resume_ms = ceil_ms(resume_started.elapsed());
+                    // Readiness, after the resume and before any dispatch:
+                    // anything the guest queued while the environment was idle
                     // (or left over from the attempt before) belongs to the
                     // past, not to the attempt about to be dispatched. This
                     // also detects a guest that died while idle: it makes the
                     // session unusable instead of letting the next attempt run
-                    // into it.
+                    // into it. It has to happen *after* the resume, because a
+                    // quiesced guest cannot answer for itself.
+                    let readiness_started = Instant::now();
                     session.drain_stale().await;
-                    if session.is_usable() {
+                    let usable = session.is_usable();
+                    let readiness_ms = ceil_ms(readiness_started.elapsed());
+                    if usable {
                         tracing::debug!(
                             environment_id = %environment.id,
                             epoch = environment.epoch,
+                            resume_ms,
+                            readiness_ms,
                             "reusing a pooled environment"
                         );
                         return Some(WarmEnvironment {
                             environment,
                             session,
                             sequence,
+                            timings: WarmStartTimings {
+                                resume_ms,
+                                readiness_ms,
+                            },
                         });
                     }
                     drop(session);
@@ -445,7 +606,7 @@ impl EnvironmentPool {
     /// session; `Err` hands the session back (boxed, because a live session is
     /// a large value), which means the caller shuts it down and terminates the
     /// environment exactly as it did in P1.
-    pub fn release(
+    pub async fn release(
         &self,
         env: &ExecutionEnvironment,
         session: BridgeSession,
@@ -454,34 +615,66 @@ impl EnvironmentPool {
         if !self.policy.reuse_enabled() || !session.is_usable() {
             return Err(Box::new(session));
         }
-        let now = self.clock.now();
-        // The sessions lock is held *across* the ledger mutation: the moment
-        // the row becomes `Idle` it is claimable, and a claimer that finds it
-        // without its session would treat a healthy environment as dead and
-        // terminate it. Holding the lock makes the row and its session appear
-        // together. `claim` never holds this lock while taking the ledger's,
-        // so the two orders cannot deadlock.
-        let mut sessions = self.sessions.lock();
-        match self
-            .repos
-            .environments
-            .release_to_pool(env, self.policy.limits, now)
-        {
-            Ok(Some(pooled)) => {
-                sessions.insert(pooled.id.clone(), PooledSession { session, sequence });
-                tracing::debug!(
-                    environment_id = %pooled.id,
-                    epoch = pooled.epoch,
-                    "environment returned to the pool"
-                );
-                Ok(pooled)
-            }
-            Ok(None) => Err(Box::new(session)),
-            Err(e) => {
-                tracing::warn!(error = %e, environment_id = %env.id, "cannot pool environment");
-                Err(Box::new(session))
-            }
+        // Quiesce *before* the row is published. The moment the row is `Idle`
+        // a claimer can take it, and every claimer resumes what it takes, so
+        // the environment must already be quiesced by then. An environment
+        // that cannot be quiesced is not pooled at all: the caller terminates
+        // it exactly as it did in P1 (PLT-4633 acceptance 3).
+        if let Err(e) = self.provider.idle_quiesce(&env.id).await {
+            tracing::warn!(
+                error = %e,
+                environment_id = %env.id,
+                "quiescing the environment failed; terminating it instead of pooling it"
+            );
+            return Err(Box::new(session));
         }
+        let now = self.clock.now();
+        let published = {
+            // The sessions lock is held *across* the ledger mutation: the
+            // moment the row becomes `Idle` it is claimable, and a claimer
+            // that finds it without its session would treat a healthy
+            // environment as dead and terminate it. Holding the lock makes the
+            // row and its session appear together. `claim` never holds this
+            // lock while taking the ledger's, so the two orders cannot
+            // deadlock. The lock is a `parking_lot` one, so the block also
+            // keeps it from being held across the await below.
+            let mut sessions = self.sessions.lock();
+            match self
+                .repos
+                .environments
+                .release_to_pool(env, self.policy.limits, now)
+            {
+                Ok(Some(pooled)) => {
+                    sessions.insert(pooled.id.clone(), PooledSession { session, sequence });
+                    tracing::debug!(
+                        environment_id = %pooled.id,
+                        epoch = pooled.epoch,
+                        "environment returned to the pool"
+                    );
+                    Ok(pooled)
+                }
+                Ok(None) => Err(Box::new(session)),
+                Err(e) => {
+                    tracing::warn!(error = %e, environment_id = %env.id, "cannot pool environment");
+                    Err(Box::new(session))
+                }
+            }
+        };
+        if published.is_err()
+            && let Err(e) = self.provider.idle_resume(&env.id).await
+        {
+            // We quiesced it and the ledger refused it (a cap, or a row that
+            // moved on). The caller now shuts the guest down and terminates
+            // it, which is easier on a running VM than on a paused one, so put
+            // it back the way that path expects to find it. Best effort: the
+            // terminate that follows does not depend on it.
+            tracing::warn!(
+                error = %e,
+                environment_id = %env.id,
+                "resuming an environment the pool refused failed; it is terminated either way"
+            );
+        }
+        published
     }
 
     /// Terminate every idle environment that is past its TTL.
@@ -749,6 +942,16 @@ mod tests {
         }
     }
 
+    /// Reuse on *and* the measurement switch: what an operator sets to take
+    /// the idle measurement the capability is waiting for.
+    fn measuring() -> PoolConfig {
+        PoolConfig {
+            enabled: true,
+            allow_unverified_idle: true,
+            ..PoolConfig::default()
+        }
+    }
+
     /// PLT-4632 acceptance 4: a runtime profile whose idle capability is not
     /// `Supported` has reuse disabled, whatever the configuration says.
     #[test]
@@ -795,6 +998,96 @@ mod tests {
         assert!(!PoolPolicy::off().reuse_enabled());
     }
 
+    /// PLT-4633 acceptance 4: an `Unverified` idle capability is gated off by
+    /// default, `[pool] allow_unverified_idle` opens it for a measurement, and
+    /// the result is still not a verified warm configuration.
+    #[test]
+    fn an_unverified_idle_capability_needs_the_switch_and_stays_unverified() {
+        let unverified = || Support::unverified("not measured on real hardware");
+        let both_unverified = caps(unverified(), unverified());
+
+        let gated = PoolPolicy::decide(&both_unverified, &on());
+        assert!(
+            !gated.reuse_enabled(),
+            "code without a measurement is not enough on its own"
+        );
+        assert_eq!(
+            gated.disabled_reason(),
+            Some(ReuseDisabled::IdleQuiesceNotSupported)
+        );
+        assert!(!gated.idle_verified());
+        assert!(
+            gated.reason().contains("allow_unverified_idle is not set"),
+            "{}",
+            gated.reason()
+        );
+
+        let measuring_policy = PoolPolicy::decide(&both_unverified, &measuring());
+        assert!(
+            measuring_policy.reuse_enabled(),
+            "the switch opens the gate"
+        );
+        assert_eq!(measuring_policy.disabled_reason(), None);
+        assert!(
+            !measuring_policy.idle_verified(),
+            "a measurement run must never count as a verified warm configuration"
+        );
+        assert!(
+            measuring_policy.reason().contains("measurement run"),
+            "{}",
+            measuring_policy.reason()
+        );
+
+        // The switch accepts `Unverified` only. `Unsupported` stays closed,
+        // and the reason does not send an operator to a switch that cannot
+        // help them.
+        let unsupported = PoolPolicy::decide(
+            &caps(
+                Support::unsupported("destroy-after-invoke"),
+                Support::Supported,
+            ),
+            &measuring(),
+        );
+        assert!(!unsupported.reuse_enabled());
+        assert!(
+            !unsupported.reason().contains("allow_unverified_idle"),
+            "{}",
+            unsupported.reason()
+        );
+
+        // A measured provider is verified, switch or no switch.
+        let verified =
+            PoolPolicy::decide(&caps(Support::Supported, Support::Supported), &measuring());
+        assert!(verified.reuse_enabled() && verified.idle_verified());
+    }
+
+    /// The reason and the two capability statuses are what `GET /v1/provider`
+    /// shows, on the enabled and the disabled path alike.
+    #[test]
+    fn the_policy_reports_whether_reuse_is_on_and_whether_it_was_measured() {
+        let supported = caps(Support::Supported, Support::Supported);
+        let info = PoolPolicy::decide(&supported, &on()).info(&supported);
+        assert!(info.enabled && info.verified);
+        assert_eq!(info.idle_quiesce, "supported");
+        assert_eq!(info.idle_resume, "supported");
+        assert!(info.reason.contains("supported"), "{}", info.reason);
+
+        let unverified = caps(
+            Support::unverified("not measured"),
+            Support::unverified("not measured"),
+        );
+        let info = PoolPolicy::decide(&unverified, &measuring()).info(&unverified);
+        assert!(info.enabled, "reuse really is running");
+        assert!(!info.verified, "and it is never shown as a warm success");
+        assert_eq!(info.idle_quiesce, "unverified");
+        assert_eq!(info.idle_resume, "unverified");
+
+        let off = PoolPolicy::decide(&supported, &PoolConfig::default()).info(&supported);
+        assert!(!off.enabled && !off.verified);
+        assert_eq!(off.reason, "[pool] enabled is false");
+        assert_eq!(PoolPolicy::off().reason(), "[pool] enabled is false");
+    }
+
     #[test]
     fn pool_policy_carries_the_configured_caps_and_ttl() {
         let cfg = PoolConfig {
@@ -802,6 +1095,7 @@ mod tests {
             max_idle_per_revision: 3,
             idle_ttl_seconds: 45,
             max_total_idle: 9,
+            ..PoolConfig::default()
         };
         let policy = PoolPolicy::decide(&caps(Support::Supported, Support::Supported), &cfg);
         assert_eq!(policy.limits().max_idle_per_key, 3);
@@ -890,6 +1184,10 @@ mod tests {
     struct StubProvider {
         terminated: Mutex<Vec<EnvironmentId>>,
         fail_terminate: AtomicBool,
+        quiesced: Mutex<Vec<EnvironmentId>>,
+        resumed: Mutex<Vec<EnvironmentId>>,
+        fail_quiesce: AtomicBool,
+        fail_resume: AtomicBool,
     }
 
     impl StubProvider {
@@ -897,13 +1195,29 @@ mod tests {
             Self {
                 terminated: Mutex::new(Vec::new()),
                 fail_terminate: AtomicBool::new(false),
+                quiesced: Mutex::new(Vec::new()),
+                resumed: Mutex::new(Vec::new()),
+                fail_quiesce: AtomicBool::new(false),
+                fail_resume: AtomicBool::new(false),
             }
         }
         fn fail_terminate(&self, fail: bool) {
             self.fail_terminate.store(fail, Ordering::SeqCst);
         }
+        fn fail_quiesce(&self, fail: bool) {
+            self.fail_quiesce.store(fail, Ordering::SeqCst);
+        }
+        fn fail_resume(&self, fail: bool) {
+            self.fail_resume.store(fail, Ordering::SeqCst);
+        }
         fn terminated(&self) -> Vec<EnvironmentId> {
             self.terminated.lock().clone()
+        }
+        fn quiesced(&self) -> Vec<EnvironmentId> {
+            self.quiesced.lock().clone()
+        }
+        fn resumed(&self) -> Vec<EnvironmentId> {
+            self.resumed.lock().clone()
         }
     }
 
@@ -944,6 +1258,20 @@ mod tests {
                 was_running: true,
                 cleaned: vec![id.to_string()],
             })
+        }
+        async fn idle_quiesce(&self, id: &EnvironmentId) -> Result<(), ProviderError> {
+            self.quiesced.lock().push(id.clone());
+            match self.fail_quiesce.load(Ordering::SeqCst) {
+                true => Err(ProviderError::Internal("quiesce failed".into())),
+                false => Ok(()),
+            }
+        }
+        async fn idle_resume(&self, id: &EnvironmentId) -> Result<(), ProviderError> {
+            self.resumed.lock().push(id.clone());
+            match self.fail_resume.load(Ordering::SeqCst) {
+                true => Err(ProviderError::Internal("resume failed".into())),
+                false => Ok(()),
+            }
         }
         async fn observe_environment(
             &self,
@@ -1039,6 +1367,9 @@ mod tests {
                 // Everything idle is expired, so a sweep reaps immediately.
                 idle_ttl_seconds: 0,
                 max_total_idle: 4,
+                // The capabilities above are `Supported`, so the measurement
+                // switch is not what opens this gate.
+                allow_unverified_idle: false,
             },
         )
     }
@@ -1200,6 +1531,7 @@ mod tests {
 
         let pooled = pool
             .release(&env, session, 3)
+            .await
             .expect("the environment pools");
         assert_eq!(pooled.state, EnvironmentState::Idle);
         let (claimed_id, claimed_epoch) = claimer.await.unwrap();
@@ -1214,6 +1546,106 @@ mod tests {
             "a healthy environment was terminated by a claim that saw the row without its session"
         );
         assert_eq!(pool.held(), 0, "the claimer took the session with the row");
+    }
+
+    /// PLT-4633 acceptance 1 and 3: an environment is quiesced on its way into
+    /// the pool and resumed on its way out, and a resume that fails is never
+    /// dispatched into. The environment is retired exactly like a dead guest —
+    /// terminated once, settled, metered once — and the caller gets `None`,
+    /// which is the cold start.
+    #[tokio::test]
+    async fn a_failed_resume_retires_the_environment_and_hands_out_nothing() {
+        let store = Arc::new(InMemoryStore::new(Limits::default()));
+        let key = reuse_key();
+        let env = busy_row(&store, &key);
+        let session = live_session(&store, &env.id, env.epoch).await;
+        let provider = Arc::new(StubProvider::new());
+        let sink = Arc::new(RecordingSink::default());
+        let pool = EnvironmentPool::new(
+            Repositories::in_memory(store.clone()),
+            provider.clone(),
+            sink.clone(),
+            Arc::new(SystemClock),
+            policy_on(),
+        );
+
+        let pooled = pool
+            .release(&env, session, 2)
+            .await
+            .expect("the environment pools");
+        assert_eq!(pooled.state, EnvironmentState::Idle);
+        assert_eq!(
+            provider.quiesced(),
+            vec![env.id.clone()],
+            "quiesced on the way into the pool"
+        );
+
+        provider.fail_resume(true);
+        assert!(
+            pool.claim(&key).await.is_none(),
+            "an environment whose resume was not confirmed is never handed out"
+        );
+        assert_eq!(provider.resumed(), vec![env.id.clone()]);
+        assert_eq!(
+            provider.terminated(),
+            vec![env.id.clone()],
+            "retired exactly once"
+        );
+        assert!(
+            matches!(state_of(&store, &env.id), EnvironmentState::Failed { .. }),
+            "{:?}",
+            state_of(&store, &env.id)
+        );
+        assert_eq!(pool.held(), 0);
+        let events = sink.events();
+        assert_eq!(events.len(), 1, "metered once, when it was really gone");
+        assert_eq!(events[0].event_type, UsageEventType::EnvironmentStopped);
+        assert_eq!(
+            events[0].sequence, 3,
+            "the stop event continues the environment's own count"
+        );
+    }
+
+    /// The other half of acceptance 3: an environment that cannot be quiesced
+    /// never enters the pool. The session comes back to the caller, which
+    /// terminates it exactly as it did before reuse existed.
+    #[tokio::test]
+    async fn a_failed_quiesce_keeps_the_environment_out_of_the_pool() {
+        let store = Arc::new(InMemoryStore::new(Limits::default()));
+        let key = reuse_key();
+        let env = busy_row(&store, &key);
+        let session = live_session(&store, &env.id, env.epoch).await;
+        let provider = Arc::new(StubProvider::new());
+        provider.fail_quiesce(true);
+        let pool = EnvironmentPool::new(
+            Repositories::in_memory(store.clone()),
+            provider.clone(),
+            Arc::new(RecordingSink::default()),
+            Arc::new(SystemClock),
+            policy_on(),
+        );
+
+        assert!(
+            pool.release(&env, session, 0).await.is_err(),
+            "the session is handed back so the caller can terminate it"
+        );
+        assert_eq!(provider.quiesced(), vec![env.id.clone()]);
+        assert!(
+            provider.resumed().is_empty(),
+            "nothing was paused, so nothing is resumed"
+        );
+        assert_eq!(
+            state_of(&store, &env.id),
+            EnvironmentState::Busy,
+            "the row never became claimable"
+        );
+        assert!(store.list_idle().unwrap().is_empty());
+        assert_eq!(pool.held(), 0);
+        assert!(
+            provider.terminated().is_empty(),
+            "the pool does not terminate it; the caller does"
+        );
+        assert!(pool.claim(&key).await.is_none());
     }
 
     /// Regression (review F9 and F5): a terminate that failed is not recorded

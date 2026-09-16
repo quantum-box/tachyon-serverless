@@ -84,7 +84,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 3. `config/gateway.{dev,firecracker}.toml` は operator だけが読める。token・secret 値の保管はファイル権限に依存する。
 4. `IdentityProvider` は token を `Principal` に解決する以上のことをしない。IAM / policy は将来の adapter（`docs/inventory-tachyon-apps.md` §3.7）。
 5. KVM と Firecracker の隔離境界は upstream の設計を信頼する（`docs/adr/0001-execution-provider-firecracker-first.md`）。本リポジトリで hypervisor の脆弱性は扱わない。
-6. 1 環境は 1 tenant の 1 revision にしか使われない（`ExecutionPolicy.concurrency_per_environment = 1`、`min_ready = 0`）。warm 再利用は `[pool] enabled` と provider の `idle_quiesce` / `idle_resume` = `Supported` が両方揃ったときだけ働き（`docs/architecture.md` §4「環境 pool と再利用キー」）、同梱の firecracker / process はどちらも `Unsupported` を返すので destroy-after-invoke のまま。再利用する場合も ReuseKey の 8 field 完全一致が条件で、tenant / revision / 設定 / secret generation をまたいで 1 環境が共有されることはない。
+6. 1 環境は 1 tenant の 1 revision にしか使われない（`ExecutionPolicy.concurrency_per_environment = 1`、`min_ready = 0`）。warm 再利用は `[pool] enabled` と provider の `idle_quiesce` / `idle_resume` = `Supported` が両方揃ったときだけ働き（`docs/architecture.md` §4「環境 pool と再利用キー」）、process は `Unsupported`、firecracker は実装済みだが未計測の `Unverified` を返すので、既定ではどちらも destroy-after-invoke のまま。`Unverified` を受け入れるのは計測用の `[pool] allow_unverified_idle` を明示的に立てたときだけで、その構成は API とログで「未検証」と表示される。再利用する場合も ReuseKey の 8 field 完全一致が条件で、tenant / revision / 設定 / secret generation をまたいで 1 環境が共有されることはない。
 7. clock は host のもの（`Clock` trait）。guest の時刻は信頼しない。
 
 ## 6. 原則

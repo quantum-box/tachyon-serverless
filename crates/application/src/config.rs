@@ -321,9 +321,10 @@ impl InvokeConfig {
 ///
 /// This is only one half of the gate. Reuse also requires the provider to
 /// report both `idle_quiesce` and `idle_resume` as `Supported`; `Unverified`
-/// is explicitly not enough. Both shipped providers report `Unsupported`, so
-/// turning this on changes nothing for them and they keep destroying the
-/// environment after every invocation.
+/// is not enough unless [`PoolConfig::allow_unverified_idle`] is set for a
+/// measurement. The process provider reports `Unsupported` and the Firecracker
+/// provider `Unverified`, so with the defaults neither of them pools anything
+/// and both keep destroying the environment after every invocation.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct PoolConfig {
@@ -335,6 +336,20 @@ pub struct PoolConfig {
     pub idle_ttl_seconds: u64,
     /// Idle environments kept across all reuse keys.
     pub max_total_idle: usize,
+    /// **Measurement only.** Accept `Unverified` for `idle_quiesce` and
+    /// `idle_resume` instead of requiring `Supported`.
+    ///
+    /// It exists because of a chicken and egg: a provider may only report
+    /// those capabilities as `Supported` once a real pause/resume cycle has
+    /// been measured, and the measurement cannot be taken while the pool
+    /// refuses to reuse anything. Switching this on lets
+    /// `scripts/kvm/measure-warm.sh` take it.
+    ///
+    /// It never turns an unverified configuration into a verified one: with
+    /// this set, `GET /v1/provider` reports `reuse.verified = false` and the
+    /// bootstrap log warns, so a measurement run can never be mistaken for a
+    /// warm success (PLT-4633 acceptance 4). Off by default.
+    pub allow_unverified_idle: bool,
 }
 
 impl Default for PoolConfig {
@@ -344,6 +359,7 @@ impl Default for PoolConfig {
             max_idle_per_revision: 1,
             idle_ttl_seconds: 60,
             max_total_idle: 8,
+            allow_unverified_idle: false,
         }
     }
 }
@@ -692,6 +708,16 @@ value = "demo-secret-value-a"
         assert_eq!(default.idle_ttl_seconds, 60);
         assert_eq!(default.max_total_idle, 8);
         assert_eq!(default.idle_ttl(), Duration::from_secs(60));
+        assert!(
+            !default.allow_unverified_idle,
+            "an unmeasured idle capability is not accepted unless an operator asks for it"
+        );
+
+        // PLT-4633: the measurement switch is opt-in and independent of the
+        // caps, so a config can turn it on without touching anything else.
+        let measuring = format!("{DEV}\n[pool]\nenabled = true\nallow_unverified_idle = true\n");
+        let pool = GatewayConfig::from_toml(&measuring).unwrap().pool;
+        assert!(pool.enabled && pool.allow_unverified_idle);
 
         let on = format!("{DEV}\n[pool]\nenabled = true\nidle_ttl_seconds = 5\n");
         let pool = GatewayConfig::from_toml(&on).unwrap().pool;

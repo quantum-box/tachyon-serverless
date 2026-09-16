@@ -42,7 +42,7 @@ use crate::error::AppError;
 use crate::repository::{IdempotencyBinding, IdempotencyOutcome, Repositories};
 use crate::services::history::{HistoryService, InvocationDetail};
 use crate::services::pool::{
-    EnvironmentPool, WarmEnvironment, environment_lifetime_ms, reuse_key_for,
+    EnvironmentPool, WarmEnvironment, WarmStartTimings, environment_lifetime_ms, reuse_key_for,
     secret_binding_generation,
 };
 use crate::services::revision::ensure_ready;
@@ -744,6 +744,9 @@ struct Prepared {
     /// Milliseconds spent waiting for the guest to report `Ready`. Zero for a
     /// warm start: the guest reported it during the invocation that booted it.
     runtime_init_ms: u64,
+    /// What taking this environment out of the pool cost: the resume and the
+    /// readiness check. `None` for a cold start, which booted instead.
+    warm: Option<WarmStartTimings>,
     logs: LogForwarder,
 }
 
@@ -1233,6 +1236,7 @@ impl Driver {
             start_kind,
             environment_boot_ms,
             runtime_init_ms,
+            warm,
             logs,
         } = prepared;
         let env_id = env.id.clone();
@@ -1349,6 +1353,7 @@ impl Driver {
                     lease,
                     &logs,
                     queue_wait_ms,
+                    warm,
                 )
                 .await;
                 return Attempted::RetryCold;
@@ -1555,6 +1560,11 @@ impl Driver {
             queue_wait_ms: Some(queue_wait_ms),
             environment_boot_ms: Some(environment_boot_ms),
             runtime_init_ms: Some(runtime_init_ms),
+            // A warm start reports what it really cost instead of nothing:
+            // boot and init are zero because nothing booted, and the resume
+            // and the readiness check say what happened instead (PLT-4633).
+            resume_ms: warm.map(|w| w.resume_ms),
+            readiness_ms: warm.map(|w| w.readiness_ms),
             handler_ms: Some(handler_ms),
             response_ms: Some(response_ms),
             total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
@@ -1635,8 +1645,10 @@ impl Driver {
         }
         let release = if may_reuse {
             // The pool takes the environment's event count with it, so the
-            // next attempt on it continues where this one stopped.
-            svc.pool.release(&env, session, self.seq)
+            // next attempt on it continues where this one stopped. It also
+            // quiesces the environment on the way in; one it cannot quiesce is
+            // handed back here and terminated like any other.
+            svc.pool.release(&env, session, self.seq).await
         } else {
             Err(Box::new(session))
         };
@@ -1758,6 +1770,7 @@ impl Driver {
             environment,
             mut session,
             sequence,
+            timings,
         } = warm;
         let logs = LogForwarder::new(
             self.svc.repos.logs.clone(),
@@ -1784,13 +1797,15 @@ impl Driver {
             LogPhase::Boot,
             None,
             &format!(
-                "reusing pooled environment {} at epoch {}",
-                environment.id, environment.epoch
+                "reusing pooled environment {} at epoch {} (resume {} ms, readiness check {} ms)",
+                environment.id, environment.epoch, timings.resume_ms, timings.readiness_ms
             ),
         );
         tracing::debug!(
             environment_id = %environment.id,
             epoch = environment.epoch,
+            resume_ms = timings.resume_ms,
+            readiness_ms = timings.readiness_ms,
             "warm start"
         );
         Prepared {
@@ -1799,6 +1814,7 @@ impl Driver {
             start_kind: StartKind::Warm,
             environment_boot_ms: 0,
             runtime_init_ms: 0,
+            warm: Some(timings),
             logs,
         }
     }
@@ -1822,6 +1838,7 @@ impl Driver {
     /// that never takes the frame died initializing for *this* invocation, so
     /// repeating it would only repeat the failure — which is why a cold
     /// undelivered dispatch is not retried.
+    #[allow(clippy::too_many_arguments)]
     async fn retire_after_undelivered_warm(
         &mut self,
         env: &mut ExecutionEnvironment,
@@ -1830,6 +1847,7 @@ impl Driver {
         mut lease: ExecutionLease,
         logs: &LogForwarder,
         queue_wait_ms: u64,
+        warm: Option<WarmStartTimings>,
     ) {
         let svc = self.svc.clone();
         let attempt_id = attempt.id.clone();
@@ -1861,6 +1879,10 @@ impl Driver {
             queue_wait_ms: Some(queue_wait_ms),
             environment_boot_ms: Some(0),
             runtime_init_ms: Some(0),
+            // The resume and the readiness check happened even though the
+            // dispatch did not: this attempt cost that much before it failed.
+            resume_ms: warm.map(|w| w.resume_ms),
+            readiness_ms: warm.map(|w| w.readiness_ms),
             total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
             ..tachyon_serverless_domain::AttemptTimings::default()
         };
@@ -2181,6 +2203,7 @@ impl Driver {
             start_kind: StartKind::Cold,
             environment_boot_ms,
             runtime_init_ms,
+            warm: None,
             logs,
         })
     }

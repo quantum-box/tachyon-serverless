@@ -157,6 +157,17 @@ pub struct FakeProviderOptions {
     /// default fake keeps the destroy-after-invoke behaviour of both shipped
     /// providers.
     pub warm_capable: bool,
+    /// When set, `idle_quiesce` fails with this reason. The environment is
+    /// then never pooled and the caller terminates it, exactly as it did
+    /// before reuse existed (PLT-4633 acceptance 3).
+    pub fail_quiesce: Option<String>,
+    /// When set, `idle_resume` fails with this reason. The pool must retire
+    /// the environment and fall back to a cold start, and must never dispatch
+    /// into it.
+    pub fail_resume: Option<String>,
+    /// Artificial cost of `idle_resume`, so a test can observe that a warm
+    /// start reports what it really cost instead of reporting zero.
+    pub resume_delay: Duration,
 }
 
 #[derive(Debug)]
@@ -165,6 +176,9 @@ struct FakeEnvironment {
     guest: tokio::task::JoinHandle<()>,
     host_pid: u32,
     running: bool,
+    /// True between a successful `idle_quiesce` and the next `idle_resume`.
+    /// A real provider would have stopped the guest's vCPUs here.
+    paused: bool,
     /// Host messages the guest received, in order.
     received: Arc<Mutex<Vec<HostMessage>>>,
     /// The `HelloAck` the guest received (test-only; contains secrets and
@@ -179,6 +193,11 @@ struct Inner {
     environments: HashMap<EnvironmentId, FakeEnvironment>,
     created: Vec<EnvironmentId>,
     terminated: Vec<(EnvironmentId, TerminateReason)>,
+    /// Every `idle_quiesce` / `idle_resume` call in order, including the ones
+    /// [`FakeProviderOptions`] made fail, so a test can assert both that the
+    /// call happened and what the pool did about its failure.
+    quiesced: Vec<EnvironmentId>,
+    resumed: Vec<EnvironmentId>,
 }
 
 /// Test-only [`ExecutionProvider`].
@@ -255,6 +274,27 @@ impl FakeExecutionProvider {
             .environments
             .iter()
             .filter(|(_, e)| e.running)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Every `idle_quiesce` call, in order (failed ones included).
+    pub fn quiesced(&self) -> Vec<EnvironmentId> {
+        self.inner.lock().quiesced.clone()
+    }
+
+    /// Every `idle_resume` call, in order (failed ones included).
+    pub fn resumed(&self) -> Vec<EnvironmentId> {
+        self.inner.lock().resumed.clone()
+    }
+
+    /// Environments currently quiesced. Nothing may be dispatched into these.
+    pub fn paused(&self) -> Vec<EnvironmentId> {
+        let inner = self.inner.lock();
+        inner
+            .environments
+            .iter()
+            .filter(|(_, e)| e.running && e.paused)
             .map(|(id, _)| id.clone())
             .collect()
     }
@@ -413,6 +453,7 @@ impl ExecutionProvider for FakeExecutionProvider {
                     guest,
                     host_pid,
                     running: true,
+                    paused: false,
                     received,
                     hello_ack,
                 },
@@ -455,6 +496,44 @@ impl ExecutionProvider for FakeExecutionProvider {
                 was_running: false,
                 cleaned: Vec::new(),
             }),
+        }
+    }
+
+    /// Quiesce an environment on its way into the pool. Idempotent, like the
+    /// real thing: quiescing an already quiesced environment is `Ok`.
+    async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.inner.lock().quiesced.push(environment_id.clone());
+        if let Some(reason) = &self.options.fail_quiesce {
+            return Err(ProviderError::Internal(reason.clone()));
+        }
+        let mut inner = self.inner.lock();
+        match inner.environments.get_mut(environment_id) {
+            Some(env) if env.running => {
+                env.paused = true;
+                Ok(())
+            }
+            _ => Err(ProviderError::NotFound(environment_id.clone())),
+        }
+    }
+
+    /// Resume a quiesced environment. `resume_delay` makes the call cost
+    /// something measurable, so a test can check that a warm start reports
+    /// what it really cost.
+    async fn idle_resume(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.inner.lock().resumed.push(environment_id.clone());
+        if !self.options.resume_delay.is_zero() {
+            tokio::time::sleep(self.options.resume_delay).await;
+        }
+        if let Some(reason) = &self.options.fail_resume {
+            return Err(ProviderError::Internal(reason.clone()));
+        }
+        let mut inner = self.inner.lock();
+        match inner.environments.get_mut(environment_id) {
+            Some(env) if env.running => {
+                env.paused = false;
+                Ok(())
+            }
+            _ => Err(ProviderError::NotFound(environment_id.clone())),
         }
     }
 
@@ -1118,6 +1197,106 @@ mod tests {
             !caps.idle_quiesce.is_supported() && !caps.idle_resume.is_supported(),
             "the default fake is destroy-after-invoke, like both shipped providers"
         );
+    }
+
+    /// PLT-4633: quiesce and resume are recorded, are idempotent, and can be
+    /// made to fail so the pool's two fallback paths can be exercised.
+    #[tokio::test]
+    async fn idle_quiesce_and_resume_are_recorded_and_can_be_made_to_fail() {
+        let provider = FakeExecutionProvider::new();
+        let id = EnvironmentId::generate();
+        let _handle = provider.create_environment(spec(&id)).await.unwrap();
+
+        provider.idle_quiesce(&id).await.unwrap();
+        assert_eq!(provider.paused(), vec![id.clone()]);
+        provider.idle_quiesce(&id).await.unwrap();
+        assert_eq!(provider.paused(), vec![id.clone()], "quiesce is idempotent");
+        provider.idle_resume(&id).await.unwrap();
+        assert!(provider.paused().is_empty());
+        assert_eq!(provider.quiesced().len(), 2);
+        assert_eq!(provider.resumed(), vec![id.clone()]);
+
+        // An environment the provider does not know cannot be paused.
+        let missing = EnvironmentId::generate();
+        assert!(matches!(
+            provider.idle_quiesce(&missing).await,
+            Err(ProviderError::NotFound(_))
+        ));
+
+        // The failure modes report the configured reason and change nothing.
+        let failing = FakeExecutionProvider::with_options(FakeProviderOptions {
+            fail_quiesce: Some("quiesce refused".into()),
+            fail_resume: Some("resume refused".into()),
+            ..FakeProviderOptions::default()
+        });
+        let id = EnvironmentId::generate();
+        let _handle = failing.create_environment(spec(&id)).await.unwrap();
+        assert!(matches!(
+            failing.idle_quiesce(&id).await,
+            Err(ProviderError::Internal(m)) if m == "quiesce refused"
+        ));
+        assert!(matches!(
+            failing.idle_resume(&id).await,
+            Err(ProviderError::Internal(m)) if m == "resume refused"
+        ));
+        assert!(
+            failing.paused().is_empty(),
+            "a failed quiesce pauses nothing"
+        );
+        assert_eq!(failing.quiesced(), vec![id.clone()], "the call is recorded");
+        assert_eq!(failing.resumed(), vec![id]);
+    }
+
+    /// A provider without idle support keeps the port's default, which refuses
+    /// both calls — the state every shipped provider was in before PLT-4633.
+    #[tokio::test]
+    async fn the_port_default_refuses_quiesce_and_resume() {
+        struct Bare;
+        #[async_trait]
+        impl ExecutionProvider for Bare {
+            fn kind(&self) -> ProviderKind {
+                ProviderKind::Fake
+            }
+            fn capabilities(&self) -> Capabilities {
+                FakeExecutionProvider::new().capabilities()
+            }
+            async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
+                unimplemented!()
+            }
+            async fn validate_artifact(
+                &self,
+                _: &ArtifactLocation,
+                _: Architecture,
+            ) -> Result<(), ProviderError> {
+                unimplemented!()
+            }
+            async fn create_environment(
+                &self,
+                _: EnvironmentSpec,
+            ) -> Result<EnvironmentHandle, ProviderError> {
+                unimplemented!()
+            }
+            async fn terminate_environment(
+                &self,
+                _: &EnvironmentId,
+                _: TerminateReason,
+            ) -> Result<TerminateReport, ProviderError> {
+                unimplemented!()
+            }
+            async fn observe_environment(
+                &self,
+                _: &EnvironmentId,
+            ) -> Result<EnvironmentObservation, ProviderError> {
+                unimplemented!()
+            }
+            async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError> {
+                unimplemented!()
+            }
+        }
+        let id = EnvironmentId::generate();
+        for r in [Bare.idle_quiesce(&id).await, Bare.idle_resume(&id).await] {
+            assert!(matches!(r, Err(ProviderError::Unavailable(_))), "{r:?}");
+        }
     }
 
     #[tokio::test]

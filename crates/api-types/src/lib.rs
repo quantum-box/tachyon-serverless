@@ -124,6 +124,39 @@ pub struct ApiErrorBody {
 // provider
 // ---------------------------------------------------------------------------
 
+/// Whether this gateway reuses (warms) execution environments, and why.
+///
+/// `enabled` is what the gateway *does*; `verified` is whether the provider's
+/// idle support was ever measured. The two are separate on purpose: an
+/// operator may switch reuse on for an `unverified` provider in order to take
+/// the measurement (`[pool] allow_unverified_idle`), and such a run must never
+/// be presented as a warm success. `enabled: true, verified: false` therefore
+/// means "reuse is running so it can be measured", not "warm works here"
+/// (PLT-4633 acceptance 4, docs/architecture.md §4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ReuseInfo {
+    pub enabled: bool,
+    pub verified: bool,
+    /// One sentence naming the gate that decided this. Always present, on the
+    /// enabled and the disabled path alike.
+    pub reason: String,
+    /// `supported` | `unsupported` | `unverified`, as the provider reports it.
+    pub idle_quiesce: String,
+    pub idle_resume: String,
+}
+
+impl Default for ReuseInfo {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            verified: false,
+            reason: "environment reuse is off".to_string(),
+            idle_quiesce: "unknown".to_string(),
+            idle_resume: "unknown".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ProviderInfo {
     pub kind: String,
@@ -133,6 +166,9 @@ pub struct ProviderInfo {
     pub capabilities: serde_json::Value,
     #[schema(value_type = Object)]
     pub preflight: serde_json::Value,
+    /// Warm reuse: on or off, measured or not, and why.
+    #[serde(default)]
+    pub reuse: ReuseInfo,
 }
 
 impl ProviderInfo {
@@ -140,6 +176,7 @@ impl ProviderInfo {
         kind: &domain::ProviderKind,
         caps: &port::Capabilities,
         preflight: &port::PreflightReport,
+        reuse: ReuseInfo,
     ) -> Self {
         Self {
             kind: kind.as_str().to_string(),
@@ -152,6 +189,7 @@ impl ProviderInfo {
             .to_string(),
             capabilities: serde_json::to_value(caps).unwrap_or_default(),
             preflight: serde_json::to_value(preflight).unwrap_or_default(),
+            reuse,
         }
     }
 }
@@ -428,6 +466,12 @@ pub struct TimingsResponse {
     pub queue_wait_ms: Option<u64>,
     pub environment_boot_ms: Option<u64>,
     pub runtime_init_ms: Option<u64>,
+    /// Warm starts only: the environment resume and the readiness check that
+    /// followed it. Absent on a cold start, which boots instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness_ms: Option<u64>,
     pub handler_ms: Option<u64>,
     pub response_ms: Option<u64>,
     pub total_ms: Option<u64>,
@@ -439,6 +483,8 @@ impl From<&domain::AttemptTimings> for TimingsResponse {
             queue_wait_ms: t.queue_wait_ms,
             environment_boot_ms: t.environment_boot_ms,
             runtime_init_ms: t.runtime_init_ms,
+            resume_ms: t.resume_ms,
+            readiness_ms: t.readiness_ms,
             handler_ms: t.handler_ms,
             response_ms: t.response_ms,
             total_ms: t.total_ms,
@@ -618,5 +664,37 @@ mod tests {
         assert_eq!(ErrorCode::NotFound.http_status(), 404);
         assert_eq!(ErrorCode::Timeout.http_status(), 504);
         assert_eq!(ErrorCode::CapacityExceeded.http_status(), 429);
+    }
+
+    /// PLT-4633: `reuse` is new, so a provider response without it (an older
+    /// gateway) still deserializes — and it defaults to "off", never to
+    /// something a reader could take for a working warm configuration.
+    #[test]
+    fn provider_info_without_reuse_defaults_to_off() {
+        let j = r#"{"kind":"process","dev_only":true,"isolation":"process",
+                    "capabilities":{},"preflight":{}}"#;
+        let info: ProviderInfo = serde_json::from_str(j).unwrap();
+        assert!(!info.reuse.enabled);
+        assert!(!info.reuse.verified);
+        assert!(!info.reuse.reason.is_empty());
+        assert_eq!(info.reuse.idle_quiesce, "unknown");
+        assert_eq!(info.reuse.idle_resume, "unknown");
+
+        // A response that carries it round-trips, including the combination
+        // that must never be read as a warm success.
+        let measuring = ProviderInfo {
+            reuse: ReuseInfo {
+                enabled: true,
+                verified: false,
+                reason: "a measurement run".into(),
+                idle_quiesce: "unverified".into(),
+                idle_resume: "unverified".into(),
+            },
+            ..info
+        };
+        let encoded = serde_json::to_string(&measuring).unwrap();
+        let back: ProviderInfo = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(back.reuse, measuring.reuse);
+        assert!(back.reuse.enabled && !back.reuse.verified);
     }
 }

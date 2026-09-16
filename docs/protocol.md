@@ -65,5 +65,6 @@ SDK のエラー型: handler の `Err` → `Handler.Error`、panic → `Runtime.
   （aarch64 は `keep_bootcon` を追加）。
 - bridge の `--init` モード（PID 1）: `/proc` `/sys` `/dev`(devtmpfs) `/tmp`(tmpfs) を mount → `/dev/vdb` を `/function` に ro mount → `/proc/cmdline` から `tachyon.*` を読む → `/proc/sys/kernel/random/boot_id` を読む → vsock で host に接続 → 通常処理 → 終了時に `reboot(RB_POWER_OFF)`。
 - Firecracker API 順序: `PUT /machine-config` → `PUT /boot-source` → `PUT /drives/rootfs` (ro, root) → `PUT /drives/function` (ro) → `PUT /vsock {guest_cid: 3, uds_path}` → `PUT /actions InstanceStart`。host は InstanceStart 前に `<uds_path>_5000` で listen しておく。
+- idle 休止・再開（PLT-4633。環境 pool だけが呼ぶ）: 休止は `PATCH /vm {"state": "Paused"}`、再開は `PATCH /vm {"state": "Resumed"}`。vsock device と bridge の接続は休止をまたいで保たれるので、再開後に再 handshake はしない（pool 側の readiness 検査は再開の**後**に行う）。どちらも冪等で、「すでにその状態」という fault は成功として扱う。VMM プロセスが死んでいる / API socket が無い / 環境が存在しない場合はそれぞれ別の error を返し、pool は再利用をやめて cold start に落ちる。呼ばれるのは provider が `idle_quiesce` / `idle_resume` を申告し、`[pool]` の gate が開いたときだけである（`docs/architecture.md` §4）。
 - terminate: Shutdown frame → 2 秒 → firecracker プロセスに SIGKILL → API socket / vsock uds / function drive / workdir を削除。
 - network は P1 では設定しない（egress none）。tap を作らない。

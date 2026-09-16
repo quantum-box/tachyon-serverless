@@ -171,13 +171,33 @@ impl ApiClient {
     /// `PUT <path>` with a JSON body; success means `204 No Content`
     /// (any 2xx is accepted).
     pub async fn put(&self, path: &str, body: &serde_json::Value) -> Result<(), ApiError> {
-        let resp = self.request("PUT", path, body).await?;
+        self.send("PUT", path, body).await
+    }
+
+    /// `PATCH <path>` with a JSON body. Firecracker uses `PATCH` for the
+    /// state changes of an already configured microVM — `PATCH /vm` with
+    /// `{"state": "Paused"}` / `{"state": "Resumed"}` (docs/protocol.md §C) —
+    /// and answers them exactly like `PUT`: `204 No Content` on success,
+    /// `400 Bad Request` with `{"fault_message": "..."}` otherwise.
+    pub async fn patch(&self, path: &str, body: &serde_json::Value) -> Result<(), ApiError> {
+        self.send("PATCH", path, body).await
+    }
+
+    /// One request whose only interesting outcome is success; a non-2xx
+    /// answer becomes [`ApiError::Status`] carrying the fault message.
+    async fn send(
+        &self,
+        method: &str,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<(), ApiError> {
+        let resp = self.request(method, path, body).await?;
         if (200..300).contains(&resp.status) {
             Ok(())
         } else {
             let body = String::from_utf8_lossy(&resp.body).into_owned();
             Err(ApiError::Status {
-                method: "PUT".into(),
+                method: method.into(),
                 path: path.into(),
                 status: resp.status,
                 reason: resp.reason,
@@ -326,6 +346,65 @@ mod tests {
                 assert_eq!(status, 400);
                 assert_eq!(path, "/boot-source");
                 assert!(body.contains("kernel file cannot be opened"));
+            }
+            other => panic!("unexpected: {other}"),
+        }
+    }
+
+    /// PLT-4633: idle quiesce / resume go out as `PATCH /vm`, and the body is
+    /// exactly `{"state": "Paused"}` / `{"state": "Resumed"}`.
+    #[tokio::test]
+    async fn patch_sends_the_method_and_body_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("fc.sock");
+        let rx = fake_server(
+            sock.clone(),
+            b"HTTP/1.1 204 No Content\r\nServer: Firecracker API\r\nConnection: keep-alive\r\n\r\n",
+        )
+        .await;
+        let client = ApiClient::new(&sock, Duration::from_secs(2));
+        client
+            .patch("/vm", &serde_json::json!({"state": "Paused"}))
+            .await
+            .unwrap();
+        let req = String::from_utf8(rx.await.unwrap()).unwrap();
+        let (head, body) = req.split_once("\r\n\r\n").unwrap();
+        assert!(head.starts_with("PATCH /vm HTTP/1.1\r\n"), "{head}");
+        assert_eq!(body, r#"{"state":"Paused"}"#);
+    }
+
+    #[tokio::test]
+    async fn patch_surfaces_a_fault_message_with_its_method() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("fc.sock");
+        let body = r#"{"fault_message":"The requested operation is not supported: Paused"}"#;
+        let resp: &'static [u8] = Box::leak(
+            format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .into_bytes()
+            .into_boxed_slice(),
+        );
+        let _rx = fake_server(sock.clone(), resp).await;
+        let client = ApiClient::new(&sock, Duration::from_secs(2));
+        let err = client
+            .patch("/vm", &serde_json::json!({"state": "Paused"}))
+            .await
+            .unwrap_err();
+        match err {
+            ApiError::Status {
+                method,
+                path,
+                status,
+                body,
+                ..
+            } => {
+                assert_eq!(method, "PATCH");
+                assert_eq!(path, "/vm");
+                assert_eq!(status, 400);
+                assert!(body.contains("not supported"), "{body}");
             }
             other => panic!("unexpected: {other}"),
         }

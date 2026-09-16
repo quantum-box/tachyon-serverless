@@ -1,6 +1,6 @@
 //! `provider` (capability table) and `health` (/healthz, /readyz).
 
-use tachyon_serverless_api_types::ProviderInfo;
+use tachyon_serverless_api_types::{ProviderInfo, ReuseInfo};
 
 use crate::client::ApiClient;
 use crate::error::{CliError, ExitCode};
@@ -64,6 +64,20 @@ pub fn capability_rows(caps: &serde_json::Value) -> Vec<(String, String, String)
     rows
 }
 
+/// One line an operator can act on: whether this gateway reuses environments,
+/// whether that configuration was ever measured, and why.
+///
+/// An enabled but unverified configuration is spelled out as a measurement
+/// run, because it must never read as a warm success (PLT-4633 acceptance 4).
+pub fn reuse_summary(reuse: &ReuseInfo) -> String {
+    let state = match (reuse.enabled, reuse.verified) {
+        (true, true) => "on (verified)",
+        (true, false) => "on (UNVERIFIED: measurement only)",
+        (false, _) => "off",
+    };
+    format!("{state}; {}", reuse.reason)
+}
+
 pub async fn provider(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), CliError> {
     let resp = client.get_unauth("/v1/provider").await?.ok()?;
     if p.json {
@@ -77,6 +91,7 @@ pub async fn provider(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), Cli
         ("kind", info.kind.clone()),
         ("isolation", info.isolation.clone()),
         ("dev_only", info.dev_only.to_string()),
+        ("environment_reuse", reuse_summary(&info.reuse)),
     ])?;
     let mut t = Table::new(&["CAPABILITY", "STATUS", "NOTE"]);
     for (name, status, note) in capability_rows(&info.capabilities) {
@@ -151,6 +166,46 @@ pub async fn health(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), CliEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PLT-4633 acceptance 4: an unverified configuration is never displayed
+    /// as a warm success, and the reason is always shown.
+    #[test]
+    fn reuse_is_summarised_without_claiming_an_unverified_setup_works() {
+        let base = ReuseInfo {
+            enabled: true,
+            verified: true,
+            reason: "both idle capabilities are supported".into(),
+            idle_quiesce: "supported".into(),
+            idle_resume: "supported".into(),
+        };
+        assert_eq!(
+            reuse_summary(&base),
+            "on (verified); both idle capabilities are supported"
+        );
+
+        let measuring = ReuseInfo {
+            verified: false,
+            reason: "allow_unverified_idle: a measurement run".into(),
+            idle_quiesce: "unverified".into(),
+            idle_resume: "unverified".into(),
+            ..base.clone()
+        };
+        let line = reuse_summary(&measuring);
+        assert!(line.contains("UNVERIFIED"), "{line}");
+        assert!(line.contains("measurement"), "{line}");
+
+        let off = ReuseInfo {
+            enabled: false,
+            verified: false,
+            reason: "[pool] enabled is false".into(),
+            ..base
+        };
+        assert_eq!(reuse_summary(&off), "off; [pool] enabled is false");
+        assert_eq!(
+            reuse_summary(&ReuseInfo::default()),
+            "off; environment reuse is off"
+        );
+    }
 
     #[test]
     fn capability_rows_flatten_support_objects() {

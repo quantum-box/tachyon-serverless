@@ -311,6 +311,17 @@ async fn full_api_roundtrip() {
     assert_eq!(provider.status, StatusCode::OK);
     assert_eq!(provider.json()["kind"], "fake");
     assert_eq!(provider.json()["dev_only"], true);
+    // PLT-4633 acceptance 4: whether environments are reused, whether that was
+    // ever measured, and why, are all on the API — never only in a log.
+    let reuse = provider.json()["reuse"].clone();
+    assert_eq!(reuse["enabled"], false);
+    assert_eq!(reuse["verified"], false);
+    assert_eq!(reuse["idle_quiesce"], "unsupported");
+    assert_eq!(reuse["idle_resume"], "unsupported");
+    assert!(
+        reuse["reason"].as_str().is_some_and(|r| !r.is_empty()),
+        "the reason is always present: {reuse}"
+    );
 
     // deploy
     let (function_id, revision_id) = deploy(r, "hello").await;

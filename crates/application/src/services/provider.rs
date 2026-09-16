@@ -13,23 +13,36 @@ use tachyon_serverless_provider_port::{
 };
 
 use crate::error::AppError;
+use crate::services::pool::PoolPolicy;
 
 pub struct ProviderService {
     provider: Arc<dyn ExecutionProvider>,
     ttl: Duration,
+    /// The reuse decision this gateway booted with. It is part of the provider
+    /// view because "does this gateway reuse environments, and was that ever
+    /// measured" is a property of the (provider, configuration) pair, and an
+    /// operator has to be able to read it without guessing from the capability
+    /// table (PLT-4633 acceptance 4).
+    policy: PoolPolicy,
     cache: Mutex<Option<(Instant, PreflightReport)>>,
     /// Serialises concurrent preflights so the provider is probed once.
     probe: AsyncMutex<()>,
 }
 
 impl ProviderService {
-    pub fn new(provider: Arc<dyn ExecutionProvider>, ttl: Duration) -> Self {
+    pub fn new(provider: Arc<dyn ExecutionProvider>, ttl: Duration, policy: PoolPolicy) -> Self {
         Self {
             provider,
             ttl,
+            policy,
             cache: Mutex::new(None),
             probe: AsyncMutex::new(()),
         }
+    }
+
+    /// The reuse decision behind [`ProviderService::info`].
+    pub fn reuse_policy(&self) -> &PoolPolicy {
+        &self.policy
     }
 
     pub fn kind(&self) -> ProviderKind {
@@ -81,10 +94,8 @@ impl ProviderService {
 
     pub async fn info(&self) -> Result<ProviderInfo, AppError> {
         let report = self.preflight().await;
-        Ok(ProviderInfo::from_port(
-            &self.kind(),
-            &self.capabilities(),
-            &report,
-        ))
+        let caps = self.capabilities();
+        let reuse = self.policy.info(&caps);
+        Ok(ProviderInfo::from_port(&self.kind(), &caps, &report, reuse))
     }
 }
