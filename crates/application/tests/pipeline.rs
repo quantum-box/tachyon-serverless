@@ -1371,7 +1371,18 @@ async fn secret_values_never_reach_host_logs() {
         invocations.push(out.invocation().id.clone());
     }
 
-    let text = captured.text();
+    // The driver keeps running after `invoke` returns (terminate, usage, final
+    // log line), so a loaded machine can reach this point before the pipeline
+    // has logged anything. Wait for the marker instead of racing it, otherwise
+    // the secret-absence assertions below could pass on an empty capture.
+    let mut text = captured.text();
+    for _ in 0..100 {
+        if text.contains("invocation finished") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        text = captured.text();
+    }
     assert!(
         text.contains("invocation finished"),
         "the subscriber captured the pipeline"
