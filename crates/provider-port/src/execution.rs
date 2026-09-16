@@ -143,7 +143,29 @@ pub enum TerminateReason {
     InitFailed,
     Crashed,
     Shutdown,
+    /// The environment was quiesced ([`ExecutionProvider::idle_quiesce`]) when
+    /// it was terminated: it sat in the idle pool and its guest is not being
+    /// scheduled.
+    ///
+    /// Such a guest cannot read a `Shutdown` frame and cannot power itself
+    /// off, so the host does not send it one and implementations must **not**
+    /// wait for a self-initiated exit: waiting only spends the whole grace
+    /// period on a guest that could never use it (PLT-4633 review F3).
+    Quiesced,
     Reconcile,
+}
+
+impl TerminateReason {
+    /// Whether the guest may still shut itself down, so a provider should wait
+    /// for it before killing the process.
+    ///
+    /// Exactly two reasons qualify: the host sent a `Shutdown` frame to a
+    /// *running* guest and gave it a chance to act on it. Everything else —
+    /// a timeout, a crash, a reconcile, and a [`TerminateReason::Quiesced`]
+    /// environment whose vCPUs are stopped — is killed straight away.
+    pub fn waits_for_the_guest(&self) -> bool {
+        matches!(self, Self::Completed | Self::Shutdown)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

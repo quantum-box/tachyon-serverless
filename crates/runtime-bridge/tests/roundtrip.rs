@@ -200,6 +200,7 @@ impl Session {
             epoch: 1,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: 4_102_444_800_000,
+            remaining_ms: 60_000,
             trace_id: "trace-1".into(),
             payload,
         })

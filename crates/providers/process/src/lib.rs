@@ -765,10 +765,9 @@ impl ExecutionProvider for ProcessProvider {
         let dir = self.env_dir(environment_id);
         // The host sends `Shutdown` before these, so the bridge is expected to
         // exit by itself (mirrors the Firecracker provider).
-        let graceful = matches!(
-            reason,
-            TerminateReason::Completed | TerminateReason::Shutdown
-        );
+        // Only a guest that can still act on the `Shutdown` frame is waited
+        // for; a quiesced environment cannot (PLT-4633 review F3).
+        let graceful = reason.waits_for_the_guest();
         match self.untrack(environment_id) {
             Some(tracked) => {
                 let mut guard = tracked.child.lock().await;

@@ -161,6 +161,17 @@ write_config() {
     return 1
   fi
   cp "$BASE_CONFIG" "$CONFIG_PATH"
+  # allow_unverified_idle is refused under profile = "production" (it accepts an
+  # idle capability nobody has measured, docs/architecture.md section 4), so a
+  # measurement run is a dev-profile run. Only the profile changes: the provider
+  # is still firecracker, which is what makes the measurement meaningful.
+  if ! grep -qE '^[[:space:]]*profile[[:space:]]*=' "$CONFIG_PATH"; then
+    echo "the base config $BASE_CONFIG has no top-level profile key to rewrite." >&2
+    echo "Point TSLS_GATEWAY_CONFIG at a config with one." >&2
+    return 1
+  fi
+  sed -e 's/^[[:space:]]*profile[[:space:]]*=.*/profile = "dev"                # measurement run (scripts\/kvm\/measure-warm.sh)/' \
+    "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
   cat >> "$CONFIG_PATH" <<EOF
 
 # Added by scripts/kvm/measure-warm.sh (PLT-4633).
@@ -168,6 +179,7 @@ write_config() {
 # allow_unverified_idle accepts the provider's "unverified" idle capability so that
 # this measurement can be taken at all. It does not make the configuration verified:
 # GET /v1/provider reports reuse.verified = false and the gateway warns at startup.
+# It is refused under profile = "production", which is why the copy above is dev.
 [pool]
 enabled = true
 allow_unverified_idle = true

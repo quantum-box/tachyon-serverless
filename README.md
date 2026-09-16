@@ -19,7 +19,7 @@ Tachyon のサーバーレス実行基盤の **動作プロトタイプ**。sing
 **でない**
 
 - 本番サービス、マルチノード、永続 DB（P1 は in-memory + `state.json`）
-- warm 再利用、idle 休止、snapshot/restore、非同期 invoke、cron、Console UI、egress 制御、OCI image の pull（Capability / API で明示的に `unsupported`）
+- warm 再利用と idle 休止は既定では働かない（firecracker は実装済みだが実機未計測の `unverified`、process は `unsupported`）。snapshot/restore、非同期 invoke、cron、Console UI、egress 制御、OCI image の pull は Capability / API で明示的に `unsupported`
 
 ## 状態
 
@@ -170,7 +170,8 @@ docs/evidence          実行記録（E2E デモ、KVM smoke）
 
 ## 非対象
 
-warm 再利用、idle 休止、snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted / public-web、OCI image の pull。
+snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted / public-web、OCI image の pull。
+warm 再利用と idle 休止は実装済みだが二重 gate の内側にあり、既定では働かない（firecracker は実機未計測の `unverified`、process は `unsupported`。docs/architecture.md §4）。
 
 ## コントリビュート
 

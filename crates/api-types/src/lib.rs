@@ -126,19 +126,31 @@ pub struct ApiErrorBody {
 
 /// Whether this gateway reuses (warms) execution environments, and why.
 ///
-/// `enabled` is what the gateway *does*; `verified` is whether the provider's
-/// idle support was ever measured. The two are separate on purpose: an
-/// operator may switch reuse on for an `unverified` provider in order to take
-/// the measurement (`[pool] allow_unverified_idle`), and such a run must never
-/// be presented as a warm success. `enabled: true, verified: false` therefore
-/// means "reuse is running so it can be measured", not "warm works here"
-/// (PLT-4633 acceptance 4, docs/architecture.md §4).
+/// The two flags answer two different questions and neither implies the other
+/// (PLT-4633 review F7):
+///
+/// - `enabled` is what this gateway *does*: both gates are open, so
+///   environments really are pooled and reused.
+/// - `verified` is a fact about the **provider**: it reports both
+///   `idle_quiesce` and `idle_resume` as `supported`, which it may only do
+///   once the pause/resume cycle has been measured on real hardware. It says
+///   nothing about the `[pool]` configuration, so a gateway with reuse
+///   switched off can still report `verified: true`.
+///
+/// They are separate on purpose: an operator may switch reuse on for an
+/// `unverified` provider in order to take the measurement
+/// (`[pool] allow_unverified_idle`), and such a run must never be presented as
+/// a warm success. `enabled: true, verified: false` therefore means "reuse is
+/// running so it can be measured", not "warm works here" (PLT-4633 acceptance
+/// 4, docs/architecture.md §4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ReuseInfo {
     pub enabled: bool,
+    /// The provider reports both idle capabilities as `supported`, i.e. they
+    /// were measured. Independent of whether reuse is switched on.
     pub verified: bool,
-    /// One sentence naming the gate that decided this. Always present, on the
-    /// enabled and the disabled path alike.
+    /// One sentence naming the gate that decided `enabled`. Always present, on
+    /// the enabled and the disabled path alike.
     pub reason: String,
     /// `supported` | `unsupported` | `unverified`, as the provider reports it.
     pub idle_quiesce: String,

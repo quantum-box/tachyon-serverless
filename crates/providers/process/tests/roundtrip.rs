@@ -186,6 +186,7 @@ async fn create_invoke_terminate_roundtrip() {
             epoch: 1,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: 4_102_444_800_000,
+            remaining_ms: 60_000,
             trace_id: "t".into(),
             payload: serde_json::json!({"ping": "pong"}),
         },

@@ -1317,6 +1317,15 @@ impl Driver {
         self.save_env(&env);
 
         let deadline_ms = execution_deadline_ts.timestamp_millis().max(0) as u64;
+        // What the guest actually computes its own deadline from. An absolute
+        // host timestamp is meaningless to a guest that was quiesced — its
+        // clock stopped with it, so after a resume of arbitrary length it
+        // would read the deadline as further away than it is (PLT-4633 review
+        // F5, docs/protocol.md §A). The host keeps enforcing
+        // `execution_deadline` itself either way.
+        let remaining_ms = (execution_deadline_ts - self.now())
+            .num_milliseconds()
+            .max(0) as u64;
         // A warm dispatch may still have to be repeated cold, and then the
         // payload is needed a second time. A cold one hands over its only copy.
         let retryable = warm_allowed && start_kind == StartKind::Warm;
@@ -1329,6 +1338,7 @@ impl Driver {
                 epoch: env.epoch,
                 event_type: self.event_kind.event_type().to_string(),
                 deadline_ms,
+                remaining_ms,
                 trace_id: self.trace_id.clone(),
                 payload,
             })
@@ -1645,21 +1655,27 @@ impl Driver {
         }
         let release = if may_reuse {
             // The pool takes the environment's event count with it, so the
-            // next attempt on it continues where this one stopped. It also
-            // quiesces the environment on the way in; one it cannot quiesce is
-            // handed back here and terminated like any other.
-            svc.pool.release(&env, session, self.seq).await
+            // next attempt on it continues where this one stopped.
+            //
+            // `release` does not pause anything on this path any more: it
+            // takes the environment over and returns, so the caller's response
+            // never waits for the hypervisor's pause and its API timeout
+            // (PLT-4633 review F4). `Ok` means the pool owns the environment
+            // from here: it publishes the row only once the guest really is
+            // quiesced, and if it cannot be, the pool terminates and meters it
+            // instead. Either way this driver is done with it.
+            svc.pool.clone().release(&env, session, self.seq)
         } else {
             Err(Box::new(session))
         };
         let mut session = match release {
-            Ok(pooled) => {
+            Ok(()) => {
                 logs.platform(
                     LogPhase::Shutdown,
                     None,
                     &format!(
-                        "environment {env_id} returned to the pool (idle at epoch {})",
-                        pooled.epoch
+                        "environment {env_id} handed to the pool at epoch {} (quiescing)",
+                        env.epoch
                     ),
                 );
                 // The pool owns the environment and its session now: it is not
@@ -1680,6 +1696,9 @@ impl Driver {
                 TerminateReason::Crashed => "crashed",
                 TerminateReason::Shutdown => "shutdown",
                 TerminateReason::InitFailed => "init failed",
+                // The driver never terminates a quiesced environment (only
+                // the pool owns those), but the reason is part of the enum.
+                TerminateReason::Quiesced => "quiesced",
                 TerminateReason::Reconcile => "reconcile",
             })
             .await;

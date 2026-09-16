@@ -65,15 +65,18 @@ pub fn capability_rows(caps: &serde_json::Value) -> Vec<(String, String, String)
 }
 
 /// One line an operator can act on: whether this gateway reuses environments,
-/// whether that configuration was ever measured, and why.
+/// whether the provider's idle support was ever measured, and why.
 ///
 /// An enabled but unverified configuration is spelled out as a measurement
 /// run, because it must never read as a warm success (PLT-4633 acceptance 4).
+/// `verified` is a fact about the provider, not about the gate, so it is shown
+/// on the "off" line too instead of being silently folded into it (review F7).
 pub fn reuse_summary(reuse: &ReuseInfo) -> String {
     let state = match (reuse.enabled, reuse.verified) {
         (true, true) => "on (verified)",
         (true, false) => "on (UNVERIFIED: measurement only)",
-        (false, _) => "off",
+        (false, true) => "off (the provider's idle support is measured)",
+        (false, false) => "off",
     };
     format!("{state}; {}", reuse.reason)
 }
@@ -198,9 +201,23 @@ mod tests {
             enabled: false,
             verified: false,
             reason: "[pool] enabled is false".into(),
-            ..base
+            ..base.clone()
         };
         assert_eq!(reuse_summary(&off), "off; [pool] enabled is false");
+
+        // Reuse off on a provider whose idle support *was* measured: the two
+        // facts are separate, and the line says both rather than implying that
+        // nothing was measured (review F7).
+        let measured_but_off = ReuseInfo {
+            enabled: false,
+            verified: true,
+            reason: "[pool] enabled is false".into(),
+            ..base
+        };
+        let line = reuse_summary(&measured_but_off);
+        assert!(line.starts_with("off ("), "{line}");
+        assert!(line.contains("measured"), "{line}");
+        assert!(!line.contains("UNVERIFIED"), "{line}");
         assert_eq!(
             reuse_summary(&ReuseInfo::default()),
             "off; environment reuse is off"

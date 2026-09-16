@@ -19,7 +19,18 @@ pub use wire::*;
 pub const PROTOCOL_NAME: &str = tachyon_serverless_domain::RUNTIME_PROTOCOL_V1;
 
 /// Numeric protocol version carried in the bridge handshake.
-pub const PROTOCOL_VERSION: u32 = 1;
+///
+/// The host accepts a guest only when the two numbers are equal, so a bump is
+/// how an addition that a guest must *understand* is kept from reaching a
+/// guest that cannot.
+///
+/// - **1**: P1.
+/// - **2** (PLT-4633): `HostMessage::Ping` / `GuestMessage::Pong` and
+///   `HostMessage::Invoke.remaining_ms`. An unknown message type is a protocol
+///   error, so a version-1 bridge must never be sent a `Ping`; and a
+///   version-1 bridge would compute the user process's deadline from an
+///   absolute host timestamp, which is wrong for a guest that was paused.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Default vsock port the guest bridge connects to on the host (CID 2).
 pub const DEFAULT_VSOCK_PORT: u32 = 5000;

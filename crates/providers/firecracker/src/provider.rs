@@ -539,7 +539,7 @@ impl FirecrackerProvider {
         {
             Ok(()) => Ok(()),
             Err(crate::api::ApiError::Status { status, body, .. })
-                if is_already_in_state(&body) =>
+                if is_already_in_state(state, &body) =>
             {
                 tracing::debug!(
                     env_id = %environment_id,
@@ -574,8 +574,8 @@ impl FirecrackerProvider {
     }
 }
 
-/// Whether a `PATCH /vm` fault means "the microVM is already in the state you
-/// asked for".
+/// Whether a `PATCH /vm` fault means "the microVM is already in **the state
+/// that was requested**".
 ///
 /// Matched on the fault message rather than the status code because
 /// Firecracker answers `400 Bad Request` for every refused state change, so
@@ -583,10 +583,32 @@ impl FirecrackerProvider {
 /// and resume are idempotent by contract
 /// ([`ExecutionProvider::idle_quiesce`]), and a retry that finds the VM
 /// already in the requested state has got what it asked for.
-fn is_already_in_state(fault: &str) -> bool {
+///
+/// The direction is part of the question (PLT-4633 review F1). A refusal of
+/// `{"state":"Resumed"}` that talks about a *paused* VM is a refusal, not a
+/// success: reporting it as success would hand the pool an environment whose
+/// vCPUs are stopped, and the next invocation would hang in it until the
+/// execution deadline. A message this cannot place is therefore a failure —
+/// a false failure costs one cold start, a false success costs a hung
+/// invocation.
+fn is_already_in_state(requested: &str, fault: &str) -> bool {
     let fault = fault.to_ascii_lowercase();
-    fault.contains("already")
-        && (fault.contains("paus") || fault.contains("resum") || fault.contains("running"))
+    if !fault.contains("already") {
+        return false;
+    }
+    // "paused"/"pause", and "resumed"/"resume"/"running" (Firecracker calls
+    // the resumed state `Running` in some messages).
+    let says_paused = fault.contains("paus");
+    let says_running = fault.contains("resum") || fault.contains("running");
+    // A message that names both states, or neither, cannot be placed.
+    if says_paused == says_running {
+        return false;
+    }
+    match requested {
+        VM_STATE_PAUSED => says_paused,
+        VM_STATE_RESUMED => says_running,
+        _ => false,
+    }
 }
 
 /// Validate an inspected ELF against the revision's and the host's architecture.
@@ -742,10 +764,10 @@ impl ExecutionProvider for FirecrackerProvider {
         if tracked.is_none() && !paths.dir.exists() {
             return Ok(TerminateReport::default());
         }
-        let graceful = matches!(
-            reason,
-            TerminateReason::Completed | TerminateReason::Shutdown
-        );
+        // Only a guest that can still act on the `Shutdown` frame is waited
+        // for. A quiesced microVM cannot: its vCPUs are stopped, so waiting
+        // would spend the whole grace period for nothing (PLT-4633 review F3).
+        let graceful = reason.waits_for_the_guest();
         let mut cleaned = Vec::new();
         let mut was_running = false;
 
@@ -934,21 +956,77 @@ mod tests {
         assert!(note.contains("measure-warm.sh"), "{note}");
     }
 
+    /// PLT-4633 (review F1): "already in that state" is success only for the
+    /// state that was **requested**, and only in that direction.
+    ///
+    /// A refusal of `{"state":"Resumed"}` whose message talks about a paused
+    /// microVM is a refusal. Reporting it as success would tell the pool that
+    /// the environment resumed, and the next invocation would be dispatched
+    /// into a VM whose vCPUs are stopped and hang there until the execution
+    /// deadline. A message that cannot be placed is a failure too: a false
+    /// failure costs one cold start, a false success costs a hung invocation.
     #[test]
-    fn a_vm_already_in_the_requested_state_is_not_a_failure() {
+    fn a_refusal_is_success_only_for_the_state_that_was_requested() {
+        // Quiesce: only a message that says it is already paused.
         for fault in [
             r#"{"fault_message":"The microVM is already paused."}"#,
+            r#"{"fault_message":"Vm is already Paused"}"#,
+        ] {
+            assert!(is_already_in_state(VM_STATE_PAUSED, fault), "{fault}");
+            assert!(
+                !is_already_in_state(VM_STATE_RESUMED, fault),
+                "a resume was not granted by a message about a paused VM: {fault}"
+            );
+        }
+
+        // Resume: Firecracker calls the running state both `Resumed` and
+        // `Running` depending on the message.
+        for fault in [
             r#"{"fault_message":"Vm is already Resumed"}"#,
             r#"{"fault_message":"the vm is already running"}"#,
         ] {
-            assert!(is_already_in_state(fault), "{fault}");
+            assert!(is_already_in_state(VM_STATE_RESUMED, fault), "{fault}");
+            assert!(
+                !is_already_in_state(VM_STATE_PAUSED, fault),
+                "a pause was not granted by a message about a running VM: {fault}"
+            );
         }
+
+        // Neither direction accepts these.
         for fault in [
+            // The defect this test exists for: a refused resume whose text
+            // mentions the other state.
+            r#"{"fault_message":"cannot resume: the microVM is already paused"}"#,
+            // Not an "already" message at all.
             r#"{"fault_message":"The requested operation is not supported: Paused"}"#,
             r#"{"fault_message":"Internal error"}"#,
+            // "already", but no state that can be placed, or both at once.
+            r#"{"fault_message":"the vm is already in the requested state"}"#,
+            r#"{"fault_message":"already: paused, not running"}"#,
             "",
         ] {
-            assert!(!is_already_in_state(fault), "{fault}");
+            assert!(!is_already_in_state(VM_STATE_PAUSED, fault), "{fault}");
+            assert!(!is_already_in_state(VM_STATE_RESUMED, fault), "{fault}");
+        }
+    }
+
+    /// PLT-4633 (review F3): the grace period is for a guest that can still
+    /// use it. A quiesced microVM cannot — its vCPUs are stopped — so this
+    /// provider must not wait for one.
+    #[test]
+    fn a_quiesced_environment_is_not_waited_for() {
+        assert!(!TerminateReason::Quiesced.waits_for_the_guest());
+        for reason in [TerminateReason::Completed, TerminateReason::Shutdown] {
+            assert!(reason.waits_for_the_guest(), "{reason:?}");
+        }
+        for reason in [
+            TerminateReason::Timeout,
+            TerminateReason::Cancelled,
+            TerminateReason::InitFailed,
+            TerminateReason::Crashed,
+            TerminateReason::Reconcile,
+        ] {
+            assert!(!reason.waits_for_the_guest(), "{reason:?}");
         }
     }
 

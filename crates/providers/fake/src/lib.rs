@@ -93,6 +93,13 @@ pub enum FakeGuestScript {
     RespondOkForever(serde_json::Value),
     /// Ready, then answer *every* `Invoke` with the invoke payload itself.
     EchoForever,
+    /// Ready, answer the first `Invoke` with this payload and then stop
+    /// reading the connection entirely, without closing it: a guest that is
+    /// still connected but no longer being scheduled (a resume that did not
+    /// really take, a wedged guest). Nothing is queued for the host to find,
+    /// so only a probe that waits for an answer can tell it from a healthy
+    /// one (PLT-4633 review F2).
+    RespondOkThenStopAnswering(serde_json::Value),
     /// Ready, answer the first `Invoke` with this payload and then send
     /// `Exited` *without closing the stream*: a user process that died right
     /// after answering, while the bridge is still connected. The host only
@@ -133,6 +140,7 @@ impl FakeGuestScript {
             Self::RespondOkForever(_) => "respond_ok_forever",
             Self::EchoForever => "echo_forever",
             Self::RespondOkThenExit(_) => "respond_ok_then_exit",
+            Self::RespondOkThenStopAnswering(_) => "respond_ok_then_stop_answering",
             Self::StaleEpochThenOkForever(_) => "stale_epoch_then_ok_forever",
             Self::Custom(_) => "custom",
         }
@@ -168,6 +176,10 @@ pub struct FakeProviderOptions {
     /// Artificial cost of `idle_resume`, so a test can observe that a warm
     /// start reports what it really cost instead of reporting zero.
     pub resume_delay: Duration,
+    /// Artificial cost of `idle_quiesce`. A real pause goes through the
+    /// hypervisor's API with its own timeout, and the caller's response must
+    /// not wait for it (PLT-4633 review F4).
+    pub quiesce_delay: Duration,
 }
 
 #[derive(Debug)]
@@ -503,6 +515,9 @@ impl ExecutionProvider for FakeExecutionProvider {
     /// real thing: quiescing an already quiesced environment is `Ok`.
     async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
         self.inner.lock().quiesced.push(environment_id.clone());
+        if !self.options.quiesce_delay.is_zero() {
+            tokio::time::sleep(self.options.quiesce_delay).await;
+        }
         if let Some(reason) = &self.options.fail_quiesce {
             return Err(ProviderError::Internal(reason.clone()));
         }
@@ -607,6 +622,17 @@ impl Guest {
         loop {
             let frame: Bytes = self.reader.next().await?.ok()?;
             match decode_message::<HostMessage>(&frame) {
+                // The real bridge answers the host's liveness probe from its
+                // own frame loop, without involving the user process, so every
+                // script answers it here instead of each one remembering to.
+                // A guest that must *not* answer stops reading altogether
+                // ([`FakeGuestScript::RespondOkThenStopAnswering`]).
+                Ok(HostMessage::Ping { nonce }) => {
+                    self.ctx.received.lock().push(HostMessage::Ping { nonce });
+                    if !self.send(&GuestMessage::Pong { nonce }).await {
+                        return None;
+                    }
+                }
                 Ok(msg) => {
                     self.ctx.received.lock().push(msg.clone());
                     return Some(msg);
@@ -681,7 +707,10 @@ impl Guest {
                     });
                 }
                 HostMessage::Shutdown { .. } => return None,
-                HostMessage::Cancel { .. } | HostMessage::HelloAck { .. } => continue,
+                // `recv` answers a `Ping` itself, so one never gets here.
+                HostMessage::Cancel { .. }
+                | HostMessage::HelloAck { .. }
+                | HostMessage::Ping { .. } => continue,
                 HostMessage::HelloReject { .. } => return None,
             }
         }
@@ -893,6 +922,19 @@ async fn run_guest(script: FakeGuestScript, ctx: GuestContext, stream: DuplexStr
                 })
                 .await;
         }
+        // Answer once, then never read another frame. The stream stays open,
+        // so the host sees a healthy-looking connection with nothing on it.
+        FakeGuestScript::RespondOkThenStopAnswering(payload) => {
+            if !guest.ready().await {
+                return;
+            }
+            let Some(inv) = guest.wait_invoke().await else {
+                return;
+            };
+            if guest.respond(&inv, inv.epoch, payload).await {
+                std::future::pending::<()>().await;
+            }
+        }
         FakeGuestScript::RespondOk(_)
         | FakeGuestScript::Echo
         | FakeGuestScript::EchoHttp
@@ -1080,6 +1122,7 @@ mod tests {
             epoch: 1,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: now_ms() + 1000,
+            remaining_ms: 1000,
             trace_id: "t".into(),
             payload: serde_json::json!({"hello": "world"}),
         }

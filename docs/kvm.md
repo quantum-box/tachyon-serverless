@@ -186,9 +186,11 @@ scripts/kvm/measure-warm.sh
 
 `examples/hello`（guest 用 musl バイナリ）を deploy し、**環境再利用を有効にした gateway** で同じ関数を複数回 invoke して、cold と warm を並べて測る。gateway はこのスクリプトが起動し、最後に停止する（§3.5 と同じ port なので、別の gateway を動かしたまま実行しない）。
 
-設定は `config/gateway.firecracker.toml` をコピーし、末尾に次を足したものを使う（証跡の `gateway.toml` に残る）。
+設定は `config/gateway.firecracker.toml` をコピーし、**`profile` を `dev` に書き換えて**末尾に次を足したものを使う（証跡の `gateway.toml` に残る）。`allow_unverified_idle` は `profile = "production"` では拒否される（未計測の休止・再開コードを本番構成で動かさないため。`docs/architecture.md` §4）ので、計測は dev profile で行う。provider は firecracker のままである。
 
 ```toml
+profile = "dev"                # 計測専用。production では allow_unverified_idle が拒否される
+
 [pool]
 enabled = true
 allow_unverified_idle = true   # 計測専用。Unverified の capability を受け入れる
@@ -202,7 +204,7 @@ max_total_idle = 4
 | provider | `GET /v1/provider` の `reuse` と capability を記録 | `reuse.enabled = true`、`reuse.verified = false`（= 計測のための実行）。`enabled` が false なら測る対象が無いので中断する |
 | 1 回目の invoke | cold start。環境が pool に入る（＝ `idle_quiesce`） | `start_kind = cold`、`environment_boot_ms` が入る |
 | paused VMM | pool に入っている間の firecracker プロセスを 2 回 sample（`ps` と `/proc/<pid>/{status,stat}`） | RSS / VSZ / threads / state と、間隔中に消費した CPU tick |
-| 2 回目以降 | 同じ環境が再開されて使われる（＝ `idle_resume` → readiness 検査） | `start_kind = warm`、`resume_ms` と `readiness_ms` が入り、`environment_boot_ms` は 0 |
+| 2 回目以降 | 同じ環境が再開されて使われる（＝ `idle_resume` → readiness 検査。guest への `Ping` / `Pong` を含む） | `start_kind = warm`、`resume_ms` と `readiness_ms` が入り、`environment_boot_ms` は 0 |
 | 比較 | cold と warm の中央値を並べる | `total_ms` の差が「boot を外した分」 |
 
 主な環境変数: `WARM_INVOCATIONS`（既定 6、最低 2）、`WARM_MEMORY_MIB`（256）、`WARM_CPU_MILLIS`（500）、`WARM_TIMEOUT_SECONDS`（30）、`WARM_IDLE_TTL_SECONDS`（300）、`PAUSED_SAMPLE_SECONDS`（3）、`WARM_FUNCTION`、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
@@ -367,7 +369,7 @@ TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
 
 - host と同じアーキテクチャの guest のみ。`validate_artifact` は ELF の `e_machine` を revision の宣言と host の両方に照合し、`PT_INTERP` があるバイナリ（動的リンク）は `artifact rejected`（rootfs に libc が無い）。
 - ネットワークなし。`EgressProfile::None` 以外の spec は `InvalidSpec`。
-- 1 環境 1 実行、destroy-after-invoke。warm / snapshot は `Unsupported`。
+- 1 環境 1 実行。snapshot は `Unsupported`。warm 再利用（idle 休止・再開）は実装済みだが `Unverified`（実機未計測）なので既定では働かず、destroy-after-invoke のままである。計測は §3.7、gate は `docs/architecture.md` §4。
 - `ephemeral_storage_mib` は未制御（function drive は read-only、`/tmp` は guest の tmpfs で上限なし）。
 - 課金・メータリング用の host 側計測は timings のみ（`host_metering = Unverified`）。
 - jailer なし。Firecracker は実行ユーザーとして動く。seccomp は Firecracker 既定。

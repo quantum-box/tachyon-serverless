@@ -138,6 +138,8 @@ ID は `<prefix>_<26 文字 lowercase ULID>`（`fn_` `rev_` `inv_` `att_` `env_`
 }
 ```
 
+`start_kind = warm` の attempt では `timings` に `resume_ms` と `readiness_ms` が入り、`environment_boot_ms` / `runtime_init_ms` は 0 になる（起動も初期化もしていないため）。`readiness_ms` は再開後の drain と guest への liveness 検査（`Ping` / `Pong`）の往復を含む。cold の attempt にはこの 2 つは出ない（`null` ではなく省略される）。
+
 `isolation` は `micro_vm` | `container` | `process`。`capabilities.*.status` は `supported` | `unsupported`(`reason`) | `unverified`(`note`)。`unverified` は実機で計測していないという意味で、supported として扱ってはならない。
 
 `reuse` は「この gateway が環境を再利用するか」と「その構成が計測済みか」を分けて返す（`docs/architecture.md` §4）。
@@ -145,7 +147,7 @@ ID は `<prefix>_<26 文字 lowercase ULID>`（`fn_` `rev_` `inv_` `att_` `env_`
 | field | 意味 |
 |---|---|
 | `enabled` | 実際に再利用するか（capability gate と `[pool] enabled` の両方が開いているか） |
-| `verified` | `idle_quiesce` / `idle_resume` が両方 `supported`（＝実機で計測済み）か |
+| `verified` | **provider** が `idle_quiesce` / `idle_resume` を両方 `supported`（＝実機で計測済み）と申告しているか。`enabled` とは独立で、再利用が off の gateway でも `true` になりうる |
 | `reason` | そう決まった理由。有効なときも無効なときも必ず入る |
 | `idle_quiesce` / `idle_resume` | provider の申告（`supported` / `unsupported` / `unverified`） |
 

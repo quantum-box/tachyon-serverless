@@ -349,6 +349,13 @@ pub struct PoolConfig {
     /// this set, `GET /v1/provider` reports `reuse.verified = false` and the
     /// bootstrap log warns, so a measurement run can never be mistaken for a
     /// warm success (PLT-4633 acceptance 4). Off by default.
+    ///
+    /// **Refused under `profile = "production"`**, exactly like a dev-only
+    /// provider ([`GatewayConfig::validate`]). Running unmeasured pause/resume
+    /// code against production traffic is the thing the capability gate exists
+    /// to prevent, and a warning is not a gate: nobody reads the log of a
+    /// gateway that started successfully (PLT-4633 review F8,
+    /// docs/architecture.md §4).
     pub allow_unverified_idle: bool,
 }
 
@@ -501,6 +508,21 @@ impl GatewayConfig {
                 self.provider.kind.as_str()
             )));
         }
+        // The measurement switch is refused under production for the same
+        // reason a dev-only provider is: it runs code whose behaviour nobody
+        // has measured on real hardware, and the environment pool is exactly
+        // where that shows up as a hung invocation rather than as a warning
+        // (PLT-4633 review F8). Measurements are taken under `profile = "dev"`
+        // (`scripts/kvm/measure-warm.sh`, docs/kvm.md §3.7).
+        if self.profile == Profile::Production && self.pool.allow_unverified_idle {
+            return Err(ConfigError::Invalid(
+                "[pool] allow_unverified_idle is a measurement-only switch and cannot be used \
+                 with profile = \"production\": it accepts an idle capability nobody has \
+                 measured. Take the measurement under profile = \"dev\" \
+                 (scripts/kvm/measure-warm.sh), then promote the capability"
+                    .into(),
+            ));
+        }
         if self.capacity.max_concurrency == 0 {
             return Err(ConfigError::Invalid(
                 "capacity.max_concurrency must be >= 1".into(),
@@ -644,6 +666,58 @@ value = "demo-secret-value-a"
         assert!(matches!(err, ConfigError::Invalid(_)), "{err}");
     }
 
+    /// The dev config with a production profile and a provider that is allowed
+    /// there, so the only thing under test is the `[pool]` section.
+    fn production_firecracker(pool: &str) -> String {
+        let base = DEV
+            .replace("profile = \"dev\"", "profile = \"production\"")
+            .replace(
+                "kind = \"process\"\n\n[provider.process]\n\
+                 bridge_binary = \"target/debug/tachyon-serverless-runtime-bridge\"\n\
+                 workdir = \"./data/process\"",
+                "kind = \"firecracker\"\n\n[provider.firecracker]\n\
+                 firecracker_binary = \".kvm/bin/firecracker\"\n\
+                 kernel = \".kvm/vmlinux\"\n\
+                 rootfs = \".kvm/rootfs.ext4\"\n\
+                 workdir = \".kvm/run\"",
+            );
+        format!("{base}\n{pool}")
+    }
+
+    /// PLT-4633 (review F8): the measurement switch is refused under
+    /// `profile = "production"`, like a dev-only provider.
+    ///
+    /// It accepts an idle capability nobody has measured, which is the one
+    /// thing the capability gate exists to keep away from production traffic;
+    /// a warning would not, because nobody reads the log of a gateway that
+    /// started successfully. The message says where the measurement belongs.
+    #[test]
+    fn the_measurement_switch_is_refused_under_production() {
+        // The same configuration without the switch is accepted, so the switch
+        // is what this rejects rather than the profile or the provider.
+        let plain = production_firecracker("[pool]\nenabled = true\n");
+        let cfg = GatewayConfig::from_toml(&plain).expect("a production pool config is fine");
+        assert_eq!(cfg.profile, Profile::Production);
+        assert!(cfg.pool.enabled && !cfg.pool.allow_unverified_idle);
+
+        let measuring =
+            production_firecracker("[pool]\nenabled = true\nallow_unverified_idle = true\n");
+        let err = GatewayConfig::from_toml(&measuring).unwrap_err();
+        let ConfigError::Invalid(message) = &err else {
+            panic!("expected an invalid-config error, got {err}");
+        };
+        assert!(message.contains("allow_unverified_idle"), "{message}");
+        assert!(message.contains("production"), "{message}");
+        assert!(
+            message.contains("dev"),
+            "the message says where to take the measurement instead: {message}"
+        );
+
+        // And it is accepted under dev, which is where measurements are taken.
+        let dev = format!("{DEV}\n[pool]\nenabled = true\nallow_unverified_idle = true\n");
+        assert!(GatewayConfig::from_toml(&dev).is_ok());
+    }
+
     #[test]
     fn fake_provider_cannot_be_selected() {
         let text = DEV.replace("kind = \"process\"", "kind = \"fake\"");
@@ -718,6 +792,13 @@ value = "demo-secret-value-a"
         let measuring = format!("{DEV}\n[pool]\nenabled = true\nallow_unverified_idle = true\n");
         let pool = GatewayConfig::from_toml(&measuring).unwrap().pool;
         assert!(pool.enabled && pool.allow_unverified_idle);
+        assert!(
+            GatewayConfig::from_toml(&measuring)
+                .unwrap()
+                .validate()
+                .is_ok(),
+            "a measurement configuration is valid under the dev profile"
+        );
 
         let on = format!("{DEV}\n[pool]\nenabled = true\nidle_ttl_seconds = 5\n");
         let pool = GatewayConfig::from_toml(&on).unwrap().pool;
