@@ -1,6 +1,6 @@
-# 受入チェックリスト（PLT-4613〜PLT-4630）
+# 受入チェックリスト（PLT-4613〜PLT-4630、PLT-4632）
 
-- 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1
+- 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4632
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
 - 状態の記録日: 2026-09-16（統合ブランチ `feat/serverless-prototype-p1` の commit `8555e34` 以降（2026-09-16 のレビュー指摘の修正を統合した後。E2E はこの統合後の commit `95af2ba` で再実行）のコード・テスト・`docs/evidence/` を読んで更新）
 
@@ -258,6 +258,28 @@ KVM の記録に共通する制約:
 | 6 | process provider の結果を microVM の証跡として使わない | 実装済み（規則、process の `boot_evidence` に `guest_boot_id` が無い、CLI の dev_only 警告） | `docs/adr/0002-process-provider-dev-only.md`、`apps/cli/tests/mock_gateway.rs::{invoke_warns_on_stderr_for_a_dev_only_provider, http_adapter_warns_for_a_dev_only_provider}`、`docs/adr/0001-execution-provider-firecracker-first.md` §「受入規則」、`docs/evidence/20260915T073238Z-process/invocations.json` |
 
 ---
+
+
+## PLT-4632 ExecutionEnvironment pool・再利用キー・reconciler
+
+環境の再利用は二重の gate の内側にある。provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と申告し、かつ `[pool] enabled = true` のときだけ有効になる。Firecracker と process はどちらも `Unsupported` を返し、`[pool]` の既定は無効なので、**出荷している両 provider の挙動は P1 と同じ destroy-after-invoke のまま**である。したがって本節に KVM 実機の記録はなく、検証は fake provider による自動テストで行っている。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 完全一致の再利用キーだけ再利用し、他 tenant・他 revision・設定変更・失効した secret 世代と混ざらない | 実装済み | `crates/application/src/repository.rs::only_an_exactly_matching_reuse_key_is_reused`（8 次元すべての不一致）、`crates/application/tests/pipeline.rs::{another_revision_never_reuses_the_first_revisions_environment, a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start}` |
+| 2 | `Busy` を配らず、`Ready` になる前に処理を流さない | 実装済み | `crates/application/src/repository.rs::{nothing_is_dispatched_before_ready_and_busy_is_never_handed_out, a_ready_environment_is_not_in_the_pool_and_is_never_claimed, concurrent_claims_never_hand_the_same_environment_to_two_callers}`、`crates/application/tests/pipeline.rs::a_busy_environment_is_never_handed_to_a_concurrent_invocation` |
+| 3 | controller 再起動で所有を照合して状態を修復する | 実装済み | `crates/application/tests/pipeline.rs::a_pooled_environment_is_reclaimed_after_a_restart`、`crates/application/src/services/reconcile.rs`、PLT-4627 #6 の各テスト |
+| 4 | 休止能力が未検証の profile は再利用を feature gate で無効にし、終了後に破棄する | 実装済み | `crates/application/tests/pipeline.rs::a_provider_without_supported_idle_capabilities_keeps_destroy_after_invoke`、`crates/application/src/services/pool.rs`（`PoolPolicy::decide`） |
+| 5 | idle TTL と drain で回収し、terminate に失敗しても取りこぼさない | 実装済み | `crates/application/tests/pipeline.rs::idle_environments_are_reaped_by_the_ttl_sweeper_and_by_a_drain`、`crates/application/src/services/pool.rs::{a_failed_terminate_keeps_the_environment_for_the_next_sweep, a_failed_terminate_while_retiring_is_retried_and_metered_once}` |
+| 6 | 前の attempt が残したフレームで次の attempt が決まらない | 実装済み | `crates/application/tests/pipeline.rs::{a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one, a_guest_that_exited_after_answering_is_not_pooled}`、`crates/application/src/bridge_session.rs::draining_attributes_trailing_frames_to_the_attempt_that_left_them` |
+| 7 | 再利用しても利用量を取りこぼさず、環境の寿命を一度だけ計上する | 実装済み | `crates/application/tests/pipeline.rs::{every_invocation_on_a_reused_environment_is_metered, a_reaped_pooled_environment_reports_its_lifetime_to_usage, an_environment_the_driver_ends_reports_its_whole_life, the_usage_sequence_of_a_reused_environment_never_restarts}` |
+| 8 | 異常終了した環境を pool に戻さない | 実装済み | `crates/application/tests/pipeline.rs::an_environment_whose_guest_crashed_is_never_pooled` |
+| 9 | warm dispatch が届かなかった場合は cold と同じ分類をしてから cold で再試行する | 実装済み | `crates/application/tests/pipeline.rs::{an_undelivered_warm_dispatch_is_classified_like_a_cold_one, a_warm_dispatch_into_a_dead_guest_falls_back_to_a_cold_start}`、`docs/threat-model.md` §9 |
+| 10 | secret 値そのものが再利用キーや台帳へ入らない | 実装済み | `crates/application/src/services/pool.rs::the_secret_generation_is_salted_and_unambiguous`（プロセスごとの salt 付き digest） |
+| 11 | release と claim が競合しても、session の無い行を掴まない | 実装済み | `crates/application/src/services/pool.rs::a_claim_racing_a_release_never_takes_a_row_without_its_session` |
+| 12 | 再試行に必要な間だけ payload を保持する | 実装済み | `crates/application/src/services/invoke.rs::a_dispatched_payload_is_retained_only_while_a_cold_retry_can_need_it` |
+| 13 | KVM 実機での再利用 | 未検証 | 現行 provider は `idle_quiesce` / `idle_resume` が `Unsupported` のため再利用経路に入らない。実機で測るには provider 側の休止・再開の実装（PLT-4633）が要る |
+| 14 | 複数プロセス間での slot・lease・pool membership の原子性 | 未着手 | pool は 1 プロセス内。`docs/adr/0003-execution-state-persistence.md` の方針に沿って PLT-4631 で扱う |
 
 ## ADR-0001 残る測定の状況
 
