@@ -12,6 +12,10 @@
 - MIT License を追加
 - README / CONTRIBUTING / CODE_OF_CONDUCT / SECURITY などのリポジトリ基本ドキュメントを追加
 - GitHub の Issue / Pull Request テンプレートと Dependabot 設定を追加
+- P2 の前提（Linear PLT-4627 / PLT-4618）
+  - 再起動時の分類を dispatch 済みかどうかで分ける。`Running` だったものは `OutcomeUnknown{Host.Restarted}`、未 dispatch は `Failed{platform_error}`
+  - 起動時に `ExecutionProvider::list_environments` で孤児環境を回収し、結果を構造化ログと `GET /readyz` の `reconcile` に出す。`[reconcile] on_startup` で無効化できる
+  - 実行状態の永続化方針を `docs/adr/0003-execution-state-persistence.md` に決定（P2 が要求する複数プロセス間の原子性と移行手順）
 - P1 動作プロトタイプ（Linear PLT-4613〜PLT-4630）。SLA なし、API と設定は予告なく変わる
   - Rust workspace（Rust 1.95.0 / edition 2024）と契約 crate: `crates/domain`（ID・entity・状態遷移・`ErrorClass`・`Limits`）、`crates/protocol`（host ↔ bridge frame、Runtime API）、`crates/provider-port`（`ExecutionProvider` ほかの port）、`crates/api-types`（DTO・`ErrorCode`）
   - `crates/application`: function / revision / alias / invoke / 履歴の usecase、in-memory repository と `data_dir/state.json` への永続化（壊れたファイルは退避方法を示して拒否）、静的 token と secret binding、容量と queue、queue / init / execution の deadline、cancel、再起動時の reconcile

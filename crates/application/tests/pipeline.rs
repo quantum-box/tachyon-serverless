@@ -20,9 +20,10 @@ use tachyon_serverless_application::{
     AppError, Application, BootstrapOptions, GatewayConfig, InvokeOutcome, InvokeRequest,
 };
 use tachyon_serverless_domain::{
-    AliasName, Architecture, ArtifactRef, AttemptStatus, Clock, EnvironmentId, EnvironmentState,
-    ErrorClass, EventKind, Function, FunctionRevision, InvocationId, InvocationStatus,
-    ProviderKind, RevisionStatus, Sha256Digest, TenantId, Timestamp, UsageEventType,
+    AliasName, Architecture, ArtifactRef, AttemptStatus, Clock, EgressProfile, EnvironmentId,
+    EnvironmentState, ErrorClass, EventKind, ExecutionEnvironment, Function, FunctionRevision,
+    InvocationId, InvocationStatus, ProviderKind, ResourceProfile, ReuseKey, RevisionId,
+    RevisionStatus, Sha256Digest, TenantId, Timestamp, UsageEventType,
 };
 use tachyon_serverless_protocol::{
     FrameCodec, GuestMessage, HostMessage, PROTOCOL_VERSION, decode_message, encode_message,
@@ -1792,4 +1793,227 @@ async fn client_deadline_bounds_the_queue_wait() {
     let running = with_status(&h, &function, InvocationStatus::Running).unwrap();
     app.invoke.cancel(&h.a, &running).await.unwrap();
     hanging.await.unwrap().unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// startup reconcile (docs/architecture.md §4, docs/threat-model.md §12 T10)
+// ---------------------------------------------------------------------------
+
+/// Spec for an environment created behind the gateway's back, the way a
+/// process that died before terminating its environment would have left it.
+fn orphan_spec(id: &EnvironmentId) -> EnvironmentSpec {
+    EnvironmentSpec {
+        environment_id: id.clone(),
+        tenant_id: TenantId::parse(TENANT_A).unwrap(),
+        revision_id: RevisionId::generate(),
+        artifact: ArtifactLocation {
+            path: "/nonexistent".into(),
+            digest: Sha256Digest::of_bytes(b"orphan"),
+            size_bytes: 1,
+        },
+        architecture: Architecture::Aarch64,
+        resources: ResourceProfile::default(),
+        egress: EgressProfile::None,
+        connect_timeout: Duration::from_secs(1),
+    }
+}
+
+/// A ledger row for an environment this gateway considers active.
+fn ledger_environment(id: &EnvironmentId, now: Timestamp) -> ExecutionEnvironment {
+    let tenant = TenantId::parse(TENANT_A).unwrap();
+    let revision = RevisionId::generate();
+    ExecutionEnvironment::request(
+        id.clone(),
+        tenant.clone(),
+        revision.clone(),
+        ProviderKind::Fake,
+        ReuseKey {
+            tenant_id: tenant,
+            revision_id: revision,
+            execution_role_version: 1,
+            configuration_version: 1,
+            resource_profile_digest: "d".into(),
+            runtime_profile: "default".into(),
+            network_policy_version: 1,
+            secret_binding_generation: 1,
+        },
+        now,
+    )
+}
+
+#[tokio::test]
+async fn startup_reconcile_terminates_orphans_and_spares_live_environments() {
+    let h = harness(vec![], "");
+    let now = h.app.clock.now();
+    // Left behind by a previous process: the provider still runs it, this
+    // gateway never heard of it.
+    let orphan = EnvironmentId::generate();
+    h.fake
+        .create_environment(orphan_spec(&orphan))
+        .await
+        .unwrap();
+    // An environment of a live invocation: it is recorded in the ledger
+    // before the provider creates it, so reconcile must leave it alone.
+    let live = EnvironmentId::generate();
+    h.app
+        .repos
+        .environments
+        .insert(ledger_environment(&live, now))
+        .unwrap();
+    h.fake.create_environment(orphan_spec(&live)).await.unwrap();
+
+    let report = h
+        .app
+        .reconcile_on_startup()
+        .await
+        .expect("reconcile is on by default");
+    assert_eq!(report.found, 2);
+    assert_eq!(report.adopted, 1);
+    assert_eq!(report.terminated, 1);
+    assert_eq!(report.failed, 0);
+    assert_eq!(report.lost, 0);
+    assert_eq!(report.error, None);
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(orphan, TerminateReason::Reconcile)],
+        "only the orphan is reclaimed"
+    );
+    assert_eq!(h.fake.running(), vec![live.clone()]);
+    let live_env = h.app.repos.environments.get(&live).unwrap().unwrap();
+    assert!(
+        !live_env.is_terminal(),
+        "a live environment is untouched: {:?}",
+        live_env.state
+    );
+    assert_eq!(h.app.reconcile.last_report(), Some(report));
+}
+
+#[tokio::test]
+async fn startup_reconcile_marks_environments_the_provider_no_longer_has() {
+    let h = harness(vec![], "");
+    let vanished = EnvironmentId::generate();
+    h.app
+        .repos
+        .environments
+        .insert(ledger_environment(&vanished, h.app.clock.now()))
+        .unwrap();
+
+    let report = h.app.reconcile_on_startup().await.unwrap();
+    assert_eq!((report.found, report.terminated, report.lost), (0, 0, 1));
+    let env = h.app.repos.environments.get(&vanished).unwrap().unwrap();
+    assert!(
+        matches!(env.state, EnvironmentState::Lost { .. }),
+        "{:?}",
+        env.state
+    );
+    assert!(h.app.repos.environments.list_active().unwrap().is_empty());
+    assert!(
+        h.fake.terminated().is_empty(),
+        "there is nothing on the host to terminate"
+    );
+}
+
+/// Delegates to the fake provider but cannot be listed, like a provider whose
+/// host state is unreadable at startup.
+struct UnlistableProvider(Arc<FakeExecutionProvider>);
+
+#[async_trait]
+impl ExecutionProvider for UnlistableProvider {
+    fn kind(&self) -> ProviderKind {
+        self.0.kind()
+    }
+    fn capabilities(&self) -> Capabilities {
+        self.0.capabilities()
+    }
+    async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
+        self.0.preflight().await
+    }
+    async fn validate_artifact(
+        &self,
+        artifact: &ArtifactLocation,
+        architecture: Architecture,
+    ) -> Result<(), ProviderError> {
+        self.0.validate_artifact(artifact, architecture).await
+    }
+    async fn create_environment(
+        &self,
+        spec: EnvironmentSpec,
+    ) -> Result<EnvironmentHandle, ProviderError> {
+        self.0.create_environment(spec).await
+    }
+    async fn terminate_environment(
+        &self,
+        environment_id: &EnvironmentId,
+        reason: TerminateReason,
+    ) -> Result<TerminateReport, ProviderError> {
+        self.0.terminate_environment(environment_id, reason).await
+    }
+    async fn observe_environment(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<EnvironmentObservation, ProviderError> {
+        self.0.observe_environment(environment_id).await
+    }
+    async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError> {
+        Err(ProviderError::Unavailable(
+            "cannot read the provider workdir".into(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn startup_reconcile_never_blocks_startup_on_a_provider_error() {
+    let fake = Arc::new(FakeExecutionProvider::new());
+    let provider = Arc::new(UnlistableProvider(fake.clone()));
+    let h = harness_with(fake, provider, "", None);
+    let live = EnvironmentId::generate();
+    h.app
+        .repos
+        .environments
+        .insert(ledger_environment(&live, h.app.clock.now()))
+        .unwrap();
+
+    let report = h.app.reconcile_on_startup().await.unwrap();
+    assert!(
+        report.error.is_some(),
+        "the provider failure is recorded, not raised"
+    );
+    assert_eq!(
+        (report.found, report.terminated, report.failed, report.lost),
+        (0, 0, 0, 0)
+    );
+    assert!(
+        !h.app
+            .repos
+            .environments
+            .get(&live)
+            .unwrap()
+            .unwrap()
+            .is_terminal(),
+        "a provider that cannot be listed proves nothing about the ledger"
+    );
+    // Startup continued: the gateway still serves invocations.
+    let (function, _) = deploy(&h, &h.a, "after-reconcile").await;
+    let out = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(out.succeeded(), "{:?}", out.invocation().status);
+}
+
+#[tokio::test]
+async fn startup_reconcile_can_be_turned_off() {
+    let h = harness(vec![], "[reconcile]\non_startup = false\n");
+    let orphan = EnvironmentId::generate();
+    h.fake
+        .create_environment(orphan_spec(&orphan))
+        .await
+        .unwrap();
+
+    assert!(h.app.reconcile_on_startup().await.is_none());
+    assert!(h.app.reconcile.last_report().is_none());
+    assert!(h.fake.terminated().is_empty());
+    assert_eq!(h.fake.running(), vec![orphan]);
 }

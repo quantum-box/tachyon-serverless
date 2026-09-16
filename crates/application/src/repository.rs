@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use tachyon_serverless_domain::{
     AliasName, AttemptId, EnvironmentId, ErrorClass, ExecutionEnvironment, ExecutionLease,
     Function, FunctionAlias, FunctionId, FunctionName, FunctionRevision, Invocation,
-    InvocationAttempt, InvocationError, InvocationId, LeaseId, Limits, LogRecord, RevisionId,
-    Sha256Digest, TenantId, Timestamp,
+    InvocationAttempt, InvocationError, InvocationId, InvocationStatus, LeaseId, Limits, LogRecord,
+    RevisionId, Sha256Digest, TenantId, Timestamp,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -283,8 +283,10 @@ impl InMemoryStore {
 
     /// Store that loads `<data_dir>/state.json` if present and writes it
     /// through after every mutation. Non-terminal invocations, attempts and
-    /// environments found on disk are reconciled to a failed/lost state
-    /// because their driver tasks no longer exist.
+    /// environments found on disk are settled by [`reconcile_after_restart`]
+    /// because their driver tasks no longer exist: a dispatched invocation
+    /// ends as `OutcomeUnknown`, one that never started as
+    /// `Failed{PlatformError}`, and every environment as `Lost`.
     pub fn with_persistence(
         data_dir: &Path,
         limits: Limits,
@@ -373,12 +375,29 @@ fn write_state(path: &Path, state: &PersistedState) -> Result<(), RepoError> {
     Ok(())
 }
 
-/// Anything that was in flight when the previous process died cannot be
-/// resumed: mark it as a platform failure so the ledger stays consistent.
+/// Error type carried by everything the restart reconcile settles.
+pub const HOST_RESTARTED: &str = "Host.Restarted";
+
+/// Classify what was in flight when the previous process died
+/// (docs/threat-model.md §9).
+///
+/// An invocation that was already `Running` had its `Invoke` frame written,
+/// so the handler may have run: its outcome is unknown and must never be
+/// reported as a plain failure. One that never left `Accepted` / `Queued`
+/// was never dispatched, so it provably did not start and fails with
+/// `PlatformError`. Attempts follow their invocation and environments become
+/// `Lost`; the host processes behind them are reclaimed separately by
+/// [`crate::services::ReconcileService`].
+///
 /// Idempotency keys bound to an invocation that is not in the ledger (left
 /// behind by older versions that reserved keys before acceptance) are
 /// dropped, so a retry with such a key is accepted as a new invocation.
 fn reconcile_after_restart(state: &mut PersistedState, now: Timestamp) {
+    const INVOCATION_MSG: &str = "gateway restarted while the invocation was in flight";
+    const UNKNOWN_MSG: &str =
+        "gateway restarted after the invocation was dispatched; the handler may have run";
+    const ATTEMPT_MSG: &str = "gateway restarted while the attempt was in flight";
+
     let PersistedState {
         invocations,
         idempotency,
@@ -386,25 +405,44 @@ fn reconcile_after_restart(state: &mut PersistedState, now: Timestamp) {
     } = &mut *state;
     idempotency.retain(|(_, entry)| invocations.contains_key(&entry.invocation_id));
     for inv in state.invocations.values_mut() {
-        if !inv.status.is_terminal() {
+        if inv.status.is_terminal() {
+            continue;
+        }
+        if matches!(inv.status, InvocationStatus::Running) {
+            if inv.mark_outcome_unknown(UNKNOWN_MSG, now).is_ok()
+                && let InvocationStatus::OutcomeUnknown { error } = &mut inv.status
+            {
+                // The domain stamps the generic `Host.OutcomeUnknown`; a
+                // restart names itself so the cause stays visible.
+                error.error_type = HOST_RESTARTED.to_string();
+            }
+        } else {
             let _ = inv.mark_failed(
-                InvocationError::new(
-                    ErrorClass::PlatformError,
-                    "Host.Restarted",
-                    "gateway restarted while the invocation was in flight",
-                ),
+                InvocationError::new(ErrorClass::PlatformError, HOST_RESTARTED, INVOCATION_MSG),
                 now,
             );
         }
     }
+    // An attempt is settled like the invocation it belongs to, so a caller
+    // never sees a failed attempt under an unknown outcome.
+    let unknown: BTreeSet<InvocationId> = state
+        .invocations
+        .values()
+        .filter(|inv| matches!(inv.status, InvocationStatus::OutcomeUnknown { .. }))
+        .map(|inv| inv.id.clone())
+        .collect();
     for att in state.attempts.values_mut() {
-        if !att.status.is_terminal() {
+        if att.status.is_terminal() {
+            continue;
+        }
+        if unknown.contains(&att.invocation_id) {
+            let _ = att.outcome_unknown(
+                InvocationError::new(ErrorClass::OutcomeUnknown, HOST_RESTARTED, UNKNOWN_MSG),
+                now,
+            );
+        } else {
             let _ = att.fail(
-                InvocationError::new(
-                    ErrorClass::PlatformError,
-                    "Host.Restarted",
-                    "gateway restarted while the attempt was in flight",
-                ),
+                InvocationError::new(ErrorClass::PlatformError, HOST_RESTARTED, ATTEMPT_MSG),
                 now,
             );
         }
@@ -893,7 +931,8 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use tachyon_serverless_domain::{
-        Deadlines, EventKind, InvocationMode, LogPhase, LogStream, ProviderKind, ReuseKey,
+        AttemptStatus, Deadlines, EventKind, InvocationMode, LogPhase, LogStream, ProviderKind,
+        ReuseKey, StartKind,
     };
 
     fn now() -> Timestamp {
@@ -1170,7 +1209,7 @@ mod tests {
         assert_eq!(invs.len(), 1);
         assert!(
             invs[0].status.is_terminal(),
-            "in-flight work is failed on restart"
+            "work that never started is failed on restart"
         );
         assert!(
             EnvironmentRepository::list_active(&store)
@@ -1179,5 +1218,75 @@ mod tests {
         );
         let text = std::fs::read_to_string(dir.path().join("state.json")).unwrap();
         assert!(text.contains("persisted"));
+    }
+
+    /// docs/threat-model.md §9: a restart may only report a failure for work
+    /// that provably never started.
+    #[test]
+    fn restart_separates_dispatched_work_from_work_that_never_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = TenantId::generate();
+        let f = FunctionId::generate();
+
+        let mut queued = keyed_invocation(&t, &f, None);
+        queued.mark_queued().unwrap();
+        let mut running = keyed_invocation(&t, &f, None);
+        let attempt_id = AttemptId::generate();
+        running
+            .mark_running(attempt_id.clone(), now(), now(), now())
+            .unwrap();
+        let mut finished = keyed_invocation(&t, &f, None);
+        finished
+            .mark_running(AttemptId::generate(), now(), now(), now())
+            .unwrap();
+        finished.mark_succeeded(None, None, now()).unwrap();
+        let attempt = InvocationAttempt::dispatch(
+            attempt_id.clone(),
+            running.id.clone(),
+            t.clone(),
+            1,
+            EnvironmentId::generate(),
+            1,
+            StartKind::Cold,
+            now(),
+        );
+        let (queued_id, running_id, finished_id) =
+            (queued.id.clone(), running.id.clone(), finished.id.clone());
+        {
+            let store =
+                InMemoryStore::with_persistence(dir.path(), Limits::default(), now()).unwrap();
+            for inv in [queued, running, finished] {
+                InvocationRepository::insert(&store, inv).unwrap();
+            }
+            store.insert_attempt(attempt).unwrap();
+        }
+
+        let store = InMemoryStore::with_persistence(dir.path(), Limits::default(), now()).unwrap();
+        let load = |id: &InvocationId| InvocationRepository::get(&store, id).unwrap().unwrap();
+        match load(&queued_id).status {
+            InvocationStatus::Failed { error } => {
+                assert_eq!(error.class, ErrorClass::PlatformError);
+                assert_eq!(error.error_type, HOST_RESTARTED);
+            }
+            other => panic!("a queued invocation was never dispatched: {other:?}"),
+        }
+        match load(&running_id).status {
+            InvocationStatus::OutcomeUnknown { error } => {
+                assert_eq!(error.class, ErrorClass::OutcomeUnknown);
+                assert_eq!(error.error_type, HOST_RESTARTED);
+            }
+            other => panic!("a dispatched invocation may have run: {other:?}"),
+        }
+        assert_eq!(
+            load(&finished_id).status,
+            InvocationStatus::Succeeded,
+            "terminal invocations are untouched"
+        );
+        match store.get_attempt(&attempt_id).unwrap().unwrap().status {
+            AttemptStatus::OutcomeUnknown { error } => {
+                assert_eq!(error.error_type, HOST_RESTARTED);
+            }
+            other => panic!("the attempt follows its invocation: {other:?}"),
+        }
     }
 }

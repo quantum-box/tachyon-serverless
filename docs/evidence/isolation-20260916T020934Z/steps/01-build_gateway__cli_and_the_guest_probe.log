@@ -1,0 +1,9 @@
+   Compiling tachyon-serverless-provider-port v0.1.0 (/home/takanorifukuyama.guest/tsls/crates/provider-port)
+   Compiling tachyon-serverless-api-types v0.1.0 (/home/takanorifukuyama.guest/tsls/crates/api-types)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/home/takanorifukuyama.guest/tsls/crates/providers/firecracker)
+   Compiling tachyon-serverless-provider-process v0.1.0 (/home/takanorifukuyama.guest/tsls/crates/providers/process)
+   Compiling tachyon-serverless-application v0.1.0 (/home/takanorifukuyama.guest/tsls/crates/application)
+   Compiling tachyon-serverless-cli v0.1.0 (/home/takanorifukuyama.guest/tsls/apps/cli)
+   Compiling tachyon-serverless-gateway v0.1.0 (/home/takanorifukuyama.guest/tsls/apps/gateway)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.53s
+    Finished `release` profile [optimized] target(s) in 0.22s

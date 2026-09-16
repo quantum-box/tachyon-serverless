@@ -1080,3 +1080,169 @@ async fn http_adapter_forwards_the_raw_request_path() {
         assert_eq!(event["query"], query, "{suffix}");
     }
 }
+
+/// A gateway that restarts on a `data_dir` left behind by a crash converges:
+/// the ledger settles a dispatched invocation as `outcome_unknown` and its
+/// environment as `lost`, and the environment the provider still runs is
+/// reclaimed with `Reconcile` before the listener accepts. `/readyz` shows
+/// the pass (docs/architecture.md §4).
+#[tokio::test]
+async fn bootstrap_converges_on_a_state_file_left_behind_by_a_crash() {
+    use tachyon_serverless_domain::{
+        Architecture, AttemptId, Clock, Deadlines, EgressProfile, EnvironmentId, EnvironmentState,
+        ErrorClass, EventKind, ExecutionEnvironment, FunctionId, Invocation, InvocationId,
+        InvocationMode, InvocationStatus, ProviderKind, ResourceProfile, ReuseKey, RevisionId,
+        Sha256Digest, SystemClock, TenantId,
+    };
+    use tachyon_serverless_provider_port::{
+        ArtifactLocation, EnvironmentSpec, ExecutionProvider, TerminateReason,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let now = SystemClock.now();
+    let tenant = TenantId::parse(TENANT_A).unwrap();
+    let revision = RevisionId::generate();
+
+    // A ledger written by a process that died while an invocation was running.
+    let mut invocation = Invocation::accept(
+        InvocationId::generate(),
+        tenant.clone(),
+        FunctionId::generate(),
+        None,
+        revision.clone(),
+        InvocationMode::Sync,
+        EventKind::Json,
+        Deadlines {
+            queue_deadline: now,
+            init_deadline: None,
+            execution_deadline: None,
+            client_deadline: now + Duration::from_secs(60),
+        },
+        None,
+        Sha256Digest::of_bytes(b"{}"),
+        2,
+        "trace".into(),
+        now,
+    )
+    .unwrap();
+    invocation
+        .mark_running(
+            AttemptId::generate(),
+            now + Duration::from_secs(30),
+            now + Duration::from_secs(5),
+            now,
+        )
+        .unwrap();
+    let stale_env = ExecutionEnvironment::request(
+        EnvironmentId::generate(),
+        tenant.clone(),
+        revision.clone(),
+        ProviderKind::Fake,
+        ReuseKey {
+            tenant_id: tenant.clone(),
+            revision_id: revision.clone(),
+            execution_role_version: 1,
+            configuration_version: 1,
+            resource_profile_digest: "d".into(),
+            runtime_profile: "default".into(),
+            network_policy_version: 1,
+            secret_binding_generation: 1,
+        },
+        now,
+    );
+    let mut invocations = serde_json::Map::new();
+    invocations.insert(
+        invocation.id.to_string(),
+        serde_json::to_value(&invocation).unwrap(),
+    );
+    let mut environments = serde_json::Map::new();
+    environments.insert(
+        stale_env.id.to_string(),
+        serde_json::to_value(&stale_env).unwrap(),
+    );
+    std::fs::write(
+        dir.path().join("state.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "invocations": invocations,
+            "environments": environments,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    // ... and an environment that outlived that process.
+    let fake = Arc::new(FakeExecutionProvider::new());
+    let orphan = EnvironmentId::generate();
+    fake.create_environment(EnvironmentSpec {
+        environment_id: orphan.clone(),
+        tenant_id: tenant.clone(),
+        revision_id: revision.clone(),
+        artifact: ArtifactLocation {
+            path: "/nonexistent".into(),
+            digest: Sha256Digest::of_bytes(b"orphan"),
+            size_bytes: 1,
+        },
+        architecture: Architecture::Aarch64,
+        resources: ResourceProfile::default(),
+        egress: EgressProfile::None,
+        connect_timeout: Duration::from_secs(1),
+    })
+    .await
+    .unwrap();
+
+    let app = Application::bootstrap_with(
+        config(dir.path()),
+        fake.clone(),
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let report = app
+        .reconcile_on_startup()
+        .await
+        .expect("reconcile is on by default");
+    assert_eq!(
+        (
+            report.found,
+            report.adopted,
+            report.terminated,
+            report.failed
+        ),
+        (1, 0, 1, 0)
+    );
+    assert_eq!(report.error, None);
+    assert_eq!(
+        fake.terminated(),
+        vec![(orphan, TerminateReason::Reconcile)]
+    );
+    assert!(
+        fake.running().is_empty(),
+        "nothing of the previous process is left running"
+    );
+
+    // The ledger settled: dispatched work is unknown, its environment lost.
+    let settled = app.repos.invocations.get(&invocation.id).unwrap().unwrap();
+    match settled.status {
+        InvocationStatus::OutcomeUnknown { error } => {
+            assert_eq!(error.class, ErrorClass::OutcomeUnknown);
+            assert_eq!(error.error_type, "Host.Restarted");
+        }
+        other => panic!("a dispatched invocation may have run: {other:?}"),
+    }
+    let env = app.repos.environments.get(&stale_env.id).unwrap().unwrap();
+    assert!(
+        matches!(env.state, EnvironmentState::Lost { .. }),
+        "{:?}",
+        env.state
+    );
+
+    // and the pass is visible on /readyz.
+    let r = router(app);
+    let ready = call(&r, Request::get("/readyz").body(Body::empty()).unwrap()).await;
+    assert_eq!(ready.status, StatusCode::OK);
+    assert_eq!(ready.json()["reconcile"]["found"], 1);
+    assert_eq!(ready.json()["reconcile"]["terminated"], 1);
+    assert_eq!(ready.json()["reconcile"]["error"], serde_json::Value::Null);
+}

@@ -414,6 +414,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-isolation-probe"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tachyon-serverless-sdk",
+ "tokio",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

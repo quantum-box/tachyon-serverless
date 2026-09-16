@@ -157,18 +157,19 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 1. `Invoke` frame の書き込みが成功した後、`Response` / `Error` を受け取る前に bridge との stream が閉じた（EOF / IO error）。
 2. `observe_environment` が `Exited` / `NotFound` を返し、結果 frame が無い。
-3. gateway が再起動し、ledger に `Running` の invocation が残っている（起動時 reconcile）。
+3. gateway が再起動し、ledger に `Running` の invocation が残っている（起動時 reconcile。`Invoke` frame は書き終えているので handler が走った可能性がある）。Attempt も同じ分類にする。
 
 入らない条件:
 
 - `execution_deadline` 到達 → `Timeout`（host が判定済み）。
 - bridge が `Error{kind: crash}` を送ってから閉じた → `Failed{Crash}`（結果は「crash」として確定）。
 - frame の protocol 違反 → `Failed{PlatformError}`（`docs/architecture.md` §3-9 の分類に従う）。
+- 再起動時に `Accepted` / `Queued` のまま残っていた → 一度も dispatch していない＝ handler は開始していないので `Failed{PlatformError}` / `Host.Restarted`（`crates/application/src/repository.rs::reconcile_after_restart`、`docs/architecture.md` §4）。
 - `Invoke` frame が guest に届かなかった（handler は開始していない）→ `Failed`。encode できない（`FrameTooLarge`、何も書いていない）→ `PlatformError` / `Host.InvokeTooLarge`（環境は健全なので `Stopped`）。書き込み失敗（接続断）→ guest が閉じる前に送った frame を短時間読み、`Exited` なら `Crash` / `Runtime.Exited`、無ければ `Crash` / `Host.BridgeDisconnectedBeforeInvoke`。同じ guest の挙動が書き込みの競合で分類を変えないようにするため。
 
 契約:
 
-- HTTP 502 `outcome_unknown`、`error_type = "Host.OutcomeUnknown"`。応答には `invocation_id` を含める。
+- HTTP 502 `outcome_unknown`、`error_type = "Host.OutcomeUnknown"`（起動時 reconcile で確定したものは `Host.Restarted`）。応答には `invocation_id` を含める。
 - **自動再実行しない。** 再実行の判断は client の責務。client は「実行されたかもしれない」として自身の冪等性で扱う。
 - 同じ Idempotency-Key での再送は `OutcomeUnknown` の記録を返し、再実行しない（§10）。
 - 環境は必ず terminate する。後から届く `Response` は Lease 解放済みのため捨てる。
@@ -221,7 +222,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | T07 | 暴走 handler（cpu-burn、無限ループ） | host watchdog → `Cancel` → `terminate`（SIGKILL）→ `Failed{Timeout}`。環境は再利用しない | terminate の実測（`docs/adr/0001` の残る測定） |
 | T08 | 巨大 payload / response / frame による memory 枯渇 | §11 の各上限。frame 上限は codec で decode 前に拒否 | — |
 | T09 | log 洪水による retention 破壊・disk 枯渇 | invocation ごとの行数 / bytes 上限、`dropped` で観測 | — |
-| T10 | orphan 環境（process / socket / tap / drive / workdir）が残る | `terminate_environment` は冪等、`TerminateReport.cleaned` を列挙、`list_environments` で reconcile。P1 は tap を作らない | 実測（PLT-4627 の orphan テスト） |
+| T10 | orphan 環境（process / socket / tap / drive / workdir）が残る | `terminate_environment` は冪等、`TerminateReport.cleaned` を列挙。起動時に application（`ReconcileService`）が `list_environments` を呼び、active として知らない環境を `terminate(Reconcile)` で回収する（listener を開ける前。`docs/architecture.md` §4）。P1 は tap を作らない | KVM 実機での実測（PLT-4627 の orphan テスト） |
 | T11 | artifact の差し替え・改竄・他 tenant の artifact の実行 | Revision は digest 固定、`spec_digest` で `verify_integrity`、alias は generation CAS、artifact store は content-addressed。upload した tenant を所有者として記録し、revision は自 tenant が upload した digest しか解決しない（§14-1） | — |
 | T12 | dev_only provider が production で使われる | `profile = "production"` は `Capabilities.dev_only` を拒否。`/v1/provider` が `dev_only` を露出 | 設定ミス |
 | T13 | `TACHYON_*` を revision の env で上書きし、bridge の挙動を変える | `validate_env_name` が `TACHYON_` prefix と重複を拒否（test `invalid_specs_are_rejected`） | — |
@@ -285,3 +286,4 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 8. `LogRecord` の `phase`（boot / init / handler / shutdown）と `stream`（stdout / stderr / platform）を落とさない。`platform` 行は bridge / host が出したもので、user code の出力と混ぜない。
 9. `BootEvidence` は `Hello` 受信時に `record_guest_boot_id`、provider 由来（host pid、VMM version、kernel digest）は `mark_initializing` で記録。secret を入れない。
 10. `Capabilities` は測定していない能力を `Supported` と言わない（`Unverified{note}`）。fake / process provider の結果で `Supported` を主張しない。
+11. 再起動は完了ではない。listener を開ける前に `ReconcileService` を走らせ、provider の孤児を `terminate(Reconcile)` で回収する。dispatch 済みの invocation は `OutcomeUnknown`、未 dispatch は `Failed{PlatformError}`（§9）。列挙に失敗しても起動は止めず、結果は `GET /readyz` の `reconcile` に出す。

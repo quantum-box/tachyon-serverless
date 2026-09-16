@@ -1,0 +1,12 @@
+2026-09-16T02:10:30.580Z [platform/boot] creating environment env_01m2kznpvckqsc4xv6d9ry98fw with provider firecracker
+2026-09-16T02:10:36.586Z [platform/boot] bridge connected after 5988 ms (host_pid=Some(322636))
+2026-09-16T02:10:36.836Z [platform/init] user process started (pid 102)
+2026-09-16T02:10:36.902Z [stderr/init] isolation-probe: starting (arch=aarch64 unisolated=false)
+2026-09-16T02:10:37.244Z [stdout/handler] isolation-probe: probe=resources invocation=inv_01m2kznptvjhf47cdhqh1br4xs attempt=att_01m2kznxe343aqnmy2xtpreg5x alloc_mib=512
+2026-09-16T02:10:37.287Z [stdout/handler] isolation-probe: alloc start requested=512 MiB chunk=16 MiB chunks=32
+2026-09-16T02:10:37.834Z [stdout/handler] isolation-probe: alloc touched 16 MiB of 512 MiB
+2026-09-16T02:10:38.501Z [stdout/handler] isolation-probe: alloc touched 32 MiB of 512 MiB
+2026-09-16T02:10:39.335Z [stdout/handler] isolation-probe: alloc touched 48 MiB of 512 MiB
+2026-09-16T02:10:40.311Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+2026-09-16T02:10:41.414Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+2026-09-16T02:10:44.234Z [platform/shutdown] environment terminated (Crashed); cleaned: process-group:322636, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2kznpvckqsc4xv6d9ry98fw/console.log, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2kznpvckqsc4xv6d9ry98fw/fc.log, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw/fc.sock, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw/v.sock, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw/v.sock_5000, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw/function.ext4, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw/fc.pid, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw/stage/app, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw/stage, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2kznpvckqsc4xv6d9ry98fw

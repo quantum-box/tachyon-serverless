@@ -1,0 +1,6 @@
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1604032 bytes, arch aarch64)
+artifact sha256:ba4902c9bd7a6873b3b112602b1d82de704cc79acf5d90f78526ae334209ae8d
+revision rev_01m2kzn2rapxq3509bzvchpd5g (#1) created: pending
+revision rev_01m2kzn2rapxq3509bzvchpd5g is preparing
+revision rev_01m2kzn2rapxq3509bzvchpd5g is ready
+[e2e] revision baseline: rev_01m2kzn2rapxq3509bzvchpd5g (256 MiB, 500 m)

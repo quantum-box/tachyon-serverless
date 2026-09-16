@@ -55,7 +55,7 @@ scripts/kvm/bootstrap.sh
    - 2 回目以降は manifest の sha256 と一致すれば再取得しない
    - `CI_VERSION=v1.15` のように prefix を固定、`GUEST_KERNEL_SERIES=6.1` で系列を固定できる（`firecracker-ci/v1.17/` という prefix は S3 に存在しないため、既定は日付 prefix の自動解決）
    - 実機で確認した組み合わせは `CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1`（guest kernel 6.1.155、§5）。既定の自動解決は実機で確認していない
-3. `rustup target add <arch>-unknown-linux-musl` → `cargo build --release --target <arch>-unknown-linux-musl -p tachyon-serverless-runtime-bridge -p example-hello -p example-http-axum -p example-cpu-burn`
+3. `rustup target add <arch>-unknown-linux-musl` → `cargo build --release --target <arch>-unknown-linux-musl -p tachyon-serverless-runtime-bridge -p example-hello -p example-http-axum -p example-cpu-burn -p example-isolation-probe`
    - musl target は既定で static-pie。`readelf` があれば `PT_INTERP` が無いことを確認する。動的リンクになった場合は `RUSTFLAGS="-C target-feature=+crt-static"` を付けて再実行
 4. host 用の `fc-smoke` をビルド（`target/release/fc-smoke`）
 5. `scripts/kvm/build-rootfs.sh` を呼び、最後に各成果物の sha256 を表示
@@ -119,14 +119,65 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 |---|---|
 | isolation | micro_vm |
 | create_terminate / observe / enforce_deadline | supported |
-| egress_none | unverified（NIC は構成しないが guest からの到達不能は未測定、ADR-0001 M8。commit `95af2ba` までは supported と表示していた） |
-| enforce_resource_limits | unverified（vcpu / mem は machine-config で指定、ephemeral storage は未制御） |
+| egress_none | supported（ADR-0001 M8 を実測。`docs/evidence/isolation-20260916T020934Z/`） |
+| enforce_resource_limits | unverified（M9 で vcpu / mem の guest 側一致と超過 alloc の `crash` 分類は実測済み。ephemeral storage は未制御のため unverified のまま。`docs/evidence/isolation-20260916T020934Z/`） |
 | host_metering | unverified |
 | egress_restricted / egress_public_web | unsupported（ネットワークデバイス未設定） |
 | idle_quiesce / idle_resume / snapshot_create / snapshot_clone | unsupported（P1 未実装） |
 | dev_only | false |
 
-### 3.6 teardown
+`egress_none`（M8）と `enforce_resource_limits`（M9）を実際に測るのが §3.6。
+
+### 3.6 隔離の計測（ADR-0001 M8 / M9）
+
+```sh
+scripts/kvm/measure-isolation.sh
+```
+
+`examples/isolation-probe`（guest 用の musl バイナリ。`bootstrap.sh` がビルドする）を gateway 経由で deploy し、
+guest の中から egress（M8）と資源上限（M9）を測る。gateway は `config/gateway.firecracker.toml` でこのスクリプトが起動し、最後に停止する（§3.5 と同じ設定なので、別の gateway を同じ port で動かしたまま実行しない）。
+
+| ステップ | 内容 | 期待 |
+|---|---|---|
+| M8 egress | `{"probe":"egress"}`。`1.1.1.1:443`（public IPv4）、`169.254.169.254:80`（link-local の metadata アドレス）、`10.0.2.2:80`（host 側 gateway の候補）へ 2 秒 timeout で TCP connect し、公開名の DNS 解決も試す | **全部失敗**すること |
+| M8 interface | 同じ応答に含まれる `/proc/net/dev` と `/proc/net/route` | `lo` だけ、default route 0 件 |
+| M9 resources | `{"probe":"resources"}`。`/proc/cpuinfo` の processor 数、`available_parallelism`、`/proc/meminfo` の MemTotal、見えていれば cgroup の `memory.max` / `cpu.max` | vCPU は revision の `cpu_millis` から決まる値と一致。MemTotal は要求値以下で、要求値の 70%（`MEM_TOLERANCE_PCT`）以上 |
+| M9 alloc | `--memory-mib 128` の revision（`--no-publish`）に `{"probe":"resources","alloc_mib":512}`。16 MiB ずつ確保し 4 KiB ごとに 1 byte 書く | 上限を超えたところで kernel に kill され、host からは crash に見える。`tsls functions invocation --json` の `status` / `error.class` / `error.error_type` を記録する |
+
+主な環境変数: `PROBE_MEMORY_MIB`（既定 256）、`PROBE_CPU_MILLIS`（500）、`ALLOC_MEMORY_MIB`（128）、`ALLOC_MIB`（既定は `ALLOC_MEMORY_MIB` の 4 倍）、`MEM_TOLERANCE_PCT`（70）、`CONNECT_TIMEOUT_MS`（2000）、`DNS_TIMEOUT_MS`（5000）、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
+
+結果の読み方:
+
+- **期待される M8 の結果は「全 target で connect 失敗」**。NIC が無い guest では `error_kind` が `NetworkUnreachable`（`ENETUNREACH`）や `HostUnreachable` になる。`connected: true` が 1 つでもあれば隔離が破れており、スクリプトは exit 1 で終わる。
+- 名前が解決できたことも「resolver に届いた」＝到達なので、`reached_network` は TCP と DNS の or を取る。`/etc/resolv.conf` が無い guest では musl が 127.0.0.1 に問い合わせて失敗する（probe 側で 5 秒に打ち切る）。
+- M9 の vCPU は revision の `cpu_millis` を 1000 で切り上げた値（`ResourceProfile::vcpus`）。`--cpu-millis 500` なら 1 vCPU。
+- guest の MemTotal は machine-config で渡した値より必ず小さい（kernel と予約分）。完全一致は求めず、既定では要求値の 70〜100% を許容する。外れたら finding として記録するが、スクリプトは失敗させない。
+- alloc の進捗は guest の stdout に出るので、OOM kill で応答が返らなくても「どこまで触れたか」が `tsls functions logs`（evidence の `alloc-logs.txt`）に残る。
+- 値も分類も **nested virtualization 上の記録**（§5）であり、bare metal と x86_64 では未確認。
+
+終了コード:
+
+| exit | 意味 |
+|---|---|
+| 0 | 計測できて M8 PASS（M9 の不一致は finding として記録するだけで、失敗にしない） |
+| 1 | guest から network に到達した（M8 FAIL。security 上の失敗なのでここだけ非 0 にする） |
+| 2 | 計測自体ができなかった（build / gateway / deploy / probe の失敗） |
+
+証跡は `docs/evidence/isolation-<UTC>/`:
+
+| ファイル | 内容 |
+|---|---|
+| `summary.txt` | host・provider・使った revision・M8 / M9 の表と finding 一覧 |
+| `summary.json` | step ごとの PASS/FAIL、要求値、`measurements.M8` / `.M9` |
+| `egress.json` | egress probe の応答（target ごとの `connected` / `error_kind` / `elapsed_ms`、DNS、interface と route、`guest.boot_id`） |
+| `resources.json` | resource probe の応答（vCPU、MemTotal、cgroup） |
+| `alloc-invoke.json` / `alloc-invocation.json` / `alloc-logs.txt` | 上限超え alloc の CLI 応答、invocation の分類、guest の進捗ログ |
+| `revision-baseline.json` / `revision-alloc.json` | 使った revision の spec（要求した vCPU / memory の正本） |
+| `provider.json` / `gateway.log` / `steps/` / `orphan-check.txt` | capability 表、gateway のログ、step ごとのログ、終了後の孤児監査 |
+
+このスクリプトは provider の `Capabilities` を変更しない。`egress_none` を `Unverified` から `Supported` にするのは、この計測結果を確認した上での別の変更（ADR-0001 §「決定」5）。
+
+### 3.7 teardown
 
 ```sh
 scripts/kvm/teardown.sh           # .kvm/run を参照する firecracker を SIGKILL → .kvm/run 削除 → 孤児監査
@@ -137,6 +188,8 @@ scripts/kvm/teardown.sh --purge   # .kvm を丸ごと削除
 `.kvm` のイメージに attach された loop device（想定 0）、`tsls*` という tap（想定 0）。残っていれば非 0。
 
 ## 4. 証跡の読み方
+
+smoke（`scripts/kvm/smoke.sh`）の証跡。隔離計測（`scripts/kvm/measure-isolation.sh`）の `docs/evidence/isolation-<UTC>/` は §3.6 を参照。
 
 `docs/evidence/kvm-<UTC>/`:
 

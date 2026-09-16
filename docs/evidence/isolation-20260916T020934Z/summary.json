@@ -1,0 +1,88 @@
+{
+  "run_id": "isolation-20260916T020934Z",
+  "architecture": "aarch64",
+  "host": "Linux 7.0.0-28-generic aarch64",
+  "gateway_config": "/home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml",
+  "function": "isolation-probe",
+  "baseline_revision": "rev_01m2kzn2rapxq3509bzvchpd5g",
+  "alloc_revision": "rev_01m2kznper7f50gjs63e0v4wrv",
+  "requested": {
+    "memory_mib": 256,
+    "cpu_millis": 500,
+    "alloc_memory_mib": 128,
+    "alloc_mib": 512
+  },
+  "measurements": {
+    "M8": {
+      "status": "PASS",
+      "detail": "3/3 targets attempted, none connected, dns_resolved=false"
+    },
+    "M9": {
+      "status": "PASS",
+      "detail": "vcpu 1/1 vs 1 requested; MemTotal 232 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash"
+    }
+  },
+  "orphans": "clean",
+  "findings": [],
+  "generated_at": "2026-09-16T02:10:45Z",
+  "steps": [
+    {
+      "name": "build gateway, cli and the guest probe",
+      "status": "PASS",
+      "duration_ms": 26835,
+      "message": ""
+    },
+    {
+      "name": "gateway healthz/readyz",
+      "status": "PASS",
+      "duration_ms": 7787,
+      "message": ""
+    },
+    {
+      "name": "provider is firecracker / micro_vm",
+      "status": "PASS",
+      "duration_ms": 86,
+      "message": ""
+    },
+    {
+      "name": "function isolation-probe (idempotent)",
+      "status": "PASS",
+      "duration_ms": 111,
+      "message": ""
+    },
+    {
+      "name": "deploy baseline revision (256 MiB)",
+      "status": "PASS",
+      "duration_ms": 773,
+      "message": ""
+    },
+    {
+      "name": "M8: egress probe",
+      "status": "PASS",
+      "duration_ms": 12412,
+      "message": ""
+    },
+    {
+      "name": "M9: resource probe",
+      "status": "PASS",
+      "duration_ms": 7032,
+      "message": ""
+    },
+    {
+      "name": "deploy allocation revision (128 MiB)",
+      "status": "PASS",
+      "duration_ms": 709,
+      "message": ""
+    },
+    {
+      "name": "M9: allocate 512 MiB past the limit",
+      "status": "PASS",
+      "duration_ms": 14099,
+      "message": ""
+    }
+  ],
+  "passed": 9,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

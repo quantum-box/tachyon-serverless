@@ -138,6 +138,9 @@ pub async fn serve(
 ) -> anyhow::Result<()> {
     let provider = providers::build_provider(&config)?;
     let app = Application::bootstrap(config, provider)?;
+    // Reclaim environments a previous process left behind before the listener
+    // accepts, so an orphan cannot outlive a crash or a kill.
+    app.reconcile_on_startup().await;
     let listener = TcpListener::bind(&app.config.listen).await?;
     let addr = listener.local_addr()?;
     tracing::info!(
