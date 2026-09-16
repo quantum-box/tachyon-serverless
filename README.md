@@ -162,7 +162,7 @@ crates/runtime-bridge  guest 側 agent
 crates/sdk             run(handler) / serve_http(router)
 apps/gateway           axum gateway
 apps/cli               tsls
-examples/*             hello / http-axum / cpu-burn
+examples/*             hello / http-axum / cpu-burn / isolation-probe（M8・M9 の計測用）
 scripts/e2e            デモと検証スクリプト
 scripts/kvm            KVM 環境の preflight / bootstrap / smoke / teardown
 docs/evidence          実行記録（E2E デモ、KVM smoke）

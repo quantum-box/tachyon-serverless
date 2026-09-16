@@ -92,8 +92,8 @@ baseline profile は `docs/inventory-tachyon-apps.md` §6。結果は、`scripts
 | M5 | timeout kill: cpu-burn を `timeout_seconds = 5` で実行 | `execution_deadline + grace(1 s)` から terminate 完了まで ≤ 2 s、`Failed{Timeout}`、orphan 0 | 一部実測済み（host 強制 timeout → terminate → 残留なし: `docs/evidence/kvm-20260915T080221Z/timeout.json`、E2E step 18 は `timeout_seconds = 2` で 504 `Host.Timeout`） / 未測定（`timeout_seconds = 5` での「deadline + grace から terminate 完了まで ≤ 2 s」の単独測定） |
 | M6 | terminate の冪等性と cleanup: 2 回目の `terminate_environment` が `was_running = false`、`cleaned` の全パスが存在しない | 100% | 一部実測済み（1 回目の terminate の `cleaned` と、その後に process・env dir・socket が残らないこと: `hello.json`・`timeout.json` の `leftovers`） / 未測定（2 回目の `terminate_environment`） |
 | M7 | orphan 検査: N 回の invoke 後に firecracker プロセス、uds、drive、workdir が残らない | 0 件 | 一部実測済み（E2E 1 回分の invoke 後と gateway 停止後の orphan-check が clean: `docs/evidence/20260915T125610Z-firecracker/` の step 19・27） / 未測定（x86_64、回数を決めた繰り返し） |
-| M8 | egress none: guest から `connect()` が失敗する（NIC が無い） | 失敗すること | 未測定 |
-| M9 | resource 上限: `machine-config` の vCPU / memory が guest から見える値と一致し、超過 alloc が OOM で終わる | 一致、環境が `Failed{Crash}` に分類される | 未測定（`machine-config` に渡した値（1 vCPU / 256 MiB）の記録だけ） |
+| M8 | egress none: guest から `connect()` が失敗する（NIC が無い） | 失敗すること | 実測済み（aarch64 nested。3 宛先すべて `NetworkUnreachable`、DNS 解決なし、loopback のみ。`docs/evidence/isolation-20260916T020934Z/`） |
+| M9 | resource 上限: `machine-config` の vCPU / memory が guest から見える値と一致し、超過 alloc が OOM で終わる | 一致、環境が `Failed{Crash}` に分類される | 一部実測済み（vCPU 1 一致、MemTotal 232 MiB / 要求 256 MiB、超過 alloc は `crash` / `Runtime.Crash`。ephemeral storage は未強制のまま。`docs/evidence/isolation-20260916T020934Z/`） |
 | M10 | 同時実行: `max_concurrency = 4` で 4 並列、5 本目が queue に入る | 429 / 504 の分類が仕様どおり | 未測定 |
 | M11 | `OutcomeUnknown`: Running 中に firecracker プロセスを外部から kill | `OutcomeUnknown`、再実行なし、環境 terminate 済み | 未測定 |
 | M12 | aarch64 で M1〜M5 | 同上 | 一部実測済み（M1〜M3・M5 の上記の範囲。nested virtualization 上だけで、bare metal は未測定） |

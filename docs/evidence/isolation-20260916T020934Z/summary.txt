@@ -1,0 +1,32 @@
+tachyon-serverless isolation measurement 20260916T020934Z
+host              Linux 7.0.0-28-generic aarch64 (aarch64)
+gateway config    /home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml
+provider          firecracker / micro_vm / dev_only=false
+function          isolation-probe (fn_01m2kzn27ynn09aqqp0pk54dep)
+baseline revision rev_01m2kzn2rapxq3509bzvchpd5g (256 MiB, 500 m)
+alloc revision    rev_01m2kznper7f50gjs63e0v4wrv (128 MiB, alloc 512 MiB)
+orphans           clean
+
+== M8 egress (expected: every target fails) ==
+  1.1.1.1:443	connected=false	error=NetworkUnreachable	1 ms
+  169.254.169.254:80	connected=false	error=NetworkUnreachable	1 ms
+  10.0.2.2:80	connected=false	error=NetworkUnreachable	0 ms
+  dns example.com	resolved=false	error=ProbeTimeout	5016 ms
+  interfaces: lo (loopback_only=true, default routes 0)
+  guest boot_id: f03836ad-4c7e-4b33-830f-f9debf33140c
+
+== M9 resources (expected: the guest sees what the revision asked for) ==
+  vcpus: available_parallelism=1 cpuinfo=1
+  memory: MemTotal=232 MiB (238240 kB)
+  cgroup: available=false memory.max=- cpu.max=-
+  alloc invocation inv_01m2kznptvjhf47cdhqh1br4xs: status=failed class=crash type=Runtime.Crash
+  last guest progress lines:
+    2026-09-16T02:10:40.311Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+    2026-09-16T02:10:41.414Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+
+== findings ==
+  none
+
+== verdict ==
+  M8   PASS     3/3 targets attempted, none connected, dns_resolved=false
+  M9   PASS     vcpu 1/1 vs 1 requested; MemTotal 232 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash

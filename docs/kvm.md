@@ -119,8 +119,8 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 |---|---|
 | isolation | micro_vm |
 | create_terminate / observe / enforce_deadline | supported |
-| egress_none | unverified（NIC は構成しないが guest からの到達不能は未測定、ADR-0001 M8。commit `95af2ba` までは supported と表示していた） |
-| enforce_resource_limits | unverified（vcpu / mem は machine-config で指定、ephemeral storage は未制御） |
+| egress_none | supported（ADR-0001 M8 を実測。`docs/evidence/isolation-20260916T020934Z/`） |
+| enforce_resource_limits | unverified（M9 で vcpu / mem の guest 側一致と超過 alloc の `crash` 分類は実測済み。ephemeral storage は未制御のため unverified のまま。`docs/evidence/isolation-20260916T020934Z/`） |
 | host_metering | unverified |
 | egress_restricted / egress_public_web | unsupported（ネットワークデバイス未設定） |
 | idle_quiesce / idle_resume / snapshot_create / snapshot_clone | unsupported（P1 未実装） |

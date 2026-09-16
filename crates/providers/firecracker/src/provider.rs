@@ -115,11 +115,12 @@ impl FirecrackerProvider {
             observe: Support::Supported,
             enforce_deadline: Support::Supported,
             enforce_resource_limits: Support::unverified(
-                "vcpu/mem via machine-config; ephemeral storage not enforced",
+                "vcpu/mem verified against the guest (ADR-0001 M9); ephemeral storage not enforced",
             ),
-            egress_none: Support::unverified(
-                "no network device is configured; guest-side unreachability not yet measured (ADR-0001 M8)",
-            ),
+            // ADR-0001 M8 measured on aarch64 (docs/evidence/isolation-20260916T020934Z):
+            // no network device is configured, the guest lists loopback only and
+            // every connect attempt failed with NetworkUnreachable.
+            egress_none: Support::Supported,
             egress_restricted: Support::unsupported("no network device is configured in P1"),
             egress_public_web: Support::unsupported("no network device is configured in P1"),
             host_metering: Support::unverified("host-side timings only; no cgroup/KVM stats"),
@@ -772,7 +773,7 @@ mod tests {
         assert!(c.create_terminate.is_supported());
         assert!(c.observe.is_supported());
         assert!(c.enforce_deadline.is_supported());
-        assert!(matches!(c.egress_none, Support::Unverified { .. }));
+        assert!(c.egress_none.is_supported());
         assert!(matches!(
             c.enforce_resource_limits,
             Support::Unverified { .. }
