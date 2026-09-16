@@ -1,0 +1,25 @@
+tachyon-serverless 外部公開デモ 20260916T120349Z
+commit            591b130 (main, PLT-4632 統合後)
+経路              macOS ホスト -> インターネット -> Cloudflare quick tunnel -> Lima VM の gateway -> Firecracker microVM
+provider          firecracker / micro_vm / dev_only=false / profile=production
+公開 URL          一時的な quick tunnel。実行後に閉鎖済みのため記録しない
+認証              リポジトリ同梱のデモ用トークンではなく、この実行のために生成したトークン
+
+== ホストから外部経由で叩いた結果 ==
+  GET  /http/            200  本文 'ok'
+  POST /http/echo        200  本文 'hello from the public internet'
+  GET  /http/status/404  404  関数が返した status をそのまま素通し
+  認証ヘッダなし         401
+
+== 実行証跡（最後の invocation） ==
+  invocation        inv_01m2n1nd7jvtcb7rcmhsfehqz3
+  status            succeeded  http_status 404
+  guest_boot_id     2ecaed19-b1b5-4a66-8903-ab4050a0964c
+  host_pid          327221
+  firecracker       v1.17.0
+  environment_boot  9873 ms
+  runtime_init      653 ms
+  handler           149 ms
+  total             10944 ms
+
+計測は Apple M4 上の Lima VM による入れ子仮想化。参考値であり SLA ではない。
