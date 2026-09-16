@@ -23,7 +23,7 @@
 | `SecretProvider`（`secret.rs`） | `binding_ref` → `SecretValue`。値は HelloAck の env にだけ載る | `packages/secrets`（`SecretsRepository`、`SecretPath`、`SecretValue`） | adapter candidate |
 | `IdentityProvider`（`identity.rs`） | Bearer → `Principal{tenant_id, roles}` | `packages/auth`（`Executor`、`ServiceAccount`、`WorkloadIdentity`、`api_key.rs`、`access_token.rs`）、`platform/foundation/value_object`（`TenantId`） | adapter candidate |
 | `UsageSink`（`usage.rs`） | host 観測の `UsageEvent` 受け取り（`event_id` で重複排除） | `packages/compute/domain/src/cloud_app_billing.rs`、`cloud_app_build_charge.rs`、`packages/audit` | reference（課金は非対象） |
-| repositories（`crates/application`。P1 は in-memory + `state.json`） | Function / Revision / Alias / Invocation / Environment の永続化 | `packages/compute/domain/src/repository.rs`、`job_run.rs::JobRunRepository`、`packages/compute/migrations/` | reference（TiDB 永続化は P1 非対象） |
+| repositories（`crates/application`。P1 は in-memory + `state.json`） | Function / Revision / Alias / Invocation / Environment の永続化 | `packages/compute/domain/src/repository.rs`、`job_run.rs::JobRunRepository`、`packages/compute/migrations/` | reference（TiDB 永続化は P1 非対象。P2 以降の方針は `docs/adr/0003-execution-state-persistence.md`: control-plane と cell 局所状態を port で分け、プロトタイプは埋め込み SQLite。TiDB は同じ trait の将来 adapter に据え置く） |
 
 ## 3. 領域別の棚卸し
 
@@ -42,7 +42,7 @@
 | 失敗分類 | `ProviderFailureCategory{InfrastructureFailure, BuildFailure, UserConfigurationError, Timeout, Cancelled, Unknown}` + `is_retryable()`。本リポジトリの `ErrorClass`（`crates/domain/src/invocation.rs`）はこれより細かく、`OutcomeUnknown` を「自動再実行しない terminal」として別立てにしている |
 | 分類 | **reference** |
 | 対応する port / 型 | `crates/domain/src/ids.rs`（同じ `<prefix>_<ulid>` 規約。`TenantId` は `tn_` を再利用し、本リポジトリは tenant を発行しない）、`ExecutionEnvironment` / `InvocationAttempt` ≈ JobRun、`ErrorClass` ≈ `ProviderFailureCategory` |
-| 注意 | **prefix 衝突**: tachyon-apps の `env_` は `EnvironmentVariableId`、本リポジトリの `env_` は `ExecutionEnvironment`（`crates/domain/src/ids.rs`）。両者は別ストアなので P1 では問題にならないが、同じ DB / ログ基盤に流す前に必ず解消する（本リポジトリ側はまだ永続データが無い）。決定は PLT-4618 の担当に委ねる |
+| 注意 | **prefix 衝突**: tachyon-apps の `env_` は `EnvironmentVariableId`、本リポジトリの `env_` は `ExecutionEnvironment`（`crates/domain/src/ids.rs`）。両者は別ストアなので P1 では問題にならないが、同じ DB / ログ基盤に流す前に必ず解消する。決定は `docs/adr/0003-execution-state-persistence.md`「結果」: 本リポジトリが自分の store（schema）を所有する限り rename せず、同じ store に流す場合にだけ出所で修飾する（PLT-4618） |
 
 ### 3.2 `packages/compute` scheduler
 
@@ -146,7 +146,7 @@
 | `packages/compute/domain/src/{cron_job, custom_domain, deploy_hook, app_transfer, template_catalog, framework_detection, wrangler_config, ...}.rs` | Cloud Apps 製品機能。P1 非対象（cron / Console UI は `docs/architecture.md` §6） |
 | `packages/{iac, payment, pricing, onboarding, notification, ...}` | プロトタイプの範囲外 |
 | `cluster/{gke-autopilot, n1-aws, n1-aws-bootstrap, intranet, developer-app, ...}` | 既存 cluster / ネットワーク運用。独立リポジトリで縦断を通す目的に無関係。内部ホスト名は本リポジトリに持ち込まない |
-| `packages/runner-controller/src/terminal_outbox.rs`、session PVC GC | Kubernetes 固有の耐久化。P1 の gateway は単一プロセスで、Invocation ledger を `state.json` に持つ |
+| `packages/runner-controller/src/terminal_outbox.rs`、session PVC GC | Kubernetes 固有の耐久化。P1 の gateway は単一プロセスで、Invocation ledger を `state.json` に持つ（`state.json` は台帳であって調整には使っていない。複数 dispatcher が同じ slot を争う P2 の要求は `docs/adr/0003-execution-state-persistence.md` で扱う） |
 
 ## 4. 再利用しないと決めた点（PLT-4616 への入力）
 
@@ -208,7 +208,7 @@ PLT-4615（検証環境）と PLT-4621（Firecracker provider）はこのプロ�
 
 | # | 内容 | 担当 |
 |---|---|---|
-| 1 | `env_` prefix の衝突（§3.1 注意） | PLT-4618 |
+| 1 | 解消済み（方針）: `env_` prefix の衝突（§3.1 注意）は rename せず、本リポジトリが自分の store（schema）を所有して tachyon-apps と table 空間を共有しないことで扱う。同じ store に流す場合にだけ出所で修飾する。`docs/adr/0003-execution-state-persistence.md`「結果」 | PLT-4618 |
 | 2 | `SecretProvider` adapter で `binding_ref` に path + field をどう符号化するか（§3.6） | PLT-4623 以降 |
 | 3 | Kata / Cloud Hypervisor adapter を書く場合の bridge transport（vsock が Kubernetes 経由で使えるか） | PLT-4616 の「残る測定」 |
 | 4 | 解消済み: `ArtifactStore` port は tenant を持たないままだが、`POST /v1/artifacts` が `(tenant_id, digest)` の所有を `state.json`（`artifact_owners`）に記録し、revision は自 tenant が upload した digest しか参照できない（他 tenant だけが upload した digest は存在しない digest と同じ扱い）。実装は `crates/application/src/services/artifact.rs`（`ArtifactService::upload`、`owned_artifact`）。`docs/threat-model.md` §14-1 | PLT-4620 |

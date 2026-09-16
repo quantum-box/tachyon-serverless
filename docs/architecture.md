@@ -162,6 +162,7 @@ value = "s3cr3t-a"
 9. ログは invocation 単位で `Limits` の行数・bytes 上限を守り、超過分は `dropped = true` で観測できるようにする。
 10. 「動いた」証跡: 環境の `BootEvidence`（guest_boot_id, host_pid, provider details）を Invocation の attempt に残し、API と CLI で表示する。
 11. 再起動で「開始したかもしれない」ものを `Failed` にしない。dispatch 済みは `OutcomeUnknown`、未 dispatch だけ `Failed`（§4「起動時の後始末」）。孤児環境の回収は listener を開ける前に済ませる。
+12. 永続化は P1 では in-memory + `state.json` の write-through（`crates/application/src/repository.rs`）で、調整（coordination）には使っていない。環境再利用・autoscaling・scale-to-zero が要求する複数プロセス間の原子性（slot 取得、Lease の期限、pool membership、reuse key 検索、Idempotency binding）は現在の store では表現できない。方針は `docs/adr/0003-execution-state-persistence.md`（control-plane と cell 局所状態を port で分け、プロトタイプは 1 file の埋め込み SQLite に載せる。TiDB は将来の adapter で §6 のとおり非対象のまま）。
 
 ## 6. 非対象（P1）
 
