@@ -398,6 +398,16 @@ fn print_attempt(a: &AttemptResponse, p: &mut Printer<'_>) -> Result<(), CliErro
         opt_ms(&t.response_ms),
         opt_ms(&t.total_ms),
     ))?;
+    // A warm start booted nothing; what it did cost is the resume and the
+    // readiness check, so it gets its own line instead of being read off two
+    // zeros (PLT-4633).
+    if t.resume_ms.is_some() || t.readiness_ms.is_some() {
+        p.line(format!(
+            "     warm start: resume={} readiness={}",
+            opt_ms(&t.resume_ms),
+            opt_ms(&t.readiness_ms),
+        ))?;
+    }
     let ev = &a.boot_evidence;
     let host_pid = ev
         .get("host_pid")

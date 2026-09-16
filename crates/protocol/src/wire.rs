@@ -115,6 +115,15 @@ pub enum GuestMessage {
     Heartbeat {
         ts_ms: u64,
     },
+    /// Answer to [`HostMessage::Ping`], carrying the nonce back unchanged.
+    ///
+    /// Sent by the bridge's own frame loop, so it proves that the guest is
+    /// being scheduled and that the bridge is still reading its end of the
+    /// connection — which is exactly what the host has to know after resuming
+    /// a quiesced environment (protocol version 2, docs/protocol.md §A).
+    Pong {
+        nonce: u64,
+    },
 }
 
 /// Messages sent by the host to the guest bridge.
@@ -149,10 +158,33 @@ pub enum HostMessage {
         attempt_id: String,
         epoch: u64,
         event_type: String,
-        /// Absolute deadline, milliseconds since Unix epoch.
+        /// Absolute deadline, milliseconds since Unix epoch, **in the host's
+        /// clock**. Informational for the guest: the host is what enforces it.
         deadline_ms: u64,
+        /// Milliseconds left until `deadline_ms` when the host wrote this
+        /// frame.
+        ///
+        /// The bridge derives the deadline it publishes to the user process
+        /// from this (`guest now + remaining_ms`) rather than from
+        /// `deadline_ms`, because a guest that was quiesced has a clock that
+        /// stopped with it: after a resume of arbitrary length, an absolute
+        /// host timestamp means nothing in the guest's frame and the guest
+        /// would compute a deadline that is wrong by the length of the pause
+        /// (protocol version 2, docs/protocol.md §A and §B).
+        remaining_ms: u64,
         trace_id: String,
         payload: serde_json::Value,
+    },
+    /// Liveness probe. The bridge answers with [`GuestMessage::Pong`] carrying
+    /// the same nonce and does nothing else; it never reaches the user
+    /// process.
+    ///
+    /// The host uses it as the readiness check of a resumed environment: a
+    /// quiesced guest cannot answer, so an answer is evidence that the guest
+    /// is running again rather than an assumption that it is
+    /// (docs/architecture.md §4).
+    Ping {
+        nonce: u64,
     },
     /// Cooperative cancellation. The bridge signals the user process and,
     /// after `grace_ms`, kills it. The host terminates the environment anyway.
@@ -209,6 +241,7 @@ impl fmt::Debug for HostMessage {
                 epoch,
                 event_type,
                 deadline_ms,
+                remaining_ms,
                 trace_id,
                 payload,
             } => f
@@ -218,9 +251,11 @@ impl fmt::Debug for HostMessage {
                 .field("epoch", epoch)
                 .field("event_type", event_type)
                 .field("deadline_ms", deadline_ms)
+                .field("remaining_ms", remaining_ms)
                 .field("trace_id", trace_id)
                 .field("payload", payload)
                 .finish(),
+            HostMessage::Ping { nonce } => f.debug_struct("Ping").field("nonce", nonce).finish(),
             HostMessage::Cancel {
                 attempt_id,
                 grace_ms,
@@ -306,6 +341,7 @@ mod tests {
             epoch: 1,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: 42,
+            remaining_ms: 30_000,
             trace_id: "t".into(),
             payload: serde_json::json!({"name": "x"}),
         };
@@ -313,6 +349,49 @@ mod tests {
         let frame = r.next().await.unwrap().unwrap();
         let back: HostMessage = decode_message(&frame).unwrap();
         assert_eq!(back, msg);
+    }
+
+    /// PLT-4633 (review F2 and F5): protocol version 2 carries the liveness
+    /// probe the host needs after a resume, and the time left that a guest
+    /// with a stopped clock needs instead of an absolute host timestamp. Both
+    /// survive the wire unchanged.
+    #[test]
+    fn version_2_carries_the_probe_and_the_remaining_time() {
+        let ping = HostMessage::Ping { nonce: 7 };
+        let back: HostMessage = decode_message(&encode_message(&ping).unwrap()).unwrap();
+        assert_eq!(back, ping);
+        assert_eq!(
+            String::from_utf8(encode_message(&ping).unwrap().to_vec()).unwrap(),
+            r#"{"type":"ping","nonce":7}"#
+        );
+
+        let pong = GuestMessage::Pong { nonce: 7 };
+        let back: GuestMessage = decode_message(&encode_message(&pong).unwrap()).unwrap();
+        assert_eq!(back, pong);
+
+        // The nonce is what pairs an answer with its probe: a `Pong` from an
+        // earlier probe must be distinguishable from the one being waited for.
+        assert_ne!(back, GuestMessage::Pong { nonce: 8 });
+
+        let invoke = HostMessage::Invoke {
+            invocation_id: "inv_1".into(),
+            attempt_id: "att_1".into(),
+            epoch: 3,
+            event_type: "tachyon.invoke.v1".into(),
+            deadline_ms: 1_700_000_000_000,
+            remaining_ms: 25_000,
+            trace_id: "t".into(),
+            payload: serde_json::json!({}),
+        };
+        let encoded = encode_message(&invoke).unwrap();
+        assert!(
+            String::from_utf8(encoded.to_vec())
+                .unwrap()
+                .contains(r#""remaining_ms":25000"#)
+        );
+        let back: HostMessage = decode_message(&encoded).unwrap();
+        assert_eq!(back, invoke);
+        assert!(format!("{invoke:?}").contains("remaining_ms: 25000"));
     }
 
     #[test]

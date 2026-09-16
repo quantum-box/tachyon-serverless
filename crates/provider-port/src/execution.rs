@@ -35,6 +35,22 @@ impl Support {
     pub fn is_supported(&self) -> bool {
         matches!(self, Self::Supported)
     }
+    /// True while a capability has code behind it that nobody has measured.
+    /// Callers that gate on a capability must treat this as "no" unless an
+    /// operator has explicitly opted into a measurement run
+    /// (docs/architecture.md §4).
+    pub fn is_unverified(&self) -> bool {
+        matches!(self, Self::Unverified { .. })
+    }
+    /// Stable machine-readable status name, the same value `serde` writes for
+    /// the tag: `supported` | `unsupported` | `unverified`.
+    pub fn status_str(&self) -> &'static str {
+        match self {
+            Self::Supported => "supported",
+            Self::Unsupported { .. } => "unsupported",
+            Self::Unverified { .. } => "unverified",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,7 +143,29 @@ pub enum TerminateReason {
     InitFailed,
     Crashed,
     Shutdown,
+    /// The environment was quiesced ([`ExecutionProvider::idle_quiesce`]) when
+    /// it was terminated: it sat in the idle pool and its guest is not being
+    /// scheduled.
+    ///
+    /// Such a guest cannot read a `Shutdown` frame and cannot power itself
+    /// off, so the host does not send it one and implementations must **not**
+    /// wait for a self-initiated exit: waiting only spends the whole grace
+    /// period on a guest that could never use it (PLT-4633 review F3).
+    Quiesced,
     Reconcile,
+}
+
+impl TerminateReason {
+    /// Whether the guest may still shut itself down, so a provider should wait
+    /// for it before killing the process.
+    ///
+    /// Exactly two reasons qualify: the host sent a `Shutdown` frame to a
+    /// *running* guest and gave it a chance to act on it. Everything else —
+    /// a timeout, a crash, a reconcile, and a [`TerminateReason::Quiesced`]
+    /// environment whose vCPUs are stopped — is killed straight away.
+    pub fn waits_for_the_guest(&self) -> bool {
+        matches!(self, Self::Completed | Self::Shutdown)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -219,6 +257,54 @@ pub trait ExecutionProvider: Send + Sync {
         environment_id: &EnvironmentId,
         reason: TerminateReason,
     ) -> Result<TerminateReport, ProviderError>;
+
+    /// Quiesce an environment that is entering the idle pool: stop it
+    /// consuming CPU while it waits for the next invocation, without losing
+    /// the guest's state or the open bridge connection.
+    ///
+    /// Called exactly once when an environment enters the pool, and paired
+    /// with exactly one [`ExecutionProvider::idle_resume`] when it is claimed
+    /// again (docs/architecture.md §4). Implementations must be idempotent: an
+    /// environment that is already quiesced is `Ok`, because that is the state
+    /// the caller asked for.
+    ///
+    /// `Err` means the environment is **not** quiesced. The pool then does not
+    /// pool it at all and falls back to terminating it, so a failure here can
+    /// never leave a half-paused environment where an invocation could land.
+    ///
+    /// The default implementation reports [`ProviderError::Unavailable`], so a
+    /// provider without idle support compiles unchanged — and is gated off
+    /// anyway, because it cannot honestly report the capability.
+    ///
+    /// **Capability rule.** A provider may report
+    /// [`Capabilities::idle_quiesce`] as [`Support::Supported`] only when this
+    /// method is implemented *and* the pause/resume cycle has been measured on
+    /// real hardware with the result recorded under `docs/evidence/`. Code
+    /// without a measurement is [`Support::Unverified`], which the pool
+    /// refuses unless an operator opts into a measurement run
+    /// (`[pool] allow_unverified_idle`).
+    async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        Err(ProviderError::Unavailable(format!(
+            "provider `{}` does not implement idle_quiesce (environment {environment_id})",
+            self.kind().as_str()
+        )))
+    }
+
+    /// Resume a quiesced environment so the next invocation can be dispatched
+    /// into it. Idempotent, like [`ExecutionProvider::idle_quiesce`].
+    ///
+    /// `Err` means the environment is **not** running again. The caller must
+    /// never dispatch into an environment whose resume was not confirmed: the
+    /// pool retires it and starts a cold one instead.
+    ///
+    /// The same capability rule applies to [`Capabilities::idle_resume`]:
+    /// `Supported` requires an implementation *and* a measurement.
+    async fn idle_resume(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        Err(ProviderError::Unavailable(format!(
+            "provider `{}` does not implement idle_resume (environment {environment_id})",
+            self.kind().as_str()
+        )))
+    }
 
     async fn observe_environment(
         &self,

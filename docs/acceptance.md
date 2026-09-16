@@ -1,6 +1,6 @@
-# 受入チェックリスト（PLT-4613〜PLT-4630、PLT-4632）
+# 受入チェックリスト（PLT-4613〜PLT-4630、PLT-4632、PLT-4633）
 
-- 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4632
+- 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4632 と PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
 - 状態の記録日: 2026-09-16（統合ブランチ `feat/serverless-prototype-p1` の commit `8555e34` 以降（2026-09-16 のレビュー指摘の修正を統合した後。E2E はこの統合後の commit `95af2ba` で再実行）のコード・テスト・`docs/evidence/` を読んで更新）
 
@@ -262,7 +262,7 @@ KVM の記録に共通する制約:
 
 ## PLT-4632 ExecutionEnvironment pool・再利用キー・reconciler
 
-環境の再利用は二重の gate の内側にある。provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と申告し、かつ `[pool] enabled = true` のときだけ有効になる。Firecracker と process はどちらも `Unsupported` を返し、`[pool]` の既定は無効なので、**出荷している両 provider の挙動は P1 と同じ destroy-after-invoke のまま**である。したがって本節に KVM 実機の記録はなく、検証は fake provider による自動テストで行っている。
+環境の再利用は二重の gate の内側にある。provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と申告し、かつ `[pool] enabled = true` のときだけ有効になる。process は `Unsupported` のままで、Firecracker は PLT-4633 で休止・再開を実装し、実機計測を経て `Supported` になった（次節）。`[pool]` の既定は無効なので、**既定の挙動は P1 と同じ destroy-after-invoke のまま**である。本節の検証は fake provider による自動テストで行っており、実機の休止・再開は次節に記録する。
 
 | # | 受入条件 | 状態 | 証跡 |
 |---|---|---|---|
@@ -278,8 +278,27 @@ KVM の記録に共通する制約:
 | 10 | secret 値そのものが再利用キーや台帳へ入らない | 実装済み | `crates/application/src/services/pool.rs::the_secret_generation_is_salted_and_unambiguous`（プロセスごとの salt 付き digest） |
 | 11 | release と claim が競合しても、session の無い行を掴まない | 実装済み | `crates/application/src/services/pool.rs::a_claim_racing_a_release_never_takes_a_row_without_its_session` |
 | 12 | 再試行に必要な間だけ payload を保持する | 実装済み | `crates/application/src/services/invoke.rs::a_dispatched_payload_is_retained_only_while_a_cold_retry_can_need_it` |
-| 13 | KVM 実機での再利用 | 未検証 | 現行 provider は `idle_quiesce` / `idle_resume` が `Unsupported` のため再利用経路に入らない。実機で測るには provider 側の休止・再開の実装（PLT-4633）が要る |
+| 13 | KVM 実機での再利用 | 実装済み・KVM実測あり | `docs/evidence/warm-20260916T162532Z/summary.txt`（6 invocation 中 5 が warm、同一環境を 6 epoch 再利用）。詳細は次節 |
 | 14 | 複数プロセス間での slot・lease・pool membership の原子性 | 未着手 | pool は 1 プロセス内。`docs/adr/0003-execution-state-persistence.md` の方針に沿って PLT-4631 で扱う |
+
+## PLT-4633 idle 休止・再開（warm 再利用の実機計測）
+
+休止・再開は Firecracker の `PATCH /vm {"state": "Paused"/"Resumed"}` で実装している（`crates/providers/firecracker/src/provider.rs`）。pool は Idle 行を公開する前に休止し、払い出す前に再開してから guest に `Ping` を送り、`Pong` が返らない環境は配らずに retire する。計測は `scripts/kvm/measure-warm.sh`（`docs/kvm.md` §3.7）で取り、証跡は `docs/evidence/warm-20260916T162532Z/`。この証跡をもって `idle_quiesce` / `idle_resume` を `Unverified` から `Supported` に上げた（`docs/adr/0001` §「決定」5）。`[pool]` の既定は off のままなので、既定の挙動は変わらない。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 実機で休止と再開が往復し、同じ環境が再利用される | 実装済み・KVM実測あり | `docs/evidence/warm-20260916T162532Z/summary.txt`: 6 invocation 中 5 が warm、環境は 1 つを 6 epoch |
+| 2 | warm が cold より速いことを実測で示す | 実装済み・KVM実測あり | `docs/evidence/warm-20260916T162532Z/comparison.json`: cold `total_ms` 14663 / warm 230（中央値、差 14433）、`resume_ms` 9、`readiness_ms` 9 |
+| 3 | 休止中の環境が host の CPU を消費しない | 実装済み・KVM実測あり | `docs/evidence/warm-20260916T162532Z/paused-vmm.json`: 3 秒間の CPU tick 0、state `Sl`。RSS は 38 MiB のままで、**休止は memory を返さない** |
+| 4 | 再開後、guest が応答することを確かめてから dispatch する | 実装済み | protocol v2 の `Ping` / `Pong`（`docs/protocol.md` §A）、`crates/application/src/bridge_session.rs::the_readiness_probe_only_passes_when_the_guest_answers`、`crates/application/tests/pipeline.rs::a_pooled_guest_that_stops_answering_is_never_dispatched_into` |
+| 5 | 再開が拒否されたら warm を諦めて cold に落ちる | 実装済み | `crates/providers/firecracker/src/provider.rs::a_refusal_is_success_only_for_the_state_that_was_requested`、`crates/application/src/services/pool.rs` の retire 経路 |
+| 6 | 休止を client の応答経路から外す | 実装済み | `crates/application/src/services/pool.rs::the_quiesce_runs_after_the_caller_is_gone_without_publishing_early`、`crates/application/tests/pipeline.rs::a_slow_quiesce_does_not_hold_up_the_callers_response` |
+| 7 | 休止した guest に Shutdown を送って待たない | 実装済み | `TerminateReason::Quiesced`、`crates/application/src/services/pool.rs::a_paused_environment_is_reaped_without_waiting_for_its_guest` |
+| 8 | 再開後の deadline が休止時間の分だけ伸びない | 実装済み | `HostMessage::Invoke.remaining_ms`、`crates/runtime-bridge/src/session.rs::a_resumed_guest_gets_a_deadline_in_its_own_clock` |
+| 9 | 計測専用 switch が本番 profile で拒否される | 実装済み | `crates/application/src/config.rs::the_measurement_switch_is_refused_under_production` |
+| 10 | 証跡が gate の状態を記録する | 実装済み・KVM実測あり | `docs/evidence/warm-20260916T162532Z/summary.json` の `reuse`（`enabled=true`、`verified=false`、`measurement_only=true`）。昇格前の計測であることが記録に残る |
+| 11 | x86_64 / bare metal での計測 | 未検証 | 記録は aarch64 の nested virtualization のみ（`docs/kvm.md` §5） |
+| 12 | 長時間 idle のあとの再開、N ≥ 20 の分布 | 未検証 | 今回の記録は 1 環境・warm 5 回。TTL 満了と drain の回収は fake provider のテストのみ |
 
 ## ADR-0001 残る測定の状況
 

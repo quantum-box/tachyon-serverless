@@ -338,6 +338,7 @@ async fn drive(
             epoch: 1,
             event_type: event_types::JSON.to_owned(),
             deadline_ms: now_ms() + ms(handler_budget),
+            remaining_ms: ms(handler_budget),
             trace_id: "fc-smoke".to_owned(),
             payload,
         },

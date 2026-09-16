@@ -87,8 +87,14 @@ pub struct InvokeParams {
     pub attempt_id: AttemptId,
     pub epoch: u64,
     pub event_type: String,
-    /// Absolute deadline, milliseconds since Unix epoch.
+    /// Absolute deadline, milliseconds since Unix epoch, in the host's clock.
     pub deadline_ms: u64,
+    /// Milliseconds left until `deadline_ms` at the moment of the dispatch.
+    ///
+    /// The guest computes the deadline it shows the user process from this,
+    /// because a guest that was quiesced has a clock that stopped with it
+    /// (docs/protocol.md §A). The host keeps enforcing `deadline_ms` itself.
+    pub remaining_ms: u64,
     pub trace_id: String,
     pub payload: serde_json::Value,
 }
@@ -423,6 +429,89 @@ impl BridgeSession {
         drained
     }
 
+    /// Ask the guest whether it is there, and wait for its answer until
+    /// `deadline`. `true` only when *this* probe was answered.
+    ///
+    /// This is the one part of the readiness check that is not an inference
+    /// from what the host already knew (PLT-4633 review F2).
+    /// [`Self::drain_stale`] only consumes what is already buffered and
+    /// [`Self::is_usable`] only reports what earlier frames revealed, so a
+    /// guest that died or stopped being scheduled while the environment was
+    /// quiesced looks exactly like a healthy one. A `Ping` has to travel into
+    /// the guest and a `Pong` has to come back out, which a resumed guest does
+    /// in microseconds and a stopped one never does.
+    ///
+    /// The bridge answers from its own frame loop, so this proves that the
+    /// guest is scheduled and that the bridge is reading — not that the user
+    /// process is healthy; a user process that died has already queued
+    /// `Exited`, which this drains and reports as unusable, like everywhere
+    /// else.
+    ///
+    /// A failed probe is never fatal to the invocation: the caller retires the
+    /// environment and starts cold.
+    pub async fn probe_ready(&mut self, deadline: Instant) -> bool {
+        if !self.is_usable() {
+            return false;
+        }
+        let nonce = PROBE_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Err(e) = self.send(&HostMessage::Ping { nonce }).await {
+            tracing::warn!(
+                environment_id = %self.environment_id,
+                error = %e,
+                "the readiness probe could not be written"
+            );
+            return false;
+        }
+        loop {
+            match self.next_message(deadline, "readiness").await {
+                Ok(GuestMessage::Pong { nonce: answered }) if answered == nonce => return true,
+                // An answer to an earlier probe on this session: not evidence
+                // about this one, so keep waiting.
+                Ok(GuestMessage::Pong { .. }) => {}
+                Ok(GuestMessage::Log {
+                    stream,
+                    phase,
+                    attempt_id,
+                    line,
+                    ..
+                }) => self.logs.forward_guest(stream, phase, attempt_id, &line),
+                Ok(GuestMessage::Response {
+                    attempt_id, epoch, ..
+                })
+                | Ok(GuestMessage::Error {
+                    attempt_id, epoch, ..
+                }) => {
+                    self.stale_results += 1;
+                    tracing::warn!(
+                        environment_id = %self.environment_id,
+                        %attempt_id,
+                        epoch,
+                        "dropping a result that arrived during the readiness probe"
+                    );
+                }
+                Ok(GuestMessage::Exited { exit_code, signal }) => {
+                    self.guest_exited = true;
+                    tracing::info!(
+                        environment_id = %self.environment_id,
+                        ?exit_code,
+                        ?signal,
+                        "the guest process exited; the readiness probe fails"
+                    );
+                    return false;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        environment_id = %self.environment_id,
+                        error = %e,
+                        "the guest did not answer the readiness probe"
+                    );
+                    return false;
+                }
+            }
+        }
+    }
+
     /// Re-point a pooled session at the next attempt: record the environment's
     /// new epoch, attribute log lines to the new invocation and drop the
     /// previous lease, so a frame the previous attempt left behind is counted
@@ -498,6 +587,7 @@ impl BridgeSession {
             epoch: params.epoch,
             event_type: params.event_type,
             deadline_ms: params.deadline_ms,
+            remaining_ms: params.remaining_ms,
             trace_id: params.trace_id,
             payload: params.payload,
         })?;
@@ -565,7 +655,9 @@ impl BridgeSession {
                     line,
                     ..
                 } => self.logs.forward_guest(stream, phase, attempt_id, &line),
-                GuestMessage::Heartbeat { .. } | GuestMessage::Ready { .. } => {}
+                GuestMessage::Heartbeat { .. }
+                | GuestMessage::Ready { .. }
+                | GuestMessage::Pong { .. } => {}
                 other => {
                     tracing::warn!(
                         environment_id = %self.environment_id,
@@ -716,8 +808,13 @@ fn message_name(m: &GuestMessage) -> &'static str {
         GuestMessage::Error { .. } => "error",
         GuestMessage::Exited { .. } => "exited",
         GuestMessage::Heartbeat { .. } => "heartbeat",
+        GuestMessage::Pong { .. } => "pong",
     }
 }
+
+/// Source of the probe nonces of this process. Only has to make two probes on
+/// one session distinguishable, so a counter is enough.
+static PROBE_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 #[cfg(test)]
 mod tests {
@@ -885,6 +982,7 @@ mod tests {
             epoch: 7,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: 0,
+            remaining_ms: 1_000,
             trace_id: "t".into(),
             payload: serde_json::json!({}),
         })
@@ -1020,6 +1118,7 @@ mod tests {
             epoch: 1,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: 0,
+            remaining_ms: 1_000,
             trace_id: "t".into(),
             payload: serde_json::json!({}),
         })
@@ -1038,6 +1137,7 @@ mod tests {
             epoch: 1,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: 0,
+            remaining_ms: 1_000,
             trace_id: "t".into(),
             payload,
         }
@@ -1171,6 +1271,7 @@ mod tests {
             epoch: 1,
             event_type: "tachyon.invoke.v1".into(),
             deadline_ms: 0,
+            remaining_ms: 1_000,
             trace_id: "t".into(),
             payload: serde_json::json!({}),
         })
@@ -1196,6 +1297,106 @@ mod tests {
         assert_eq!(q.records[0].attempt_id, Some(att));
         assert_eq!(q.records[0].phase, LogPhase::Handler);
         guest_task.abort();
+    }
+
+    /// PLT-4633 (review F2): the readiness probe is the only part of the check
+    /// that asks the guest anything. A guest that answers is ready; a guest
+    /// that is still connected but no longer answering is not, and saying so
+    /// costs one bounded wait instead of one hung invocation.
+    #[tokio::test]
+    async fn the_readiness_probe_only_passes_when_the_guest_answers() {
+        // 1. A guest that answers.
+        let (host, guest) = tokio::io::duplex(64 * 1024);
+        let env = EnvironmentId::generate();
+        let (_store, logs, _) = setup(&env);
+        let mut g = Guest::new(guest);
+        let e2 = env.clone();
+        let answering = tokio::spawn(async move {
+            g.send(&hello(&e2)).await;
+            g.recv().await.unwrap();
+            while let Some(HostMessage::Ping { nonce }) = g.recv().await {
+                g.send(&GuestMessage::Pong { nonce }).await;
+            }
+        });
+        let (mut s, _) = BridgeSession::handshake(
+            Box::new(host),
+            &env,
+            1,
+            params(),
+            logs.clone(),
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+        assert!(
+            s.probe_ready(Instant::now() + Duration::from_secs(2)).await,
+            "a guest that answers the probe is ready"
+        );
+        assert!(s.is_usable());
+        // Twice in a row: each probe waits for its own answer.
+        assert!(s.probe_ready(Instant::now() + Duration::from_secs(2)).await);
+        answering.abort();
+
+        // 2. A guest that is connected but no longer reads its end: nothing is
+        //    queued for the host to find, so only the probe can tell.
+        let (host, guest) = tokio::io::duplex(64 * 1024);
+        let mut g = Guest::new(guest);
+        let e2 = env.clone();
+        let silent = tokio::spawn(async move {
+            g.send(&hello(&e2)).await;
+            g.recv().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let (mut s, _) = BridgeSession::handshake(
+            Box::new(host),
+            &env,
+            1,
+            params(),
+            logs.clone(),
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(s.drain_stale().await, 0, "nothing is buffered");
+        assert!(s.is_usable(), "and the host cannot tell from what it knows");
+        assert!(
+            !s.probe_ready(Instant::now() + Duration::from_millis(200))
+                .await,
+            "a guest that does not answer is not ready"
+        );
+        silent.abort();
+
+        // 3. A guest whose user process exited answers the probe with its
+        //    queued `Exited` frame, which also makes the session unusable.
+        let (host, guest) = tokio::io::duplex(64 * 1024);
+        let mut g = Guest::new(guest);
+        let e2 = env.clone();
+        let exited = tokio::spawn(async move {
+            g.send(&hello(&e2)).await;
+            g.recv().await.unwrap();
+            g.send(&GuestMessage::Exited {
+                exit_code: Some(0),
+                signal: None,
+            })
+            .await;
+            std::future::pending::<()>().await;
+        });
+        let (mut s, _) = BridgeSession::handshake(
+            Box::new(host),
+            &env,
+            1,
+            params(),
+            logs,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+        assert!(
+            !s.probe_ready(Instant::now() + Duration::from_secs(1)).await,
+            "a guest that exited is not ready"
+        );
+        assert!(!s.is_usable());
+        exited.abort();
     }
 
     #[tokio::test]

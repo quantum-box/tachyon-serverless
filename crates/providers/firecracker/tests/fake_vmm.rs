@@ -188,6 +188,24 @@ mod fake {
                     serde_json::Value::Bool(Path::new(&format!("{uds_path}_{port}")).exists());
             }
             writeln!(record, "{entry}").unwrap();
+            // PLT-4633: the two answers a state change can get. Pausing is
+            // told "already paused" (which the provider must treat as the
+            // state it asked for) and resuming is refused outright.
+            if mode == "vm-fault" && path == "/vm" {
+                let fault = if body["state"] == "Paused" {
+                    r#"{"fault_message":"The microVM is already paused."}"#
+                } else {
+                    r#"{"fault_message":"fake: cannot resume"}"#
+                };
+                write!(
+                    conn,
+                    "HTTP/1.1 400 Bad Request\r\nServer: Firecracker API\r\nConnection: keep-alive\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    fault.len(),
+                    fault
+                )
+                .unwrap();
+                continue;
+            }
             if mode == "fail-api" && path == "/boot-source" {
                 let fault = r#"{"fault_message":"fake: The kernel file cannot be opened"}"#;
                 write!(
@@ -564,6 +582,77 @@ async fn full_lifecycle_with_fake_vmm() {
         .unwrap();
     assert!(!again.was_running);
     assert!(again.cleaned.is_empty());
+}
+
+/// PLT-4633: idle quiesce and resume reach the VMM as `PATCH /vm` with the
+/// documented body, and the bridge connection survives the pause — which is
+/// what makes a pooled session usable again without a second handshake.
+#[tokio::test]
+async fn idle_quiesce_and_resume_patch_the_vm_state() {
+    let f = fixture("normal");
+    let p = &f.provider;
+    let spec = spec(&f, Duration::from_secs(10));
+    let env_id = spec.environment_id.clone();
+    let paths = EnvPaths::new(&f.root.join("run"), env_id.as_str(), 5000);
+    let handle = p.create_environment(spec).await.expect("create");
+
+    p.idle_quiesce(&env_id).await.expect("quiesce");
+    p.idle_resume(&env_id).await.expect("resume");
+
+    let calls = read_api_log(&paths.dir);
+    let vm: Vec<&serde_json::Value> = calls.iter().filter(|c| c["path"] == "/vm").collect();
+    assert_eq!(vm.len(), 2, "one call each: {calls:?}");
+    assert_eq!(vm[0]["method"], "PATCH");
+    assert_eq!(vm[0]["body"], serde_json::json!({"state": "Paused"}));
+    assert_eq!(vm[1]["method"], "PATCH");
+    assert_eq!(vm[1]["body"], serde_json::json!({"state": "Resumed"}));
+
+    // The guest is still on the other end of the same stream.
+    let mut bridge = Framed::new(handle.stream, FrameCodec);
+    let frame = tokio::time::timeout(Duration::from_secs(5), bridge.next())
+        .await
+        .expect("hello in time")
+        .expect("stream open")
+        .expect("frame");
+    let hello: GuestMessage = decode_message(&frame).unwrap();
+    assert!(matches!(hello, GuestMessage::Hello { .. }), "{hello:?}");
+
+    // Once the environment is gone there is nothing left to pause.
+    drop(bridge);
+    p.terminate_environment(&env_id, TerminateReason::Timeout)
+        .await
+        .unwrap();
+    for r in [p.idle_quiesce(&env_id).await, p.idle_resume(&env_id).await] {
+        assert!(matches!(r, Err(ProviderError::NotFound(_))), "{r:?}");
+    }
+}
+
+/// A microVM already in the requested state is success (the caller got what it
+/// asked for); any other fault is an error the pool has to act on, and it says
+/// which request failed.
+#[tokio::test]
+async fn an_already_paused_vm_is_success_and_a_refused_resume_is_an_error() {
+    let f = fixture("vm-fault");
+    let p = &f.provider;
+    let spec = spec(&f, Duration::from_secs(10));
+    let env_id = spec.environment_id.clone();
+    let handle = p.create_environment(spec).await.expect("create");
+
+    p.idle_quiesce(&env_id)
+        .await
+        .expect("already paused is the state we asked for");
+
+    let err = p.idle_resume(&env_id).await.unwrap_err();
+    assert!(
+        matches!(&err, ProviderError::Internal(m) if m.contains("cannot resume")),
+        "{err}"
+    );
+    assert!(err.to_string().contains("PATCH /vm"), "{err}");
+
+    drop(handle);
+    p.terminate_environment(&env_id, TerminateReason::Timeout)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

@@ -66,7 +66,22 @@ fn host_message_name(m: &HostMessage) -> &'static str {
         HostMessage::Invoke { .. } => "invoke",
         HostMessage::Cancel { .. } => "cancel",
         HostMessage::Shutdown { .. } => "shutdown",
+        HostMessage::Ping { .. } => "ping",
     }
+}
+
+/// The deadline handed to the user process, expressed in the **guest's** clock.
+///
+/// The host sends both its own absolute deadline and `remaining_ms`, the time
+/// that was left when it wrote the frame. Only the second one can be used
+/// here: a guest that was quiesced has a clock that stopped with it, so after
+/// a resume of arbitrary length the host's absolute timestamp is ahead of the
+/// guest's clock by the whole pause and the user process would compute a
+/// deadline that is too generous by that much (PLT-4633 review F5). `now +
+/// remaining` is correct whether the guest was paused or not, and the host
+/// stays the authority: it enforces the real deadline and cancels regardless.
+fn guest_deadline_ms(now_ms: u64, remaining_ms: u64) -> u64 {
+    now_ms.saturating_add(remaining_ms)
 }
 
 /// Variant name of an outgoing frame for logging.
@@ -80,6 +95,7 @@ fn guest_message_name(m: &GuestMessage) -> &'static str {
         GuestMessage::Error { .. } => "error",
         GuestMessage::Exited { .. } => "exited",
         GuestMessage::Heartbeat { .. } => "heartbeat",
+        GuestMessage::Pong { .. } => "pong",
     }
 }
 
@@ -336,9 +352,14 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
                 Some(Err(e)) => break Outcome::ProtocolError(e.to_string()),
                 Some(Ok(frame)) => match decode_message::<HostMessage>(&frame) {
                     Err(e) => break Outcome::ProtocolError(format!("undecodable host frame: {e}")),
-                    Ok(HostMessage::Invoke { invocation_id, attempt_id, epoch, event_type, deadline_ms, trace_id, payload }) => {
+                    Ok(HostMessage::Invoke { invocation_id, attempt_id, epoch, event_type, deadline_ms: host_deadline_ms, remaining_ms, trace_id, payload }) => {
+                        // What the user process is told is derived from the
+                        // time left, not from the host's absolute timestamp:
+                        // this guest's clock may have been stopped while the
+                        // environment was quiesced (see `guest_deadline_ms`).
+                        let deadline_ms = guest_deadline_ms(now_ms(), remaining_ms);
                         let request = InvokeRequest { invocation_id, attempt_id, epoch, event_type, deadline_ms, trace_id, payload };
-                        info!(attempt_id = %request.attempt_id, epoch, "invoke received");
+                        info!(attempt_id = %request.attempt_id, epoch, host_deadline_ms, remaining_ms, deadline_ms, "invoke received");
                         if let Err(rejected) = api.dispatch(request) {
                             warn!(attempt_id = %rejected.attempt_id, "invoke rejected: an attempt is already in flight");
                             let _ = out_tx.send(GuestMessage::Error {
@@ -360,6 +381,14 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
                         kill_deadline = Some(Box::pin(tokio::time::sleep(Duration::from_millis(grace_ms))));
                     }
                     Ok(HostMessage::Shutdown { reason }) => break Outcome::Shutdown(reason),
+                    // Liveness probe: answered by this loop and nothing else.
+                    // The user process is not involved, so the answer means
+                    // exactly "this guest is scheduled and the bridge is
+                    // reading" — which is what the host needs to know after
+                    // resuming a quiesced environment.
+                    Ok(HostMessage::Ping { nonce }) => {
+                        let _ = out_tx.send(GuestMessage::Pong { nonce }).await;
+                    }
                     Ok(other) => warn!("ignoring unexpected {} frame after handshake", host_message_name(&other)),
                 },
             },
@@ -732,6 +761,46 @@ mod tests {
     async fn next_frame(host: &mut FramedRead<DuplexStream, FrameCodec>) -> Option<GuestMessage> {
         let frame = timeout(T, host.next()).await.expect("frame timeout")?;
         Some(decode_message(&frame.expect("valid frame")).expect("decodable frame"))
+    }
+
+    /// PLT-4633 (review F5): the deadline the user process sees is computed
+    /// from the time the host said was left, in this guest's own clock.
+    ///
+    /// A guest that was quiesced for a while comes back with a clock that is
+    /// behind the host's by the whole pause. Handing it the host's absolute
+    /// deadline would give the handler that pause for free — it would compute
+    /// "deadline − my now" and get too much — while the host cancels it at the
+    /// real deadline.
+    #[test]
+    fn a_resumed_guest_gets_a_deadline_in_its_own_clock() {
+        // Clocks in step: the two ways of computing it agree.
+        let host_now = 1_700_000_000_000u64;
+        let remaining = 30_000u64;
+        assert_eq!(
+            guest_deadline_ms(host_now, remaining),
+            host_now + remaining,
+            "an unpaused guest is unaffected"
+        );
+
+        // Paused for a minute: the guest's clock stopped with it.
+        let guest_now = host_now - 60_000;
+        let host_deadline = host_now + remaining;
+        let guest_deadline = guest_deadline_ms(guest_now, remaining);
+        assert_eq!(guest_deadline, guest_now + remaining);
+        assert_eq!(
+            guest_deadline.saturating_sub(guest_now),
+            remaining,
+            "the guest computes exactly the time the host said was left"
+        );
+        assert_eq!(
+            host_deadline.saturating_sub(guest_now),
+            remaining + 60_000,
+            "which the host's absolute deadline would have overstated by the pause"
+        );
+
+        // Degenerate inputs stay sane: no time left, and no overflow.
+        assert_eq!(guest_deadline_ms(guest_now, 0), guest_now);
+        assert_eq!(guest_deadline_ms(u64::MAX, 5), u64::MAX);
     }
 
     #[tokio::test]

@@ -195,7 +195,12 @@ async fn handler(
                     "kind": kind, "dev_only": dev_only, "isolation": isolation,
                     "capabilities": {"isolation": isolation, "dev_only": dev_only,
                         "create_terminate": {"status": "supported"},
+                        "idle_quiesce": {"status": "unsupported", "reason": "P1"},
+                        "idle_resume": {"status": "unsupported", "reason": "P1"},
                         "snapshot_create": {"status": "unsupported", "reason": "P1"}},
+                    "reuse": {"enabled": false, "verified": false,
+                        "reason": "the provider does not support idle quiesce and resume",
+                        "idle_quiesce": "unsupported", "idle_resume": "unsupported"},
                     "preflight": {"provider": kind, "ok": true,
                         "checks": [{"name": "bridge", "ok": true, "detail": "found"}]}
                 }),
@@ -893,8 +898,25 @@ async fn provider_and_health() {
     let mock = Mock::start(MockState::default()).await;
     let (code, out, err) = mock.tsls(&["provider"]).await;
     assert_eq!(code, ExitCode::Ok);
-    assert!(out.contains("kind       process"), "{out}");
+    // The key column is padded to the longest key, so match the row rather
+    // than a fixed amount of whitespace.
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("kind") && l.trim_end().ends_with("process")),
+        "{out}"
+    );
     assert!(out.contains("snapshot_create   unsupported  P1"), "{out}");
+    // PLT-4633: whether environments are reused, and why, is part of the
+    // provider view an operator reads.
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("environment_reuse") && l.contains("off")),
+        "{out}"
+    );
+    assert!(
+        out.contains("does not support idle quiesce and resume"),
+        "the reason is shown, not just the state: {out}"
+    );
     assert!(err.contains("NO isolation"), "{err}");
     let (code, out, _) = mock.tsls(&["health", "--json"]).await;
     assert_eq!(code, ExitCode::Ok);

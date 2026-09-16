@@ -1331,18 +1331,37 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
     }
 }
 
-/// docs/threat-model.md T03 (PLT-4623): the resolved secret value is handed
-/// to the guest in `HelloAck` but never appears in host logs, at any level,
-/// nor in the invocation log records.
-#[tokio::test]
-async fn secret_values_never_reach_host_logs() {
+/// Everything this test binary's pipeline logs, captured once for the whole
+/// process.
+///
+/// Deliberately **global** rather than a thread-local subscriber
+/// (`tracing::subscriber::set_default`): callsite interest is cached
+/// process-wide the first time a callsite is reached, so with a thread-local
+/// subscriber a callsite that another test in this binary reached first — on a
+/// thread with no subscriber installed — stays dark for the rest of the run.
+/// The capture is then empty and the secret-absence assertions below pass
+/// without having looked at anything. Which test gets there first depends on
+/// the scheduler, which makes that a flake; `tests/bootstrap_log.rs` avoids it
+/// by living in its own binary. Here the subscriber is installed globally,
+/// once, and the test looks for *its own* invocation ids in what was captured.
+static HOST_LOGS: std::sync::LazyLock<CapturedLogs> = std::sync::LazyLock::new(|| {
     let captured = CapturedLogs::default();
     let subscriber = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::TRACE)
         .with_ansi(false)
         .with_writer(captured.clone())
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("this test binary sets the global subscriber exactly once");
+    captured
+});
+
+/// docs/threat-model.md T03 (PLT-4623): the resolved secret value is handed
+/// to the guest in `HelloAck` but never appears in host logs, at any level,
+/// nor in the invocation log records.
+#[tokio::test]
+async fn secret_values_never_reach_host_logs() {
+    let captured = &*HOST_LOGS;
 
     let h = harness(
         vec![
@@ -1375,19 +1394,22 @@ async fn secret_values_never_reach_host_logs() {
 
     // The driver keeps running after `invoke` returns (terminate, usage, final
     // log line), so a loaded machine can reach this point before the pipeline
-    // has logged anything. Wait for the marker instead of racing it, otherwise
-    // the secret-absence assertions below could pass on an empty capture.
+    // has logged anything. Wait for *this test's own* invocations to appear
+    // instead of racing them: the capture is shared with the rest of the
+    // binary, and a marker another test wrote would let the secret-absence
+    // assertions below pass without this pipeline ever having been looked at.
+    let saw_this_pipeline = |text: &str| invocations.iter().all(|id| text.contains(id.as_str()));
     let mut text = captured.text();
     for _ in 0..100 {
-        if text.contains("invocation finished") {
+        if saw_this_pipeline(&text) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         text = captured.text();
     }
     assert!(
-        text.contains("invocation finished"),
-        "the subscriber captured the pipeline"
+        saw_this_pipeline(&text),
+        "the subscriber captured this pipeline"
     );
     assert!(
         !text.contains("demo-secret-value-a"),
@@ -2026,13 +2048,23 @@ async fn startup_reconcile_can_be_turned_off() {
 /// Reuse on, with room for two idle environments per reuse key.
 const POOL_ON: &str = "[pool]\nenabled = true\nmax_idle_per_revision = 2\nidle_ttl_seconds = 60\nmax_total_idle = 8\n";
 
+/// The same, plus the switch that accepts an idle capability nobody measured,
+/// so that the measurement can be taken (PLT-4633).
+const POOL_MEASURING: &str = "[pool]\nenabled = true\nallow_unverified_idle = true\nmax_idle_per_revision = 2\nidle_ttl_seconds = 60\nmax_total_idle = 8\n";
+
 /// A fake that reports both idle capabilities as `Supported` and whose guests
 /// serve any number of sequential attempts, i.e. the only provider in this
 /// repository that the pool will ever hand anything out for.
 fn warm_fake() -> Arc<FakeExecutionProvider> {
+    warm_fake_with(FakeProviderOptions::default())
+}
+
+/// The same, with the idle knobs a test needs: a resume that costs something,
+/// a quiesce that fails, a resume that fails.
+fn warm_fake_with(options: FakeProviderOptions) -> Arc<FakeExecutionProvider> {
     let fake = Arc::new(FakeExecutionProvider::with_options(FakeProviderOptions {
         warm_capable: true,
-        ..FakeProviderOptions::default()
+        ..options
     }));
     fake.set_default_script(Some(FakeGuestScript::EchoForever));
     fake
@@ -2074,6 +2106,19 @@ fn attempt_of(out: &InvokeOutcome) -> &tachyon_serverless_domain::InvocationAtte
     &out.detail.attempts[0].0
 }
 
+/// Invoke, then wait for the pool to finish taking the environment over.
+///
+/// `EnvironmentPool::release` hands the environment to the pool and returns, so
+/// the caller's response is not held up by the pause (PLT-4633 review F4). What
+/// the pool holds is therefore settled a moment after the invocation ends, and
+/// a test that asserts on it waits for that moment — the same wait a drain
+/// performs before it sweeps. Nothing else about the invocation changes.
+async fn invoke_pooled(h: &Harness, req: InvokeRequest) -> Result<InvokeOutcome, AppError> {
+    let out = h.app.invoke.invoke(req).await;
+    h.app.pool.settle().await;
+    out
+}
+
 fn environment_state(h: &Harness, id: &EnvironmentId) -> EnvironmentState {
     h.app.repos.environments.get(id).unwrap().unwrap().state
 }
@@ -2087,12 +2132,12 @@ async fn a_second_invocation_reuses_the_pooled_environment_as_a_warm_start() {
     let h = pool_harness(warm_fake(), POOL_ON);
     let (function, _) = deploy(&h, &h.a, "warm").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
-        .await
-        .unwrap();
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
     assert!(first.succeeded(), "{:?}", first.invocation().status);
     let cold = attempt_of(&first);
     assert_eq!(cold.start_kind, StartKind::Cold, "the first start is cold");
@@ -2103,12 +2148,12 @@ async fn a_second_invocation_reuses_the_pooled_environment_as_a_warm_start() {
     assert_eq!(environment_state(&h, &env_id), EnvironmentState::Idle);
     assert_eq!(h.fake.running(), vec![env_id.clone()]);
 
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
-        .await
-        .unwrap();
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
     assert!(second.succeeded(), "{:?}", second.invocation().status);
     assert_eq!(second.output, Some(serde_json::json!({"n": 2})));
     let warm = attempt_of(&second);
@@ -2140,13 +2185,90 @@ async fn a_second_invocation_reuses_the_pooled_environment_as_a_warm_start() {
     assert_eq!(environment_state(&h, &env_id), EnvironmentState::Idle);
 }
 
+/// A guest that holds its answer until the first `overlap_count` attempts are
+/// all in flight.
+///
+/// Two invocations that are *supposed* to overlap should overlap by
+/// construction: without this the test depends on the scheduler interleaving
+/// them, and a run where the first finishes (and is pooled) before the second
+/// starts would see a warm start and fail for a reason that is not the thing
+/// under test. Attempts after the first `overlap_count` answer immediately, so
+/// a later warm invocation is not left waiting for a barrier nobody else will
+/// reach.
+fn respond_when_all_are_in_flight(
+    overlap: Arc<tokio::sync::Barrier>,
+    overlap_count: usize,
+    seen: Arc<AtomicUsize>,
+) -> FakeGuestScript {
+    FakeGuestScript::Custom(Arc::new(move |ctx: CustomScriptContext| -> ScriptFuture {
+        let overlap = overlap.clone();
+        let seen = seen.clone();
+        Box::pin(async move {
+            let (r, w) = tokio::io::split(ctx.stream);
+            let mut reader = FramedRead::new(r, FrameCodec);
+            let mut writer = FramedWrite::new(w, FrameCodec);
+            let hello = GuestMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                bridge_version: "test-guest".into(),
+                environment_id: ctx.environment_id.to_string(),
+                guest_boot_id: Some("test-boot".into()),
+                architecture: "aarch64".into(),
+            };
+            if writer.send(encode_message(&hello).unwrap()).await.is_err() {
+                return;
+            }
+            if !matches!(reader.next().await, Some(Ok(_))) {
+                return;
+            }
+            let ready = encode_message(&GuestMessage::Ready { init_ms: 1 }).unwrap();
+            if writer.send(ready).await.is_err() {
+                return;
+            }
+            while let Some(Ok(frame)) = reader.next().await {
+                let answer = match decode_message::<HostMessage>(&frame) {
+                    Ok(HostMessage::Ping { nonce }) => GuestMessage::Pong { nonce },
+                    Ok(HostMessage::Invoke {
+                        attempt_id,
+                        epoch,
+                        payload,
+                        ..
+                    }) => {
+                        if seen.fetch_add(1, Ordering::SeqCst) < overlap_count {
+                            overlap.wait().await;
+                        }
+                        GuestMessage::Response {
+                            attempt_id,
+                            epoch,
+                            payload,
+                            handler_ms: Some(1),
+                        }
+                    }
+                    _ => continue,
+                };
+                if writer.send(encode_message(&answer).unwrap()).await.is_err() {
+                    return;
+                }
+            }
+        })
+    }))
+}
+
 /// Acceptance 2, end to end: while an attempt holds an environment it is
 /// `Busy`, and a concurrent invocation must boot its own instead of being
 /// handed the busy one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_busy_environment_is_never_handed_to_a_concurrent_invocation() {
     use tachyon_serverless_domain::StartKind;
-    let h = pool_harness(warm_fake(), POOL_ON);
+    let fake = warm_fake();
+    // Neither guest answers until both attempts are in flight, so the two
+    // invocations really are concurrent rather than usually concurrent.
+    let overlap = Arc::new(tokio::sync::Barrier::new(2));
+    fake.set_default_script(Some(respond_when_all_are_in_flight(
+        overlap,
+        2,
+        Arc::new(AtomicUsize::new(0)),
+    )));
+    let h = pool_harness(fake, POOL_ON);
     let (function, _) = deploy(&h, &h.a, "concurrent").await;
 
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
@@ -2177,13 +2299,15 @@ async fn a_busy_environment_is_never_handed_to_a_concurrent_invocation() {
     assert_eq!(h.fake.created().len(), 2);
 
     // Both are pooled now (the cap is 2), so the next invocation is warm and
-    // takes one of them.
-    let third = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 3})))
-        .await
-        .unwrap();
+    // takes one of them. These two invocations ran in their own tasks, so wait
+    // for the pool to finish taking them over, exactly as `invoke_pooled` does.
+    h.app.pool.settle().await;
+    let third = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 3})),
+    )
+    .await
+    .unwrap();
     let warm = attempt_of(&third);
     assert_eq!(warm.start_kind, StartKind::Warm);
     assert_eq!(warm.epoch, 2);
@@ -2201,16 +2325,10 @@ async fn another_revision_never_reuses_the_first_revisions_environment() {
     let (two, rev_two) = deploy(&h, &h.a, "rev-two").await;
     assert_ne!(rev_one.id, rev_two.id);
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &one, serde_json::json!({})))
+    let first = invoke_pooled(&h, invoke_request(&h.a, &one, serde_json::json!({})))
         .await
         .unwrap();
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &two, serde_json::json!({})))
+    let second = invoke_pooled(&h, invoke_request(&h.a, &two, serde_json::json!({})))
         .await
         .unwrap();
     assert!(first.succeeded() && second.succeeded());
@@ -2222,10 +2340,7 @@ async fn another_revision_never_reuses_the_first_revisions_environment() {
     assert_eq!(h.fake.created().len(), 2);
 
     // Each revision reuses only its own environment.
-    let again = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &one, serde_json::json!({})))
+    let again = invoke_pooled(&h, invoke_request(&h.a, &one, serde_json::json!({})))
         .await
         .unwrap();
     assert_eq!(attempt_of(&again).start_kind, StartKind::Warm);
@@ -2264,10 +2379,7 @@ async fn a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start() {
     let h = pool_harness_with(warm_fake(), POOL_ON, None, Some(secrets.clone()));
     let (function, _) = deploy(&h, &h.a, "rotating").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let first = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(first.succeeded());
@@ -2275,10 +2387,7 @@ async fn a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start() {
     assert_eq!(environment_state(&h, &old_env), EnvironmentState::Idle);
 
     // Same everything, same environment: the generation did not move.
-    let same = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let same = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert_eq!(attempt_of(&same).start_kind, StartKind::Warm);
@@ -2286,10 +2395,7 @@ async fn a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start() {
 
     // Rotate the value behind the same binding ref.
     *secrets.0.lock().unwrap() = "v2".to_string();
-    let rotated = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let rotated = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(rotated.succeeded());
@@ -2325,20 +2431,14 @@ async fn a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one() {
     let h = pool_harness(fake, POOL_ON);
     let (function, _) = deploy(&h, &h.a, "fenced").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let first = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(first.succeeded(), "{:?}", first.invocation().status);
     assert_eq!(first.output, Some(serde_json::json!({"fresh": true})));
     assert_eq!(attempt_of(&first).epoch, 1);
 
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let second = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(second.succeeded(), "{:?}", second.invocation().status);
@@ -2361,10 +2461,7 @@ async fn idle_environments_are_reaped_by_the_ttl_sweeper_and_by_a_drain() {
     let h = pool_harness_with(warm_fake(), POOL_ON, Some(clock), None);
     let (function, _) = deploy(&h, &h.a, "ttl").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let first = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     let pooled = attempt_of(&first).environment_id.clone();
@@ -2381,16 +2478,14 @@ async fn idle_environments_are_reaped_by_the_ttl_sweeper_and_by_a_drain() {
     assert_eq!((swept.examined, swept.reaped, swept.raced), (1, 1, 0));
     assert_eq!(
         h.fake.terminated(),
-        vec![(pooled.clone(), TerminateReason::Shutdown)]
+        vec![(pooled.clone(), TerminateReason::Quiesced)],
+        "a pooled environment is paused: it is reaped without a shutdown frame          and without the provider's grace period (review F3)"
     );
     assert_eq!(environment_state(&h, &pooled), EnvironmentState::Stopped);
     assert!(h.fake.running().is_empty());
 
     // The next invocation boots a fresh one, and a drain empties the pool.
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let second = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     let fresh = attempt_of(&second).environment_id.clone();
@@ -2419,6 +2514,16 @@ impl ExecutionProvider for UnverifiedIdle {
         caps.idle_resume =
             tachyon_serverless_provider_port::Support::unverified("not measured on real hardware");
         caps
+    }
+    // Delegated, not defaulted: this decorator changes what the provider
+    // *reports*, never what it can do. Taking the port's default here would
+    // make every resume fail and hide the capability gate behind a provider
+    // that is simply broken.
+    async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.0.idle_quiesce(environment_id).await
+    }
+    async fn idle_resume(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.0.idle_resume(environment_id).await
     }
     async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
         self.0.preflight().await
@@ -2454,19 +2559,15 @@ impl ExecutionProvider for UnverifiedIdle {
     }
 }
 
-/// Acceptance 4: an unverified idle capability disables reuse even with the
-/// pool switched on, and the environment is destroyed after the invocation.
-/// The same holds for `Unsupported`, which is what both shipped providers
-/// report, so this is the behaviour of the whole product today.
-#[tokio::test]
-async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invoke() {
-    use tachyon_serverless_domain::StartKind;
-
-    // Unverified: the code exists but nothing was measured. Not enough.
+/// A harness whose provider reports both idle capabilities as `Unverified`:
+/// the code exists but nobody measured it. That is exactly the state the
+/// Firecracker provider is in (docs/adr/0001 §5), so this is what the shipped
+/// microVM provider does under a given `[pool]` section.
+fn unverified_harness(extra: &str) -> Harness {
     let fake = warm_fake();
     let provider = Arc::new(UnverifiedIdle(fake.clone()));
     let dir = tempfile::tempdir().unwrap();
-    let config = GatewayConfig::from_toml(&config_toml(dir.path(), "dev", POOL_ON)).unwrap();
+    let config = GatewayConfig::from_toml(&config_toml(dir.path(), "dev", extra)).unwrap();
     let app = Application::bootstrap_with(
         config,
         provider,
@@ -2476,20 +2577,29 @@ async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invo
         },
     )
     .unwrap();
-    let h = Harness {
+    Harness {
         app,
         fake,
         a: principal(TENANT_A, vec![Role::Deploy, Role::Invoke]),
         b: principal(TENANT_B, vec![Role::Deploy, Role::Invoke]),
         dir,
-    };
+    }
+}
+
+/// Acceptance 4: an unverified idle capability disables reuse even with the
+/// pool switched on, and the environment is destroyed after the invocation.
+/// The same holds for `Unsupported`, which is what both shipped providers
+/// report, so this is the behaviour of the whole product today.
+#[tokio::test]
+async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invoke() {
+    use tachyon_serverless_domain::StartKind;
+
+    // Unverified: the code exists but nothing was measured. Not enough.
+    let h = unverified_harness(POOL_ON);
     assert!(!h.app.pool.policy().reuse_enabled());
     let (function, _) = deploy(&h, &h.a, "unverified").await;
     for _ in 0..2 {
-        let out = h
-            .app
-            .invoke
-            .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        let out = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
             .await
             .unwrap();
         assert!(out.succeeded(), "{:?}", out.invocation().status);
@@ -2515,12 +2625,12 @@ async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invo
     plain
         .fake
         .push_script(FakeGuestScript::RespondOk(serde_json::json!({"ok": true})));
-    let out = plain
-        .app
-        .invoke
-        .invoke(invoke_request(&plain.a, &function, serde_json::json!({})))
-        .await
-        .unwrap();
+    let out = invoke_pooled(
+        &plain,
+        invoke_request(&plain.a, &function, serde_json::json!({})),
+    )
+    .await
+    .unwrap();
     assert!(out.succeeded());
     assert_eq!(attempt_of(&out).start_kind, StartKind::Cold);
     assert_eq!(plain.fake.terminated().len(), 1);
@@ -2537,10 +2647,7 @@ async fn a_pooled_environment_is_reclaimed_after_a_restart() {
     use tachyon_serverless_domain::StartKind;
     let h = pool_harness(warm_fake(), POOL_ON);
     let (function, _) = deploy(&h, &h.a, "restarted").await;
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let first = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     let pooled = attempt_of(&first).environment_id.clone();
@@ -2600,6 +2707,497 @@ async fn a_pooled_environment_is_reclaimed_after_a_restart() {
 }
 
 // ---------------------------------------------------------------------------
+// idle quiesce / resume and the measurement gate (PLT-4633)
+// ---------------------------------------------------------------------------
+
+/// Acceptance 1 and 2: the environment is quiesced when it enters the pool and
+/// resumed when it is claimed, the readiness check follows the resume, and the
+/// warm attempt reports what that cost instead of reporting zero.
+#[tokio::test]
+async fn a_warm_start_is_quiesced_resumed_and_reports_what_that_cost() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake_with(FakeProviderOptions {
+        // A resume that costs something measurable: a warm attempt that
+        // reported 0 ms for it would be hiding real work.
+        resume_delay: Duration::from_millis(25),
+        ..FakeProviderOptions::default()
+    });
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "warm-timings").await;
+
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let cold = attempt_of(&first);
+    let env_id = cold.environment_id.clone();
+    assert_eq!(cold.start_kind, StartKind::Cold);
+    assert_eq!(
+        cold.timings.resume_ms, None,
+        "a cold start resumes nothing, and says so instead of reporting 0"
+    );
+    assert_eq!(cold.timings.readiness_ms, None);
+    assert_eq!(
+        h.fake.quiesced(),
+        vec![env_id.clone()],
+        "quiesced on the way into the pool"
+    );
+    assert_eq!(
+        h.fake.paused(),
+        vec![env_id.clone()],
+        "and it really is paused while it waits"
+    );
+    assert!(h.fake.resumed().is_empty());
+
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
+    assert!(second.succeeded(), "{:?}", second.invocation().status);
+    assert_eq!(second.output, Some(serde_json::json!({"n": 2})));
+    let warm = attempt_of(&second);
+    assert_eq!(warm.start_kind, StartKind::Warm);
+    assert_eq!(warm.environment_id, env_id);
+    assert_eq!(
+        h.fake.resumed(),
+        vec![env_id.clone()],
+        "resumed when it was claimed, exactly once"
+    );
+    assert!(
+        h.fake
+            .host_messages(&env_id)
+            .iter()
+            .any(|m| matches!(m, HostMessage::Ping { .. })),
+        "the readiness check asked the guest instead of assuming (review F2)"
+    );
+    assert_eq!(
+        warm.timings.environment_boot_ms,
+        Some(0),
+        "nothing booted on a warm start"
+    );
+    assert_eq!(warm.timings.runtime_init_ms, Some(0));
+    let resume_ms = warm
+        .timings
+        .resume_ms
+        .expect("a warm start records its resume");
+    assert!(
+        resume_ms >= 20,
+        "the resume took at least 25 ms but was reported as {resume_ms} ms"
+    );
+    assert!(
+        warm.timings.readiness_ms.is_some(),
+        "the readiness check is recorded too"
+    );
+
+    // The same numbers reach the API surface.
+    let api = tachyon_serverless_api_types::TimingsResponse::from(&warm.timings);
+    assert_eq!(api.resume_ms, Some(resume_ms));
+    assert_eq!(api.readiness_ms, warm.timings.readiness_ms);
+
+    // Back in the pool, quiesced again for the next one.
+    assert_eq!(h.fake.quiesced().len(), 2);
+    assert_eq!(h.fake.paused(), vec![env_id]);
+    assert_eq!(h.fake.created().len(), 1, "one environment served both");
+}
+
+/// Acceptance 3, the resume half: a resume that fails retires the environment
+/// exactly once and the invocation is served by a cold start instead. Nothing
+/// is ever dispatched into an environment whose resume was not confirmed.
+#[tokio::test]
+async fn a_failed_resume_falls_back_to_a_cold_start_and_retires_the_environment_once() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake_with(FakeProviderOptions {
+        fail_resume: Some("the vmm refused to resume".into()),
+        ..FakeProviderOptions::default()
+    });
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "resume-fails").await;
+
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
+    assert!(first.succeeded());
+    let retired = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &retired), EnvironmentState::Idle);
+
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
+    assert!(
+        second.succeeded(),
+        "the invocation still succeeds, cold: {:?}",
+        second.invocation().status
+    );
+    assert_eq!(second.output, Some(serde_json::json!({"n": 2})));
+    let attempt = attempt_of(&second);
+    assert_eq!(attempt.start_kind, StartKind::Cold);
+    assert_ne!(attempt.environment_id, retired);
+    assert_eq!(attempt.epoch, 1, "a fresh environment, not the retired one");
+    assert_eq!(
+        attempt.number, 1,
+        "the fallback is not a retry: nothing was ever dispatched into the pooled one"
+    );
+
+    assert_eq!(h.fake.resumed(), vec![retired.clone()], "tried once");
+    assert_eq!(
+        h.fake
+            .terminated()
+            .iter()
+            .filter(|(id, _)| id == &retired)
+            .count(),
+        1,
+        "retired exactly once"
+    );
+    assert!(
+        matches!(
+            environment_state(&h, &retired),
+            EnvironmentState::Failed { .. }
+        ),
+        "{:?}",
+        environment_state(&h, &retired)
+    );
+    assert_eq!(
+        stopped_events(&h, &retired).len(),
+        1,
+        "metered once, when it was really gone"
+    );
+    assert_eq!(h.fake.created().len(), 2);
+    // The retired one is gone; the cold environment that served the fallback
+    // is itself quiesced and pooled afterwards, so reuse keeps working.
+    assert_eq!(h.app.pool.held(), 1);
+    assert_eq!(
+        environment_state(&h, &attempt.environment_id),
+        EnvironmentState::Idle
+    );
+    assert_usage_event_ids_are_unique(&h);
+}
+
+/// Acceptance 3, the quiesce half: an environment that cannot be quiesced is
+/// not pooled at all. The invocation keeps destroy-after-invoke, which is the
+/// behaviour of the whole product today.
+#[tokio::test]
+async fn an_environment_that_cannot_be_quiesced_is_terminated_instead_of_pooled() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake_with(FakeProviderOptions {
+        fail_quiesce: Some("the vmm refused to pause".into()),
+        ..FakeProviderOptions::default()
+    });
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "quiesce-fails").await;
+
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let env = attempt_of(&first).environment_id.clone();
+    assert_eq!(h.fake.quiesced(), vec![env.clone()], "it was attempted");
+    assert!(
+        h.fake.paused().is_empty(),
+        "and it did not take, so nothing is paused"
+    );
+    assert_eq!(
+        environment_state(&h, &env),
+        EnvironmentState::Stopped,
+        "destroy-after-invoke, exactly as before reuse existed"
+    );
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(env.clone(), TerminateReason::Completed)],
+        "the pause did not take, so its guest was still running and was ended the ordinary way"
+    );
+    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert_eq!(h.app.pool.held(), 0);
+    assert_eq!(h.app.pool.quiescing(), 0);
+    assert!(h.fake.running().is_empty());
+    // The caller had already returned by then, so the pool is what terminated
+    // and metered it — exactly once (review F4).
+    assert_eq!(stopped_events(&h, &env).len(), 1);
+
+    // So the next invocation boots its own, and never sees the first one.
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
+    assert!(second.succeeded());
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Cold);
+    assert_ne!(attempt_of(&second).environment_id, env);
+    assert_eq!(h.fake.created().len(), 2);
+}
+
+/// Acceptance 4: an unverified idle capability is gated off by default; the
+/// measurement switch opens it; and neither the API nor the startup log ever
+/// presents the resulting run as a verified warm configuration.
+#[tokio::test]
+async fn an_unverified_provider_is_gated_off_by_default_and_only_measurable_with_the_switch() {
+    use tachyon_serverless_domain::StartKind;
+
+    // Default: `[pool] enabled = true` is not enough on its own.
+    let gated = unverified_harness(POOL_ON);
+    assert!(!gated.app.pool.policy().reuse_enabled());
+    let info = gated.app.provider_service.info().await.unwrap();
+    assert!(!info.reuse.enabled);
+    assert!(!info.reuse.verified);
+    assert_eq!(info.reuse.idle_quiesce, "unverified");
+    assert_eq!(info.reuse.idle_resume, "unverified");
+    assert!(
+        info.reuse
+            .reason
+            .contains("allow_unverified_idle is not set"),
+        "{}",
+        info.reuse.reason
+    );
+
+    // With the switch, reuse runs. That the *startup log* also says so is
+    // asserted in its own test binary (`tests/bootstrap_log.rs`): it needs the
+    // global tracing subscriber, and a thread-local one would make the
+    // assertion depend on what other tests in this process touched first.
+    let h = unverified_harness(POOL_MEASURING);
+    assert!(h.app.pool.policy().reuse_enabled());
+    assert!(
+        !h.app.pool.policy().idle_verified(),
+        "running is not the same as measured"
+    );
+    let info = h.app.provider_service.info().await.unwrap();
+    assert!(info.reuse.enabled);
+    assert!(
+        !info.reuse.verified,
+        "an unverified configuration is never displayed as a warm success"
+    );
+    assert!(
+        info.reuse.reason.contains("measurement run"),
+        "{}",
+        info.reuse.reason
+    );
+
+    // And reuse really happens, so the measurement can be taken.
+    let (function, _) = deploy(&h, &h.a, "measuring").await;
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
+    assert!(first.succeeded());
+    let env_id = attempt_of(&first).environment_id.clone();
+    assert_eq!(attempt_of(&first).start_kind, StartKind::Cold);
+    assert_eq!(h.fake.quiesced(), vec![env_id.clone()]);
+
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
+    assert!(second.succeeded());
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Warm);
+    assert_eq!(attempt_of(&second).environment_id, env_id);
+    assert_eq!(h.fake.resumed(), vec![env_id]);
+    assert!(attempt_of(&second).timings.resume_ms.is_some());
+    assert_eq!(h.fake.created().len(), 1);
+}
+
+/// Regression (review F2): a guest that stopped answering while it was idle is
+/// retired at the readiness check instead of being dispatched into.
+///
+/// This guest is still connected and left nothing behind, so everything the
+/// host already knew says it is healthy. Without a probe the invocation would
+/// be dispatched into it and would fail on the execution deadline; with one it
+/// costs a bounded wait and a cold start.
+#[tokio::test]
+async fn a_pooled_guest_that_stops_answering_is_never_dispatched_into() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake();
+    fake.set_default_script(Some(FakeGuestScript::RespondOkThenStopAnswering(
+        serde_json::json!({"ok": true}),
+    )));
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "silent").await;
+
+    let first = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let silent = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &silent), EnvironmentState::Idle);
+
+    let second = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(
+        second.succeeded(),
+        "the invocation is served cold instead of hanging: {:?}",
+        second.invocation().status
+    );
+    let attempt = attempt_of(&second);
+    assert_eq!(attempt.start_kind, StartKind::Cold);
+    assert_ne!(attempt.environment_id, silent);
+    assert_eq!(
+        attempt.number, 1,
+        "the silent environment was never dispatched into, so this is not a retry"
+    );
+    assert_eq!(
+        h.fake.resumed(),
+        vec![silent.clone()],
+        "it was resumed first"
+    );
+    // It stopped reading its end, so it recorded neither the probe it never
+    // answered nor anything after it. What matters is that the host did not
+    // dispatch into it a second time: the probe went unanswered and the
+    // environment was retired instead of being used.
+    assert_eq!(
+        h.fake
+            .host_messages(&silent)
+            .iter()
+            .filter(|m| matches!(m, HostMessage::Invoke { .. }))
+            .count(),
+        1,
+        "only the cold dispatch its guest was still alive for"
+    );
+    assert!(
+        matches!(
+            environment_state(&h, &silent),
+            EnvironmentState::Failed { .. }
+        ),
+        "{:?}",
+        environment_state(&h, &silent)
+    );
+    assert_eq!(
+        stopped_events(&h, &silent).len(),
+        1,
+        "metered once, when it was really gone"
+    );
+    assert_eq!(h.fake.created().len(), 2);
+    assert_usage_event_ids_are_unique(&h);
+}
+
+/// Regression (review F4): the caller's response is not held up by the pause.
+///
+/// The pause is work the *next* invocation benefits from; charging it to this
+/// one's latency is the opposite of what warm reuse is for. What must still
+/// hold is that nothing can claim the environment until it really is paused.
+#[tokio::test]
+async fn a_slow_quiesce_does_not_hold_up_the_callers_response() {
+    const PAUSE: Duration = Duration::from_millis(600);
+    let fake = warm_fake_with(FakeProviderOptions {
+        quiesce_delay: PAUSE,
+        ..FakeProviderOptions::default()
+    });
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "slow-pause").await;
+
+    let started = Instant::now();
+    let out = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    let responded_in = started.elapsed();
+    assert!(out.succeeded(), "{:?}", out.invocation().status);
+    assert!(
+        responded_in < PAUSE / 2,
+        "the caller waited {responded_in:?} for a {PAUSE:?} pause"
+    );
+
+    // While the pause is in flight the environment belongs to nobody: the row
+    // is still `Busy`, so no invocation can be dispatched into a VM that is
+    // half-paused.
+    let env = attempt_of(&out).environment_id.clone();
+    assert_eq!(environment_state(&h, &env), EnvironmentState::Busy);
+    assert_eq!(h.app.pool.quiescing(), 1);
+    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+
+    // And it does land, once the pause really finished.
+    h.app.pool.settle().await;
+    assert!(started.elapsed() >= PAUSE);
+    assert_eq!(environment_state(&h, &env), EnvironmentState::Idle);
+    assert_eq!(h.app.pool.held(), 1);
+    assert!(stopped_events(&h, &env).is_empty(), "it did not stop");
+}
+
+/// Regression (review F5): the guest is told how much time is left, not only
+/// an absolute timestamp it cannot place.
+///
+/// A guest that was quiesced has a clock that stopped with it, so the bridge
+/// computes the user process's deadline as `guest now + remaining_ms`
+/// (`crates/runtime-bridge/src/session.rs::guest_deadline_ms`). Here the host
+/// side of that is checked: every dispatch, warm or cold, carries the time
+/// left, and the absolute host deadline is still there for the host's own
+/// record.
+#[tokio::test]
+async fn every_dispatch_tells_the_guest_how_much_time_is_left() {
+    use tachyon_serverless_domain::StartKind;
+    let h = pool_harness(warm_fake(), POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "remaining").await;
+
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
+    assert!(first.succeeded());
+    let env = attempt_of(&first).environment_id.clone();
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
+    assert!(second.succeeded());
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Warm);
+    assert_eq!(attempt_of(&second).environment_id, env);
+
+    let dispatches: Vec<(u64, u64)> = h
+        .fake
+        .host_messages(&env)
+        .iter()
+        .filter_map(|m| match m {
+            HostMessage::Invoke {
+                deadline_ms,
+                remaining_ms,
+                ..
+            } => Some((*deadline_ms, *remaining_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(dispatches.len(), 2, "one cold and one warm dispatch");
+    for (deadline_ms, remaining_ms) in dispatches {
+        assert!(
+            remaining_ms > 0 && remaining_ms <= 60_000,
+            "the time left is a duration, not a timestamp: {remaining_ms}"
+        );
+        assert!(
+            deadline_ms > 1_600_000_000_000,
+            "the absolute host deadline is still reported: {deadline_ms}"
+        );
+        // The two describe the same instant in the host's clock.
+        let now = deadline_ms - remaining_ms;
+        let real_now = chrono::Utc::now().timestamp_millis() as u64;
+        assert!(
+            now.abs_diff(real_now) < 10_000,
+            "remaining_ms was not measured from the dispatch: {now} vs {real_now}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // pool: what may go back into it, and what the ledger and usage say (review)
 // ---------------------------------------------------------------------------
 
@@ -2640,16 +3238,12 @@ async fn every_invocation_on_a_reused_environment_is_metered() {
 
     let mut invocations = Vec::new();
     for n in 0..3 {
-        let out = h
-            .app
-            .invoke
-            .invoke(invoke_request(
-                &h.a,
-                &function,
-                serde_json::json!({ "n": n }),
-            ))
-            .await
-            .unwrap();
+        let out = invoke_pooled(
+            &h,
+            invoke_request(&h.a, &function, serde_json::json!({ "n": n })),
+        )
+        .await
+        .unwrap();
         assert!(out.succeeded(), "{:?}", out.invocation().status);
         if n > 0 {
             assert_eq!(attempt_of(&out).start_kind, StartKind::Warm);
@@ -2699,10 +3293,7 @@ async fn an_environment_whose_guest_crashed_is_never_pooled() {
     fake.set_default_script(Some(FakeGuestScript::Panic));
     let h = pool_harness(fake, POOL_ON);
     let (function, _) = deploy(&h, &h.a, "panics").await;
-    let out = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let out = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert_eq!(failed_error(&out).class, ErrorClass::Crash);
@@ -2727,10 +3318,7 @@ async fn an_environment_whose_guest_crashed_is_never_pooled() {
     }));
     let h = pool_harness(fake, POOL_ON);
     let (function, _) = deploy(&h, &h.a, "user-error").await;
-    let out = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let out = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert_eq!(failed_error(&out).class, ErrorClass::UserError);
@@ -2758,10 +3346,7 @@ async fn a_guest_that_exited_after_answering_is_not_pooled() {
     let h = pool_harness(fake, POOL_ON);
     let (function, _) = deploy(&h, &h.a, "exits").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let first = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(first.succeeded(), "{:?}", first.invocation().status);
@@ -2777,10 +3362,7 @@ async fn a_guest_that_exited_after_answering_is_not_pooled() {
 
     // The next invocation boots its own environment and is not settled by the
     // frame the previous guest left behind.
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let second = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(second.succeeded(), "{:?}", second.invocation().status);
@@ -2799,10 +3381,7 @@ async fn a_reaped_pooled_environment_reports_its_lifetime_to_usage() {
     let h = pool_harness_with(warm_fake(), POOL_ON, Some(clock), None);
     let (function, _) = deploy(&h, &h.a, "lifetime").await;
 
-    let out = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let out = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(out.succeeded());
@@ -2836,16 +3415,24 @@ async fn a_reaped_pooled_environment_reports_its_lifetime_to_usage() {
     assert_usage_event_ids_are_unique(&h);
 }
 
-/// A bridge stream that pretends the guest died quietly: once armed, writes
-/// fail and reads never produce anything (not even EOF), which is how a pooled
-/// session looks when its guest is gone and nothing has been read since.
+/// A bridge stream whose guest dies in the instant between the readiness probe
+/// and the dispatch.
+///
+/// Once armed, the `Invoke` frame is the write that fails; everything before it
+/// (the readiness probe of the claim) still reaches the live guest. That is the
+/// only way a warm dispatch can still find a dead guest now that the claim
+/// probes for one (PLT-4633 review F2), and it is what the retry path exists
+/// for: the handler cannot have started, so the invocation is dispatched once
+/// more, cold.
+///
+/// After that write fails, reads behave as a dead session does: whatever the
+/// guest had queued becomes readable, and then nothing at all — not even EOF.
 struct DeadWhenArmed {
     inner: Box<dyn BridgeStream>,
     armed: Arc<AtomicBool>,
     /// Wire bytes the guest had queued before it died. They become readable
-    /// only once a write has failed, i.e. once the host tries to use the
-    /// session again: a pooled session that could read them earlier would be
-    /// refused when it is claimed and never dispatched into at all.
+    /// only once the dispatch has failed, i.e. once the host tries to use the
+    /// session for the attempt itself.
     queued: Arc<std::sync::Mutex<Vec<u8>>>,
     write_failed: bool,
 }
@@ -2857,6 +3444,12 @@ impl DeadWhenArmed {
     fn broken_pipe() -> std::io::Error {
         std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the guest is gone")
     }
+    /// Whether this buffer carries the dispatch itself rather than a probe.
+    fn is_invoke(buf: &[u8]) -> bool {
+        // Frames are length-prefixed JSON, so the tag is plainly in the bytes.
+        buf.windows(br#""type":"invoke""#.len())
+            .any(|w| w == br#""type":"invoke""#)
+    }
 }
 
 impl AsyncRead for DeadWhenArmed {
@@ -2865,16 +3458,14 @@ impl AsyncRead for DeadWhenArmed {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        if self.gone() {
-            if self.write_failed {
-                let mut queued = self.queued.lock().unwrap();
-                if !queued.is_empty() {
-                    let n = queued.len().min(buf.remaining());
-                    let take: Vec<u8> = queued.drain(..n).collect();
-                    drop(queued);
-                    buf.put_slice(&take);
-                    return Poll::Ready(Ok(()));
-                }
+        if self.gone() && self.write_failed {
+            let mut queued = self.queued.lock().unwrap();
+            if !queued.is_empty() {
+                let n = queued.len().min(buf.remaining());
+                let take: Vec<u8> = queued.drain(..n).collect();
+                drop(queued);
+                buf.put_slice(&take);
+                return Poll::Ready(Ok(()));
             }
             return Poll::Pending;
         }
@@ -2888,15 +3479,14 @@ impl AsyncWrite for DeadWhenArmed {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        if self.gone() {
+        if self.gone() && (self.write_failed || Self::is_invoke(buf)) {
             self.write_failed = true;
             return Poll::Ready(Err(Self::broken_pipe()));
         }
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        if self.gone() {
-            self.write_failed = true;
+        if self.gone() && self.write_failed {
             return Poll::Ready(Err(Self::broken_pipe()));
         }
         Pin::new(&mut self.inner).poll_flush(cx)
@@ -2962,6 +3552,12 @@ impl ExecutionProvider for DiesWhenArmed {
             .terminate_environment(environment_id, reason)
             .await
     }
+    async fn idle_quiesce(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.inner.idle_quiesce(environment_id).await
+    }
+    async fn idle_resume(&self, environment_id: &EnvironmentId) -> Result<(), ProviderError> {
+        self.inner.idle_resume(environment_id).await
+    }
     async fn observe_environment(
         &self,
         environment_id: &EnvironmentId,
@@ -2992,24 +3588,24 @@ async fn a_warm_dispatch_into_a_dead_guest_falls_back_to_a_cold_start() {
     let h = harness_with(fake, provider, POOL_ON, None);
     let (function, _) = deploy(&h, &h.a, "dead-warm").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
-        .await
-        .unwrap();
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
     assert!(first.succeeded(), "{:?}", first.invocation().status);
     let dead = attempt_of(&first).environment_id.clone();
     assert_eq!(environment_state(&h, &dead), EnvironmentState::Idle);
 
     // The guest dies without telling anyone: nothing to read, writes fail.
     armed.store(true, Ordering::SeqCst);
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
-        .await
-        .unwrap();
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
     assert!(
         second.succeeded(),
         "a dead pooled environment must not fail an invocation a cold start would have served: {:?}",
@@ -3122,6 +3718,16 @@ fn respond_then_panic(payload: serde_json::Value) -> FakeGuestScript {
             }
             let mut served = 0u32;
             while let Some(Ok(frame)) = reader.next().await {
+                // The real bridge answers the host's readiness probe from its
+                // frame loop; a guest that did not would never be claimed out
+                // of the pool at all (PLT-4633 review F2).
+                if let Ok(HostMessage::Ping { nonce }) = decode_message::<HostMessage>(&frame) {
+                    let pong = encode_message(&GuestMessage::Pong { nonce }).unwrap();
+                    if writer.send(pong).await.is_err() {
+                        return;
+                    }
+                    continue;
+                }
                 let Ok(HostMessage::Invoke {
                     attempt_id, epoch, ..
                 }) = decode_message::<HostMessage>(&frame)
@@ -3170,10 +3776,7 @@ async fn an_environment_the_driver_ends_reports_its_whole_life() {
     let h = pool_harness_with(fake, POOL_ON, Some(clock), None);
     let (function, _) = deploy(&h, &h.a, "driver-ends").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let first = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert!(first.succeeded(), "{:?}", first.invocation().status);
@@ -3187,10 +3790,7 @@ async fn an_environment_the_driver_ends_reports_its_whole_life() {
     // Two minutes later it is handed to a second invocation, whose guest
     // panics: the environment is ended by the driver, not by the pool.
     offset.store(120_000, Ordering::SeqCst);
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+    let second = invoke_pooled(&h, invoke_request(&h.a, &function, serde_json::json!({})))
         .await
         .unwrap();
     assert_eq!(failed_error(&second).class, ErrorClass::Crash);
@@ -3225,16 +3825,12 @@ async fn the_usage_sequence_of_a_reused_environment_never_restarts() {
     let h = pool_harness(warm_fake(), POOL_ON);
     let (function, _) = deploy(&h, &h.a, "sequences").await;
     for n in 0..3 {
-        let out = h
-            .app
-            .invoke
-            .invoke(invoke_request(
-                &h.a,
-                &function,
-                serde_json::json!({ "n": n }),
-            ))
-            .await
-            .unwrap();
+        let out = invoke_pooled(
+            &h,
+            invoke_request(&h.a, &function, serde_json::json!({ "n": n })),
+        )
+        .await
+        .unwrap();
         assert!(out.succeeded(), "{:?}", out.invocation().status);
         if n > 0 {
             assert_eq!(attempt_of(&out).start_kind, StartKind::Warm);
@@ -3296,23 +3892,23 @@ async fn an_undelivered_warm_dispatch_is_classified_like_a_cold_one() {
     let h = harness_with(fake, provider, POOL_ON, None);
     let (function, _) = deploy(&h, &h.a, "exited-warm").await;
 
-    let first = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
-        .await
-        .unwrap();
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
     assert!(first.succeeded(), "{:?}", first.invocation().status);
     let dead = attempt_of(&first).environment_id.clone();
     assert_eq!(environment_state(&h, &dead), EnvironmentState::Idle);
 
     armed.store(true, Ordering::SeqCst);
-    let second = h
-        .app
-        .invoke
-        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
-        .await
-        .unwrap();
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
     assert!(
         second.succeeded(),
         "the cold retry serves the invocation: {:?}",

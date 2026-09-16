@@ -456,6 +456,17 @@ pub struct AttemptTimings {
     pub queue_wait_ms: Option<u64>,
     pub environment_boot_ms: Option<u64>,
     pub runtime_init_ms: Option<u64>,
+    /// Time spent resuming a quiesced environment on a warm start
+    /// ([`StartKind::Warm`]). `None` on a cold start: nothing was resumed.
+    ///
+    /// A warm start does not boot and does not initialize, so
+    /// `environment_boot_ms` and `runtime_init_ms` are legitimately zero for
+    /// it — but resuming and checking the environment is real work, and it is
+    /// reported here rather than hidden in those zeros (PLT-4633).
+    pub resume_ms: Option<u64>,
+    /// Time spent confirming, after the resume, that the environment is fit to
+    /// be dispatched into. `None` on a cold start.
+    pub readiness_ms: Option<u64>,
     pub handler_ms: Option<u64>,
     pub response_ms: Option<u64>,
     pub total_ms: Option<u64>,

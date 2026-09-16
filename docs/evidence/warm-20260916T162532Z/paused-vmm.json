@@ -1,0 +1,37 @@
+{
+  "sampled": true,
+  "environment_id": "env_01m2ngkypcaryckhp8evqp4rdc",
+  "pid": 330723,
+  "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2ngkypcaryckhp8evqp4rdc",
+  "note": "sampled while the environment was idle in the pool, i.e. after idle_quiesce returned",
+  "gap_seconds": 3,
+  "samples": [
+    {
+      "at": "2026-09-16T16:26:08Z",
+      "ps_rss_kib": 38896,
+      "ps_vsz_kib": 269988,
+      "ps_state": "Sl",
+      "vm_rss_kib": 38896,
+      "vm_size_kib": 269988,
+      "threads": 3,
+      "cpu_ticks": {
+        "utime": 654,
+        "stime": 759
+      }
+    },
+    {
+      "at": "2026-09-16T16:26:11Z",
+      "ps_rss_kib": 38896,
+      "ps_vsz_kib": 269988,
+      "ps_state": "Sl",
+      "vm_rss_kib": 38896,
+      "vm_size_kib": 269988,
+      "threads": 3,
+      "cpu_ticks": {
+        "utime": 654,
+        "stime": 759
+      }
+    }
+  ],
+  "cpu_ticks_during_gap": 0
+}

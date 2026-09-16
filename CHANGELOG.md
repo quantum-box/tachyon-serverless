@@ -12,6 +12,20 @@
 - MIT License を追加
 - README / CONTRIBUTING / CODE_OF_CONDUCT / SECURITY などのリポジトリ基本ドキュメントを追加
 - GitHub の Issue / Pull Request テンプレートと Dependabot 設定を追加
+- idle 休止・再開と warm 機能ゲート（Linear PLT-4633）
+  - `ExecutionProvider` に `idle_quiesce` / `idle_resume` を追加（既定実装は `Unavailable` を返すので、実装しない provider は今までどおり）。Firecracker provider は `PATCH /vm {state: Paused/Resumed}` で実装し、「すでにその状態」は成功、VMM プロセス死亡 / API socket 消失 / 環境不在はそれぞれ別の error にする
+  - 環境 pool が pool 入りで休止し、claim で再開してから readiness を確認する。休止に失敗した環境は pool に入れず terminate、再開を確認できない環境は retire して cold start に落ちる（dispatch しない）
+  - warm attempt が実際の費用を報告する: `AttemptTimings` に `resume_ms` / `readiness_ms` を追加し、API（`attempts[].timings`）と CLI に出す
+  - Firecracker の `idle_quiesce` / `idle_resume` は実機未計測のため `Unverified`。計測用の `[pool] allow_unverified_idle`（既定 `false`）を立てたときだけ再利用が動き、その構成は `GET /v1/provider` の `reuse.verified = false` と起動時の warn で一貫して「未検証」と示される
+  - `scripts/kvm/measure-warm.sh`: cold / warm の比較と休止中 VMM の host 資源を測り、`docs/evidence/warm-<UTC>/` に記録する。warm が 1 度も起きなければ失敗する
+  - レビュー指摘の修正:
+    - Firecracker の `PATCH /vm` の「すでにその状態」判定を**要求した状態と向き**で行う。`Resumed` を要求して「paused」と返された場合や解釈できない fault は失敗（= cold start）にする。以前は非 2xx の本文に "already" と状態語があれば両方向で成功扱いだった
+    - readiness 検査が guest に**実際に問い合わせる**。protocol を v2 に上げて `Ping` / `Pong` を追加し、再開後に bound 付き（500 ms）で往復する。答えない環境は retire して cold start に落ちる
+    - pool が terminate する環境は休止済みなので、`Shutdown` frame を送らず `TerminateReason::Quiesced` で終わらせる（provider は猶予を待たない）。sweep と drain が毎回 grace 分止まらなくなる
+    - 休止を client の応答経路から外した。`release` は環境を pool に引き渡して即座に戻り、行は休止が完了するまで `Busy`（= claim 不可）のまま。休止に失敗した環境は pool が terminate して 1 回だけ計測する。drain は引き渡し中の環境を待ってから sweep する
+    - `Invoke` に `remaining_ms` を追加し、bridge は user process 向けの deadline を `guest の現在時刻 + remaining_ms` で計算する。休止で止まった時計に絶対時刻を渡さない（強制は従来どおり host 側）
+    - `reuse.verified` を capability の事実（provider が両方 `supported` を申告しているか）として計算する。`[pool] enabled` とは独立
+    - `[pool] allow_unverified_idle` を `profile = "production"` で拒否する（dev 専用 provider と同じ扱い）
 - P2 の前提（Linear PLT-4627 / PLT-4618）
   - 再起動時の分類を dispatch 済みかどうかで分ける。`Running` だったものは `OutcomeUnknown{Host.Restarted}`、未 dispatch は `Failed{platform_error}`
   - 起動時に `ExecutionProvider::list_environments` で孤児環境を回収し、結果を構造化ログと `GET /readyz` の `reconcile` に出す。`[reconcile] on_startup` で無効化できる

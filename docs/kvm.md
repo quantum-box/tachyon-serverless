@@ -123,10 +123,11 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 | enforce_resource_limits | unverified（M9 で vcpu / mem の guest 側一致と超過 alloc の `crash` 分類は実測済み。ephemeral storage は未制御のため unverified のまま。`docs/evidence/isolation-20260916T020934Z/`） |
 | host_metering | unverified |
 | egress_restricted / egress_public_web | unsupported（ネットワークデバイス未設定） |
-| idle_quiesce / idle_resume / snapshot_create / snapshot_clone | unsupported（P1 未実装） |
+| idle_quiesce / idle_resume | supported（PLT-4633 で `PATCH /vm {state: Paused/Resumed}` を実装し §3.7 で実機計測。証跡 `docs/evidence/warm-20260916T162532Z/`。再利用に入るかは `[pool] enabled`、既定 off） |
+| snapshot_create / snapshot_clone | unsupported（未実装） |
 | dev_only | false |
 
-`egress_none`（M8）と `enforce_resource_limits`（M9）を実際に測るのが §3.6。
+`egress_none`（M8）と `enforce_resource_limits`（M9）を実際に測るのが §3.6、`idle_quiesce` / `idle_resume`（warm 再利用）を測るのが §3.7。
 
 ### 3.6 隔離の計測（ADR-0001 M8 / M9）
 
@@ -177,7 +178,68 @@ guest の中から egress（M8）と資源上限（M9）を測る。gateway は 
 
 このスクリプトは provider の `Capabilities` を変更しない。`egress_none` を `Unverified` から `Supported` にするのは、この計測結果を確認した上での別の変更（ADR-0001 §「決定」5）。
 
-### 3.7 teardown
+### 3.7 warm 再利用の計測（PLT-4633: idle 休止・再開）
+
+```sh
+scripts/kvm/measure-warm.sh
+```
+
+`examples/hello`（guest 用 musl バイナリ）を deploy し、**環境再利用を有効にした gateway** で同じ関数を複数回 invoke して、cold と warm を並べて測る。gateway はこのスクリプトが起動し、最後に停止する（§3.5 と同じ port なので、別の gateway を動かしたまま実行しない）。
+
+設定は `config/gateway.firecracker.toml` をコピーし、**`profile` を `dev` に書き換えて**末尾に次を足したものを使う（証跡の `gateway.toml` に残る）。`allow_unverified_idle` は `profile = "production"` では拒否される（未計測の休止・再開コードを本番構成で動かさないため。`docs/architecture.md` §4）ので、計測は dev profile で行う。provider は firecracker のままである。
+
+```toml
+profile = "dev"                # 計測専用。production では allow_unverified_idle が拒否される
+
+[pool]
+enabled = true
+allow_unverified_idle = true   # 計測専用。Unverified の capability を受け入れる
+max_idle_per_revision = 1
+idle_ttl_seconds = 300         # 計測中に sweeper が回収しない長さ
+max_total_idle = 4
+```
+
+計測を始める前に、`.kvm/rootfs.ext4` の中の `/sbin/tachyon-init` が今ビルドした bridge と同一かを sha256 で照合する（`debugfs`＝e2fsprogs を使う）。protocol の版は bridge に埋め込まれていて handshake は完全一致を要求するので（`docs/protocol.md` §A）、protocol を変えたあとに image を作り直していないと全 boot が失敗し、provider の障害のように見える。違っていれば `scripts/kvm/build-rootfs.sh` を促して中断する。
+
+| ステップ | 内容 | 期待 |
+|---|---|---|
+| provider | `GET /v1/provider` の `reuse` と capability を記録 | `reuse.enabled = true`、`reuse.verified = false`（= 計測のための実行）。`enabled` が false なら測る対象が無いので中断する |
+| 1 回目の invoke | cold start。環境が pool に入る（＝ `idle_quiesce`） | `start_kind = cold`、`environment_boot_ms` が入る |
+| paused VMM | pool に入っている間の firecracker プロセスを 2 回 sample（`ps` と `/proc/<pid>/{status,stat}`） | RSS / VSZ / threads / state と、間隔中に消費した CPU tick |
+| 2 回目以降 | 同じ環境が再開されて使われる（＝ `idle_resume` → readiness 検査。guest への `Ping` / `Pong` を含む） | `start_kind = warm`、`resume_ms` と `readiness_ms` が入り、`environment_boot_ms` は 0 |
+| 比較 | cold と warm の中央値を並べる | `total_ms` の差が「boot を外した分」 |
+
+主な環境変数: `WARM_INVOCATIONS`（既定 6、最低 2）、`WARM_MEMORY_MIB`（256）、`WARM_CPU_MILLIS`（500）、`WARM_TIMEOUT_SECONDS`（30）、`WARM_IDLE_TTL_SECONDS`（300）、`PAUSED_SAMPLE_SECONDS`（3）、`WARM_FUNCTION`、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
+
+結果の読み方:
+
+- **warm が 1 回も起きなければ失敗（exit 1）**。「全部 cold でも成功」に見えてしまうと、計測しなかったことが成功と区別できなくなる。原因は `gateway.log` の `quiescing the environment failed` / `resuming a pooled environment failed` と、`attempts.jsonl` の `start_kind` で切り分ける。
+- warm の行に `boot` は無い。warm が実際に払うのは `resume_ms` と `readiness_ms` で、`environment_boot_ms = 0` は「起動しなかった」という事実であって計測漏れではない。
+- paused VMM の CPU tick は「休止中に回っていないこと」の目安。RSS は解放されない（memory は VM に割り当てたまま）ので、**休止は memory を返さない**ことがここで見える。
+- この記録は `Unverified` → `Supported` の昇格を**自動的には**意味しない。昇格は証跡を確認した上での別の変更（`docs/adr/0001` §「決定」5）。`summary.txt` にもその旨を書く。
+
+終了コード:
+
+| exit | 意味 |
+|---|---|
+| 0 | 計測できて、少なくとも 1 回 warm だった |
+| 1 | 再利用は有効だったのに warm が 1 回も起きなかった |
+| 2 | 計測自体ができなかった（build / gateway / deploy / invoke の失敗） |
+
+証跡は `docs/evidence/warm-<UTC>/`:
+
+| ファイル | 内容 |
+|---|---|
+| `summary.txt` | host・provider・`reuse` の状態と理由・invocation ごとの行・cold vs warm 表・paused VMM・finding |
+| `summary.json` | step ごとの PASS/FAIL、`reuse`（`measurement_only` 付き）、`comparison`、`paused_vmm` |
+| `attempts.jsonl` | invocation 1 行ずつ（`start_kind`、`environment_id`、`epoch`、boot / resume / readiness / handler / total / client） |
+| `comparison.json` | cold と warm の中央値と差 |
+| `paused-vmm.json` | pool 在中の firecracker プロセスの 2 sample と CPU tick 差 |
+| `invocations/NN.json` | `tsls functions invocation --json` の生データ |
+| `gateway.toml` | 実際に使った設定（`[pool]` を含む） |
+| `provider.json` / `gateway.log` / `steps/` / `orphan-check.txt` | capability と `reuse`、gateway ログ、step ログ、終了後の孤児監査 |
+
+### 3.8 teardown
 
 ```sh
 scripts/kvm/teardown.sh           # .kvm/run を参照する firecracker を SIGKILL → .kvm/run 削除 → 孤児監査
@@ -189,7 +251,7 @@ scripts/kvm/teardown.sh --purge   # .kvm を丸ごと削除
 
 ## 4. 証跡の読み方
 
-smoke（`scripts/kvm/smoke.sh`）の証跡。隔離計測（`scripts/kvm/measure-isolation.sh`）の `docs/evidence/isolation-<UTC>/` は §3.6 を参照。
+smoke（`scripts/kvm/smoke.sh`）の証跡。隔離計測（`scripts/kvm/measure-isolation.sh`）の `docs/evidence/isolation-<UTC>/` は §3.6、warm 再利用計測（`scripts/kvm/measure-warm.sh`）の `docs/evidence/warm-<UTC>/` は §3.7 を参照。
 
 `docs/evidence/kvm-<UTC>/`:
 
@@ -309,7 +371,7 @@ TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
 
 - host と同じアーキテクチャの guest のみ。`validate_artifact` は ELF の `e_machine` を revision の宣言と host の両方に照合し、`PT_INTERP` があるバイナリ（動的リンク）は `artifact rejected`（rootfs に libc が無い）。
 - ネットワークなし。`EgressProfile::None` 以外の spec は `InvalidSpec`。
-- 1 環境 1 実行、destroy-after-invoke。warm / snapshot は `Unsupported`。
+- 1 環境 1 実行。snapshot は `Unsupported`。warm 再利用（idle 休止・再開）は §3.7 の実機計測を経て `Supported` だが、`[pool]` の既定が off なので既定では働かず、destroy-after-invoke のままである。gate は `docs/architecture.md` §4。
 - `ephemeral_storage_mib` は未制御（function drive は read-only、`/tmp` は guest の tmpfs で上限なし）。
 - 課金・メータリング用の host 側計測は timings のみ（`host_metering = Unverified`）。
 - jailer なし。Firecracker は実行ユーザーとして動く。seccomp は Firecracker 既定。

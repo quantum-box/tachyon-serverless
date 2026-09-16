@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.42s
+    Finished `release` profile [optimized] target(s) in 0.68s
+[e2e] guest bridge in rootfs.ext4 matches the build

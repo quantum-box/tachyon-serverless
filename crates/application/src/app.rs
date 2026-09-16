@@ -176,19 +176,20 @@ impl Application {
         ));
         let history = Arc::new(HistoryService::new(repos.clone(), usage.clone()));
         let logs = Arc::new(LogService::new(repos.clone()));
+        // Both gates are decided once, here: the provider's idle capabilities
+        // and the `[pool]` section. Everything downstream only asks the
+        // policy (docs/architecture.md §4).
+        let policy = PoolPolicy::decide(&caps, &config.pool);
         let provider_service = Arc::new(ProviderService::new(
             provider.clone(),
             config.invoke.preflight_ttl(),
+            policy,
         ));
         let reconcile = Arc::new(ReconcileService::new(
             repos.clone(),
             provider.clone(),
             clock.clone(),
         ));
-        // Both gates are decided once, here: the provider's idle capabilities
-        // and the `[pool]` section. Everything downstream only asks the
-        // policy (docs/architecture.md §4).
-        let policy = PoolPolicy::decide(&caps, &config.pool);
         // The pool gets the usage sink because it, not the driver, is what
         // ends a pooled environment's life (TTL sweep, drain, retire) and
         // therefore what has to report it (docs/architecture.md §4).
@@ -214,15 +215,32 @@ impl Application {
             entrypoints,
             pool: pool.clone(),
         });
+        // Reuse is visible at startup, on or off, with the gate that decided
+        // it and the two capabilities behind it (PLT-4633 acceptance 4). The
+        // same facts are on `GET /v1/provider`.
         tracing::info!(
             profile = config.profile.as_str(),
             provider = provider.kind().as_str(),
             dev_only = caps.dev_only,
             environment_reuse = policy.reuse_enabled(),
+            reuse_verified = policy.idle_verified(),
+            reuse_reason = policy.reason(),
             reuse_disabled = ?policy.disabled_reason(),
+            idle_quiesce = caps.idle_quiesce.status_str(),
+            idle_resume = caps.idle_resume.status_str(),
             data_dir = %config.data_dir.display(),
             "application bootstrapped"
         );
+        if policy.reuse_enabled() && !policy.idle_verified() {
+            tracing::warn!(
+                provider = provider.kind().as_str(),
+                idle_quiesce = caps.idle_quiesce.status_str(),
+                idle_resume = caps.idle_resume.status_str(),
+                "environment reuse is enabled for an UNVERIFIED idle capability \
+                 ([pool] allow_unverified_idle): this is a measurement configuration. \
+                 Its results must not be reported as a verified warm setup"
+            );
+        }
         Ok(Arc::new(Self {
             config: Arc::new(config),
             limits,

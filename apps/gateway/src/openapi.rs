@@ -55,6 +55,7 @@ impl utoipa::Modify for SecurityAddon {
         api::ApiError,
         api::ApiErrorBody,
         api::ProviderInfo,
+        api::ReuseInfo,
         api::ArtifactUploadResponse,
         api::CreateFunctionRequest,
         api::FunctionResponse,
