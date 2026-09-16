@@ -159,9 +159,9 @@ build_guest() {
   echo "[rust] cargo build --release --target $MUSL_TARGET (bridge + examples)"
   cargo build --release --target "$MUSL_TARGET" \
     -p tachyon-serverless-runtime-bridge \
-    -p example-hello -p example-http-axum -p example-cpu-burn
+    -p example-hello -p example-http-axum -p example-cpu-burn -p example-isolation-probe
   local out="$REPO_ROOT/target/$MUSL_TARGET/release"
-  for bin in tachyon-serverless-runtime-bridge example-hello example-http-axum example-cpu-burn; do
+  for bin in tachyon-serverless-runtime-bridge example-hello example-http-axum example-cpu-burn example-isolation-probe; do
     if [ ! -f "$out/$bin" ]; then
       echo "[rust] expected binary missing: $out/$bin" >&2
       exit 1
@@ -188,7 +188,7 @@ summary() {
   printf '  %-64s  %s\n' "$KERNEL_SHA256" ".kvm/vmlinux ($KERNEL_KEY)"
   printf '  %-64s  %s\n' "$(sha256_of "$ROOTFS")" ".kvm/rootfs.ext4"
   local out="$REPO_ROOT/target/$MUSL_TARGET/release"
-  for bin in tachyon-serverless-runtime-bridge example-hello example-http-axum example-cpu-burn; do
+  for bin in tachyon-serverless-runtime-bridge example-hello example-http-axum example-cpu-burn example-isolation-probe; do
     printf '  %-64s  %s\n' "$(sha256_of "$out/$bin")" "target/$MUSL_TARGET/release/$bin"
   done
   echo "next: scripts/kvm/smoke.sh"
