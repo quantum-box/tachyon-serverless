@@ -15,7 +15,7 @@ public な独立リポジトリ単体で、次を通す。
 
 - 実行 provider は **Firecracker (Linux/KVM)** を第一候補とし、`ExecutionProvider` trait の背後に隠す。
 - macOS などの開発機では **process provider**（隔離なし、dev 専用）で同じ縦断を確認できる。process provider の成功は microVM の成功ではない。gateway は `profile = "production"` で dev_only provider を拒否する。
-- P1 は 1 環境 1 同時実行、destroy-after-invoke。再利用・warm・snapshot は未対応（Capability に `Unsupported` と明示）。
+- P1 は 1 環境 1 同時実行、destroy-after-invoke。環境 pool（warm 再利用）は §4「環境 pool と再利用キー」の 2 重 gate の背後にあり、既定では働かない。firecracker / process はどちらも `idle_quiesce` / `idle_resume` を `Unsupported` と報告するので、同梱の provider では destroy-after-invoke のまま。snapshot は未対応（Capability に `Unsupported` と明示）。
 
 ## 2. crate 構成と依存方向
 
@@ -78,6 +78,8 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      Invoke を届けられなかった場合 (handler は未開始、OutcomeUnknown にしない):
      encode 不能 → 500 platform_error (Host.InvokeTooLarge)。書き込み失敗 → guest が閉じる前に送った
      Exited を読めれば 502 crash (Runtime.Exited)、無ければ 502 crash (Host.BridgeDisconnectedBeforeInvoke)。
+     再利用環境 (warm) への書き込み失敗も同じ手順・同じ分類で attempt に記録する。分類は誰が dispatch したかで
+     変わらない。warm だけはその後 cold で 1 回だけやり直す (§4「環境 pool と再利用キー」)。
   9 Response / Error を execution_deadline まで待つ。
      - Response          → Succeeded (output inline ≤ config inline_output_max, http_status は http event のみ)
      - Error(Handler)    → Failed{user_error}     - Error(Panic)  → Failed{crash}
@@ -125,6 +127,12 @@ queue_timeout_seconds = 10
 [reconcile]
 on_startup = true              # 起動時に provider の孤児環境を回収する（既定 true）
 
+[pool]
+enabled = false                # 環境再利用（warm）。既定 off
+max_idle_per_revision = 1      # reuse key ごとに idle で残す環境数
+idle_ttl_seconds = 60          # これを超えて idle な環境は sweeper が破棄する
+max_total_idle = 8             # 全 reuse key 合計の idle 上限
+
 [[identity.tokens]]
 token = "dev-token-tenant-a"
 tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
@@ -149,6 +157,45 @@ value = "s3cr3t-a"
 
 規則: provider の列挙や terminate が失敗しても起動は止めない（warn を出して続行し、`reconcile.error` に残す）。実行中の invocation の環境は `create_environment` より前に台帳へ記録されるため必ず「知っている」側に入り、reconcile が terminate することはない。`[reconcile] on_startup = false` で 2 と 3 だけを止められる（1 は常に走る）。
 
+### 環境 pool と再利用キー（PLT-4632）
+
+invoke 後の環境を破棄せず `Idle` で残し、次の invoke に渡す仕組み（`crates/application/src/services/pool.rs`）。**2 つの gate が両方開いたときだけ**働く。
+
+1. **capability**: provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と報告すること。`Unverified`（コードはあるが実機で測っていない）では足りない。firecracker / process はどちらも `Unsupported` なので、同梱の provider では何も pool されない（`docs/adr/0001` §5）。
+2. **設定**: `[pool] enabled = true`。既定は `false`。
+
+どちらかが閉じていれば `EnvironmentPool` は「再利用しない」としか答えず、invoke pipeline は P1 と同じ destroy-after-invoke になる。理由は起動ログと `PoolPolicy::disabled_reason()` に出る。
+
+**再利用キー**（`ReuseKey`、RFC §5.3）は 8 field の複合キーで、**全 field が一致した環境だけ**が再利用される。1 field でも違えば別環境になる。
+
+| field | 由来 |
+|---|---|
+| `tenant_id` / `revision_id` | 境界そのもの。またがない |
+| `execution_role_version` | プロトタイプでは 1 固定（版管理された実行 role がまだ無い） |
+| `configuration_version` | artifact digest・非 secret env var・`ExecutionPolicy`・binding 定義の digest |
+| `resource_profile_digest` | `ResourceProfile` の digest |
+| `runtime_profile` | guest が話す runtime protocol |
+| `network_policy_version` | `EgressProfile` 由来 |
+| `secret_binding_generation` | **解決後の** `(env 名, binding ref, 値)` の digest。値が rotate されれば generation が変わり、旧世代で起動した環境は再利用されない |
+
+`secret_binding_generation` のために secret は環境を作る前に解決する。解決できない binding は台帳に行を作らず・何も起動せずに `502 init_error` で終わる。値は `HelloAck` 以外のどこにも出ない（`docs/threat-model.md` §6-4）。台帳（`state.json`）に載るのは「解決後の値から導いた digest」であり、**プロセスごとのランダム salt** を混ぜ、各部分を長さ prefix 付きで連結してから取る。したがって state file を読めても推測した secret と突き合わせられないし、generation はプロセス内でしか比較できない（pool はプロセス内のものなので、それで足りる）。
+
+**状態と原子性**。pool の membership は台帳側（`EnvironmentRepository`）が持つ。
+
+- `claim_for_reuse(key)`: reuse key 完全一致かつ **`Idle`**（＝ pool membership そのもの）の環境を 1 つだけ `Busy` にし、**epoch を 1 進める**。探索・状態遷移・epoch 加算を 1 回の store mutation で行うので、同時に 2 つの claim が走っても勝者は 1 つ（`repository.rs` の `concurrent_claims_never_hand_the_same_environment_to_two_callers`）。`Busy` は決して配られず、`Ready` 前の環境（`Requested` / `Provisioning` / `Initializing`）にも dispatch しない。`Ready` も配らない: それは cold start が今まさに dispatch しようとしている自分の環境であって、pool の持ち物ではない。
+- `release_to_pool`: attempt が健全に終わった環境だけを `Idle` に戻す。`max_idle_per_revision` / `max_total_idle` を超える分と、epoch がずれた古い複製は拒否され、呼び出し側が今までどおり terminate する。「健全」は **attempt の結果**でも判定する: 成功と `UserError`（handler が返したエラー。guest は生きている）だけが対象で、`Crash` / `InitError` / `Timeout` / `PlatformError` / `OutcomeUnknown`、cancel、shutdown 中はいずれも戻さない。戻す前に、直前の attempt が残した frame を必ず drain する（`BridgeSession::drain_stale`）: 残った `Log` は**前の** invocation に付け、`Response` / `Error` は stale として捨て、`Exited` や EOF を見たら session を使用不可にして pool 入りを拒否する。`Exited` は attempt id も epoch も持たないので、lease では fence できない。
+- pool は session と台帳の行を**同時に**公開する（`release` は session map の lock を握ったまま `release_to_pool` を呼ぶ）。行だけ見えて session が無い瞬間は存在しないので、claim 側が健全な環境を「死んでいる」と誤認して terminate することはない。
+- epoch が進むことで、前の attempt が遅れて送ってきた frame は `ExecutionLease::accepts(attempt_id, epoch)` に一致せず捨てられる（`docs/threat-model.md` T05）。再利用が入って初めてこの fencing が効く。
+- 取り出した warm 環境に `Invoke` frame を**渡せなかった**場合（idle の間に guest が死んでいた等）は、handler が始まっていないことが確定しているので、その環境を retire して **cold で 1 回だけ**やり直す。やり直しは cold 固定なので再帰しない。失敗した 1 行目の attempt の分類は cold と同じ規則で決める（`docs/threat-model.md` §9）: 書き込み失敗の後、guest が閉じる前に送った frame を短時間読み、`Exited` があれば `Crash` / `Runtime.Exited`、無ければ `Crash` / `Host.BridgeDisconnectedBeforeInvoke`。同じ guest の挙動が「warm だったから」別の分類になることはなく、warm 固有なのは**やり直すこと**だけである（やり直す理由は §9）。台帳には attempt が 2 行残り、usage には死んだ環境の `EnvironmentStopped` が 1 回だけ出る。
+
+**回収**。`idle_ttl_seconds` を過ぎた環境は sweeper（gateway が `idle_ttl/2` 間隔で起動）が terminate する。graceful shutdown では TTL に関係なく全部落とす（pool の session はプロセスと運命を共にするため、跨いで生き残らせない）。terminate に成功した環境だけが terminal になり、そのとき pool が `UsageEvent{EnvironmentStopped}`（id は `<env>:<epoch>:pool-stopped`）を出す。terminate が失敗した環境は `Draining` のまま残し（`list_active` に残るので起動時 reconcile から見えるし、pool からは配られない）、次の sweep で再試行する。claim した環境が使えずに **retire** する場合（session が無い、guest が死んでいた）も同じ経路を通る: 先に `Draining` にしてから terminate し、成功したら `Failed` にして計測、失敗したら `Draining` のまま再試行を queue して**まだ計測しない**。再起動後は台帳上の非 terminal な環境がすべて `Lost` になり、host に残った実体は起動時 reconcile が orphan として回収する（前節）。
+
+**計測**。1 つの環境が生涯に出す `EnvironmentStopped` はちょうど 1 回で、それは誰が終わらせたか（driver / sweeper / drain / retire / 失敗した terminate の再試行）に依らない。`monotonic_duration_ms` も 1 種類だけ:「台帳の `created_at` から終了時刻まで」の host 観測の生存時間である（`crates/application/src/services/pool.rs::environment_lifetime_ms`）。再利用される環境は個々の attempt より長く生きるので、attempt の stopwatch では測れない。`UsageEvent.sequence` は**環境ごとに単調**で、warm 再利用でも続き番号になる（pool が session と一緒に carry し、driver はその続きから採番する）。したがって 1 環境の event は `sequence` で並べられ、`event_id` = `<env>:<epoch>:<sequence>` も衝突しない。
+
+**範囲**。この pool は 1 プロセス内だけのものである。guest への open な stream（`BridgeSession`）は永続化できないため in-process に留まり、複数プロセス間の原子性（pool membership、slot、Lease 期限）は本 store では依然として表現できない。方針は `docs/adr/0003-execution-state-persistence.md`。
+
+Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が記録され、API 応答の `attempts[].start_kind` に出る。
+
 ## 5. 決め事（実装者が守ること）
 
 1. domain / application は `firecracker` `kube` `axum` を import しない。provider は `ExecutionProvider` だけを実装する。
@@ -166,4 +213,6 @@ value = "s3cr3t-a"
 
 ## 6. 非対象（P1）
 
-warm 再利用、idle 休止、snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted/public-web、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。
+idle 休止、snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted/public-web、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。
+
+warm 再利用は実装済み（§4「環境 pool と再利用キー」）だが、provider が `idle_quiesce` / `idle_resume` を `Supported` と報告しない限り働かない。firecracker / process はどちらも `Unsupported` を返すため、同梱の構成では P1 と同じ destroy-after-invoke であり、それを `crates/application/tests/pipeline.rs` が検査する。

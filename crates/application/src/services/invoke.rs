@@ -41,6 +41,10 @@ use crate::entrypoint::EntrypointPolicy;
 use crate::error::AppError;
 use crate::repository::{IdempotencyBinding, IdempotencyOutcome, Repositories};
 use crate::services::history::{HistoryService, InvocationDetail};
+use crate::services::pool::{
+    EnvironmentPool, WarmEnvironment, environment_lifetime_ms, reuse_key_for,
+    secret_binding_generation,
+};
 use crate::services::revision::ensure_ready;
 
 /// Upper bound of a caller-supplied trace id. Together with the fixed-size
@@ -153,6 +157,10 @@ pub struct InvokeService {
     capacity: CapacityConfig,
     invoke_cfg: InvokeConfig,
     entrypoints: EntrypointPolicy,
+    /// Warm environment pool. Hands out nothing unless both the provider's
+    /// idle capabilities and `[pool] enabled` allow reuse, so with the shipped
+    /// providers every invocation stays cold and destroy-after-invoke.
+    pool: Arc<EnvironmentPool>,
     global_slots: Arc<Semaphore>,
     revision_slots: Mutex<HashMap<RevisionId, Arc<Semaphore>>>,
     queued: Arc<AtomicUsize>,
@@ -173,6 +181,7 @@ pub struct InvokeServiceDeps {
     pub capacity: CapacityConfig,
     pub invoke: InvokeConfig,
     pub entrypoints: EntrypointPolicy,
+    pub pool: Arc<EnvironmentPool>,
 }
 
 impl InvokeService {
@@ -191,6 +200,7 @@ impl InvokeService {
             capacity: deps.capacity,
             invoke_cfg: deps.invoke,
             entrypoints: deps.entrypoints,
+            pool: deps.pool,
             revision_slots: Mutex::new(HashMap::new()),
             queued: Arc::new(AtomicUsize::new(0)),
             in_flight: Mutex::new(HashMap::new()),
@@ -343,7 +353,7 @@ impl InvokeService {
             function,
             revision,
             event_kind: req.event_kind,
-            payload: req.payload,
+            payload: RetainedPayload::new(req.payload),
             input_size,
             trace_id,
             client_deadline,
@@ -351,10 +361,10 @@ impl InvokeService {
             accepted_at: Instant::now(),
             pre: Some(pre),
             env_id: None,
-            env_started: None,
             attempt_id: None,
             lease_id: None,
             seq: 0,
+            epoch: 1,
         };
         tokio::spawn(driver.run(done_tx));
 
@@ -667,6 +677,18 @@ enum Dispatch {
     },
 }
 
+/// Result of one dispatch onto one environment ([`Driver::attempt`]).
+enum Attempted {
+    /// Terminal: the ledger is settled and this is the handler output.
+    Done(Option<serde_json::Value>),
+    /// The pooled environment was gone before the `Invoke` frame reached its
+    /// guest, so the handler cannot have started. The environment has been
+    /// retired and the attempt settled; the caller dispatches once more, cold.
+    /// Never produced when the caller disallowed a warm start, so a retry can
+    /// never ask for another one.
+    RetryCold,
+}
+
 /// A secret binding of the revision could not be resolved.
 struct SecretResolutionFailure {
     binding_ref: String,
@@ -708,13 +730,74 @@ impl SecretResolutionFailure {
     }
 }
 
+/// The environment half of the pipeline, however it was obtained: freshly
+/// booted ([`Driver::prepare_cold`]) or taken out of the pool
+/// ([`Driver::prepare_warm`]). From here on the two paths are identical.
+struct Prepared {
+    /// Ledger row, already `Busy`-able at the epoch this attempt will use.
+    env: ExecutionEnvironment,
+    session: BridgeSession,
+    start_kind: StartKind,
+    /// Milliseconds spent booting the environment. Zero for a warm start:
+    /// nothing booted.
+    environment_boot_ms: u64,
+    /// Milliseconds spent waiting for the guest to report `Ready`. Zero for a
+    /// warm start: the guest reported it during the invocation that booted it.
+    runtime_init_ms: u64,
+    logs: LogForwarder,
+}
+
+/// The invocation payload while it is being dispatched.
+///
+/// A warm dispatch may still have to be repeated cold, so the `Invoke` frame
+/// gets a copy and the original is retained — but only until the write has
+/// resolved. Anything other than a lost connection means no retry can ask for
+/// it again, and the copy is released there and then, so a payload (up to
+/// `max_payload_bytes`, 1 MiB by default) is never held twice for the whole
+/// handler execution. A cold dispatch hands over its only copy and retains
+/// nothing.
+struct RetainedPayload(Option<serde_json::Value>);
+
+impl RetainedPayload {
+    fn new(payload: serde_json::Value) -> Self {
+        Self(Some(payload))
+    }
+
+    /// The copy that goes into the `Invoke` frame. `retryable` keeps the
+    /// original for a possible cold retry; otherwise the only copy is handed
+    /// over.
+    fn checkout(&mut self, retryable: bool) -> serde_json::Value {
+        match retryable {
+            true => self.0.clone().unwrap_or(serde_json::Value::Null),
+            false => self.0.take().unwrap_or(serde_json::Value::Null),
+        }
+    }
+
+    /// The dispatch resolved. Only a lost connection can still need the
+    /// retained copy (the caller then dispatches once more, cold); every other
+    /// outcome releases it here. Returns whether a retry is still possible,
+    /// which is exactly "the payload is still held".
+    fn settle(&mut self, connection_lost: bool) -> bool {
+        if connection_lost && self.0.is_some() {
+            return true;
+        }
+        self.0 = None;
+        false
+    }
+
+    #[cfg(test)]
+    fn held(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
 struct Driver {
     svc: Arc<InvokeService>,
     invocation_id: InvocationId,
     function: Function,
     revision: FunctionRevision,
     event_kind: EventKind,
-    payload: serde_json::Value,
+    payload: RetainedPayload,
     input_size: u64,
     trace_id: String,
     client_deadline: Timestamp,
@@ -724,11 +807,18 @@ struct Driver {
     // What the driver has recorded so far, so that a panic can still clean
     // up (see `cleanup_after_panic`). Cleared once the normal path finished.
     env_id: Option<EnvironmentId>,
-    env_started: Option<Instant>,
     attempt_id: Option<AttemptId>,
     lease_id: Option<LeaseId>,
-    /// Last usage-event sequence number used for the environment.
+    /// Usage-event counter of the environment this driver currently works
+    /// with: zero for one this driver booted, and the pool's count for one it
+    /// reused. The events of a single environment are therefore monotonic over
+    /// its whole life, across every invocation that ran on it
+    /// (`UsageEvent::sequence`).
     seq: u64,
+    /// Epoch of the environment this driver currently works with. It is part
+    /// of every usage event id, so the events of an attempt on a reused
+    /// environment never collide with those of the attempt before it.
+    epoch: u64,
 }
 
 async fn wait_cancel(rx: &mut watch::Receiver<Option<CancelKind>>) -> CancelKind {
@@ -814,14 +904,18 @@ impl Driver {
             );
             let _ = svc.repos.invocations.update_attempt(attempt);
         }
-        if let Ok(Some(mut env)) = svc.repos.environments.get(&env_id)
+        let row = svc.repos.environments.get(&env_id).ok().flatten();
+        if let Some(env) = &row
             && !env.is_terminal()
         {
+            let mut env = env.clone();
             let _ = env.mark_failed("driver panicked", now);
             self.save_env(&env);
         }
         self.seq += 1;
-        let duration = self.env_started.map(|t| t.elapsed().as_millis() as u64);
+        // The environment's whole life, the same quantity every other path
+        // reports for it.
+        let duration = row.as_ref().map(|env| environment_lifetime_ms(env, now));
         self.emit_usage(
             &env_id,
             None,
@@ -935,7 +1029,12 @@ impl Driver {
         bytes_out: u64,
     ) {
         let event = UsageEvent {
-            event_id: format!("{env}:{sequence}"),
+            // Unique per (environment, assignment, event). The epoch advances
+            // on every reassignment, so the events of a warm attempt never
+            // collide with those of the invocation that ran on the same
+            // environment before it — while re-sending the *same* event keeps
+            // the same id, so the sink still de-duplicates it.
+            event_id: format!("{env}:{}:{sequence}", self.epoch),
             tenant_id: self.function.tenant_id.clone(),
             environment_id: env.clone(),
             invocation_id: Some(self.invocation_id.clone()),
@@ -1003,8 +1102,6 @@ impl Driver {
     /// The whole lifecycle after acceptance. Returns the handler output on
     /// success. Every early return has already recorded the terminal state.
     async fn execute(&mut self) -> Option<serde_json::Value> {
-        let svc = self.svc.clone();
-
         // 5. capacity ------------------------------------------------------
         let _permits = match self.acquire_capacity().await {
             Ok(p) => p,
@@ -1046,23 +1143,774 @@ impl Driver {
             return None;
         }
 
+        // 6..10. one dispatch onto an environment, warm or cold ------------
+        match self.attempt(1, queue_wait_ms, true).await {
+            Attempted::Done(output) => output,
+            // The reused environment was already gone when the `Invoke` frame
+            // was written, so the handler cannot have started: retry exactly
+            // once, cold. `warm_allowed = false` makes `RetryCold` unreachable
+            // in the retry, so this can never loop.
+            Attempted::RetryCold => match self.attempt(2, queue_wait_ms, false).await {
+                Attempted::Done(output) => output,
+                Attempted::RetryCold => None,
+            },
+        }
+        // `_permits` is released here, after the last attempt finished.
+    }
+
+    /// One dispatch of this invocation onto one environment: acquire the
+    /// environment (warm when `warm_allowed` and the pool has a match, cold
+    /// otherwise), record attempt and lease, invoke, classify, and settle
+    /// everything. `number` is the attempt number in the ledger.
+    async fn attempt(&mut self, number: u32, queue_wait_ms: u64, warm_allowed: bool) -> Attempted {
+        let svc = self.svc.clone();
+
         // 6. environment ---------------------------------------------------
+        // Reuse is decided before anything is created. The reuse key carries
+        // the generation of the *resolved* secret bindings, so the bindings are
+        // resolved first; a binding this tenant cannot use fails the invocation
+        // here, without a ledger row and without booting anything.
         let tenant = self.function.tenant_id.clone();
-        let env_id = EnvironmentId::from_ulid(svc.ids.next_ulid());
-        let reuse_key = ReuseKey {
-            tenant_id: tenant.clone(),
-            revision_id: self.revision.id.clone(),
-            execution_role_version: 1,
-            configuration_version: 1,
-            resource_profile_digest: Sha256Digest::of_bytes(
-                &serde_json::to_vec(&self.revision.spec.resources).unwrap_or_default(),
-            )
-            .hex()
-            .to_string(),
-            runtime_profile: self.revision.spec.runtime.protocol.clone(),
-            network_policy_version: 1,
-            secret_binding_generation: 1,
+        let prospective_env_id = EnvironmentId::from_ulid(svc.ids.next_ulid());
+        let init_timeout = Duration::from_secs(u64::from(
+            self.revision.spec.execution.initialization_timeout_seconds,
+        ));
+        let init_deadline_ts = (self.now()
+            + chrono::Duration::milliseconds(init_timeout.as_millis() as i64))
+        .min(self.client_deadline);
+        let secret_env = match self.resolve_secret_env(&prospective_env_id).await {
+            Ok(resolved) => resolved,
+            Err(failure) => {
+                let error = failure.invocation_error();
+                tracing::warn!(
+                    environment_id = %prospective_env_id,
+                    binding_ref = %failure.binding_ref,
+                    reason = failure.reason(),
+                    error = %failure.error,
+                    "secret binding could not be resolved; environment not created"
+                );
+                self.fail_invocation(error);
+                return Attempted::Done(None);
+            }
         };
+        let reuse_key = reuse_key_for(
+            &tenant,
+            &self.revision,
+            secret_binding_generation(self.revision.spec.secrets.iter().zip(&secret_env).map(
+                |(binding, (_, value))| {
+                    (
+                        binding.env_name.as_str(),
+                        binding.binding_ref.as_str(),
+                        value.as_str(),
+                    )
+                },
+            )),
+        );
+        // A pooled environment is taken only when its reuse key matches in
+        // every field. Everything else boots cold — which, with both shipped
+        // providers, is every invocation: the pool never hands anything out
+        // unless the provider reports both idle capabilities as `Supported`.
+        let warm = match warm_allowed {
+            true => svc.pool.claim(&reuse_key).await,
+            // A retry after an undelivered warm dispatch: cold only.
+            false => None,
+        };
+        let prepared = match warm {
+            Some(warm) => self.prepare_warm(warm),
+            None => {
+                match self
+                    .prepare_cold(prospective_env_id, reuse_key, secret_env, init_timeout)
+                    .await
+                {
+                    Some(prepared) => prepared,
+                    None => return Attempted::Done(None),
+                }
+            }
+        };
+        let Prepared {
+            mut env,
+            mut session,
+            start_kind,
+            environment_boot_ms,
+            runtime_init_ms,
+            logs,
+        } = prepared;
+        let env_id = env.id.clone();
+
+        // Never start the handler after the client deadline. Checked before
+        // any attempt, lease or Running state is recorded.
+        if self.client_deadline_elapsed() {
+            self.stop_for_client_deadline(Some(&mut session), &mut env, &logs)
+                .await;
+            return Attempted::Done(None);
+        }
+
+        // 8. attempt + lease + invoke --------------------------------------
+        let Some(mut inv) = self.load_invocation() else {
+            tracing::warn!(invocation_id = %self.invocation_id, "invocation vanished before dispatch");
+            let _ = session.shutdown("invocation missing").await;
+            let _ = env.mark_failed("invocation record missing", self.now());
+            self.save_env(&env);
+            let _ = svc
+                .provider
+                .terminate_environment(&env_id, TerminateReason::Crashed)
+                .await;
+            self.env_id = None;
+            return Attempted::Done(None);
+        };
+        let timeout = Duration::from_secs(u64::from(self.revision.spec.execution.timeout_seconds));
+        let now = self.now();
+        let attempt_id = AttemptId::from_ulid(svc.ids.next_ulid());
+        // The execution deadline never exceeds the client deadline. The guest
+        // observes exactly the deadline the host enforces.
+        let full_execution_deadline =
+            now + chrono::Duration::milliseconds(timeout.as_millis() as i64);
+        let execution_deadline_ts = full_execution_deadline.min(self.client_deadline);
+        let execution_clamped = execution_deadline_ts < full_execution_deadline;
+        let execution_wait = (execution_deadline_ts - now)
+            .to_std()
+            .unwrap_or(Duration::ZERO);
+        let mut attempt = InvocationAttempt::dispatch(
+            attempt_id.clone(),
+            self.invocation_id.clone(),
+            tenant.clone(),
+            number,
+            env_id.clone(),
+            env.epoch,
+            start_kind,
+            now,
+        );
+        let lease_id = LeaseId::from_ulid(svc.ids.next_ulid());
+        let mut lease = ExecutionLease::acquire(
+            lease_id.clone(),
+            env_id.clone(),
+            attempt_id.clone(),
+            tenant.clone(),
+            env.epoch,
+            execution_deadline_ts,
+            now,
+        );
+        let running = match number {
+            1 => inv.mark_running(
+                attempt_id.clone(),
+                execution_deadline_ts,
+                init_deadline_ts,
+                now,
+            ),
+            // A retry after an undelivered dispatch: the invocation is already
+            // Running and keeps the `started_at` of its first dispatch.
+            _ => inv.mark_retry(attempt_id.clone(), execution_deadline_ts, init_deadline_ts),
+        };
+        if let Err(e) = running {
+            tracing::warn!(error = %e, "cannot record the invocation as running");
+        }
+        let _ = env.mark_busy(now);
+        let _ = svc.repos.invocations.insert_attempt(attempt.clone());
+        let _ = svc.repos.environments.insert_lease(lease.clone());
+        self.attempt_id = Some(attempt_id.clone());
+        self.lease_id = Some(lease_id);
+        self.save_invocation(inv);
+        self.save_env(&env);
+
+        let deadline_ms = execution_deadline_ts.timestamp_millis().max(0) as u64;
+        // A warm dispatch may still have to be repeated cold, and then the
+        // payload is needed a second time. A cold one hands over its only copy.
+        let retryable = warm_allowed && start_kind == StartKind::Warm;
+        let payload = self.payload.checkout(retryable);
+        let dispatched_at = Instant::now();
+        let sent = session
+            .send_invoke(InvokeParams {
+                invocation_id: self.invocation_id.clone(),
+                attempt_id: attempt_id.clone(),
+                epoch: env.epoch,
+                event_type: self.event_kind.event_type().to_string(),
+                deadline_ms,
+                trace_id: self.trace_id.clone(),
+                payload,
+            })
+            .await;
+        // The frame is either on the wire or was refused before anything was
+        // written: the retained copy can only still be needed when the
+        // connection was lost, which is the one outcome that is retried.
+        let can_retry = self
+            .payload
+            .settle(matches!(sent, Err(SessionError::Disconnected)));
+        let dispatch = match sent {
+            // The pooled guest was already gone: nothing reached it, so the
+            // handler cannot have started. What the guest queued before it
+            // closed still classifies the attempt, exactly as it does for a
+            // cold dispatch (docs/threat-model.md §9); only the retry is
+            // warm-specific.
+            Err(SessionError::Disconnected) if can_retry => {
+                self.retire_after_undelivered_warm(
+                    &mut env,
+                    &mut session,
+                    attempt,
+                    lease,
+                    &logs,
+                    queue_wait_ms,
+                )
+                .await;
+                return Attempted::RetryCold;
+            }
+            Ok(()) => {
+                self.seq += 1;
+                self.emit_usage(
+                    &env_id,
+                    Some(&attempt_id),
+                    UsageEventType::HandlerStarted,
+                    self.seq,
+                    None,
+                    self.input_size,
+                    0,
+                )
+                .await;
+                tokio::select! {
+                    o = session.wait_result(dispatched_at + execution_wait) => Dispatch::Finished(o),
+                    k = wait_cancel(&mut self.cancel_rx) => Dispatch::Cancelled(k),
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, environment_id = %env_id, "invoke frame was not delivered");
+                let drained = match error {
+                    SessionError::Disconnected => Some(
+                        session
+                            .wait_result(Instant::now() + UNDELIVERED_DRAIN)
+                            .await,
+                    ),
+                    _ => None,
+                };
+                Dispatch::NotDelivered { error, drained }
+            }
+        };
+        let handler_started = !matches!(dispatch, Dispatch::NotDelivered { .. });
+        let handler_ms = dispatched_at.elapsed().as_millis() as u64;
+        let finish_started = Instant::now();
+
+        // 9. classify ------------------------------------------------------
+        let max_response = svc.limits.max_response_bytes;
+        let inline_max = svc.invoke_cfg.inline_output_max_bytes;
+        let mut output_value = None;
+        let mut bytes_out = 0u64;
+        let (result, env_end): Classified = match dispatch {
+            Dispatch::Finished(Outcome::Response {
+                payload,
+                guest_handler_ms,
+            }) => {
+                if let Some(ms) = guest_handler_ms {
+                    env.evidence
+                        .details
+                        .insert("guest_handler_ms".into(), ms.into());
+                }
+                let bytes = serde_json::to_vec(&payload).unwrap_or_default();
+                bytes_out = bytes.len() as u64;
+                if bytes_out > max_response {
+                    (
+                        Err(InvocationError::new(
+                            ErrorClass::PlatformError,
+                            "Host.ResponseTooLarge",
+                            format!("response is {bytes_out} bytes (max {max_response})"),
+                        )),
+                        EnvEnd {
+                            reason: TerminateReason::Completed,
+                            failure: None,
+                        },
+                    )
+                } else {
+                    let http_status = match self.event_kind {
+                        EventKind::Http => payload
+                            .get("status")
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|s| u16::try_from(s).ok()),
+                        EventKind::Json => None,
+                    };
+                    let output_ref = if bytes_out <= inline_max {
+                        PayloadRef::Inline {
+                            bytes_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                            size_bytes: bytes_out,
+                        }
+                    } else {
+                        PayloadRef::Digest {
+                            digest: Sha256Digest::of_bytes(&bytes),
+                            size_bytes: bytes_out,
+                        }
+                    };
+                    output_value = Some(payload);
+                    (
+                        Ok((Some(output_ref), http_status)),
+                        EnvEnd {
+                            reason: TerminateReason::Completed,
+                            failure: None,
+                        },
+                    )
+                }
+            }
+            Dispatch::Finished(Outcome::GuestError {
+                kind,
+                error_type,
+                message,
+                stack_trace,
+                guest_handler_ms,
+            }) => {
+                if let Some(ms) = guest_handler_ms {
+                    env.evidence
+                        .details
+                        .insert("guest_handler_ms".into(), ms.into());
+                }
+                if let Some(trace) = stack_trace {
+                    logs.platform(LogPhase::Handler, Some(&attempt_id), &trace);
+                }
+                let (error, end) = classify_guest_error(kind, error_type, message);
+                (Err(error), end)
+            }
+            Dispatch::Finished(Outcome::Timeout) => {
+                let (error_type, message, line) = if execution_clamped {
+                    (
+                        "Host.ClientDeadline",
+                        "client deadline elapsed while the handler was running".to_string(),
+                        format!(
+                            "client deadline elapsed after {} ms of execution; cancelling",
+                            execution_wait.as_millis()
+                        ),
+                    )
+                } else {
+                    (
+                        "Host.Timeout",
+                        format!("handler did not finish within {} s", timeout.as_secs()),
+                        format!(
+                            "execution deadline ({} s) elapsed; cancelling",
+                            timeout.as_secs()
+                        ),
+                    )
+                };
+                logs.platform(LogPhase::Handler, Some(&attempt_id), &line);
+                let grace = svc.invoke_cfg.cancel_grace();
+                let _ = session.cancel(&attempt_id, grace).await;
+                session
+                    .drain_until_closed(Instant::now() + grace + Duration::from_millis(200))
+                    .await;
+                (
+                    Err(InvocationError::new(
+                        ErrorClass::Timeout,
+                        error_type,
+                        message,
+                    )),
+                    EnvEnd {
+                        reason: TerminateReason::Timeout,
+                        failure: Some("execution timeout"),
+                    },
+                )
+            }
+            // Only reachable after the Invoke frame was written: the handler
+            // may have run (docs/threat-model.md §9).
+            Dispatch::Finished(Outcome::Disconnected) => (
+                Err(InvocationError::new(
+                    ErrorClass::OutcomeUnknown,
+                    "Host.OutcomeUnknown",
+                    "bridge connection was lost before a result arrived",
+                )),
+                EnvEnd {
+                    reason: TerminateReason::Crashed,
+                    failure: Some("bridge disconnected"),
+                },
+            ),
+            Dispatch::Cancelled(kind) => {
+                let grace = svc.invoke_cfg.cancel_grace();
+                let _ = session.cancel(&attempt_id, grace).await;
+                session
+                    .drain_until_closed(Instant::now() + grace + Duration::from_millis(200))
+                    .await;
+                (
+                    Err(InvocationError::new(
+                        ErrorClass::Cancelled,
+                        "Host.Cancelled",
+                        match kind {
+                            CancelKind::Client => "cancelled by request",
+                            CancelKind::Shutdown => "cancelled by gateway shutdown",
+                        },
+                    )),
+                    EnvEnd {
+                        reason: cancel_reason(kind),
+                        failure: None,
+                    },
+                )
+            }
+            Dispatch::NotDelivered { error, drained } => {
+                logs.platform(
+                    LogPhase::Handler,
+                    Some(&attempt_id),
+                    &format!("invocation was not delivered to the guest: {error}"),
+                );
+                let (error, end) = undelivered_invoke(&error, drained);
+                (Err(error), end)
+            }
+        };
+
+        // 10. record, release, terminate ----------------------------------
+        let now = self.now();
+        let _ = lease.release(now);
+        let _ = svc.repos.environments.update_lease(lease);
+        let response_ms = finish_started.elapsed().as_millis() as u64;
+        attempt.timings = tachyon_serverless_domain::AttemptTimings {
+            queue_wait_ms: Some(queue_wait_ms),
+            environment_boot_ms: Some(environment_boot_ms),
+            runtime_init_ms: Some(runtime_init_ms),
+            handler_ms: Some(handler_ms),
+            response_ms: Some(response_ms),
+            total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
+        };
+        match &result {
+            Ok(_) => {
+                let _ = attempt.succeed(now);
+            }
+            Err(e) if e.class == ErrorClass::OutcomeUnknown => {
+                let _ = attempt.outcome_unknown(e.clone(), now);
+            }
+            Err(e) => {
+                let _ = attempt.fail(e.clone(), now);
+            }
+        }
+        let _ = svc.repos.invocations.update_attempt(attempt.clone());
+        if let Some(mut inv) = self.load_invocation() {
+            let r = match &result {
+                Ok((output, http_status)) => inv.mark_succeeded(output.clone(), *http_status, now),
+                Err(e) => match e.class {
+                    ErrorClass::Cancelled => inv.mark_cancelled(now),
+                    ErrorClass::OutcomeUnknown => inv.mark_outcome_unknown(e.message.clone(), now),
+                    _ => inv.mark_failed(e.clone(), now),
+                },
+            };
+            if let Err(err) = r {
+                tracing::warn!(error = %err, invocation_id = %inv.id, "cannot record invocation outcome");
+            }
+            tracing::info!(
+                invocation_id = %inv.id,
+                status = inv.status.name(),
+                handler_ms,
+                environment_boot_ms,
+                runtime_init_ms,
+                "invocation finished"
+            );
+            self.save_invocation(inv);
+        }
+        if handler_started {
+            self.seq += 1;
+            self.emit_usage(
+                &env_id,
+                Some(&attempt_id),
+                UsageEventType::HandlerFinished,
+                self.seq,
+                Some(handler_ms),
+                self.input_size,
+                bytes_out,
+            )
+            .await;
+        }
+
+        // The environment goes back into the pool only when this attempt left
+        // it healthy: a clean end with nothing to clean up, an outcome that
+        // says the guest is still there, reuse allowed by both gates, and no
+        // shutdown in progress (a pooled environment must never outlive the
+        // process holding its session). Everything else keeps
+        // destroy-after-invoke (docs/architecture.md §4).
+        //
+        // The outcome matters on its own: `EnvEnd` is the *terminate reason*,
+        // and a guest panic ends as `Completed` there while leaving a process
+        // that just died behind. Only a success and a `UserError` — the
+        // handler returned an error and the guest reported it — may be reused.
+        let outcome_allows_reuse = match &result {
+            Ok(_) => true,
+            Err(e) => e.class == ErrorClass::UserError,
+        };
+        let may_reuse = outcome_allows_reuse
+            && env_end.failure.is_none()
+            && env_end.reason == TerminateReason::Completed
+            && !svc.draining.load(Ordering::SeqCst);
+        // Whatever the guest queued after its result belongs to *this*
+        // attempt: take it here, under this attempt's log context, before the
+        // session can carry another one. An `Exited` frame or an EOF makes the
+        // session unusable, and `release` then refuses to pool it.
+        if may_reuse {
+            session.drain_stale().await;
+        }
+        let release = if may_reuse {
+            // The pool takes the environment's event count with it, so the
+            // next attempt on it continues where this one stopped.
+            svc.pool.release(&env, session, self.seq)
+        } else {
+            Err(Box::new(session))
+        };
+        let mut session = match release {
+            Ok(pooled) => {
+                logs.platform(
+                    LogPhase::Shutdown,
+                    None,
+                    &format!(
+                        "environment {env_id} returned to the pool (idle at epoch {})",
+                        pooled.epoch
+                    ),
+                );
+                // The pool owns the environment and its session now: it is not
+                // terminated, it did not stop (so no `EnvironmentStopped`), and
+                // a later panic cleanup must not reclaim it.
+                self.env_id = None;
+                self.attempt_id = None;
+                self.lease_id = None;
+                return Attempted::Done(output_value);
+            }
+            Err(session) => *session,
+        };
+        let _ = session
+            .shutdown(match env_end.reason {
+                TerminateReason::Completed => "completed",
+                TerminateReason::Timeout => "timeout",
+                TerminateReason::Cancelled => "cancelled",
+                TerminateReason::Crashed => "crashed",
+                TerminateReason::Shutdown => "shutdown",
+                TerminateReason::InitFailed => "init failed",
+                TerminateReason::Reconcile => "reconcile",
+            })
+            .await;
+        match svc
+            .provider
+            .terminate_environment(&env_id, env_end.reason)
+            .await
+        {
+            Ok(report) => logs.platform(
+                LogPhase::Shutdown,
+                None,
+                &format!(
+                    "environment terminated ({:?}); cleaned: {}",
+                    env_end.reason,
+                    report.cleaned.join(", ")
+                ),
+            ),
+            Err(e) => {
+                tracing::warn!(error = %e, environment_id = %env_id, "terminate failed");
+            }
+        }
+        let now = self.now();
+        let _ = match env_end.failure {
+            None => env.mark_stopped(now),
+            Some(reason) => env.mark_failed(reason, now),
+        };
+        self.save_env(&env);
+        self.seq += 1;
+        self.emit_usage(
+            &env_id,
+            Some(&attempt_id),
+            UsageEventType::EnvironmentStopped,
+            self.seq,
+            // The environment's whole life, not this attempt's share of it:
+            // the same quantity the pool reports for one it ends itself.
+            Some(environment_lifetime_ms(&env, now)),
+            0,
+            0,
+        )
+        .await;
+        // Everything is recorded and terminated: nothing left for a panic
+        // cleanup to do.
+        self.env_id = None;
+        self.attempt_id = None;
+        self.lease_id = None;
+        Attempted::Done(output_value)
+    }
+
+    /// Resolve the revision's secret bindings for `env_id`, in binding order.
+    ///
+    /// Split out of [`Self::hello_ack_params`] because the reuse key needs the
+    /// generation of the *resolved* bindings before the pipeline can decide
+    /// whether a pooled environment may serve this attempt: a value that was
+    /// rotated must never reach a guest started under the previous one.
+    async fn resolve_secret_env(
+        &self,
+        env_id: &EnvironmentId,
+    ) -> Result<Vec<(String, String)>, SecretResolutionFailure> {
+        let ctx = SecretDeliveryContext {
+            tenant_id: self.function.tenant_id.clone(),
+            revision_id: self.revision.id.clone(),
+            environment_id: env_id.clone(),
+            epoch: 1,
+        };
+        let mut resolved = Vec::with_capacity(self.revision.spec.secrets.len());
+        for binding in &self.revision.spec.secrets {
+            let value = self
+                .svc
+                .secrets
+                .resolve(&ctx, &binding.binding_ref)
+                .await
+                .map_err(|error| SecretResolutionFailure {
+                    binding_ref: binding.binding_ref.clone(),
+                    error,
+                })?;
+            resolved.push((binding.env_name.clone(), value.expose().to_string()));
+        }
+        Ok(resolved)
+    }
+
+    /// Take over a pooled environment.
+    ///
+    /// The ledger row is already `Busy` at its next epoch (the pool advanced it
+    /// inside the claim, in one store mutation), and the guest is long past
+    /// `Hello` and `Ready`, so nothing boots and nothing initializes here.
+    fn prepare_warm(&mut self, warm: WarmEnvironment) -> Prepared {
+        let WarmEnvironment {
+            environment,
+            mut session,
+            sequence,
+        } = warm;
+        let logs = LogForwarder::new(
+            self.svc.repos.logs.clone(),
+            self.svc.clock.clone(),
+            LogContext {
+                tenant_id: self.function.tenant_id.clone(),
+                environment_id: environment.id.clone(),
+                invocation_id: Some(self.invocation_id.clone()),
+                max_line_bytes: self.svc.limits.max_log_line_bytes,
+            },
+        );
+        // Re-point the session at this attempt. The new epoch is what fences
+        // the previous attempt out: a frame it left behind no longer matches
+        // the lease and is counted as stale (docs/threat-model.md T05).
+        session.rearm(environment.epoch, logs.clone());
+        // The pool has handed the environment over, so from here a panic must
+        // terminate it exactly as it would a cold one.
+        self.env_id = Some(environment.id.clone());
+        self.epoch = environment.epoch;
+        // Continue the environment's own usage count instead of starting a
+        // second one on the same environment.
+        self.seq = sequence;
+        logs.platform(
+            LogPhase::Boot,
+            None,
+            &format!(
+                "reusing pooled environment {} at epoch {}",
+                environment.id, environment.epoch
+            ),
+        );
+        tracing::debug!(
+            environment_id = %environment.id,
+            epoch = environment.epoch,
+            "warm start"
+        );
+        Prepared {
+            env: environment,
+            session,
+            start_kind: StartKind::Warm,
+            environment_boot_ms: 0,
+            runtime_init_ms: 0,
+            logs,
+        }
+    }
+
+    /// The pooled environment's guest was gone before the `Invoke` frame could
+    /// reach it. Settle this attempt, retire the environment exactly once and
+    /// leave the driver as if nothing had been acquired, so the caller can
+    /// dispatch again from a cold start.
+    ///
+    /// The attempt is classified from what the guest queued before it closed,
+    /// by the rule every undelivered `Invoke` follows
+    /// (docs/threat-model.md §9): `Exited` makes it `Crash` / `Runtime.Exited`,
+    /// nothing makes it `Crash` / `Host.BridgeDisconnectedBeforeInvoke`. The
+    /// same guest behaviour must not be classified differently just because
+    /// the host was reusing the environment.
+    ///
+    /// The retry is the only warm-specific part, and it does not depend on the
+    /// classification: the handler provably did not start, and *this* guest
+    /// reported `Ready` for an earlier invocation and died afterwards, so a
+    /// fresh environment is very likely to serve the request. A cold guest
+    /// that never takes the frame died initializing for *this* invocation, so
+    /// repeating it would only repeat the failure — which is why a cold
+    /// undelivered dispatch is not retried.
+    async fn retire_after_undelivered_warm(
+        &mut self,
+        env: &mut ExecutionEnvironment,
+        session: &mut BridgeSession,
+        mut attempt: InvocationAttempt,
+        mut lease: ExecutionLease,
+        logs: &LogForwarder,
+        queue_wait_ms: u64,
+    ) {
+        let svc = self.svc.clone();
+        let attempt_id = attempt.id.clone();
+        let env_id = env.id.clone();
+        // Keep reading briefly for the frames the guest queued before closing.
+        let drained = session
+            .wait_result(Instant::now() + UNDELIVERED_DRAIN)
+            .await;
+        let (error, env_end) = undelivered_invoke(&SessionError::Disconnected, Some(drained));
+        let now = self.now();
+        tracing::warn!(
+            environment_id = %env_id,
+            epoch = env.epoch,
+            error_type = %error.error_type,
+            "the reused environment was gone before dispatch; retrying with a cold start"
+        );
+        logs.platform(
+            LogPhase::Handler,
+            Some(&attempt_id),
+            &format!(
+                "the reused environment was gone before the invocation could be delivered \
+                 ({}); retrying with a cold start",
+                error.error_type
+            ),
+        );
+        let _ = lease.release(now);
+        let _ = svc.repos.environments.update_lease(lease);
+        attempt.timings = tachyon_serverless_domain::AttemptTimings {
+            queue_wait_ms: Some(queue_wait_ms),
+            environment_boot_ms: Some(0),
+            runtime_init_ms: Some(0),
+            total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
+            ..tachyon_serverless_domain::AttemptTimings::default()
+        };
+        let _ = attempt.fail(error, now);
+        let _ = svc.repos.invocations.update_attempt(attempt);
+        let _ = session.shutdown("reused environment is gone").await;
+        if let Err(e) = svc
+            .provider
+            .terminate_environment(&env_id, env_end.reason)
+            .await
+        {
+            tracing::warn!(error = %e, environment_id = %env_id, "terminate of a gone environment failed");
+        }
+        let _ = match env_end.failure {
+            None => env.mark_stopped(now),
+            Some(reason) => env.mark_failed(reason, now),
+        };
+        self.save_env(env);
+        let lifetime = environment_lifetime_ms(env, now);
+        self.seq += 1;
+        self.emit_usage(
+            &env_id,
+            Some(&attempt_id),
+            UsageEventType::EnvironmentStopped,
+            self.seq,
+            Some(lifetime),
+            0,
+            0,
+        )
+        .await;
+        // Terminated exactly once, here: the retry starts from nothing and a
+        // later panic cleanup has nothing of this environment left to reclaim.
+        self.env_id = None;
+        self.attempt_id = None;
+        self.lease_id = None;
+    }
+
+    /// Create a fresh environment and drive it to `Ready` (the P1 path).
+    ///
+    /// `None` means the invocation already reached a terminal state and the
+    /// environment, if one was created, is already terminated.
+    async fn prepare_cold(
+        &mut self,
+        env_id: EnvironmentId,
+        reuse_key: ReuseKey,
+        secret_env: Vec<(String, String)>,
+        init_timeout: Duration,
+    ) -> Option<Prepared> {
+        let svc = self.svc.clone();
+        let tenant = self.function.tenant_id.clone();
         let mut env = ExecutionEnvironment::request(
             env_id.clone(),
             tenant.clone(),
@@ -1081,6 +1929,9 @@ impl Driver {
         }
         // From here on a panic must still terminate the environment.
         self.env_id = Some(env_id.clone());
+        self.epoch = env.epoch;
+        // A newly booted environment starts its own usage count.
+        self.seq = 0;
         let _ = env.mark_provisioning(self.now());
         self.save_env(&env);
 
@@ -1128,36 +1979,12 @@ impl Driver {
         };
 
         // Initialization waits end at the client deadline at the latest.
-        let init_timeout = Duration::from_secs(u64::from(
-            self.revision.spec.execution.initialization_timeout_seconds,
-        ));
         let init_wait = init_timeout.min(self.client_remaining());
         let init_clamped = init_wait < init_timeout;
 
-        // 6a. `HelloAck` (including resolved secrets) is composed before
-        // anything boots: a binding the tenant cannot use fails the
-        // invocation without creating an environment. The environment id is
-        // already assigned, so secrets are still only resolved for it.
-        let hello_ack = match self.hello_ack_params(&env_id, &artifact, init_wait).await {
-            Ok(p) => p,
-            Err(failure) => {
-                let error = failure.invocation_error();
-                tracing::warn!(
-                    environment_id = %env_id,
-                    binding_ref = %failure.binding_ref,
-                    reason = failure.reason(),
-                    error = %failure.error,
-                    "secret binding could not be resolved; environment not created"
-                );
-                logs.platform(LogPhase::Boot, None, &error.message);
-                let _ = env.mark_failed(error.message.clone(), self.now());
-                self.save_env(&env);
-                // Nothing was created, so there is nothing to terminate.
-                self.env_id = None;
-                self.fail_invocation(error);
-                return None;
-            }
-        };
+        // `HelloAck` carries the secrets the caller already resolved for
+        // exactly this environment id.
+        let hello_ack = self.hello_ack_params(&env_id, &artifact, init_wait, secret_env);
 
         let spec = EnvironmentSpec {
             environment_id: env_id.clone(),
@@ -1170,10 +1997,6 @@ impl Driver {
             connect_timeout: init_wait,
         };
         let create_started = Instant::now();
-        self.env_started = Some(create_started);
-        let init_deadline_ts = (self.now()
-            + chrono::Duration::milliseconds(init_timeout.as_millis() as i64))
-        .min(self.client_deadline);
         logs.platform(
             LogPhase::Boot,
             None,
@@ -1352,433 +2175,39 @@ impl Driver {
             .insert("guest_init_ms".into(), ready.guest_init_ms.into());
         self.save_env(&env);
 
-        // Never start the handler after the client deadline. Checked before
-        // any attempt, lease or Running state is recorded.
-        if self.client_deadline_elapsed() {
-            self.stop_for_client_deadline(Some(&mut session), &mut env, &logs)
-                .await;
-            return None;
-        }
-
-        // 8. attempt + lease + invoke --------------------------------------
-        let Some(mut inv) = self.load_invocation() else {
-            tracing::warn!(invocation_id = %self.invocation_id, "invocation vanished before dispatch");
-            let _ = session.shutdown("invocation missing").await;
-            let _ = env.mark_failed("invocation record missing", self.now());
-            self.save_env(&env);
-            let _ = svc
-                .provider
-                .terminate_environment(&env_id, TerminateReason::Crashed)
-                .await;
-            self.env_id = None;
-            return None;
-        };
-        let timeout = Duration::from_secs(u64::from(self.revision.spec.execution.timeout_seconds));
-        let now = self.now();
-        let attempt_id = AttemptId::from_ulid(svc.ids.next_ulid());
-        // The execution deadline never exceeds the client deadline. The guest
-        // observes exactly the deadline the host enforces.
-        let full_execution_deadline =
-            now + chrono::Duration::milliseconds(timeout.as_millis() as i64);
-        let execution_deadline_ts = full_execution_deadline.min(self.client_deadline);
-        let execution_clamped = execution_deadline_ts < full_execution_deadline;
-        let execution_wait = (execution_deadline_ts - now)
-            .to_std()
-            .unwrap_or(Duration::ZERO);
-        let mut attempt = InvocationAttempt::dispatch(
-            attempt_id.clone(),
-            self.invocation_id.clone(),
-            tenant.clone(),
-            1,
-            env_id.clone(),
-            env.epoch,
-            StartKind::Cold,
-            now,
-        );
-        let lease_id = LeaseId::from_ulid(svc.ids.next_ulid());
-        let mut lease = ExecutionLease::acquire(
-            lease_id.clone(),
-            env_id.clone(),
-            attempt_id.clone(),
-            tenant.clone(),
-            env.epoch,
-            execution_deadline_ts,
-            now,
-        );
-        if let Err(e) = inv.mark_running(
-            attempt_id.clone(),
-            execution_deadline_ts,
-            init_deadline_ts,
-            now,
-        ) {
-            tracing::warn!(error = %e, "cannot mark invocation running");
-        }
-        let _ = env.mark_busy(now);
-        let _ = svc.repos.invocations.insert_attempt(attempt.clone());
-        let _ = svc.repos.environments.insert_lease(lease.clone());
-        self.attempt_id = Some(attempt_id.clone());
-        self.lease_id = Some(lease_id);
-        self.save_invocation(inv);
-        self.save_env(&env);
-
-        let deadline_ms = execution_deadline_ts.timestamp_millis().max(0) as u64;
-        let dispatched_at = Instant::now();
-        let sent = session
-            .send_invoke(InvokeParams {
-                invocation_id: self.invocation_id.clone(),
-                attempt_id: attempt_id.clone(),
-                epoch: env.epoch,
-                event_type: self.event_kind.event_type().to_string(),
-                deadline_ms,
-                trace_id: self.trace_id.clone(),
-                payload: std::mem::take(&mut self.payload),
-            })
-            .await;
-        let dispatch = match sent {
-            Ok(()) => {
-                self.seq += 1;
-                self.emit_usage(
-                    &env_id,
-                    Some(&attempt_id),
-                    UsageEventType::HandlerStarted,
-                    self.seq,
-                    None,
-                    self.input_size,
-                    0,
-                )
-                .await;
-                tokio::select! {
-                    o = session.wait_result(dispatched_at + execution_wait) => Dispatch::Finished(o),
-                    k = wait_cancel(&mut self.cancel_rx) => Dispatch::Cancelled(k),
-                }
-            }
-            Err(error) => {
-                tracing::warn!(error = %error, environment_id = %env_id, "invoke frame was not delivered");
-                let drained = match error {
-                    SessionError::Disconnected => Some(
-                        session
-                            .wait_result(Instant::now() + UNDELIVERED_DRAIN)
-                            .await,
-                    ),
-                    _ => None,
-                };
-                Dispatch::NotDelivered { error, drained }
-            }
-        };
-        let handler_started = !matches!(dispatch, Dispatch::NotDelivered { .. });
-        let handler_ms = dispatched_at.elapsed().as_millis() as u64;
-        let finish_started = Instant::now();
-
-        // 9. classify ------------------------------------------------------
-        let max_response = svc.limits.max_response_bytes;
-        let inline_max = svc.invoke_cfg.inline_output_max_bytes;
-        let mut output_value = None;
-        let mut bytes_out = 0u64;
-        let (result, env_end): Classified = match dispatch {
-            Dispatch::Finished(Outcome::Response {
-                payload,
-                guest_handler_ms,
-            }) => {
-                if let Some(ms) = guest_handler_ms {
-                    env.evidence
-                        .details
-                        .insert("guest_handler_ms".into(), ms.into());
-                }
-                let bytes = serde_json::to_vec(&payload).unwrap_or_default();
-                bytes_out = bytes.len() as u64;
-                if bytes_out > max_response {
-                    (
-                        Err(InvocationError::new(
-                            ErrorClass::PlatformError,
-                            "Host.ResponseTooLarge",
-                            format!("response is {bytes_out} bytes (max {max_response})"),
-                        )),
-                        EnvEnd {
-                            reason: TerminateReason::Completed,
-                            failure: None,
-                        },
-                    )
-                } else {
-                    let http_status = match self.event_kind {
-                        EventKind::Http => payload
-                            .get("status")
-                            .and_then(serde_json::Value::as_u64)
-                            .and_then(|s| u16::try_from(s).ok()),
-                        EventKind::Json => None,
-                    };
-                    let output_ref = if bytes_out <= inline_max {
-                        PayloadRef::Inline {
-                            bytes_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
-                            size_bytes: bytes_out,
-                        }
-                    } else {
-                        PayloadRef::Digest {
-                            digest: Sha256Digest::of_bytes(&bytes),
-                            size_bytes: bytes_out,
-                        }
-                    };
-                    output_value = Some(payload);
-                    (
-                        Ok((Some(output_ref), http_status)),
-                        EnvEnd {
-                            reason: TerminateReason::Completed,
-                            failure: None,
-                        },
-                    )
-                }
-            }
-            Dispatch::Finished(Outcome::GuestError {
-                kind,
-                error_type,
-                message,
-                stack_trace,
-                guest_handler_ms,
-            }) => {
-                if let Some(ms) = guest_handler_ms {
-                    env.evidence
-                        .details
-                        .insert("guest_handler_ms".into(), ms.into());
-                }
-                if let Some(trace) = stack_trace {
-                    logs.platform(LogPhase::Handler, Some(&attempt_id), &trace);
-                }
-                classify_guest_error(kind, error_type, message)
-            }
-            Dispatch::Finished(Outcome::Timeout) => {
-                let (error_type, message, line) = if execution_clamped {
-                    (
-                        "Host.ClientDeadline",
-                        "client deadline elapsed while the handler was running".to_string(),
-                        format!(
-                            "client deadline elapsed after {} ms of execution; cancelling",
-                            execution_wait.as_millis()
-                        ),
-                    )
-                } else {
-                    (
-                        "Host.Timeout",
-                        format!("handler did not finish within {} s", timeout.as_secs()),
-                        format!(
-                            "execution deadline ({} s) elapsed; cancelling",
-                            timeout.as_secs()
-                        ),
-                    )
-                };
-                logs.platform(LogPhase::Handler, Some(&attempt_id), &line);
-                let grace = svc.invoke_cfg.cancel_grace();
-                let _ = session.cancel(&attempt_id, grace).await;
-                session
-                    .drain_until_closed(Instant::now() + grace + Duration::from_millis(200))
-                    .await;
-                (
-                    Err(InvocationError::new(
-                        ErrorClass::Timeout,
-                        error_type,
-                        message,
-                    )),
-                    EnvEnd {
-                        reason: TerminateReason::Timeout,
-                        failure: Some("execution timeout"),
-                    },
-                )
-            }
-            // Only reachable after the Invoke frame was written: the handler
-            // may have run (docs/threat-model.md §9).
-            Dispatch::Finished(Outcome::Disconnected) => (
-                Err(InvocationError::new(
-                    ErrorClass::OutcomeUnknown,
-                    "Host.OutcomeUnknown",
-                    "bridge connection was lost before a result arrived",
-                )),
-                EnvEnd {
-                    reason: TerminateReason::Crashed,
-                    failure: Some("bridge disconnected"),
-                },
-            ),
-            Dispatch::Cancelled(kind) => {
-                let grace = svc.invoke_cfg.cancel_grace();
-                let _ = session.cancel(&attempt_id, grace).await;
-                session
-                    .drain_until_closed(Instant::now() + grace + Duration::from_millis(200))
-                    .await;
-                (
-                    Err(InvocationError::new(
-                        ErrorClass::Cancelled,
-                        "Host.Cancelled",
-                        match kind {
-                            CancelKind::Client => "cancelled by request",
-                            CancelKind::Shutdown => "cancelled by gateway shutdown",
-                        },
-                    )),
-                    EnvEnd {
-                        reason: cancel_reason(kind),
-                        failure: None,
-                    },
-                )
-            }
-            Dispatch::NotDelivered { error, drained } => {
-                logs.platform(
-                    LogPhase::Handler,
-                    Some(&attempt_id),
-                    &format!("invocation was not delivered to the guest: {error}"),
-                );
-                undelivered_invoke(&error, drained)
-            }
-        };
-
-        // 10. record, release, terminate ----------------------------------
-        let now = self.now();
-        let _ = lease.release(now);
-        let _ = svc.repos.environments.update_lease(lease);
-        let response_ms = finish_started.elapsed().as_millis() as u64;
-        attempt.timings = tachyon_serverless_domain::AttemptTimings {
-            queue_wait_ms: Some(queue_wait_ms),
-            environment_boot_ms: Some(environment_boot_ms),
-            runtime_init_ms: Some(runtime_init_ms),
-            handler_ms: Some(handler_ms),
-            response_ms: Some(response_ms),
-            total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
-        };
-        match &result {
-            Ok(_) => {
-                let _ = attempt.succeed(now);
-            }
-            Err(e) if e.class == ErrorClass::OutcomeUnknown => {
-                let _ = attempt.outcome_unknown(e.clone(), now);
-            }
-            Err(e) => {
-                let _ = attempt.fail(e.clone(), now);
-            }
-        }
-        let _ = svc.repos.invocations.update_attempt(attempt.clone());
-        if let Some(mut inv) = self.load_invocation() {
-            let r = match &result {
-                Ok((output, http_status)) => inv.mark_succeeded(output.clone(), *http_status, now),
-                Err(e) => match e.class {
-                    ErrorClass::Cancelled => inv.mark_cancelled(now),
-                    ErrorClass::OutcomeUnknown => inv.mark_outcome_unknown(e.message.clone(), now),
-                    _ => inv.mark_failed(e.clone(), now),
-                },
-            };
-            if let Err(err) = r {
-                tracing::warn!(error = %err, invocation_id = %inv.id, "cannot record invocation outcome");
-            }
-            tracing::info!(
-                invocation_id = %inv.id,
-                status = inv.status.name(),
-                handler_ms,
-                environment_boot_ms,
-                runtime_init_ms,
-                "invocation finished"
-            );
-            self.save_invocation(inv);
-        }
-        if handler_started {
-            self.seq += 1;
-            self.emit_usage(
-                &env_id,
-                Some(&attempt_id),
-                UsageEventType::HandlerFinished,
-                self.seq,
-                Some(handler_ms),
-                self.input_size,
-                bytes_out,
-            )
-            .await;
-        }
-
-        let _ = session
-            .shutdown(match env_end.reason {
-                TerminateReason::Completed => "completed",
-                TerminateReason::Timeout => "timeout",
-                TerminateReason::Cancelled => "cancelled",
-                TerminateReason::Crashed => "crashed",
-                TerminateReason::Shutdown => "shutdown",
-                TerminateReason::InitFailed => "init failed",
-                TerminateReason::Reconcile => "reconcile",
-            })
-            .await;
-        match svc
-            .provider
-            .terminate_environment(&env_id, env_end.reason)
-            .await
-        {
-            Ok(report) => logs.platform(
-                LogPhase::Shutdown,
-                None,
-                &format!(
-                    "environment terminated ({:?}); cleaned: {}",
-                    env_end.reason,
-                    report.cleaned.join(", ")
-                ),
-            ),
-            Err(e) => {
-                tracing::warn!(error = %e, environment_id = %env_id, "terminate failed");
-            }
-        }
-        let now = self.now();
-        let _ = match env_end.failure {
-            None => env.mark_stopped(now),
-            Some(reason) => env.mark_failed(reason, now),
-        };
-        self.save_env(&env);
-        self.seq += 1;
-        self.emit_usage(
-            &env_id,
-            Some(&attempt_id),
-            UsageEventType::EnvironmentStopped,
-            self.seq,
-            Some(create_started.elapsed().as_millis() as u64),
-            0,
-            0,
-        )
-        .await;
-        // Everything is recorded and terminated: nothing left for a panic
-        // cleanup to do.
-        self.env_id = None;
-        self.attempt_id = None;
-        self.lease_id = None;
-        drop(_permits);
-        output_value
+        Some(Prepared {
+            env,
+            session,
+            start_kind: StartKind::Cold,
+            environment_boot_ms,
+            runtime_init_ms,
+            logs,
+        })
     }
 
-    /// Compose `HelloAck`: entrypoint policy + revision env vars + resolved
-    /// secrets + `TACHYON_UNISOLATED=1` for dev-only providers.
-    async fn hello_ack_params(
+    /// Compose `HelloAck`: entrypoint policy + revision env vars + the secrets
+    /// [`Self::resolve_secret_env`] resolved + `TACHYON_UNISOLATED=1` for
+    /// dev-only providers.
+    fn hello_ack_params(
         &self,
         env_id: &EnvironmentId,
         artifact: &ArtifactLocation,
         init_timeout: Duration,
-    ) -> Result<HelloAckParams, SecretResolutionFailure> {
+        secret_env: Vec<(String, String)>,
+    ) -> HelloAckParams {
         let svc = &self.svc;
         let entry = svc
             .entrypoints
             .resolve(&svc.provider.kind(), &artifact.path, env_id);
         let mut env_vars = self.revision.spec.env_vars.clone();
-        let ctx = SecretDeliveryContext {
-            tenant_id: self.function.tenant_id.clone(),
-            revision_id: self.revision.id.clone(),
-            environment_id: env_id.clone(),
-            epoch: 1,
-        };
-        for binding in &self.revision.spec.secrets {
-            let value = svc
-                .secrets
-                .resolve(&ctx, &binding.binding_ref)
-                .await
-                .map_err(|error| SecretResolutionFailure {
-                    binding_ref: binding.binding_ref.clone(),
-                    error,
-                })?;
-            env_vars.push((binding.env_name.clone(), value.expose().to_string()));
-        }
+        env_vars.extend(secret_env);
         if svc.provider.capabilities().dev_only {
             env_vars.push((
                 tachyon_serverless_protocol::env::UNISOLATED.to_string(),
                 "1".to_string(),
             ));
         }
-        Ok(HelloAckParams {
+        HelloAckParams {
             entrypoint: entry.entrypoint,
             args: entry.args,
             env: env_vars,
@@ -1786,7 +2215,7 @@ impl Driver {
             init_timeout,
             max_response_bytes: svc.limits.max_response_bytes,
             max_log_line_bytes: svc.limits.max_log_line_bytes as u64,
-        })
+        }
     }
 }
 
@@ -1799,7 +2228,11 @@ fn cancel_reason(kind: CancelKind) -> TerminateReason {
 
 /// Map a guest-reported error for the attempt onto the ledger class and the
 /// environment end.
-fn classify_guest_error(kind: GuestErrorKind, error_type: String, message: String) -> Classified {
+fn classify_guest_error(
+    kind: GuestErrorKind,
+    error_type: String,
+    message: String,
+) -> (InvocationError, EnvEnd) {
     let (class, end) = match kind {
         GuestErrorKind::Handler => (
             ErrorClass::UserError,
@@ -1830,13 +2263,20 @@ fn classify_guest_error(kind: GuestErrorKind, error_type: String, message: Strin
             },
         ),
     };
-    (Err(InvocationError::new(class, error_type, message)), end)
+    (InvocationError::new(class, error_type, message), end)
 }
 
 /// Classification when the `Invoke` frame never reached the guest. The
 /// handler cannot have started, so this is never `OutcomeUnknown`
 /// (docs/threat-model.md §9).
-fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> Classified {
+///
+/// One rule for every dispatch, cold or warm: a write that failed is followed
+/// by a short read of the frames the guest queued before closing, and the
+/// classification comes from those. Whether the caller then retries is a
+/// separate decision ([`Driver::retire_after_undelivered_warm`]) and never
+/// changes what is recorded here, so the same guest behaviour cannot be
+/// classified two ways.
+fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> (InvocationError, EnvEnd) {
     match error {
         SessionError::Disconnected => match drained {
             // The guest said why it went away (typically `Exited` right after
@@ -1848,11 +2288,11 @@ fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> Classif
                 ..
             }) => classify_guest_error(kind, error_type, message),
             _ => (
-                Err(InvocationError::new(
+                InvocationError::new(
                     ErrorClass::Crash,
                     "Host.BridgeDisconnectedBeforeInvoke",
                     "the bridge closed the connection before the invocation could be delivered",
-                )),
+                ),
                 EnvEnd {
                     reason: TerminateReason::Crashed,
                     failure: Some("bridge disconnected before invoke"),
@@ -1861,22 +2301,22 @@ fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> Classif
         },
         // Nothing was written; the environment itself is healthy.
         SessionError::FrameTooLarge(size) => (
-            Err(InvocationError::new(
+            InvocationError::new(
                 ErrorClass::PlatformError,
                 "Host.InvokeTooLarge",
                 format!("invoke frame of {size} bytes exceeds the protocol frame limit"),
-            )),
+            ),
             EnvEnd {
                 reason: TerminateReason::Completed,
                 failure: None,
             },
         ),
         other => (
-            Err(InvocationError::new(
+            InvocationError::new(
                 ErrorClass::PlatformError,
                 "Host.InvokeEncode",
                 format!("invoke frame could not be encoded: {other}"),
-            )),
+            ),
             EnvEnd {
                 reason: TerminateReason::Completed,
                 failure: None,
@@ -1890,8 +2330,8 @@ mod tests {
     use super::*;
     use tachyon_serverless_domain::TenantId;
 
-    fn error_of(c: &Classified) -> &InvocationError {
-        c.0.as_ref().expect_err("classified as a failure")
+    fn error_of(c: &(InvocationError, EnvEnd)) -> &InvocationError {
+        &c.0
     }
 
     #[test]
@@ -1963,5 +2403,61 @@ mod tests {
         .invocation_error();
         assert_eq!(backend.class, ErrorClass::PlatformError);
         assert_eq!(backend.error_type, "Host.SecretBackend");
+    }
+
+    /// Regression (review R5): the copy a warm dispatch keeps for a possible
+    /// cold retry is released as soon as the write resolves as anything but a
+    /// lost connection, so a payload is never held twice for the whole handler
+    /// execution. `settle` is also what decides the retry, so the retained
+    /// copy and the retry can never disagree.
+    #[test]
+    fn a_dispatched_payload_is_retained_only_while_a_cold_retry_can_need_it() {
+        let payload = || serde_json::json!({ "n": 1 });
+
+        // Cold: the frame gets the only copy and nothing is retained, whatever
+        // the write did.
+        for connection_lost in [false, true] {
+            let mut cold = RetainedPayload::new(payload());
+            assert_eq!(cold.checkout(false), payload());
+            assert!(!cold.held(), "a cold dispatch keeps no second copy");
+            assert!(
+                !cold.settle(connection_lost),
+                "a cold dispatch is never retried"
+            );
+            assert!(!cold.held());
+        }
+
+        // Warm, delivered: the retained copy goes the moment the write is
+        // through, not when the handler finishes.
+        let mut delivered = RetainedPayload::new(payload());
+        assert_eq!(delivered.checkout(true), payload());
+        assert!(
+            delivered.held(),
+            "it can still be needed while the write is in flight"
+        );
+        assert!(!delivered.settle(false));
+        assert!(
+            !delivered.held(),
+            "a delivered payload is not held for the whole handler execution"
+        );
+
+        // Warm, connection lost: the retry needs it and gets the only copy.
+        let mut lost = RetainedPayload::new(payload());
+        let _ = lost.checkout(true);
+        assert!(
+            lost.settle(true),
+            "a lost connection is exactly what is retried cold"
+        );
+        assert!(lost.held());
+        assert_eq!(
+            lost.checkout(false),
+            payload(),
+            "the retry dispatches the same payload"
+        );
+        assert!(!lost.held());
+        assert!(
+            !lost.settle(true),
+            "and nothing is left to retry with afterwards"
+        );
     }
 }
