@@ -2017,3 +2017,583 @@ async fn startup_reconcile_can_be_turned_off() {
     assert!(h.fake.terminated().is_empty());
     assert_eq!(h.fake.running(), vec![orphan]);
 }
+
+// ---------------------------------------------------------------------------
+// environment pool / warm reuse (PLT-4632, docs/architecture.md §4)
+// ---------------------------------------------------------------------------
+
+/// Reuse on, with room for two idle environments per reuse key.
+const POOL_ON: &str = "[pool]\nenabled = true\nmax_idle_per_revision = 2\nidle_ttl_seconds = 60\nmax_total_idle = 8\n";
+
+/// A fake that reports both idle capabilities as `Supported` and whose guests
+/// serve any number of sequential attempts, i.e. the only provider in this
+/// repository that the pool will ever hand anything out for.
+fn warm_fake() -> Arc<FakeExecutionProvider> {
+    let fake = Arc::new(FakeExecutionProvider::with_options(FakeProviderOptions {
+        warm_capable: true,
+        ..FakeProviderOptions::default()
+    }));
+    fake.set_default_script(Some(FakeGuestScript::EchoForever));
+    fake
+}
+
+fn pool_harness(fake: Arc<FakeExecutionProvider>, extra: &str) -> Harness {
+    pool_harness_with(fake, extra, None, None)
+}
+
+/// `harness_with` plus the two overrides the pool tests need: a clock they can
+/// move past the idle TTL, and a secret backend they can rotate.
+fn pool_harness_with(
+    fake: Arc<FakeExecutionProvider>,
+    extra: &str,
+    clock: Option<Arc<dyn Clock>>,
+    secrets: Option<Arc<dyn tachyon_serverless_provider_port::SecretProvider>>,
+) -> Harness {
+    let dir = tempfile::tempdir().unwrap();
+    let config = GatewayConfig::from_toml(&config_toml(dir.path(), "dev", extra)).unwrap();
+    let mut options = BootstrapOptions {
+        persist_state: true,
+        secrets,
+        ..BootstrapOptions::default()
+    };
+    if let Some(clock) = clock {
+        options.clock = clock;
+    }
+    let app = Application::bootstrap_with(config, fake.clone(), options).unwrap();
+    Harness {
+        app,
+        fake,
+        a: principal(TENANT_A, vec![Role::Deploy, Role::Invoke]),
+        b: principal(TENANT_B, vec![Role::Deploy, Role::Invoke]),
+        dir,
+    }
+}
+
+fn attempt_of(out: &InvokeOutcome) -> &tachyon_serverless_domain::InvocationAttempt {
+    &out.detail.attempts[0].0
+}
+
+fn environment_state(h: &Harness, id: &EnvironmentId) -> EnvironmentState {
+    h.app.repos.environments.get(id).unwrap().unwrap().state
+}
+
+/// Acceptance 1 (the hit) and the `StartKind` the API surfaces: the first
+/// invocation boots an environment, the second is served by the same one, one
+/// epoch further on.
+#[tokio::test]
+async fn a_second_invocation_reuses_the_pooled_environment_as_a_warm_start() {
+    use tachyon_serverless_domain::StartKind;
+    let h = pool_harness(warm_fake(), POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "warm").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let cold = attempt_of(&first);
+    assert_eq!(cold.start_kind, StartKind::Cold, "the first start is cold");
+    assert_eq!(cold.epoch, 1);
+    let env_id = cold.environment_id.clone();
+    // Nothing was terminated: the environment went into the pool instead.
+    assert!(h.fake.terminated().is_empty());
+    assert_eq!(environment_state(&h, &env_id), EnvironmentState::Idle);
+    assert_eq!(h.fake.running(), vec![env_id.clone()]);
+
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
+        .await
+        .unwrap();
+    assert!(second.succeeded(), "{:?}", second.invocation().status);
+    assert_eq!(second.output, Some(serde_json::json!({"n": 2})));
+    let warm = attempt_of(&second);
+    assert_eq!(warm.start_kind, StartKind::Warm);
+    assert_eq!(
+        warm.environment_id, env_id,
+        "the same environment served it"
+    );
+    assert_eq!(warm.epoch, 2, "a reassignment advances the epoch");
+    assert_eq!(
+        h.fake.created().len(),
+        1,
+        "no second environment was created"
+    );
+    assert_eq!(
+        warm.timings.environment_boot_ms,
+        Some(0),
+        "a warm start does not boot"
+    );
+    assert_eq!(warm.timings.runtime_init_ms, Some(0));
+    // The guest was never asked to hand shake twice.
+    let handshakes = h
+        .fake
+        .host_messages(&env_id)
+        .iter()
+        .filter(|m| matches!(m, HostMessage::HelloAck { .. }))
+        .count();
+    assert_eq!(handshakes, 1, "one handshake for two attempts");
+    assert_eq!(environment_state(&h, &env_id), EnvironmentState::Idle);
+}
+
+/// Acceptance 2, end to end: while an attempt holds an environment it is
+/// `Busy`, and a concurrent invocation must boot its own instead of being
+/// handed the busy one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_busy_environment_is_never_handed_to_a_concurrent_invocation() {
+    use tachyon_serverless_domain::StartKind;
+    let h = pool_harness(warm_fake(), POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "concurrent").await;
+
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let tasks: Vec<_> = (0..2)
+        .map(|n| {
+            let app = h.app.clone();
+            let req = invoke_request(&h.a, &function, serde_json::json!({ "n": n }));
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                app.invoke.invoke(req).await
+            })
+        })
+        .collect();
+    let mut environments = Vec::new();
+    for task in tasks {
+        let out = task.await.unwrap().unwrap();
+        assert!(out.succeeded(), "{:?}", out.invocation().status);
+        let attempt = attempt_of(&out);
+        assert_eq!(attempt.start_kind, StartKind::Cold);
+        assert_eq!(attempt.epoch, 1);
+        environments.push(attempt.environment_id.clone());
+    }
+    assert_ne!(
+        environments[0], environments[1],
+        "two attempts must never share one environment"
+    );
+    assert_eq!(h.fake.created().len(), 2);
+
+    // Both are pooled now (the cap is 2), so the next invocation is warm and
+    // takes one of them.
+    let third = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 3})))
+        .await
+        .unwrap();
+    let warm = attempt_of(&third);
+    assert_eq!(warm.start_kind, StartKind::Warm);
+    assert_eq!(warm.epoch, 2);
+    assert!(environments.contains(&warm.environment_id));
+    assert_eq!(h.fake.created().len(), 2, "still no third environment");
+}
+
+/// Acceptance 1 (a miss): the revision is part of the reuse key, so a second
+/// revision never lands on the first one's environment.
+#[tokio::test]
+async fn another_revision_never_reuses_the_first_revisions_environment() {
+    use tachyon_serverless_domain::StartKind;
+    let h = pool_harness(warm_fake(), POOL_ON);
+    let (one, rev_one) = deploy(&h, &h.a, "rev-one").await;
+    let (two, rev_two) = deploy(&h, &h.a, "rev-two").await;
+    assert_ne!(rev_one.id, rev_two.id);
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &one, serde_json::json!({})))
+        .await
+        .unwrap();
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &two, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(first.succeeded() && second.succeeded());
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Cold);
+    assert_ne!(
+        attempt_of(&first).environment_id,
+        attempt_of(&second).environment_id
+    );
+    assert_eq!(h.fake.created().len(), 2);
+
+    // Each revision reuses only its own environment.
+    let again = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &one, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(attempt_of(&again).start_kind, StartKind::Warm);
+    assert_eq!(
+        attempt_of(&again).environment_id,
+        attempt_of(&first).environment_id
+    );
+}
+
+/// A secret backend whose value can be rotated between invocations.
+struct RotatingSecrets(std::sync::Mutex<String>);
+
+#[async_trait]
+impl tachyon_serverless_provider_port::SecretProvider for RotatingSecrets {
+    async fn resolve(
+        &self,
+        _ctx: &tachyon_serverless_provider_port::SecretDeliveryContext,
+        _binding_ref: &str,
+    ) -> Result<
+        tachyon_serverless_provider_port::SecretValue,
+        tachyon_serverless_provider_port::SecretError,
+    > {
+        Ok(tachyon_serverless_provider_port::SecretValue::new(
+            self.0.lock().unwrap().clone(),
+        ))
+    }
+}
+
+/// Acceptance 1, the secret dimension: the reuse key carries the generation of
+/// the *resolved* bindings, so a rotated value must not reach a guest that was
+/// started under the previous one.
+#[tokio::test]
+async fn a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start() {
+    use tachyon_serverless_domain::StartKind;
+    let secrets = Arc::new(RotatingSecrets(std::sync::Mutex::new("v1".to_string())));
+    let h = pool_harness_with(warm_fake(), POOL_ON, None, Some(secrets.clone()));
+    let (function, _) = deploy(&h, &h.a, "rotating").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(first.succeeded());
+    let old_env = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &old_env), EnvironmentState::Idle);
+
+    // Same everything, same environment: the generation did not move.
+    let same = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(attempt_of(&same).start_kind, StartKind::Warm);
+    assert_eq!(attempt_of(&same).environment_id, old_env);
+
+    // Rotate the value behind the same binding ref.
+    *secrets.0.lock().unwrap() = "v2".to_string();
+    let rotated = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(rotated.succeeded());
+    let new_env = attempt_of(&rotated).environment_id.clone();
+    assert_eq!(
+        attempt_of(&rotated).start_kind,
+        StartKind::Cold,
+        "a superseded secret generation cannot reuse the old environment"
+    );
+    assert_ne!(new_env, old_env);
+    assert_eq!(h.fake.created().len(), 2);
+    // The new guest got the new value; the old environment never saw it.
+    let Some(HostMessage::HelloAck { env, .. }) = h.fake.hello_ack(&new_env) else {
+        panic!("the new guest did not receive HelloAck");
+    };
+    assert!(env.contains(&("DEMO_SECRET".to_string(), "v2".to_string())));
+    let Some(HostMessage::HelloAck { env, .. }) = h.fake.hello_ack(&old_env) else {
+        panic!("the old guest did not receive HelloAck");
+    };
+    assert!(env.contains(&("DEMO_SECRET".to_string(), "v1".to_string())));
+}
+
+/// The epoch fencing that reuse makes load-bearing: on every attempt the guest
+/// first answers with the previous epoch. That frame must never settle the
+/// attempt, on the warm start just as on the cold one.
+#[tokio::test]
+async fn a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake();
+    fake.set_default_script(Some(FakeGuestScript::StaleEpochThenOkForever(
+        serde_json::json!({"fresh": true}),
+    )));
+    let h = pool_harness(fake, POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "fenced").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    assert_eq!(first.output, Some(serde_json::json!({"fresh": true})));
+    assert_eq!(attempt_of(&first).epoch, 1);
+
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(second.succeeded(), "{:?}", second.invocation().status);
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Warm);
+    assert_eq!(attempt_of(&second).epoch, 2);
+    assert_eq!(
+        second.output,
+        Some(serde_json::json!({"fresh": true})),
+        "the frame carrying the previous epoch was rejected as stale"
+    );
+}
+
+/// Idle environments do not live forever: the TTL sweeper terminates them, and
+/// a drain empties the pool whatever the TTL says.
+#[tokio::test]
+async fn idle_environments_are_reaped_by_the_ttl_sweeper_and_by_a_drain() {
+    use tachyon_serverless_domain::StartKind;
+    let offset = Arc::new(AtomicI64::new(0));
+    let clock: Arc<dyn Clock> = Arc::new(ShiftedClock(offset.clone()));
+    let h = pool_harness_with(warm_fake(), POOL_ON, Some(clock), None);
+    let (function, _) = deploy(&h, &h.a, "ttl").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    let pooled = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &pooled), EnvironmentState::Idle);
+
+    // Still inside the TTL: the sweeper looks and leaves it alone.
+    let swept = h.app.sweep_idle_environments().await.unwrap();
+    assert_eq!((swept.examined, swept.reaped), (1, 0));
+    assert!(h.fake.terminated().is_empty());
+
+    // Past the TTL (60 s): it is terminated and settled.
+    offset.store(120_000, Ordering::SeqCst);
+    let swept = h.app.sweep_idle_environments().await.unwrap();
+    assert_eq!((swept.examined, swept.reaped, swept.raced), (1, 1, 0));
+    assert_eq!(
+        h.fake.terminated(),
+        vec![(pooled.clone(), TerminateReason::Shutdown)]
+    );
+    assert_eq!(environment_state(&h, &pooled), EnvironmentState::Stopped);
+    assert!(h.fake.running().is_empty());
+
+    // The next invocation boots a fresh one, and a drain empties the pool.
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    let fresh = attempt_of(&second).environment_id.clone();
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Cold);
+    assert_ne!(fresh, pooled);
+    assert_eq!(environment_state(&h, &fresh), EnvironmentState::Idle);
+    let drained = h.app.drain_pool().await;
+    assert_eq!(drained.reaped, 1, "a drain ignores the TTL");
+    assert_eq!(environment_state(&h, &fresh), EnvironmentState::Stopped);
+    assert!(h.fake.running().is_empty());
+}
+
+/// Delegates to the fake but reports the idle capabilities as `Unverified`,
+/// like a runtime profile whose idle behaviour has not been measured.
+struct UnverifiedIdle(Arc<FakeExecutionProvider>);
+
+#[async_trait]
+impl ExecutionProvider for UnverifiedIdle {
+    fn kind(&self) -> ProviderKind {
+        self.0.kind()
+    }
+    fn capabilities(&self) -> Capabilities {
+        let mut caps = self.0.capabilities();
+        caps.idle_quiesce =
+            tachyon_serverless_provider_port::Support::unverified("not measured on real hardware");
+        caps.idle_resume =
+            tachyon_serverless_provider_port::Support::unverified("not measured on real hardware");
+        caps
+    }
+    async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
+        self.0.preflight().await
+    }
+    async fn validate_artifact(
+        &self,
+        artifact: &ArtifactLocation,
+        architecture: Architecture,
+    ) -> Result<(), ProviderError> {
+        self.0.validate_artifact(artifact, architecture).await
+    }
+    async fn create_environment(
+        &self,
+        spec: EnvironmentSpec,
+    ) -> Result<EnvironmentHandle, ProviderError> {
+        self.0.create_environment(spec).await
+    }
+    async fn terminate_environment(
+        &self,
+        environment_id: &EnvironmentId,
+        reason: TerminateReason,
+    ) -> Result<TerminateReport, ProviderError> {
+        self.0.terminate_environment(environment_id, reason).await
+    }
+    async fn observe_environment(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<EnvironmentObservation, ProviderError> {
+        self.0.observe_environment(environment_id).await
+    }
+    async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError> {
+        self.0.list_environments().await
+    }
+}
+
+/// Acceptance 4: an unverified idle capability disables reuse even with the
+/// pool switched on, and the environment is destroyed after the invocation.
+/// The same holds for `Unsupported`, which is what both shipped providers
+/// report, so this is the behaviour of the whole product today.
+#[tokio::test]
+async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invoke() {
+    use tachyon_serverless_domain::StartKind;
+
+    // Unverified: the code exists but nothing was measured. Not enough.
+    let fake = warm_fake();
+    let provider = Arc::new(UnverifiedIdle(fake.clone()));
+    let dir = tempfile::tempdir().unwrap();
+    let config = GatewayConfig::from_toml(&config_toml(dir.path(), "dev", POOL_ON)).unwrap();
+    let app = Application::bootstrap_with(
+        config,
+        provider,
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let h = Harness {
+        app,
+        fake,
+        a: principal(TENANT_A, vec![Role::Deploy, Role::Invoke]),
+        b: principal(TENANT_B, vec![Role::Deploy, Role::Invoke]),
+        dir,
+    };
+    assert!(!h.app.pool.policy().reuse_enabled());
+    let (function, _) = deploy(&h, &h.a, "unverified").await;
+    for _ in 0..2 {
+        let out = h
+            .app
+            .invoke
+            .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+            .await
+            .unwrap();
+        assert!(out.succeeded(), "{:?}", out.invocation().status);
+        assert_eq!(attempt_of(&out).start_kind, StartKind::Cold);
+        assert_eq!(attempt_of(&out).epoch, 1);
+    }
+    assert_eq!(h.fake.created().len(), 2, "every invocation is cold");
+    let terminated = h.fake.terminated();
+    assert_eq!(terminated.len(), 2);
+    assert!(
+        terminated
+            .iter()
+            .all(|(_, r)| *r == TerminateReason::Completed)
+    );
+    assert!(h.fake.running().is_empty(), "nothing is left running");
+    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert_eq!(h.app.pool.held(), 0);
+
+    // Unsupported: the default fake, and what firecracker / process report.
+    let plain = pool_harness(Arc::new(FakeExecutionProvider::new()), POOL_ON);
+    assert!(!plain.app.pool.policy().reuse_enabled());
+    let (function, _) = deploy(&plain, &plain.a, "unsupported").await;
+    plain
+        .fake
+        .push_script(FakeGuestScript::RespondOk(serde_json::json!({"ok": true})));
+    let out = plain
+        .app
+        .invoke
+        .invoke(invoke_request(&plain.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(out.succeeded());
+    assert_eq!(attempt_of(&out).start_kind, StartKind::Cold);
+    assert_eq!(plain.fake.terminated().len(), 1);
+    assert!(plain.fake.running().is_empty());
+    assert!(plain.app.sweep_idle_environments().await.is_none());
+}
+
+/// Acceptance 3: a pooled environment cannot survive a restart, because the
+/// session that drives it dies with the process. The ledger settles it as
+/// `Lost`, and the startup reconcile reclaims the host process behind it
+/// instead of letting a new invocation be handed something it cannot drive.
+#[tokio::test]
+async fn a_pooled_environment_is_reclaimed_after_a_restart() {
+    use tachyon_serverless_domain::StartKind;
+    let h = pool_harness(warm_fake(), POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "restarted").await;
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    let pooled = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &pooled), EnvironmentState::Idle);
+    assert_eq!(h.fake.running(), vec![pooled.clone()]);
+    h.app.store.persist_now().unwrap();
+
+    // Restart on the same data_dir. The host (the fake) still runs the
+    // environment; the new process holds no session to it.
+    let config = GatewayConfig::from_toml(&config_toml(h.dir.path(), "dev", POOL_ON)).unwrap();
+    let restarted = Application::bootstrap_with(
+        config,
+        h.fake.clone(),
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            restarted
+                .repos
+                .environments
+                .get(&pooled)
+                .unwrap()
+                .unwrap()
+                .state,
+            EnvironmentState::Lost { .. }
+        ),
+        "a pooled environment does not survive the process that held its session"
+    );
+    assert!(
+        restarted.repos.environments.list_idle().unwrap().is_empty(),
+        "nothing stale is left in the pool"
+    );
+
+    let report = restarted.reconcile_on_startup().await.unwrap();
+    assert_eq!((report.found, report.adopted, report.terminated), (1, 0, 1));
+    assert!(
+        h.fake
+            .terminated()
+            .contains(&(pooled.clone(), TerminateReason::Reconcile)),
+        "the orphan is reclaimed"
+    );
+    assert!(h.fake.running().is_empty());
+
+    // The next invocation boots a fresh environment.
+    let out = restarted
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(out.succeeded(), "{:?}", out.invocation().status);
+    assert_eq!(attempt_of(&out).start_kind, StartKind::Cold);
+    assert_ne!(attempt_of(&out).environment_id, pooled);
+}

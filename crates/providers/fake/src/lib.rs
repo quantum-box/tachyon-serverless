@@ -87,6 +87,18 @@ pub enum FakeGuestScript {
     /// Ready, answer first with a `Response` carrying a wrong epoch, then the
     /// correct one. Tests lease fencing on the host side.
     WrongEpochThenOk(serde_json::Value),
+    /// Ready, then answer *every* `Invoke` with this JSON payload, for as long
+    /// as the environment lives. Used to serve several sequential attempts on
+    /// one pooled environment.
+    RespondOkForever(serde_json::Value),
+    /// Ready, then answer *every* `Invoke` with the invoke payload itself.
+    EchoForever,
+    /// Ready, then for every `Invoke` answer twice: first `{"stale": true}`
+    /// carrying the *previous* epoch (a late frame of the attempt before),
+    /// then this payload at the correct epoch. The two payloads differ so a
+    /// test can tell which one settled the attempt, which is what makes epoch
+    /// fencing across reuse observable.
+    StaleEpochThenOkForever(serde_json::Value),
     /// Fully custom conversation.
     Custom(CustomScript),
 }
@@ -112,6 +124,9 @@ impl FakeGuestScript {
             Self::DisconnectAfterInvoke => "disconnect_after_invoke",
             Self::ExitAfterReady => "exit_after_ready",
             Self::WrongEpochThenOk(_) => "wrong_epoch_then_ok",
+            Self::RespondOkForever(_) => "respond_ok_forever",
+            Self::EchoForever => "echo_forever",
+            Self::StaleEpochThenOkForever(_) => "stale_epoch_then_ok_forever",
             Self::Custom(_) => "custom",
         }
     }
@@ -129,6 +144,12 @@ pub struct FakeProviderOptions {
     pub fail_create: Option<String>,
     /// When set, `preflight` reports not ok.
     pub preflight_failure: Option<String>,
+    /// Report `idle_quiesce` and `idle_resume` as `Supported`. The
+    /// application only pools environments for a provider that does, so this
+    /// is what lets a test exercise reuse end to end. Off by default: the
+    /// default fake keeps the destroy-after-invoke behaviour of both shipped
+    /// providers.
+    pub warm_capable: bool,
 }
 
 #[derive(Debug)]
@@ -277,6 +298,10 @@ impl ExecutionProvider for FakeExecutionProvider {
 
     fn capabilities(&self) -> Capabilities {
         let unsupported = |what: &str| Support::unsupported(format!("fake provider: {what}"));
+        let idle = |what: &str| match self.options.warm_capable {
+            true => Support::Supported,
+            false => unsupported(what),
+        };
         Capabilities {
             isolation: IsolationLevel::Process,
             create_terminate: Support::Supported,
@@ -287,8 +312,8 @@ impl ExecutionProvider for FakeExecutionProvider {
             egress_restricted: unsupported("no network model"),
             egress_public_web: unsupported("no network model"),
             host_metering: unsupported("no metering"),
-            idle_quiesce: unsupported("destroy-after-invoke"),
-            idle_resume: unsupported("destroy-after-invoke"),
+            idle_quiesce: idle("destroy-after-invoke"),
+            idle_resume: idle("destroy-after-invoke"),
             snapshot_create: unsupported("no snapshots"),
             snapshot_clone: unsupported("no snapshots"),
             dev_only: true,
@@ -832,6 +857,44 @@ async fn run_guest(script: FakeGuestScript, ctx: GuestContext, stream: DuplexStr
                 guest.drain_until_shutdown().await;
             }
         }
+        // One environment, many sequential attempts: the guest side of
+        // environment reuse. The loop only ends when the host sends
+        // `Shutdown` or the stream dies.
+        FakeGuestScript::RespondOkForever(_)
+        | FakeGuestScript::EchoForever
+        | FakeGuestScript::StaleEpochThenOkForever(_) => {
+            if !guest.ready().await {
+                return;
+            }
+            loop {
+                let Some(inv) = guest.wait_invoke().await else {
+                    return;
+                };
+                let ok = match &script {
+                    FakeGuestScript::RespondOkForever(v) => {
+                        guest.respond(&inv, inv.epoch, v.clone()).await
+                    }
+                    FakeGuestScript::EchoForever => {
+                        let v = inv.payload.clone();
+                        guest.respond(&inv, inv.epoch, v).await
+                    }
+                    FakeGuestScript::StaleEpochThenOkForever(v) => {
+                        guest
+                            .respond(
+                                &inv,
+                                inv.epoch.saturating_sub(1),
+                                serde_json::json!({"stale": true}),
+                            )
+                            .await
+                            && guest.respond(&inv, inv.epoch, v.clone()).await
+                    }
+                    _ => unreachable!("handled above"),
+                };
+                if !ok {
+                    return;
+                }
+            }
+        }
         FakeGuestScript::Custom(_) => unreachable!("handled above"),
     }
 }
@@ -1032,5 +1095,46 @@ mod tests {
         assert!(caps.dev_only);
         assert!(caps.create_terminate.is_supported());
         assert!(!caps.snapshot_create.is_supported());
+        assert!(
+            !caps.idle_quiesce.is_supported() && !caps.idle_resume.is_supported(),
+            "the default fake is destroy-after-invoke, like both shipped providers"
+        );
+    }
+
+    #[tokio::test]
+    async fn warm_capable_fake_reports_idle_support_and_serves_many_attempts() {
+        let provider = FakeExecutionProvider::with_options(FakeProviderOptions {
+            warm_capable: true,
+            ..FakeProviderOptions::default()
+        });
+        let caps = provider.capabilities();
+        assert!(caps.idle_quiesce.is_supported() && caps.idle_resume.is_supported());
+
+        provider.push_script(FakeGuestScript::EchoForever);
+        let id = EnvironmentId::generate();
+        let handle = provider.create_environment(spec(&id)).await.unwrap();
+        let mut host = Host::new(handle.stream);
+        host.recv().await.unwrap();
+        host.send(&ack(&id)).await;
+        assert!(matches!(
+            host.recv_non_log().await.unwrap(),
+            GuestMessage::Ready { .. }
+        ));
+        // Three sequential attempts, one environment, no second Ready.
+        for n in 0..3 {
+            host.send(&invoke(&format!("att_{n}"))).await;
+            match host.recv_non_log().await.unwrap() {
+                GuestMessage::Response {
+                    attempt_id,
+                    payload,
+                    ..
+                } => {
+                    assert_eq!(attempt_id, format!("att_{n}"));
+                    assert_eq!(payload, serde_json::json!({"hello": "world"}));
+                }
+                other => panic!("expected a Response for attempt {n}, got {other:?}"),
+            }
+        }
+        assert_eq!(provider.created(), vec![id], "one environment served all 3");
     }
 }

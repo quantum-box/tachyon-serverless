@@ -41,6 +41,9 @@ use crate::entrypoint::EntrypointPolicy;
 use crate::error::AppError;
 use crate::repository::{IdempotencyBinding, IdempotencyOutcome, Repositories};
 use crate::services::history::{HistoryService, InvocationDetail};
+use crate::services::pool::{
+    EnvironmentPool, WarmEnvironment, reuse_key_for, secret_binding_generation,
+};
 use crate::services::revision::ensure_ready;
 
 /// Upper bound of a caller-supplied trace id. Together with the fixed-size
@@ -153,6 +156,10 @@ pub struct InvokeService {
     capacity: CapacityConfig,
     invoke_cfg: InvokeConfig,
     entrypoints: EntrypointPolicy,
+    /// Warm environment pool. Hands out nothing unless both the provider's
+    /// idle capabilities and `[pool] enabled` allow reuse, so with the shipped
+    /// providers every invocation stays cold and destroy-after-invoke.
+    pool: Arc<EnvironmentPool>,
     global_slots: Arc<Semaphore>,
     revision_slots: Mutex<HashMap<RevisionId, Arc<Semaphore>>>,
     queued: Arc<AtomicUsize>,
@@ -173,6 +180,7 @@ pub struct InvokeServiceDeps {
     pub capacity: CapacityConfig,
     pub invoke: InvokeConfig,
     pub entrypoints: EntrypointPolicy,
+    pub pool: Arc<EnvironmentPool>,
 }
 
 impl InvokeService {
@@ -191,6 +199,7 @@ impl InvokeService {
             capacity: deps.capacity,
             invoke_cfg: deps.invoke,
             entrypoints: deps.entrypoints,
+            pool: deps.pool,
             revision_slots: Mutex::new(HashMap::new()),
             queued: Arc::new(AtomicUsize::new(0)),
             in_flight: Mutex::new(HashMap::new()),
@@ -708,6 +717,23 @@ impl SecretResolutionFailure {
     }
 }
 
+/// The environment half of the pipeline, however it was obtained: freshly
+/// booted ([`Driver::prepare_cold`]) or taken out of the pool
+/// ([`Driver::prepare_warm`]). From here on the two paths are identical.
+struct Prepared {
+    /// Ledger row, already `Busy`-able at the epoch this attempt will use.
+    env: ExecutionEnvironment,
+    session: BridgeSession,
+    start_kind: StartKind,
+    /// Milliseconds spent booting the environment. Zero for a warm start:
+    /// nothing booted.
+    environment_boot_ms: u64,
+    /// Milliseconds spent waiting for the guest to report `Ready`. Zero for a
+    /// warm start: the guest reported it during the invocation that booted it.
+    runtime_init_ms: u64,
+    logs: LogForwarder,
+}
+
 struct Driver {
     svc: Arc<InvokeService>,
     invocation_id: InvocationId,
@@ -1047,310 +1073,67 @@ impl Driver {
         }
 
         // 6. environment ---------------------------------------------------
+        // Reuse is decided before anything is created. The reuse key carries
+        // the generation of the *resolved* secret bindings, so the bindings are
+        // resolved first; a binding this tenant cannot use fails the invocation
+        // here, without a ledger row and without booting anything.
         let tenant = self.function.tenant_id.clone();
-        let env_id = EnvironmentId::from_ulid(svc.ids.next_ulid());
-        let reuse_key = ReuseKey {
-            tenant_id: tenant.clone(),
-            revision_id: self.revision.id.clone(),
-            execution_role_version: 1,
-            configuration_version: 1,
-            resource_profile_digest: Sha256Digest::of_bytes(
-                &serde_json::to_vec(&self.revision.spec.resources).unwrap_or_default(),
-            )
-            .hex()
-            .to_string(),
-            runtime_profile: self.revision.spec.runtime.protocol.clone(),
-            network_policy_version: 1,
-            secret_binding_generation: 1,
-        };
-        let mut env = ExecutionEnvironment::request(
-            env_id.clone(),
-            tenant.clone(),
-            self.revision.id.clone(),
-            svc.provider.kind(),
-            reuse_key,
-            self.now(),
-        );
-        if let Err(e) = svc.repos.environments.insert(env.clone()) {
-            self.fail_invocation(InvocationError::new(
-                ErrorClass::PlatformError,
-                "Host.Storage",
-                e.to_string(),
-            ));
-            return None;
-        }
-        // From here on a panic must still terminate the environment.
-        self.env_id = Some(env_id.clone());
-        let _ = env.mark_provisioning(self.now());
-        self.save_env(&env);
-
-        let logs = LogForwarder::new(
-            svc.repos.logs.clone(),
-            svc.clock.clone(),
-            LogContext {
-                tenant_id: tenant.clone(),
-                environment_id: env_id.clone(),
-                invocation_id: Some(self.invocation_id.clone()),
-                max_line_bytes: svc.limits.max_log_line_bytes,
-            },
-        );
-
-        let artifact = match &self.revision.spec.artifact {
-            tachyon_serverless_domain::ArtifactRef::Binary { digest, .. } => {
-                match svc.artifacts.get(digest).await {
-                    Ok(stored) => ArtifactLocation {
-                        path: stored.path,
-                        digest: stored.digest,
-                        size_bytes: stored.size_bytes,
-                    },
-                    Err(e) => {
-                        let _ = env.mark_failed(format!("artifact unavailable: {e}"), self.now());
-                        self.save_env(&env);
-                        self.fail_invocation(InvocationError::new(
-                            ErrorClass::InitError,
-                            "Host.ArtifactUnavailable",
-                            format!("artifact unavailable: {e}"),
-                        ));
-                        return None;
-                    }
-                }
-            }
-            tachyon_serverless_domain::ArtifactRef::OciImage { reference, .. } => {
-                let _ = env.mark_failed("oci images are not executable", self.now());
-                self.save_env(&env);
-                self.fail_invocation(InvocationError::new(
-                    ErrorClass::InitError,
-                    "Host.UnsupportedArtifact",
-                    format!("oci image `{reference}` is not executable by this provider"),
-                ));
-                return None;
-            }
-        };
-
-        // Initialization waits end at the client deadline at the latest.
+        let prospective_env_id = EnvironmentId::from_ulid(svc.ids.next_ulid());
         let init_timeout = Duration::from_secs(u64::from(
             self.revision.spec.execution.initialization_timeout_seconds,
         ));
-        let init_wait = init_timeout.min(self.client_remaining());
-        let init_clamped = init_wait < init_timeout;
-
-        // 6a. `HelloAck` (including resolved secrets) is composed before
-        // anything boots: a binding the tenant cannot use fails the
-        // invocation without creating an environment. The environment id is
-        // already assigned, so secrets are still only resolved for it.
-        let hello_ack = match self.hello_ack_params(&env_id, &artifact, init_wait).await {
-            Ok(p) => p,
+        let init_deadline_ts = (self.now()
+            + chrono::Duration::milliseconds(init_timeout.as_millis() as i64))
+        .min(self.client_deadline);
+        let secret_env = match self.resolve_secret_env(&prospective_env_id).await {
+            Ok(resolved) => resolved,
             Err(failure) => {
                 let error = failure.invocation_error();
                 tracing::warn!(
-                    environment_id = %env_id,
+                    environment_id = %prospective_env_id,
                     binding_ref = %failure.binding_ref,
                     reason = failure.reason(),
                     error = %failure.error,
                     "secret binding could not be resolved; environment not created"
                 );
-                logs.platform(LogPhase::Boot, None, &error.message);
-                let _ = env.mark_failed(error.message.clone(), self.now());
-                self.save_env(&env);
-                // Nothing was created, so there is nothing to terminate.
-                self.env_id = None;
                 self.fail_invocation(error);
                 return None;
             }
         };
-
-        let spec = EnvironmentSpec {
-            environment_id: env_id.clone(),
-            tenant_id: tenant.clone(),
-            revision_id: self.revision.id.clone(),
-            artifact: artifact.clone(),
-            architecture: self.revision.spec.runtime.architecture,
-            egress: self.revision.spec.egress,
-            resources: self.revision.spec.resources,
-            connect_timeout: init_wait,
-        };
-        let create_started = Instant::now();
-        self.env_started = Some(create_started);
-        let init_deadline_ts = (self.now()
-            + chrono::Duration::milliseconds(init_timeout.as_millis() as i64))
-        .min(self.client_deadline);
-        logs.platform(
-            LogPhase::Boot,
-            None,
-            &format!(
-                "creating environment {env_id} with provider {}",
-                svc.provider.kind().as_str()
-            ),
+        let reuse_key = reuse_key_for(
+            &tenant,
+            &self.revision,
+            secret_binding_generation(self.revision.spec.secrets.iter().zip(&secret_env).map(
+                |(binding, (_, value))| {
+                    (
+                        binding.env_name.as_str(),
+                        binding.binding_ref.as_str(),
+                        value.as_str(),
+                    )
+                },
+            )),
         );
-        let created = tokio::select! {
-            r = svc.provider.create_environment(spec) => r,
-            k = wait_cancel(&mut self.cancel_rx) => {
-                let _ = env.mark_stopped(self.now());
-                self.save_env(&env);
-                let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
-                self.fail_invocation(InvocationError::new(ErrorClass::Cancelled, "Host.Cancelled", "cancelled during environment creation"));
-                return None;
+        // A pooled environment is taken only when its reuse key matches in
+        // every field. Everything else boots cold — which, with both shipped
+        // providers, is every invocation: the pool never hands anything out
+        // unless the provider reports both idle capabilities as `Supported`.
+        let warm = svc.pool.claim(&reuse_key).await;
+        let prepared = match warm {
+            Some(warm) => self.prepare_warm(warm),
+            None => {
+                self.prepare_cold(prospective_env_id, reuse_key, secret_env, init_timeout)
+                    .await?
             }
         };
-        let handle = match created {
-            Ok(h) => h,
-            Err(e) => {
-                tracing::warn!(error = %e, environment_id = %env_id, "environment creation failed");
-                if init_clamped && matches!(e, ProviderError::Timeout { .. }) {
-                    self.stop_for_client_deadline(None, &mut env, &logs).await;
-                    return None;
-                }
-                let _ = env.mark_failed(format!("create failed: {e}"), self.now());
-                self.save_env(&env);
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::InitFailed)
-                    .await;
-                let (class, error_type) = match &e {
-                    ProviderError::Boot(_)
-                    | ProviderError::Timeout { .. }
-                    | ProviderError::ArtifactRejected(_) => {
-                        (ErrorClass::InitError, "Host.EnvironmentBootFailed")
-                    }
-                    _ => (ErrorClass::PlatformError, "Host.ProviderError"),
-                };
-                self.fail_invocation(InvocationError::new(class, error_type, e.to_string()));
-                return None;
-            }
-        };
-        let environment_boot_ms = handle
-            .connected_at
-            .saturating_duration_since(handle.created_at)
-            .as_millis() as u64;
-        let connected_at = handle.connected_at;
-        let _ = env.mark_initializing(handle.evidence.clone(), self.now());
-        self.save_env(&env);
-        self.seq += 1;
-        self.emit_usage(
-            &env_id,
-            None,
-            UsageEventType::EnvironmentStarted,
-            self.seq,
-            None,
-            0,
-            0,
-        )
-        .await;
-        logs.platform(
-            LogPhase::Boot,
-            None,
-            &format!(
-                "bridge connected after {environment_boot_ms} ms (host_pid={:?})",
-                handle.evidence.host_pid
-            ),
-        );
-
-        // 7. handshake + ready ---------------------------------------------
-        let handshake_timeout = svc.invoke_cfg.handshake_timeout();
-        let handshake_wait = handshake_timeout.min(self.client_remaining());
-        let handshake = BridgeSession::handshake(
-            handle.stream,
-            &env_id,
-            env.epoch,
-            hello_ack,
-            logs.clone(),
-            handshake_wait,
-        )
-        .await;
-        let (mut session, hello) = match handshake {
-            Ok(x) => x,
-            Err(e) => {
-                if handshake_wait < handshake_timeout && matches!(e, SessionError::Timeout { .. }) {
-                    self.stop_for_client_deadline(None, &mut env, &logs).await;
-                    return None;
-                }
-                let _ = env.mark_failed(format!("handshake failed: {e}"), self.now());
-                self.save_env(&env);
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::InitFailed)
-                    .await;
-                self.fail_invocation(InvocationError::new(
-                    ErrorClass::InitError,
-                    "Host.HandshakeFailed",
-                    e.to_string(),
-                ));
-                return None;
-            }
-        };
-        if let Some(boot_id) = &hello.guest_boot_id {
-            env.record_guest_boot_id(boot_id.clone());
-        }
-        env.evidence
-            .details
-            .insert("bridge_version".into(), hello.bridge_version.clone().into());
-        env.evidence.details.insert(
-            "guest_architecture".into(),
-            hello.architecture.clone().into(),
-        );
-        self.save_env(&env);
-
-        let init_deadline = create_started + init_wait;
-        let ready = tokio::select! {
-            r = session.wait_ready(init_deadline) => r,
-            k = wait_cancel(&mut self.cancel_rx) => {
-                let _ = session.shutdown("cancelled").await;
-                let _ = env.mark_stopped(self.now());
-                self.save_env(&env);
-                let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
-                self.fail_invocation(InvocationError::new(ErrorClass::Cancelled, "Host.Cancelled", "cancelled during initialization"));
-                return None;
-            }
-        };
-        let ready = match ready {
-            Ok(r) => r,
-            Err(SessionError::Timeout { .. }) if init_clamped => {
-                self.stop_for_client_deadline(Some(&mut session), &mut env, &logs)
-                    .await;
-                return None;
-            }
-            Err(e) => {
-                let (error_type, message) = match &e {
-                    SessionError::InitError {
-                        error_type,
-                        message,
-                        ..
-                    } => (error_type.clone(), message.clone()),
-                    SessionError::Timeout { .. } => (
-                        "Host.InitTimeout".to_string(),
-                        format!(
-                            "guest did not become ready within {} s",
-                            init_timeout.as_secs()
-                        ),
-                    ),
-                    SessionError::Disconnected => (
-                        "Host.BridgeDisconnected".to_string(),
-                        "bridge disconnected before Ready".to_string(),
-                    ),
-                    other => ("Host.InitProtocol".to_string(), other.to_string()),
-                };
-                logs.platform(LogPhase::Init, None, &format!("init failed: {message}"));
-                let _ = session.shutdown("init failed").await;
-                let _ = env.mark_failed(format!("init failed: {error_type}"), self.now());
-                self.save_env(&env);
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::InitFailed)
-                    .await;
-                self.fail_invocation(InvocationError::new(
-                    ErrorClass::InitError,
-                    error_type,
-                    message,
-                ));
-                return None;
-            }
-        };
-        let runtime_init_ms = connected_at.elapsed().as_millis() as u64;
-        let _ = env.mark_ready(self.now());
-        env.evidence
-            .details
-            .insert("guest_init_ms".into(), ready.guest_init_ms.into());
-        self.save_env(&env);
+        let Prepared {
+            mut env,
+            mut session,
+            start_kind,
+            environment_boot_ms,
+            runtime_init_ms,
+            logs,
+        } = prepared;
+        let env_id = env.id.clone();
 
         // Never start the handler after the client deadline. Checked before
         // any attempt, lease or Running state is recorded.
@@ -1392,7 +1175,7 @@ impl Driver {
             1,
             env_id.clone(),
             env.epoch,
-            StartKind::Cold,
+            start_kind,
             now,
         );
         let lease_id = LeaseId::from_ulid(svc.ids.next_ulid());
@@ -1687,6 +1470,40 @@ impl Driver {
             .await;
         }
 
+        // The environment goes back into the pool only when this attempt left
+        // it healthy: a clean end with nothing to clean up, reuse allowed by
+        // both gates, and no shutdown in progress (a pooled environment must
+        // never outlive the process holding its session). Everything else
+        // keeps destroy-after-invoke (docs/architecture.md §4).
+        let may_reuse = env_end.failure.is_none()
+            && env_end.reason == TerminateReason::Completed
+            && !svc.draining.load(Ordering::SeqCst);
+        let release = if may_reuse {
+            svc.pool.release(&env, session)
+        } else {
+            Err(Box::new(session))
+        };
+        let mut session = match release {
+            Ok(pooled) => {
+                logs.platform(
+                    LogPhase::Shutdown,
+                    None,
+                    &format!(
+                        "environment {env_id} returned to the pool (idle at epoch {})",
+                        pooled.epoch
+                    ),
+                );
+                // The pool owns the environment and its session now: it is not
+                // terminated, it did not stop (so no `EnvironmentStopped`), and
+                // a later panic cleanup must not reclaim it.
+                self.env_id = None;
+                self.attempt_id = None;
+                self.lease_id = None;
+                drop(_permits);
+                return output_value;
+            }
+            Err(session) => *session,
+        };
         let _ = session
             .shutdown(match env_end.reason {
                 TerminateReason::Completed => "completed",
@@ -1728,7 +1545,7 @@ impl Driver {
             Some(&attempt_id),
             UsageEventType::EnvironmentStopped,
             self.seq,
-            Some(create_started.elapsed().as_millis() as u64),
+            self.env_started.map(|t| t.elapsed().as_millis() as u64),
             0,
             0,
         )
@@ -1742,27 +1559,26 @@ impl Driver {
         output_value
     }
 
-    /// Compose `HelloAck`: entrypoint policy + revision env vars + resolved
-    /// secrets + `TACHYON_UNISOLATED=1` for dev-only providers.
-    async fn hello_ack_params(
+    /// Resolve the revision's secret bindings for `env_id`, in binding order.
+    ///
+    /// Split out of [`Self::hello_ack_params`] because the reuse key needs the
+    /// generation of the *resolved* bindings before the pipeline can decide
+    /// whether a pooled environment may serve this attempt: a value that was
+    /// rotated must never reach a guest started under the previous one.
+    async fn resolve_secret_env(
         &self,
         env_id: &EnvironmentId,
-        artifact: &ArtifactLocation,
-        init_timeout: Duration,
-    ) -> Result<HelloAckParams, SecretResolutionFailure> {
-        let svc = &self.svc;
-        let entry = svc
-            .entrypoints
-            .resolve(&svc.provider.kind(), &artifact.path, env_id);
-        let mut env_vars = self.revision.spec.env_vars.clone();
+    ) -> Result<Vec<(String, String)>, SecretResolutionFailure> {
         let ctx = SecretDeliveryContext {
             tenant_id: self.function.tenant_id.clone(),
             revision_id: self.revision.id.clone(),
             environment_id: env_id.clone(),
             epoch: 1,
         };
+        let mut resolved = Vec::with_capacity(self.revision.spec.secrets.len());
         for binding in &self.revision.spec.secrets {
-            let value = svc
+            let value = self
+                .svc
                 .secrets
                 .resolve(&ctx, &binding.binding_ref)
                 .await
@@ -1770,15 +1586,370 @@ impl Driver {
                     binding_ref: binding.binding_ref.clone(),
                     error,
                 })?;
-            env_vars.push((binding.env_name.clone(), value.expose().to_string()));
+            resolved.push((binding.env_name.clone(), value.expose().to_string()));
         }
+        Ok(resolved)
+    }
+
+    /// Take over a pooled environment.
+    ///
+    /// The ledger row is already `Busy` at its next epoch (the pool advanced it
+    /// inside the claim, in one store mutation), and the guest is long past
+    /// `Hello` and `Ready`, so nothing boots and nothing initializes here.
+    fn prepare_warm(&mut self, warm: WarmEnvironment) -> Prepared {
+        let WarmEnvironment {
+            environment,
+            mut session,
+        } = warm;
+        let logs = LogForwarder::new(
+            self.svc.repos.logs.clone(),
+            self.svc.clock.clone(),
+            LogContext {
+                tenant_id: self.function.tenant_id.clone(),
+                environment_id: environment.id.clone(),
+                invocation_id: Some(self.invocation_id.clone()),
+                max_line_bytes: self.svc.limits.max_log_line_bytes,
+            },
+        );
+        // Re-point the session at this attempt. The new epoch is what fences
+        // the previous attempt out: a frame it left behind no longer matches
+        // the lease and is counted as stale (docs/threat-model.md T05).
+        session.rearm(environment.epoch, logs.clone());
+        // The pool has handed the environment over, so from here a panic must
+        // terminate it exactly as it would a cold one.
+        self.env_id = Some(environment.id.clone());
+        self.env_started = Some(Instant::now());
+        logs.platform(
+            LogPhase::Boot,
+            None,
+            &format!(
+                "reusing pooled environment {} at epoch {}",
+                environment.id, environment.epoch
+            ),
+        );
+        tracing::debug!(
+            environment_id = %environment.id,
+            epoch = environment.epoch,
+            "warm start"
+        );
+        Prepared {
+            env: environment,
+            session,
+            start_kind: StartKind::Warm,
+            environment_boot_ms: 0,
+            runtime_init_ms: 0,
+            logs,
+        }
+    }
+
+    /// Create a fresh environment and drive it to `Ready` (the P1 path).
+    ///
+    /// `None` means the invocation already reached a terminal state and the
+    /// environment, if one was created, is already terminated.
+    async fn prepare_cold(
+        &mut self,
+        env_id: EnvironmentId,
+        reuse_key: ReuseKey,
+        secret_env: Vec<(String, String)>,
+        init_timeout: Duration,
+    ) -> Option<Prepared> {
+        let svc = self.svc.clone();
+        let tenant = self.function.tenant_id.clone();
+        let mut env = ExecutionEnvironment::request(
+            env_id.clone(),
+            tenant.clone(),
+            self.revision.id.clone(),
+            svc.provider.kind(),
+            reuse_key,
+            self.now(),
+        );
+        if let Err(e) = svc.repos.environments.insert(env.clone()) {
+            self.fail_invocation(InvocationError::new(
+                ErrorClass::PlatformError,
+                "Host.Storage",
+                e.to_string(),
+            ));
+            return None;
+        }
+        // From here on a panic must still terminate the environment.
+        self.env_id = Some(env_id.clone());
+        let _ = env.mark_provisioning(self.now());
+        self.save_env(&env);
+
+        let logs = LogForwarder::new(
+            svc.repos.logs.clone(),
+            svc.clock.clone(),
+            LogContext {
+                tenant_id: tenant.clone(),
+                environment_id: env_id.clone(),
+                invocation_id: Some(self.invocation_id.clone()),
+                max_line_bytes: svc.limits.max_log_line_bytes,
+            },
+        );
+
+        let artifact = match &self.revision.spec.artifact {
+            tachyon_serverless_domain::ArtifactRef::Binary { digest, .. } => {
+                match svc.artifacts.get(digest).await {
+                    Ok(stored) => ArtifactLocation {
+                        path: stored.path,
+                        digest: stored.digest,
+                        size_bytes: stored.size_bytes,
+                    },
+                    Err(e) => {
+                        let _ = env.mark_failed(format!("artifact unavailable: {e}"), self.now());
+                        self.save_env(&env);
+                        self.fail_invocation(InvocationError::new(
+                            ErrorClass::InitError,
+                            "Host.ArtifactUnavailable",
+                            format!("artifact unavailable: {e}"),
+                        ));
+                        return None;
+                    }
+                }
+            }
+            tachyon_serverless_domain::ArtifactRef::OciImage { reference, .. } => {
+                let _ = env.mark_failed("oci images are not executable", self.now());
+                self.save_env(&env);
+                self.fail_invocation(InvocationError::new(
+                    ErrorClass::InitError,
+                    "Host.UnsupportedArtifact",
+                    format!("oci image `{reference}` is not executable by this provider"),
+                ));
+                return None;
+            }
+        };
+
+        // Initialization waits end at the client deadline at the latest.
+        let init_wait = init_timeout.min(self.client_remaining());
+        let init_clamped = init_wait < init_timeout;
+
+        // `HelloAck` carries the secrets the caller already resolved for
+        // exactly this environment id.
+        let hello_ack = self.hello_ack_params(&env_id, &artifact, init_wait, secret_env);
+
+        let spec = EnvironmentSpec {
+            environment_id: env_id.clone(),
+            tenant_id: tenant.clone(),
+            revision_id: self.revision.id.clone(),
+            artifact: artifact.clone(),
+            architecture: self.revision.spec.runtime.architecture,
+            egress: self.revision.spec.egress,
+            resources: self.revision.spec.resources,
+            connect_timeout: init_wait,
+        };
+        let create_started = Instant::now();
+        self.env_started = Some(create_started);
+        logs.platform(
+            LogPhase::Boot,
+            None,
+            &format!(
+                "creating environment {env_id} with provider {}",
+                svc.provider.kind().as_str()
+            ),
+        );
+        let created = tokio::select! {
+            r = svc.provider.create_environment(spec) => r,
+            k = wait_cancel(&mut self.cancel_rx) => {
+                let _ = env.mark_stopped(self.now());
+                self.save_env(&env);
+                let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
+                self.fail_invocation(InvocationError::new(ErrorClass::Cancelled, "Host.Cancelled", "cancelled during environment creation"));
+                return None;
+            }
+        };
+        let handle = match created {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!(error = %e, environment_id = %env_id, "environment creation failed");
+                if init_clamped && matches!(e, ProviderError::Timeout { .. }) {
+                    self.stop_for_client_deadline(None, &mut env, &logs).await;
+                    return None;
+                }
+                let _ = env.mark_failed(format!("create failed: {e}"), self.now());
+                self.save_env(&env);
+                let _ = svc
+                    .provider
+                    .terminate_environment(&env_id, TerminateReason::InitFailed)
+                    .await;
+                let (class, error_type) = match &e {
+                    ProviderError::Boot(_)
+                    | ProviderError::Timeout { .. }
+                    | ProviderError::ArtifactRejected(_) => {
+                        (ErrorClass::InitError, "Host.EnvironmentBootFailed")
+                    }
+                    _ => (ErrorClass::PlatformError, "Host.ProviderError"),
+                };
+                self.fail_invocation(InvocationError::new(class, error_type, e.to_string()));
+                return None;
+            }
+        };
+        let environment_boot_ms = handle
+            .connected_at
+            .saturating_duration_since(handle.created_at)
+            .as_millis() as u64;
+        let connected_at = handle.connected_at;
+        let _ = env.mark_initializing(handle.evidence.clone(), self.now());
+        self.save_env(&env);
+        self.seq += 1;
+        self.emit_usage(
+            &env_id,
+            None,
+            UsageEventType::EnvironmentStarted,
+            self.seq,
+            None,
+            0,
+            0,
+        )
+        .await;
+        logs.platform(
+            LogPhase::Boot,
+            None,
+            &format!(
+                "bridge connected after {environment_boot_ms} ms (host_pid={:?})",
+                handle.evidence.host_pid
+            ),
+        );
+
+        // 7. handshake + ready ---------------------------------------------
+        let handshake_timeout = svc.invoke_cfg.handshake_timeout();
+        let handshake_wait = handshake_timeout.min(self.client_remaining());
+        let handshake = BridgeSession::handshake(
+            handle.stream,
+            &env_id,
+            env.epoch,
+            hello_ack,
+            logs.clone(),
+            handshake_wait,
+        )
+        .await;
+        let (mut session, hello) = match handshake {
+            Ok(x) => x,
+            Err(e) => {
+                if handshake_wait < handshake_timeout && matches!(e, SessionError::Timeout { .. }) {
+                    self.stop_for_client_deadline(None, &mut env, &logs).await;
+                    return None;
+                }
+                let _ = env.mark_failed(format!("handshake failed: {e}"), self.now());
+                self.save_env(&env);
+                let _ = svc
+                    .provider
+                    .terminate_environment(&env_id, TerminateReason::InitFailed)
+                    .await;
+                self.fail_invocation(InvocationError::new(
+                    ErrorClass::InitError,
+                    "Host.HandshakeFailed",
+                    e.to_string(),
+                ));
+                return None;
+            }
+        };
+        if let Some(boot_id) = &hello.guest_boot_id {
+            env.record_guest_boot_id(boot_id.clone());
+        }
+        env.evidence
+            .details
+            .insert("bridge_version".into(), hello.bridge_version.clone().into());
+        env.evidence.details.insert(
+            "guest_architecture".into(),
+            hello.architecture.clone().into(),
+        );
+        self.save_env(&env);
+
+        let init_deadline = create_started + init_wait;
+        let ready = tokio::select! {
+            r = session.wait_ready(init_deadline) => r,
+            k = wait_cancel(&mut self.cancel_rx) => {
+                let _ = session.shutdown("cancelled").await;
+                let _ = env.mark_stopped(self.now());
+                self.save_env(&env);
+                let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
+                self.fail_invocation(InvocationError::new(ErrorClass::Cancelled, "Host.Cancelled", "cancelled during initialization"));
+                return None;
+            }
+        };
+        let ready = match ready {
+            Ok(r) => r,
+            Err(SessionError::Timeout { .. }) if init_clamped => {
+                self.stop_for_client_deadline(Some(&mut session), &mut env, &logs)
+                    .await;
+                return None;
+            }
+            Err(e) => {
+                let (error_type, message) = match &e {
+                    SessionError::InitError {
+                        error_type,
+                        message,
+                        ..
+                    } => (error_type.clone(), message.clone()),
+                    SessionError::Timeout { .. } => (
+                        "Host.InitTimeout".to_string(),
+                        format!(
+                            "guest did not become ready within {} s",
+                            init_timeout.as_secs()
+                        ),
+                    ),
+                    SessionError::Disconnected => (
+                        "Host.BridgeDisconnected".to_string(),
+                        "bridge disconnected before Ready".to_string(),
+                    ),
+                    other => ("Host.InitProtocol".to_string(), other.to_string()),
+                };
+                logs.platform(LogPhase::Init, None, &format!("init failed: {message}"));
+                let _ = session.shutdown("init failed").await;
+                let _ = env.mark_failed(format!("init failed: {error_type}"), self.now());
+                self.save_env(&env);
+                let _ = svc
+                    .provider
+                    .terminate_environment(&env_id, TerminateReason::InitFailed)
+                    .await;
+                self.fail_invocation(InvocationError::new(
+                    ErrorClass::InitError,
+                    error_type,
+                    message,
+                ));
+                return None;
+            }
+        };
+        let runtime_init_ms = connected_at.elapsed().as_millis() as u64;
+        let _ = env.mark_ready(self.now());
+        env.evidence
+            .details
+            .insert("guest_init_ms".into(), ready.guest_init_ms.into());
+        self.save_env(&env);
+
+        Some(Prepared {
+            env,
+            session,
+            start_kind: StartKind::Cold,
+            environment_boot_ms,
+            runtime_init_ms,
+            logs,
+        })
+    }
+
+    /// Compose `HelloAck`: entrypoint policy + revision env vars + the secrets
+    /// [`Self::resolve_secret_env`] resolved + `TACHYON_UNISOLATED=1` for
+    /// dev-only providers.
+    fn hello_ack_params(
+        &self,
+        env_id: &EnvironmentId,
+        artifact: &ArtifactLocation,
+        init_timeout: Duration,
+        secret_env: Vec<(String, String)>,
+    ) -> HelloAckParams {
+        let svc = &self.svc;
+        let entry = svc
+            .entrypoints
+            .resolve(&svc.provider.kind(), &artifact.path, env_id);
+        let mut env_vars = self.revision.spec.env_vars.clone();
+        env_vars.extend(secret_env);
         if svc.provider.capabilities().dev_only {
             env_vars.push((
                 tachyon_serverless_protocol::env::UNISOLATED.to_string(),
                 "1".to_string(),
             ));
         }
-        Ok(HelloAckParams {
+        HelloAckParams {
             entrypoint: entry.entrypoint,
             args: entry.args,
             env: env_vars,
@@ -1786,7 +1957,7 @@ impl Driver {
             init_timeout,
             max_response_bytes: svc.limits.max_response_bytes,
             max_log_line_bytes: svc.limits.max_log_line_bytes as u64,
-        })
+        }
     }
 }
 

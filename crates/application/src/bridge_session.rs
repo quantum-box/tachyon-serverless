@@ -350,6 +350,22 @@ impl BridgeSession {
         &self.logs
     }
 
+    /// True while the session can still carry another attempt. A session whose
+    /// stream is gone in either direction must never go back into the pool.
+    pub fn is_usable(&self) -> bool {
+        !self.disconnected && !self.write_closed
+    }
+
+    /// Re-point a pooled session at the next attempt: record the environment's
+    /// new epoch, attribute log lines to the new invocation and drop the
+    /// previous lease, so a frame the previous attempt left behind is counted
+    /// as stale instead of settling the new one.
+    pub fn rearm(&mut self, epoch: u64, logs: LogForwarder) {
+        self.epoch = epoch;
+        self.logs = logs;
+        self.lease = None;
+    }
+
     /// Wait for `Ready` until `deadline`.
     pub async fn wait_ready(&mut self, deadline: Instant) -> Result<ReadyInfo, SessionError> {
         loop {

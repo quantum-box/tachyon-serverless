@@ -150,14 +150,40 @@ pub async fn serve(
         "gateway listening"
     );
     let service = router(app.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    // Reap pooled environments past their idle TTL. Not spawned at all unless
+    // environment reuse is on, in which case nothing is ever pooled.
+    let sweeper = app.pool.policy().reuse_enabled().then(|| {
+        let app = app.clone();
+        let every = (app.config.pool.idle_ttl() / 2).max(Duration::from_secs(1));
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(every);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                app.sweep_idle_environments().await;
+            }
+        })
+    });
     let draining = app.clone();
     axum::serve(listener, service)
         .with_graceful_shutdown(async move {
             shutdown.await;
             tracing::info!("shutdown requested; cancelling in-flight invocations");
             draining.invoke.shutdown_all(Duration::from_secs(10)).await;
+            // A pooled environment must never outlive this process: its
+            // bridge session dies with us and nothing could reclaim it.
+            let swept = draining.drain_pool().await;
+            if swept.reaped > 0 {
+                tracing::info!(
+                    reaped = swept.reaped,
+                    "pooled environments terminated on shutdown"
+                );
+            }
         })
         .await?;
+    if let Some(sweeper) = sweeper {
+        sweeper.abort();
+    }
     if let Err(e) = app.store.persist_now() {
         tracing::warn!(error = %e, "final state flush failed");
     }

@@ -14,10 +14,10 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 use tachyon_serverless_domain::{
-    AliasName, AttemptId, EnvironmentId, ErrorClass, ExecutionEnvironment, ExecutionLease,
-    Function, FunctionAlias, FunctionId, FunctionName, FunctionRevision, Invocation,
-    InvocationAttempt, InvocationError, InvocationId, InvocationStatus, LeaseId, Limits, LogRecord,
-    RevisionId, Sha256Digest, TenantId, Timestamp,
+    AliasName, AttemptId, EnvironmentId, EnvironmentState, ErrorClass, ExecutionEnvironment,
+    ExecutionLease, Function, FunctionAlias, FunctionId, FunctionName, FunctionRevision,
+    Invocation, InvocationAttempt, InvocationError, InvocationId, InvocationStatus, LeaseId,
+    Limits, LogRecord, ReuseKey, RevisionId, Sha256Digest, TenantId, Timestamp,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -91,11 +91,59 @@ pub trait InvocationRepository: Send + Sync {
     fn attempts_of(&self, invocation: &InvocationId) -> Result<Vec<InvocationAttempt>, RepoError>;
 }
 
+/// Caps the pool enforces when an environment is released back into it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolLimits {
+    /// Idle environments kept per reuse key.
+    pub max_idle_per_key: usize,
+    /// Idle environments kept across every reuse key.
+    pub max_total_idle: usize,
+}
+
 pub trait EnvironmentRepository: Send + Sync {
     fn insert(&self, env: ExecutionEnvironment) -> Result<(), RepoError>;
     fn get(&self, id: &EnvironmentId) -> Result<Option<ExecutionEnvironment>, RepoError>;
     fn update(&self, env: ExecutionEnvironment) -> Result<(), RepoError>;
     fn list_active(&self) -> Result<Vec<ExecutionEnvironment>, RepoError>;
+
+    /// The environments currently in the pool, longest idle first.
+    fn list_idle(&self) -> Result<Vec<ExecutionEnvironment>, RepoError>;
+
+    /// Atomically hand out one pooled environment whose reuse key equals
+    /// `key` in *every* field, moving it to `Busy` and advancing its epoch.
+    ///
+    /// Searching, the state change and the epoch bump all happen inside one
+    /// store mutation, so of two concurrent claims exactly one can win: the
+    /// loser sees the environment as `Busy` and skips it, or finds no
+    /// candidate at all. `None` means the caller must create an environment.
+    fn claim_for_reuse(
+        &self,
+        key: &ReuseKey,
+        now: Timestamp,
+    ) -> Result<Option<ExecutionEnvironment>, RepoError>;
+
+    /// Atomically put a finished environment back into the pool.
+    ///
+    /// `env` is the caller's copy of the `Busy` row, including whatever
+    /// evidence the attempt added. It is refused (`None`) when the stored row
+    /// moved on since — a different epoch, or no longer `Busy` — and when a
+    /// cap in `limits` is reached. The caller then terminates it instead.
+    fn release_to_pool(
+        &self,
+        env: &ExecutionEnvironment,
+        limits: PoolLimits,
+        now: Timestamp,
+    ) -> Result<Option<ExecutionEnvironment>, RepoError>;
+
+    /// Atomically take one idle environment out of the pool for termination
+    /// (TTL sweep or drain), moving it to `Draining`. False when it is no
+    /// longer idle, i.e. an attempt claimed it first.
+    fn take_idle_for_termination(
+        &self,
+        id: &EnvironmentId,
+        now: Timestamp,
+    ) -> Result<bool, RepoError>;
+
     fn insert_lease(&self, lease: ExecutionLease) -> Result<(), RepoError>;
     fn get_lease(&self, id: &LeaseId) -> Result<Option<ExecutionLease>, RepoError>;
     fn update_lease(&self, lease: ExecutionLease) -> Result<(), RepoError>;
@@ -759,6 +807,86 @@ impl EnvironmentRepository for InMemoryStore {
             .collect())
     }
 
+    fn list_idle(&self) -> Result<Vec<ExecutionEnvironment>, RepoError> {
+        let mut v: Vec<ExecutionEnvironment> = self
+            .state
+            .read()
+            .durable
+            .environments
+            .values()
+            .filter(|e| matches!(e.state, EnvironmentState::Idle))
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| a.idle_since.cmp(&b.idle_since).then(a.id.cmp(&b.id)));
+        Ok(v)
+    }
+
+    fn claim_for_reuse(
+        &self,
+        key: &ReuseKey,
+        now: Timestamp,
+    ) -> Result<Option<ExecutionEnvironment>, RepoError> {
+        Ok(self.mutate(|s| {
+            // `values()` is ordered by id (a ULID), so the oldest match wins.
+            let id = s
+                .durable
+                .environments
+                .values()
+                .find(|e| e.is_reusable() && &e.reuse_key == key)
+                .map(|e| e.id.clone())?;
+            let env = s.durable.environments.get_mut(&id)?;
+            // `reassign` refuses anything that is not Ready or Idle (so a Busy
+            // environment is never handed out) and is what advances the epoch.
+            env.reassign(now).ok()?;
+            Some(env.clone())
+        }))
+    }
+
+    fn release_to_pool(
+        &self,
+        env: &ExecutionEnvironment,
+        limits: PoolLimits,
+        now: Timestamp,
+    ) -> Result<Option<ExecutionEnvironment>, RepoError> {
+        Ok(self.mutate(|s| {
+            let current = s.durable.environments.get(&env.id)?;
+            if current.epoch != env.epoch || !matches!(current.state, EnvironmentState::Busy) {
+                return None;
+            }
+            let is_idle = |e: &&ExecutionEnvironment| matches!(e.state, EnvironmentState::Idle);
+            let total = s.durable.environments.values().filter(is_idle).count();
+            let per_key = s
+                .durable
+                .environments
+                .values()
+                .filter(is_idle)
+                .filter(|e| e.reuse_key == env.reuse_key)
+                .count();
+            if total >= limits.max_total_idle || per_key >= limits.max_idle_per_key {
+                return None;
+            }
+            let mut pooled = env.clone();
+            pooled.mark_idle(now).ok()?;
+            s.durable
+                .environments
+                .insert(pooled.id.clone(), pooled.clone());
+            Some(pooled)
+        }))
+    }
+
+    fn take_idle_for_termination(
+        &self,
+        id: &EnvironmentId,
+        now: Timestamp,
+    ) -> Result<bool, RepoError> {
+        Ok(self.mutate(|s| match s.durable.environments.get_mut(id) {
+            Some(env) if matches!(env.state, EnvironmentState::Idle) => {
+                env.mark_draining(now).is_ok()
+            }
+            _ => false,
+        }))
+    }
+
     fn insert_lease(&self, lease: ExecutionLease) -> Result<(), RepoError> {
         let mut s = self.state.write();
         if s.leases.contains_key(&lease.id) {
@@ -931,8 +1059,8 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use tachyon_serverless_domain::{
-        AttemptStatus, Deadlines, EventKind, InvocationMode, LogPhase, LogStream, ProviderKind,
-        ReuseKey, StartKind,
+        AttemptStatus, BootEvidence, Deadlines, EventKind, InvocationMode, LogPhase, LogStream,
+        ProviderKind, StartKind,
     };
 
     fn now() -> Timestamp {
@@ -1288,5 +1416,325 @@ mod tests {
             }
             other => panic!("the attempt follows its invocation: {other:?}"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // environment pool (PLT-4632)
+    // -----------------------------------------------------------------------
+
+    const POOL: PoolLimits = PoolLimits {
+        max_idle_per_key: 2,
+        max_total_idle: 4,
+    };
+
+    fn pool_key(t: &TenantId, r: &RevisionId) -> ReuseKey {
+        ReuseKey {
+            tenant_id: t.clone(),
+            revision_id: r.clone(),
+            execution_role_version: 1,
+            configuration_version: 7,
+            resource_profile_digest: "rp".into(),
+            runtime_profile: "tachyon.runtime.v1".into(),
+            network_policy_version: 3,
+            secret_binding_generation: 11,
+        }
+    }
+
+    fn ready_environment(key: &ReuseKey) -> ExecutionEnvironment {
+        let mut env = ExecutionEnvironment::request(
+            EnvironmentId::generate(),
+            key.tenant_id.clone(),
+            key.revision_id.clone(),
+            ProviderKind::Fake,
+            key.clone(),
+            now(),
+        );
+        env.mark_provisioning(now()).unwrap();
+        env.mark_initializing(BootEvidence::default(), now())
+            .unwrap();
+        env.mark_ready(now()).unwrap();
+        env
+    }
+
+    /// An environment that reached Ready, served an attempt and went back
+    /// into the pool.
+    fn pooled(store: &InMemoryStore, key: &ReuseKey) -> EnvironmentId {
+        let mut env = ready_environment(key);
+        env.mark_busy(now()).unwrap();
+        env.mark_idle(now()).unwrap();
+        let id = env.id.clone();
+        EnvironmentRepository::insert(store, env).unwrap();
+        id
+    }
+
+    /// One dimension of the reuse key: its name, and how to make it differ.
+    type Dimension = (&'static str, fn(&mut ReuseKey));
+
+    /// PLT-4632 acceptance 1: one differing field of the reuse key is enough
+    /// to make two environments incompatible.
+    #[test]
+    fn only_an_exactly_matching_reuse_key_is_reused() {
+        let store = InMemoryStore::new(Limits::default());
+        let key = pool_key(&TenantId::generate(), &RevisionId::generate());
+        let id = pooled(&store, &key);
+
+        let dimensions: [Dimension; 8] = [
+            ("tenant", |k| k.tenant_id = TenantId::generate()),
+            ("revision", |k| k.revision_id = RevisionId::generate()),
+            ("execution role version", |k| k.execution_role_version += 1),
+            ("configuration version", |k| k.configuration_version += 1),
+            ("resource profile", |k| {
+                k.resource_profile_digest = "other".into()
+            }),
+            ("runtime profile", |k| {
+                k.runtime_profile = "tachyon.runtime.v2".into()
+            }),
+            ("network policy version", |k| k.network_policy_version += 1),
+            ("secret binding generation", |k| {
+                k.secret_binding_generation += 1
+            }),
+        ];
+        for (name, change) in dimensions {
+            let mut other = key.clone();
+            change(&mut other);
+            assert_ne!(other, key, "{name} must actually differ");
+            assert!(
+                store.claim_for_reuse(&other, now()).unwrap().is_none(),
+                "a differing {name} must never reuse the environment"
+            );
+        }
+        // Nothing above touched the pooled environment.
+        assert_eq!(store.list_idle().unwrap().len(), 1);
+        let claimed = store
+            .claim_for_reuse(&key, now())
+            .unwrap()
+            .expect("the exact key hits");
+        assert_eq!(claimed.id, id);
+        assert_eq!(claimed.state, EnvironmentState::Busy);
+        assert_eq!(claimed.epoch, 2, "a reassignment advances the epoch");
+        assert!(
+            store.claim_for_reuse(&key, now()).unwrap().is_none(),
+            "it was handed out once"
+        );
+    }
+
+    /// PLT-4632 acceptance 2.
+    #[test]
+    fn nothing_is_dispatched_before_ready_and_busy_is_never_handed_out() {
+        let store = InMemoryStore::new(Limits::default());
+        let key = pool_key(&TenantId::generate(), &RevisionId::generate());
+        let fresh = || {
+            ExecutionEnvironment::request(
+                EnvironmentId::generate(),
+                key.tenant_id.clone(),
+                key.revision_id.clone(),
+                ProviderKind::Fake,
+                key.clone(),
+                now(),
+            )
+        };
+
+        let mut provisioning = fresh();
+        provisioning.mark_provisioning(now()).unwrap();
+        let mut initializing = fresh();
+        initializing.mark_provisioning(now()).unwrap();
+        initializing
+            .mark_initializing(BootEvidence::default(), now())
+            .unwrap();
+        let mut busy = ready_environment(&key);
+        busy.mark_busy(now()).unwrap();
+        let busy_id = busy.id.clone();
+        let mut draining = ready_environment(&key);
+        draining.mark_busy(now()).unwrap();
+        draining.mark_idle(now()).unwrap();
+        draining.mark_draining(now()).unwrap();
+        let mut stopped = ready_environment(&key);
+        stopped.mark_stopped(now()).unwrap();
+
+        for env in [fresh(), provisioning, initializing, busy, draining, stopped] {
+            EnvironmentRepository::insert(&store, env).unwrap();
+        }
+        assert!(
+            store.claim_for_reuse(&key, now()).unwrap().is_none(),
+            "only an environment that reported ready and is free may be handed out"
+        );
+        assert_eq!(
+            EnvironmentRepository::get(&store, &busy_id)
+                .unwrap()
+                .unwrap()
+                .epoch,
+            1,
+            "a refused claim never advances an epoch"
+        );
+        assert!(store.list_idle().unwrap().is_empty());
+
+        // The same key hits as soon as one is actually pooled.
+        let id = pooled(&store, &key);
+        assert_eq!(
+            store.claim_for_reuse(&key, now()).unwrap().map(|e| e.id),
+            Some(id)
+        );
+    }
+
+    /// Property: with `pooled` idle environments and `claimers` threads racing
+    /// for them, exactly `min(pooled, claimers)` claims win, no environment is
+    /// handed to two callers, and every winner comes back one epoch further
+    /// on. This is the single-store-mutation guarantee of `claim_for_reuse`.
+    #[test]
+    fn concurrent_claims_never_hand_the_same_environment_to_two_callers() {
+        for (idle, claimers) in [(1usize, 2usize), (1, 16), (3, 8), (8, 3), (4, 4)] {
+            let store = Arc::new(InMemoryStore::new(Limits::default()));
+            let key = pool_key(&TenantId::generate(), &RevisionId::generate());
+            for _ in 0..idle {
+                pooled(&store, &key);
+            }
+            let barrier = Arc::new(std::sync::Barrier::new(claimers));
+            let racers: Vec<_> = (0..claimers)
+                .map(|_| {
+                    let store = store.clone();
+                    let key = key.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        store.claim_for_reuse(&key, now()).unwrap()
+                    })
+                })
+                .collect();
+            let winners: Vec<ExecutionEnvironment> = racers
+                .into_iter()
+                .filter_map(|h| h.join().expect("claim panicked"))
+                .collect();
+
+            let case = format!("idle={idle} claimers={claimers}");
+            assert_eq!(winners.len(), idle.min(claimers), "{case}");
+            let mut ids: Vec<String> = winners.iter().map(|e| e.id.to_string()).collect();
+            ids.sort();
+            ids.dedup();
+            assert_eq!(
+                ids.len(),
+                winners.len(),
+                "{case}: an environment was handed out twice"
+            );
+            for w in &winners {
+                assert_eq!(w.state, EnvironmentState::Busy, "{case}");
+                assert_eq!(w.epoch, 2, "{case}: every reassignment advances the epoch");
+            }
+            assert_eq!(
+                store.list_idle().unwrap().len(),
+                idle.saturating_sub(claimers),
+                "{case}: the losers' environments stay pooled"
+            );
+        }
+    }
+
+    #[test]
+    fn releasing_respects_the_pool_caps_and_refuses_a_stale_copy() {
+        let store = InMemoryStore::new(Limits::default());
+        let key = pool_key(&TenantId::generate(), &RevisionId::generate());
+        let other_key = pool_key(&key.tenant_id, &RevisionId::generate());
+
+        // Two per key is the cap: the third stays Busy for the caller to kill.
+        let mut busy = Vec::new();
+        for _ in 0..3 {
+            let mut env = ready_environment(&key);
+            env.mark_busy(now()).unwrap();
+            EnvironmentRepository::insert(&store, env.clone()).unwrap();
+            busy.push(env);
+        }
+        assert!(
+            store
+                .release_to_pool(&busy[0], POOL, now())
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .release_to_pool(&busy[1], POOL, now())
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .release_to_pool(&busy[2], POOL, now())
+                .unwrap()
+                .is_none(),
+            "max_idle_per_key is enforced"
+        );
+        assert_eq!(
+            EnvironmentRepository::get(&store, &busy[2].id)
+                .unwrap()
+                .unwrap()
+                .state,
+            EnvironmentState::Busy,
+            "a refused release leaves the environment for the caller to terminate"
+        );
+
+        // A stale copy (the row moved on since) is refused.
+        let pooled_row = EnvironmentRepository::get(&store, &busy[0].id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            store
+                .release_to_pool(&busy[0], POOL, now())
+                .unwrap()
+                .is_none(),
+            "the row is Idle now, not Busy"
+        );
+        let mut wrong_epoch = busy[2].clone();
+        wrong_epoch.epoch = 99;
+        assert!(
+            store
+                .release_to_pool(&wrong_epoch, POOL, now())
+                .unwrap()
+                .is_none(),
+            "a copy from another epoch never goes back into the pool"
+        );
+        assert_eq!(pooled_row.state, EnvironmentState::Idle);
+        assert_eq!(pooled_row.idle_since, Some(now()));
+
+        // Two more keys still fit under max_total_idle (4).
+        for _ in 0..2 {
+            let mut env = ready_environment(&other_key);
+            env.mark_busy(now()).unwrap();
+            EnvironmentRepository::insert(&store, env.clone()).unwrap();
+            assert!(store.release_to_pool(&env, POOL, now()).unwrap().is_some());
+        }
+        let mut env = ready_environment(&other_key);
+        env.mark_busy(now()).unwrap();
+        EnvironmentRepository::insert(&store, env.clone()).unwrap();
+        assert!(
+            store.release_to_pool(&env, POOL, now()).unwrap().is_none(),
+            "max_total_idle is enforced across keys"
+        );
+        assert_eq!(store.list_idle().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn taking_an_idle_environment_for_termination_excludes_a_claim() {
+        let store = InMemoryStore::new(Limits::default());
+        let key = pool_key(&TenantId::generate(), &RevisionId::generate());
+        let id = pooled(&store, &key);
+
+        assert!(store.take_idle_for_termination(&id, now()).unwrap());
+        assert!(
+            !store.take_idle_for_termination(&id, now()).unwrap(),
+            "taking it is idempotent-safe: the second caller loses"
+        );
+        assert!(
+            store.claim_for_reuse(&key, now()).unwrap().is_none(),
+            "an environment the sweeper owns is never handed to an attempt"
+        );
+        assert_eq!(
+            EnvironmentRepository::get(&store, &id)
+                .unwrap()
+                .unwrap()
+                .state,
+            EnvironmentState::Draining
+        );
+
+        // The other way round: a claimed environment cannot be swept.
+        let claimed = pooled(&store, &key);
+        assert!(store.claim_for_reuse(&key, now()).unwrap().is_some());
+        assert!(!store.take_idle_for_termination(&claimed, now()).unwrap());
     }
 }

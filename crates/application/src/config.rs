@@ -317,6 +317,48 @@ impl InvokeConfig {
     }
 }
 
+/// Environment pool / warm reuse (docs/architecture.md §4).
+///
+/// This is only one half of the gate. Reuse also requires the provider to
+/// report both `idle_quiesce` and `idle_resume` as `Supported`; `Unverified`
+/// is explicitly not enough. Both shipped providers report `Unsupported`, so
+/// turning this on changes nothing for them and they keep destroying the
+/// environment after every invocation.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PoolConfig {
+    /// Allow environments to be reused. Off by default.
+    pub enabled: bool,
+    /// Idle environments kept per reuse key.
+    pub max_idle_per_revision: usize,
+    /// An environment idle for longer than this is terminated by the sweeper.
+    pub idle_ttl_seconds: u64,
+    /// Idle environments kept across all reuse keys.
+    pub max_total_idle: usize,
+}
+
+impl Default for PoolConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_idle_per_revision: 1,
+            idle_ttl_seconds: 60,
+            max_total_idle: 8,
+        }
+    }
+}
+
+impl PoolConfig {
+    pub fn idle_ttl(&self) -> Duration {
+        Duration::from_secs(self.idle_ttl_seconds)
+    }
+
+    /// The same TTL as a `chrono` duration, for comparing ledger timestamps.
+    pub fn idle_ttl_chrono(&self) -> chrono::Duration {
+        chrono::Duration::seconds(self.idle_ttl_seconds.min(i64::MAX as u64) as i64)
+    }
+}
+
 /// Startup reconciliation (docs/architecture.md §4).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -353,6 +395,8 @@ pub struct GatewayConfig {
     pub invoke: InvokeConfig,
     #[serde(default)]
     pub reconcile: ReconcileConfig,
+    #[serde(default)]
+    pub pool: PoolConfig,
 }
 
 fn default_listen() -> String {
@@ -507,6 +551,24 @@ impl GatewayConfig {
                 "invoke.inline_output_max_bytes must be <= limits.max_response_bytes".into(),
             ));
         }
+        if self.pool.enabled {
+            if self.pool.max_idle_per_revision == 0 {
+                return Err(ConfigError::Invalid(
+                    "pool.max_idle_per_revision must be >= 1 when the pool is enabled".into(),
+                ));
+            }
+            if self.pool.idle_ttl_seconds == 0 {
+                return Err(ConfigError::Invalid(
+                    "pool.idle_ttl_seconds must be >= 1 when the pool is enabled".into(),
+                ));
+            }
+            if self.pool.max_total_idle < self.pool.max_idle_per_revision {
+                return Err(ConfigError::Invalid(format!(
+                    "pool.max_total_idle ({}) must be >= pool.max_idle_per_revision ({})",
+                    self.pool.max_total_idle, self.pool.max_idle_per_revision
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -617,6 +679,41 @@ value = "demo-secret-value-a"
         );
         let off = format!("{DEV}\n[reconcile]\non_startup = false\n");
         assert!(!GatewayConfig::from_toml(&off).unwrap().reconcile.on_startup);
+    }
+
+    #[test]
+    fn environment_reuse_is_off_by_default_and_validated_when_enabled() {
+        let default = GatewayConfig::from_toml(DEV).unwrap().pool;
+        assert!(
+            !default.enabled,
+            "reuse is opt-in; the shipped providers destroy after every invoke"
+        );
+        assert_eq!(default.max_idle_per_revision, 1);
+        assert_eq!(default.idle_ttl_seconds, 60);
+        assert_eq!(default.max_total_idle, 8);
+        assert_eq!(default.idle_ttl(), Duration::from_secs(60));
+
+        let on = format!("{DEV}\n[pool]\nenabled = true\nidle_ttl_seconds = 5\n");
+        let pool = GatewayConfig::from_toml(&on).unwrap().pool;
+        assert!(pool.enabled);
+        assert_eq!(pool.idle_ttl_seconds, 5);
+        assert_eq!(pool.idle_ttl_chrono(), chrono::Duration::seconds(5));
+
+        for (extra, needle) in [
+            ("max_idle_per_revision = 0", "pool.max_idle_per_revision"),
+            ("idle_ttl_seconds = 0", "pool.idle_ttl_seconds"),
+            (
+                "max_idle_per_revision = 4\nmax_total_idle = 2",
+                "max_total_idle",
+            ),
+        ] {
+            let text = format!("{DEV}\n[pool]\nenabled = true\n{extra}\n");
+            let err = GatewayConfig::from_toml(&text).unwrap_err();
+            assert!(err.to_string().contains(needle), "{err}");
+            // The same values are accepted while the pool is off: nothing reads them.
+            let off = format!("{DEV}\n[pool]\nenabled = false\n{extra}\n");
+            GatewayConfig::from_toml(&off).unwrap();
+        }
     }
 
     #[test]
