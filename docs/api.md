@@ -369,7 +369,7 @@ event の `path` は `/http` より後ろの request-target path を **受け取
 | secret binding を解決できない（他 tenant の binding と存在しない binding は同じ応答。環境は作らない） | 502 | `init_error`（`Host.SecretBindingUnavailable`） |
 | handler が Err | 502 | `user_error` |
 | panic / crash | 502 | `crash` |
-| Invoke を届ける前に user process が終了 / bridge が切断（handler は未開始） | 502 | `crash`（`Runtime.Exited` / `Host.BridgeDisconnectedBeforeInvoke`） |
+| Invoke を届ける前に user process が終了 / bridge が切断（handler は未開始） | 502 | `crash`（`Runtime.Exited` / `Host.BridgeDisconnectedBeforeInvoke`）。再利用環境（warm）で起きた場合は同じ分類の attempt を 1 行残し、cold で 1 回だけやり直すので invocation 自体はやり直しの結果になる（`docs/architecture.md` §4） |
 | 実行 deadline 超過 | 504 | `timeout` |
 | client deadline 到達（handler 起動前なら起動しない、実行中なら Cancel） | 504 | `timeout`（`Host.ClientDeadline`） |
 | cancel API | 499 | `cancelled` |

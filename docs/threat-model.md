@@ -166,6 +166,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 - frame の protocol 違反 → `Failed{PlatformError}`（`docs/architecture.md` §3-9 の分類に従う）。
 - 再起動時に `Accepted` / `Queued` のまま残っていた → 一度も dispatch していない＝ handler は開始していないので `Failed{PlatformError}` / `Host.Restarted`（`crates/application/src/repository.rs::reconcile_after_restart`、`docs/architecture.md` §4）。
 - `Invoke` frame が guest に届かなかった（handler は開始していない）→ `Failed`。encode できない（`FrameTooLarge`、何も書いていない）→ `PlatformError` / `Host.InvokeTooLarge`（環境は健全なので `Stopped`）。書き込み失敗（接続断）→ guest が閉じる前に送った frame を短時間読み、`Exited` なら `Crash` / `Runtime.Exited`、無ければ `Crash` / `Host.BridgeDisconnectedBeforeInvoke`。同じ guest の挙動が書き込みの競合で分類を変えないようにするため。
+- **warm（pool から取り出した再利用環境）への書き込み失敗も同じ規則**。drain してから同じ 2 分類のどちらかを attempt に記録する。環境が再利用だったことは分類を変えない。warm だけが違うのは、その attempt を失敗として残したうえで **cold で 1 回だけ dispatch をやり直す**ことである（`docs/architecture.md` §4。やり直しは cold 固定なので再帰しない）。やり直す根拠は分類ではなく guest が死んだ場所にある: warm の guest は前の invocation で `Ready` を報告して実際に動いた後、idle の間に死んだので、新しい環境なら同じ request を実行できる見込みが高い。cold の guest は **この invocation のための初期化中**に死んでおり、やり直しても同じ失敗を繰り返すだけなので再実行しない。どちらの場合も `Invoke` は届いておらず handler は開始していないので、やり直しても at-most-once は破れない（`OutcomeUnknown` の「自動再実行しない」は handler が走ったかもしれない場合の話であり、ここには当たらない）。
 
 契約:
 

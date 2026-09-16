@@ -245,11 +245,37 @@ pub fn reuse_key_for(
 // pool
 // ---------------------------------------------------------------------------
 
+/// The host-observed life of an environment, in milliseconds: from the moment
+/// the ledger row was created to `now`, the moment the environment ended.
+///
+/// This is the single quantity `EnvironmentStopped` reports, on every path and
+/// whoever ends the environment — the driver, the TTL sweeper, a drain, a
+/// retire or the retry after a failed terminate. Once an environment can be
+/// reused it outlives every single attempt on it, so no attempt's stopwatch
+/// can measure it; taking it from the ledger instead makes the driver's number
+/// and the pool's number the same quantity rather than two that happen to
+/// share a field (docs/architecture.md §4).
+pub fn environment_lifetime_ms(env: &ExecutionEnvironment, now: Timestamp) -> u64 {
+    (now - env.created_at).num_milliseconds().max(0) as u64
+}
+
 /// A pooled environment handed to an attempt: the ledger row — already `Busy`
-/// at its new epoch — and the live session of its guest.
+/// at its new epoch — the live session of its guest, and the usage sequence
+/// the environment has reached, so the attempt continues the environment's own
+/// event count instead of starting a second one
+/// ([`UsageEvent::sequence`](tachyon_serverless_domain::UsageEvent)).
 pub struct WarmEnvironment {
     pub environment: ExecutionEnvironment,
     pub session: BridgeSession,
+    pub sequence: u64,
+}
+
+/// What the pool holds for one idle environment: the live guest connection,
+/// which cannot be persisted, and the last usage sequence the environment
+/// used. Both are handed back together when it is claimed.
+struct PooledSession {
+    session: BridgeSession,
+    sequence: u64,
 }
 
 impl std::fmt::Debug for WarmEnvironment {
@@ -275,6 +301,24 @@ pub struct PoolSweep {
     pub failed: usize,
 }
 
+/// One environment the pool owns and is about to end. Everything the settling
+/// needs travels together, so a terminate that failed can be retried later
+/// exactly as it was meant the first time.
+#[derive(Debug, Clone)]
+struct Termination {
+    id: EnvironmentId,
+    /// Reason handed to the provider.
+    terminate: TerminateReason,
+    /// Operator-facing reason, for the log line and the guest's `Shutdown`.
+    why: &'static str,
+    /// `None` -> the row ends `Stopped`; `Some(reason)` -> `Failed{reason}`.
+    failure: Option<&'static str>,
+    /// Last usage sequence the environment used, so its stop event continues
+    /// the environment's own count. Only meaningful once the session (which
+    /// carries it) is gone, i.e. on a retry.
+    sequence: u64,
+}
+
 pub struct EnvironmentPool {
     repos: Repositories,
     provider: Arc<dyn ExecutionProvider>,
@@ -282,11 +326,11 @@ pub struct EnvironmentPool {
     clock: Arc<dyn Clock>,
     policy: PoolPolicy,
     /// Live guest connections of the pooled environments. Never persisted.
-    sessions: Mutex<HashMap<EnvironmentId, BridgeSession>>,
+    sessions: Mutex<HashMap<EnvironmentId, PooledSession>>,
     /// Environments this process took out of the pool but could not terminate.
     /// Their rows stay `Draining`, so no attempt can take them, and the next
     /// sweep tries again.
-    pending_termination: Mutex<Vec<EnvironmentId>>,
+    pending_termination: Mutex<Vec<Termination>>,
 }
 
 impl std::fmt::Debug for EnvironmentPool {
@@ -349,9 +393,12 @@ impl EnvironmentPool {
             };
             // The ledger claim above already picked the single winner, so at
             // most one caller can ever take the session below.
-            let session = self.sessions.lock().remove(&environment.id);
-            match session {
-                Some(mut session) => {
+            let pooled = self.sessions.lock().remove(&environment.id);
+            match pooled {
+                Some(PooledSession {
+                    mut session,
+                    sequence,
+                }) => {
                     // Anything the guest queued while the environment was idle
                     // (or left over from the attempt before) belongs to the
                     // past, not to the attempt about to be dispatched. This
@@ -368,16 +415,19 @@ impl EnvironmentPool {
                         return Some(WarmEnvironment {
                             environment,
                             session,
+                            sequence,
                         });
                     }
                     drop(session);
-                    self.retire(environment, "the pooled guest is gone").await;
+                    self.retire(environment, "the pooled guest is gone", sequence)
+                        .await;
                 }
                 // The row says pooled but there is no live guest behind it:
                 // the row outlived the process that held its session. Retire
-                // it and try the next candidate.
+                // it and try the next candidate. No session also means no
+                // sequence: this process never metered anything for it.
                 None => {
-                    self.retire(environment, "pooled environment has no session")
+                    self.retire(environment, "pooled environment has no session", 0)
                         .await;
                 }
             }
@@ -386,7 +436,11 @@ impl EnvironmentPool {
 
     /// Hand a finished environment back to the pool.
     ///
-    /// `env` is the caller's `Busy` row for the attempt that just finished.
+    /// `env` is the caller's `Busy` row for the attempt that just finished and
+    /// `sequence` the last usage sequence it used for this environment, which
+    /// the pool keeps so the environment's event count carries on into the
+    /// next attempt and into its own stop event.
+    ///
     /// `Ok` carries the pooled row (now `Idle`) and the pool has taken the
     /// session; `Err` hands the session back (boxed, because a live session is
     /// a large value), which means the caller shuts it down and terminates the
@@ -395,6 +449,7 @@ impl EnvironmentPool {
         &self,
         env: &ExecutionEnvironment,
         session: BridgeSession,
+        sequence: u64,
     ) -> Result<ExecutionEnvironment, Box<BridgeSession>> {
         if !self.policy.reuse_enabled() || !session.is_usable() {
             return Err(Box::new(session));
@@ -413,7 +468,7 @@ impl EnvironmentPool {
             .release_to_pool(env, self.policy.limits, now)
         {
             Ok(Some(pooled)) => {
-                sessions.insert(pooled.id.clone(), session);
+                sessions.insert(pooled.id.clone(), PooledSession { session, sequence });
                 tracing::debug!(
                     environment_id = %pooled.id,
                     epoch = pooled.epoch,
@@ -447,12 +502,14 @@ impl EnvironmentPool {
         // host. Their rows stayed `Draining`, so no attempt can take them and
         // nothing lists them any more: this process keeps their ids and tries
         // again here.
-        let pending: Vec<EnvironmentId> = std::mem::take(&mut self.pending_termination.lock());
-        for id in pending {
-            if self
-                .terminate_and_settle(&id, "retrying a failed termination")
-                .await
-            {
+        let pending: Vec<Termination> = std::mem::take(&mut self.pending_termination.lock());
+        for termination in pending {
+            tracing::info!(
+                environment_id = %termination.id,
+                reason = termination.why,
+                "retrying a failed termination"
+            );
+            if self.terminate_and_settle(&termination).await {
                 report.reaped += 1;
             } else {
                 report.failed += 1;
@@ -487,7 +544,14 @@ impl EnvironmentPool {
                     continue;
                 }
             }
-            if self.terminate_and_settle(&env.id, "idle timeout").await {
+            let termination = Termination {
+                id: env.id.clone(),
+                terminate: TerminateReason::Shutdown,
+                why: "idle timeout",
+                failure: None,
+                sequence: 0,
+            };
+            if self.terminate_and_settle(&termination).await {
                 report.reaped += 1;
                 tracing::info!(environment_id = %env.id, "idle environment reaped");
             } else {
@@ -509,73 +573,88 @@ impl EnvironmentPool {
     /// Terminate one environment the pool owns (its row is `Draining`) and
     /// settle it. `true` when it is really gone.
     ///
-    /// Only a terminate that actually succeeded is recorded as a clean stop.
-    /// When it fails the host may still be running the environment, so the row
-    /// stays `Draining`: out of the pool, but still in `list_active`, so the
-    /// startup reconcile of the next process still sees an owner instead of an
-    /// environment nobody admits to. The id is kept for the next sweep.
-    async fn terminate_and_settle(&self, id: &EnvironmentId, reason: &str) -> bool {
-        let session = self.sessions.lock().remove(id);
-        if let Some(mut session) = session {
-            let _ = session.shutdown(reason).await;
+    /// Only a terminate that actually succeeded is recorded as a terminal
+    /// state and metered. When it fails the host may still be running the
+    /// environment, so the row stays `Draining`: out of the pool, but still in
+    /// `list_active`, so the startup reconcile of the next process still sees
+    /// an owner instead of an environment nobody admits to. The termination is
+    /// kept, unchanged, for the next sweep — which is what keeps the
+    /// environment's single `EnvironmentStopped` for the moment it is really
+    /// gone.
+    async fn terminate_and_settle(&self, t: &Termination) -> bool {
+        let pooled = self.sessions.lock().remove(&t.id);
+        // The environment's event count lives with its session while it is
+        // pooled; once that is gone (a retry, or a row this process never
+        // held) the termination carries it.
+        let sequence = pooled.as_ref().map_or(t.sequence, |p| p.sequence);
+        if let Some(mut pooled) = pooled {
+            let _ = pooled.session.shutdown(t.why).await;
         }
         if let Err(e) = self
             .provider
-            .terminate_environment(id, TerminateReason::Shutdown)
+            .terminate_environment(&t.id, t.terminate)
             .await
         {
             tracing::warn!(
                 error = %e,
-                environment_id = %id,
-                reason,
+                environment_id = %t.id,
+                reason = t.why,
                 "terminating a pooled environment failed; it stays draining for the next sweep"
             );
-            self.pending_termination.lock().push(id.clone());
+            self.pending_termination.lock().push(Termination {
+                sequence,
+                ..t.clone()
+            });
             return false;
         }
         let now = self.clock.now();
-        match self.repos.environments.get(id) {
+        match self.repos.environments.get(&t.id) {
             Ok(Some(mut env)) => {
-                if env.mark_stopped(now).is_ok()
+                let settled = match t.failure {
+                    None => env.mark_stopped(now),
+                    Some(reason) => env.mark_failed(reason, now),
+                };
+                if settled.is_ok()
                     && let Err(e) = self.repos.environments.update(env.clone())
                 {
-                    tracing::warn!(error = %e, environment_id = %id, "cannot record a reaped environment");
+                    tracing::warn!(error = %e, environment_id = %t.id, "cannot record a reaped environment");
                 }
-                self.emit_stopped(&env, now).await;
+                self.emit_stopped(&env, now, sequence).await;
             }
             Ok(None) => {
-                tracing::warn!(environment_id = %id, "terminated an environment the ledger no longer has")
+                tracing::warn!(environment_id = %t.id, "terminated an environment the ledger no longer has")
             }
             Err(e) => {
-                tracing::warn!(error = %e, environment_id = %id, "cannot load a reaped environment")
+                tracing::warn!(error = %e, environment_id = %t.id, "cannot load a reaped environment")
             }
         }
         true
     }
 
-    /// Terminate a pooled environment we cannot use and settle its row.
-    async fn retire(&self, mut env: ExecutionEnvironment, reason: &'static str) {
+    /// Terminate a claimed environment the pool cannot use and settle its row.
+    ///
+    /// The claim already took the row out of the pool (it is `Busy` at a new
+    /// epoch); this moves it to `Draining` first, so that a terminate which
+    /// fails leaves exactly what the sweeper leaves: an environment nothing can
+    /// claim, still in `list_active` for the startup reconcile of the next
+    /// process, with the retry queued and *no* stop event — the environment is
+    /// metered when it is really gone, once, whoever finally ends it.
+    async fn retire(&self, mut env: ExecutionEnvironment, reason: &'static str, sequence: u64) {
         tracing::warn!(environment_id = %env.id, reason, "retiring a pooled environment");
-        let terminated = self
-            .provider
-            .terminate_environment(&env.id, TerminateReason::Reconcile)
-            .await;
         let now = self.clock.now();
-        let settled = match &terminated {
-            Ok(_) => env.mark_failed(reason, now),
-            // It may still be on the host: `Lost` says so, and the startup
-            // reconcile of the next process reclaims it.
-            Err(e) => {
-                tracing::warn!(error = %e, environment_id = %env.id, "terminating a retired environment failed");
-                env.mark_lost(format!("{reason}; terminate failed: {e}"), now)
-            }
-        };
-        if settled.is_ok()
+        if env.mark_draining(now).is_ok()
             && let Err(e) = self.repos.environments.update(env.clone())
         {
-            tracing::warn!(error = %e, environment_id = %env.id, "cannot record a retired environment");
+            tracing::warn!(error = %e, environment_id = %env.id, "cannot record a retiring environment");
         }
-        self.emit_stopped(&env, now).await;
+        self.terminate_and_settle(&Termination {
+            id: env.id.clone(),
+            terminate: TerminateReason::Reconcile,
+            why: reason,
+            failure: Some(reason),
+            sequence,
+        })
+        .await;
     }
 
     /// Report the end of a pooled environment's life to usage.
@@ -585,13 +664,14 @@ impl EnvironmentPool {
     /// such an environment ever gets: without it the whole warm part of its
     /// lifetime would never reach metering.
     ///
-    /// `monotonic_duration_ms` is the host-observed lifetime, from the ledger's
-    /// `created_at` to now — the environment outlived every single attempt on
-    /// it, so no attempt's stopwatch can measure it. The id is
+    /// `monotonic_duration_ms` is [`environment_lifetime_ms`], the same
+    /// host-observed span the driver reports for an environment it ends
+    /// itself. `sequence` continues the environment's own event count, so the
+    /// stop event is the last number of its life. The id is
     /// `<environment>:<epoch>:pool-stopped`, which never collides with the
     /// driver's `<environment>:<epoch>:<sequence>` (a sequence is a number) and
     /// is stable, so a re-send of the same event still de-duplicates.
-    async fn emit_stopped(&self, env: &ExecutionEnvironment, now: Timestamp) {
+    async fn emit_stopped(&self, env: &ExecutionEnvironment, now: Timestamp, sequence: u64) {
         let resources = self
             .repos
             .revisions
@@ -608,9 +688,9 @@ impl EnvironmentPool {
                 invocation_id: None,
                 attempt_id: None,
                 event_type: UsageEventType::EnvironmentStopped,
-                sequence: env.epoch,
+                sequence: sequence + 1,
                 observed_at: now,
-                monotonic_duration_ms: Some((now - env.created_at).num_milliseconds().max(0) as u64),
+                monotonic_duration_ms: Some(environment_lifetime_ms(env, now)),
                 memory_mib: resources.memory_mib,
                 cpu_millis: resources.cpu_millis,
                 bytes_in: 0,
@@ -1118,7 +1198,9 @@ mod tests {
             })
         };
 
-        let pooled = pool.release(&env, session).expect("the environment pools");
+        let pooled = pool
+            .release(&env, session, 3)
+            .expect("the environment pools");
         assert_eq!(pooled.state, EnvironmentState::Idle);
         let (claimed_id, claimed_epoch) = claimer.await.unwrap();
         assert_eq!(
@@ -1195,5 +1277,79 @@ mod tests {
             "{}",
             events[0].event_id
         );
+        assert_eq!(
+            events[0].sequence, 1,
+            "the stop event continues the environment's own count"
+        );
+    }
+
+    /// Regression (review R2): retiring a claimed environment the pool cannot
+    /// use goes through the same settling as the sweeper. A terminate that
+    /// failed is not a stop: the row stays `Draining` (out of the pool, still
+    /// in `list_active`), the retry is queued, and the environment is metered
+    /// once — when it is really gone.
+    #[tokio::test]
+    async fn a_failed_terminate_while_retiring_is_retried_and_metered_once() {
+        let store = Arc::new(InMemoryStore::new(Limits::default()));
+        let key = reuse_key();
+        let id = idle_row(&store, &key);
+        let provider = Arc::new(StubProvider::new());
+        let sink = Arc::new(RecordingSink::default());
+        let pool = EnvironmentPool::new(
+            Repositories::in_memory(store.clone()),
+            provider.clone(),
+            sink.clone(),
+            Arc::new(SystemClock),
+            policy_on(),
+        );
+
+        // The row is pooled but this process holds no session behind it, so the
+        // claim has to retire it — and the host refuses to let go.
+        provider.fail_terminate(true);
+        assert!(
+            pool.claim(&key).await.is_none(),
+            "a row without a session is never handed out"
+        );
+        assert_eq!(
+            state_of(&store, &id),
+            EnvironmentState::Draining,
+            "a failed terminate must not put the row in a terminal state"
+        );
+        assert!(
+            EnvironmentRepository::list_active(&*store)
+                .unwrap()
+                .iter()
+                .any(|e| e.id == id),
+            "the row stays in the active set, so the startup reconcile still sees an owner"
+        );
+        assert!(
+            store.list_idle().unwrap().is_empty(),
+            "and it is out of the pool either way"
+        );
+        assert!(
+            sink.events().is_empty(),
+            "nothing stopped, so nothing is metered"
+        );
+
+        // The next sweep retries it, and now the host lets go.
+        provider.fail_terminate(false);
+        let swept = pool.sweep().await;
+        assert_eq!((swept.examined, swept.reaped, swept.failed), (0, 1, 0));
+        assert!(
+            matches!(state_of(&store, &id), EnvironmentState::Failed { .. }),
+            "{:?}",
+            state_of(&store, &id)
+        );
+        assert_eq!(provider.terminated().len(), 2, "it was retried once");
+
+        let events = sink.events();
+        assert_eq!(
+            events.len(),
+            1,
+            "exactly one stop event over the environment's whole life"
+        );
+        assert_eq!(events[0].event_type, UsageEventType::EnvironmentStopped);
+        assert_eq!(events[0].environment_id, id);
+        assert!(events[0].monotonic_duration_ms.is_some());
     }
 }

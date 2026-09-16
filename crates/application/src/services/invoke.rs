@@ -42,7 +42,8 @@ use crate::error::AppError;
 use crate::repository::{IdempotencyBinding, IdempotencyOutcome, Repositories};
 use crate::services::history::{HistoryService, InvocationDetail};
 use crate::services::pool::{
-    EnvironmentPool, WarmEnvironment, reuse_key_for, secret_binding_generation,
+    EnvironmentPool, WarmEnvironment, environment_lifetime_ms, reuse_key_for,
+    secret_binding_generation,
 };
 use crate::services::revision::ensure_ready;
 
@@ -352,7 +353,7 @@ impl InvokeService {
             function,
             revision,
             event_kind: req.event_kind,
-            payload: req.payload,
+            payload: RetainedPayload::new(req.payload),
             input_size,
             trace_id,
             client_deadline,
@@ -360,7 +361,6 @@ impl InvokeService {
             accepted_at: Instant::now(),
             pre: Some(pre),
             env_id: None,
-            env_started: None,
             attempt_id: None,
             lease_id: None,
             seq: 0,
@@ -747,13 +747,57 @@ struct Prepared {
     logs: LogForwarder,
 }
 
+/// The invocation payload while it is being dispatched.
+///
+/// A warm dispatch may still have to be repeated cold, so the `Invoke` frame
+/// gets a copy and the original is retained — but only until the write has
+/// resolved. Anything other than a lost connection means no retry can ask for
+/// it again, and the copy is released there and then, so a payload (up to
+/// `max_payload_bytes`, 1 MiB by default) is never held twice for the whole
+/// handler execution. A cold dispatch hands over its only copy and retains
+/// nothing.
+struct RetainedPayload(Option<serde_json::Value>);
+
+impl RetainedPayload {
+    fn new(payload: serde_json::Value) -> Self {
+        Self(Some(payload))
+    }
+
+    /// The copy that goes into the `Invoke` frame. `retryable` keeps the
+    /// original for a possible cold retry; otherwise the only copy is handed
+    /// over.
+    fn checkout(&mut self, retryable: bool) -> serde_json::Value {
+        match retryable {
+            true => self.0.clone().unwrap_or(serde_json::Value::Null),
+            false => self.0.take().unwrap_or(serde_json::Value::Null),
+        }
+    }
+
+    /// The dispatch resolved. Only a lost connection can still need the
+    /// retained copy (the caller then dispatches once more, cold); every other
+    /// outcome releases it here. Returns whether a retry is still possible,
+    /// which is exactly "the payload is still held".
+    fn settle(&mut self, connection_lost: bool) -> bool {
+        if connection_lost && self.0.is_some() {
+            return true;
+        }
+        self.0 = None;
+        false
+    }
+
+    #[cfg(test)]
+    fn held(&self) -> bool {
+        self.0.is_some()
+    }
+}
+
 struct Driver {
     svc: Arc<InvokeService>,
     invocation_id: InvocationId,
     function: Function,
     revision: FunctionRevision,
     event_kind: EventKind,
-    payload: serde_json::Value,
+    payload: RetainedPayload,
     input_size: u64,
     trace_id: String,
     client_deadline: Timestamp,
@@ -763,10 +807,13 @@ struct Driver {
     // What the driver has recorded so far, so that a panic can still clean
     // up (see `cleanup_after_panic`). Cleared once the normal path finished.
     env_id: Option<EnvironmentId>,
-    env_started: Option<Instant>,
     attempt_id: Option<AttemptId>,
     lease_id: Option<LeaseId>,
-    /// Last usage-event sequence number used for the environment.
+    /// Usage-event counter of the environment this driver currently works
+    /// with: zero for one this driver booted, and the pool's count for one it
+    /// reused. The events of a single environment are therefore monotonic over
+    /// its whole life, across every invocation that ran on it
+    /// (`UsageEvent::sequence`).
     seq: u64,
     /// Epoch of the environment this driver currently works with. It is part
     /// of every usage event id, so the events of an attempt on a reused
@@ -857,14 +904,18 @@ impl Driver {
             );
             let _ = svc.repos.invocations.update_attempt(attempt);
         }
-        if let Ok(Some(mut env)) = svc.repos.environments.get(&env_id)
+        let row = svc.repos.environments.get(&env_id).ok().flatten();
+        if let Some(env) = &row
             && !env.is_terminal()
         {
+            let mut env = env.clone();
             let _ = env.mark_failed("driver panicked", now);
             self.save_env(&env);
         }
         self.seq += 1;
-        let duration = self.env_started.map(|t| t.elapsed().as_millis() as u64);
+        // The environment's whole life, the same quantity every other path
+        // reports for it.
+        let duration = row.as_ref().map(|env| environment_lifetime_ms(env, now));
         self.emit_usage(
             &env_id,
             None,
@@ -1265,10 +1316,7 @@ impl Driver {
         // A warm dispatch may still have to be repeated cold, and then the
         // payload is needed a second time. A cold one hands over its only copy.
         let retryable = warm_allowed && start_kind == StartKind::Warm;
-        let payload = match retryable {
-            true => self.payload.clone(),
-            false => std::mem::take(&mut self.payload),
-        };
+        let payload = self.payload.checkout(retryable);
         let dispatched_at = Instant::now();
         let sent = session
             .send_invoke(InvokeParams {
@@ -1281,11 +1329,19 @@ impl Driver {
                 payload,
             })
             .await;
+        // The frame is either on the wire or was refused before anything was
+        // written: the retained copy can only still be needed when the
+        // connection was lost, which is the one outcome that is retried.
+        let can_retry = self
+            .payload
+            .settle(matches!(sent, Err(SessionError::Disconnected)));
         let dispatch = match sent {
             // The pooled guest was already gone: nothing reached it, so the
-            // handler cannot have started (docs/threat-model.md §9). Retire
-            // the environment and let the caller dispatch once more, cold.
-            Err(SessionError::Disconnected) if retryable => {
+            // handler cannot have started. What the guest queued before it
+            // closed still classifies the attempt, exactly as it does for a
+            // cold dispatch (docs/threat-model.md §9); only the retry is
+            // warm-specific.
+            Err(SessionError::Disconnected) if can_retry => {
                 self.retire_after_undelivered_warm(
                     &mut env,
                     &mut session,
@@ -1404,7 +1460,8 @@ impl Driver {
                 if let Some(trace) = stack_trace {
                     logs.platform(LogPhase::Handler, Some(&attempt_id), &trace);
                 }
-                classify_guest_error(kind, error_type, message)
+                let (error, end) = classify_guest_error(kind, error_type, message);
+                (Err(error), end)
             }
             Dispatch::Finished(Outcome::Timeout) => {
                 let (error_type, message, line) = if execution_clamped {
@@ -1484,7 +1541,8 @@ impl Driver {
                     Some(&attempt_id),
                     &format!("invocation was not delivered to the guest: {error}"),
                 );
-                undelivered_invoke(&error, drained)
+                let (error, end) = undelivered_invoke(&error, drained);
+                (Err(error), end)
             }
         };
 
@@ -1576,7 +1634,9 @@ impl Driver {
             session.drain_stale().await;
         }
         let release = if may_reuse {
-            svc.pool.release(&env, session)
+            // The pool takes the environment's event count with it, so the
+            // next attempt on it continues where this one stopped.
+            svc.pool.release(&env, session, self.seq)
         } else {
             Err(Box::new(session))
         };
@@ -1641,7 +1701,9 @@ impl Driver {
             Some(&attempt_id),
             UsageEventType::EnvironmentStopped,
             self.seq,
-            self.env_started.map(|t| t.elapsed().as_millis() as u64),
+            // The environment's whole life, not this attempt's share of it:
+            // the same quantity the pool reports for one it ends itself.
+            Some(environment_lifetime_ms(&env, now)),
             0,
             0,
         )
@@ -1695,6 +1757,7 @@ impl Driver {
         let WarmEnvironment {
             environment,
             mut session,
+            sequence,
         } = warm;
         let logs = LogForwarder::new(
             self.svc.repos.logs.clone(),
@@ -1713,8 +1776,10 @@ impl Driver {
         // The pool has handed the environment over, so from here a panic must
         // terminate it exactly as it would a cold one.
         self.env_id = Some(environment.id.clone());
-        self.env_started = Some(Instant::now());
         self.epoch = environment.epoch;
+        // Continue the environment's own usage count instead of starting a
+        // second one on the same environment.
+        self.seq = sequence;
         logs.platform(
             LogPhase::Boot,
             None,
@@ -1742,6 +1807,21 @@ impl Driver {
     /// reach it. Settle this attempt, retire the environment exactly once and
     /// leave the driver as if nothing had been acquired, so the caller can
     /// dispatch again from a cold start.
+    ///
+    /// The attempt is classified from what the guest queued before it closed,
+    /// by the rule every undelivered `Invoke` follows
+    /// (docs/threat-model.md §9): `Exited` makes it `Crash` / `Runtime.Exited`,
+    /// nothing makes it `Crash` / `Host.BridgeDisconnectedBeforeInvoke`. The
+    /// same guest behaviour must not be classified differently just because
+    /// the host was reusing the environment.
+    ///
+    /// The retry is the only warm-specific part, and it does not depend on the
+    /// classification: the handler provably did not start, and *this* guest
+    /// reported `Ready` for an earlier invocation and died afterwards, so a
+    /// fresh environment is very likely to serve the request. A cold guest
+    /// that never takes the frame died initializing for *this* invocation, so
+    /// repeating it would only repeat the failure — which is why a cold
+    /// undelivered dispatch is not retried.
     async fn retire_after_undelivered_warm(
         &mut self,
         env: &mut ExecutionEnvironment,
@@ -1752,18 +1832,28 @@ impl Driver {
         queue_wait_ms: u64,
     ) {
         let svc = self.svc.clone();
-        let now = self.now();
         let attempt_id = attempt.id.clone();
+        let env_id = env.id.clone();
+        // Keep reading briefly for the frames the guest queued before closing.
+        let drained = session
+            .wait_result(Instant::now() + UNDELIVERED_DRAIN)
+            .await;
+        let (error, env_end) = undelivered_invoke(&SessionError::Disconnected, Some(drained));
+        let now = self.now();
         tracing::warn!(
-            environment_id = %env.id,
+            environment_id = %env_id,
             epoch = env.epoch,
+            error_type = %error.error_type,
             "the reused environment was gone before dispatch; retrying with a cold start"
         );
         logs.platform(
             LogPhase::Handler,
             Some(&attempt_id),
-            "the reused environment was gone before the invocation could be delivered; \
-             retrying with a cold start",
+            &format!(
+                "the reused environment was gone before the invocation could be delivered \
+                 ({}); retrying with a cold start",
+                error.error_type
+            ),
         );
         let _ = lease.release(now);
         let _ = svc.repos.environments.update_lease(lease);
@@ -1774,32 +1864,29 @@ impl Driver {
             total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
             ..tachyon_serverless_domain::AttemptTimings::default()
         };
-        let _ = attempt.fail(
-            InvocationError::new(
-                ErrorClass::PlatformError,
-                "Host.WarmEnvironmentGone",
-                "the reused environment was gone before the invocation was delivered",
-            ),
-            now,
-        );
+        let _ = attempt.fail(error, now);
         let _ = svc.repos.invocations.update_attempt(attempt);
         let _ = session.shutdown("reused environment is gone").await;
         if let Err(e) = svc
             .provider
-            .terminate_environment(&env.id, TerminateReason::Crashed)
+            .terminate_environment(&env_id, env_end.reason)
             .await
         {
-            tracing::warn!(error = %e, environment_id = %env.id, "terminate of a gone environment failed");
+            tracing::warn!(error = %e, environment_id = %env_id, "terminate of a gone environment failed");
         }
-        let _ = env.mark_failed("reused environment was gone before dispatch", now);
+        let _ = match env_end.failure {
+            None => env.mark_stopped(now),
+            Some(reason) => env.mark_failed(reason, now),
+        };
         self.save_env(env);
+        let lifetime = environment_lifetime_ms(env, now);
         self.seq += 1;
         self.emit_usage(
-            &env.id.clone(),
+            &env_id,
             Some(&attempt_id),
             UsageEventType::EnvironmentStopped,
             self.seq,
-            self.env_started.map(|t| t.elapsed().as_millis() as u64),
+            Some(lifetime),
             0,
             0,
         )
@@ -1809,7 +1896,6 @@ impl Driver {
         self.env_id = None;
         self.attempt_id = None;
         self.lease_id = None;
-        self.env_started = None;
     }
 
     /// Create a fresh environment and drive it to `Ready` (the P1 path).
@@ -1844,6 +1930,8 @@ impl Driver {
         // From here on a panic must still terminate the environment.
         self.env_id = Some(env_id.clone());
         self.epoch = env.epoch;
+        // A newly booted environment starts its own usage count.
+        self.seq = 0;
         let _ = env.mark_provisioning(self.now());
         self.save_env(&env);
 
@@ -1909,7 +1997,6 @@ impl Driver {
             connect_timeout: init_wait,
         };
         let create_started = Instant::now();
-        self.env_started = Some(create_started);
         logs.platform(
             LogPhase::Boot,
             None,
@@ -2141,7 +2228,11 @@ fn cancel_reason(kind: CancelKind) -> TerminateReason {
 
 /// Map a guest-reported error for the attempt onto the ledger class and the
 /// environment end.
-fn classify_guest_error(kind: GuestErrorKind, error_type: String, message: String) -> Classified {
+fn classify_guest_error(
+    kind: GuestErrorKind,
+    error_type: String,
+    message: String,
+) -> (InvocationError, EnvEnd) {
     let (class, end) = match kind {
         GuestErrorKind::Handler => (
             ErrorClass::UserError,
@@ -2172,13 +2263,20 @@ fn classify_guest_error(kind: GuestErrorKind, error_type: String, message: Strin
             },
         ),
     };
-    (Err(InvocationError::new(class, error_type, message)), end)
+    (InvocationError::new(class, error_type, message), end)
 }
 
 /// Classification when the `Invoke` frame never reached the guest. The
 /// handler cannot have started, so this is never `OutcomeUnknown`
 /// (docs/threat-model.md §9).
-fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> Classified {
+///
+/// One rule for every dispatch, cold or warm: a write that failed is followed
+/// by a short read of the frames the guest queued before closing, and the
+/// classification comes from those. Whether the caller then retries is a
+/// separate decision ([`Driver::retire_after_undelivered_warm`]) and never
+/// changes what is recorded here, so the same guest behaviour cannot be
+/// classified two ways.
+fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> (InvocationError, EnvEnd) {
     match error {
         SessionError::Disconnected => match drained {
             // The guest said why it went away (typically `Exited` right after
@@ -2190,11 +2288,11 @@ fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> Classif
                 ..
             }) => classify_guest_error(kind, error_type, message),
             _ => (
-                Err(InvocationError::new(
+                InvocationError::new(
                     ErrorClass::Crash,
                     "Host.BridgeDisconnectedBeforeInvoke",
                     "the bridge closed the connection before the invocation could be delivered",
-                )),
+                ),
                 EnvEnd {
                     reason: TerminateReason::Crashed,
                     failure: Some("bridge disconnected before invoke"),
@@ -2203,22 +2301,22 @@ fn undelivered_invoke(error: &SessionError, drained: Option<Outcome>) -> Classif
         },
         // Nothing was written; the environment itself is healthy.
         SessionError::FrameTooLarge(size) => (
-            Err(InvocationError::new(
+            InvocationError::new(
                 ErrorClass::PlatformError,
                 "Host.InvokeTooLarge",
                 format!("invoke frame of {size} bytes exceeds the protocol frame limit"),
-            )),
+            ),
             EnvEnd {
                 reason: TerminateReason::Completed,
                 failure: None,
             },
         ),
         other => (
-            Err(InvocationError::new(
+            InvocationError::new(
                 ErrorClass::PlatformError,
                 "Host.InvokeEncode",
                 format!("invoke frame could not be encoded: {other}"),
-            )),
+            ),
             EnvEnd {
                 reason: TerminateReason::Completed,
                 failure: None,
@@ -2232,8 +2330,8 @@ mod tests {
     use super::*;
     use tachyon_serverless_domain::TenantId;
 
-    fn error_of(c: &Classified) -> &InvocationError {
-        c.0.as_ref().expect_err("classified as a failure")
+    fn error_of(c: &(InvocationError, EnvEnd)) -> &InvocationError {
+        &c.0
     }
 
     #[test]
@@ -2305,5 +2403,61 @@ mod tests {
         .invocation_error();
         assert_eq!(backend.class, ErrorClass::PlatformError);
         assert_eq!(backend.error_type, "Host.SecretBackend");
+    }
+
+    /// Regression (review R5): the copy a warm dispatch keeps for a possible
+    /// cold retry is released as soon as the write resolves as anything but a
+    /// lost connection, so a payload is never held twice for the whole handler
+    /// execution. `settle` is also what decides the retry, so the retained
+    /// copy and the retry can never disagree.
+    #[test]
+    fn a_dispatched_payload_is_retained_only_while_a_cold_retry_can_need_it() {
+        let payload = || serde_json::json!({ "n": 1 });
+
+        // Cold: the frame gets the only copy and nothing is retained, whatever
+        // the write did.
+        for connection_lost in [false, true] {
+            let mut cold = RetainedPayload::new(payload());
+            assert_eq!(cold.checkout(false), payload());
+            assert!(!cold.held(), "a cold dispatch keeps no second copy");
+            assert!(
+                !cold.settle(connection_lost),
+                "a cold dispatch is never retried"
+            );
+            assert!(!cold.held());
+        }
+
+        // Warm, delivered: the retained copy goes the moment the write is
+        // through, not when the handler finishes.
+        let mut delivered = RetainedPayload::new(payload());
+        assert_eq!(delivered.checkout(true), payload());
+        assert!(
+            delivered.held(),
+            "it can still be needed while the write is in flight"
+        );
+        assert!(!delivered.settle(false));
+        assert!(
+            !delivered.held(),
+            "a delivered payload is not held for the whole handler execution"
+        );
+
+        // Warm, connection lost: the retry needs it and gets the only copy.
+        let mut lost = RetainedPayload::new(payload());
+        let _ = lost.checkout(true);
+        assert!(
+            lost.settle(true),
+            "a lost connection is exactly what is retried cold"
+        );
+        assert!(lost.held());
+        assert_eq!(
+            lost.checkout(false),
+            payload(),
+            "the retry dispatches the same payload"
+        );
+        assert!(!lost.held());
+        assert!(
+            !lost.settle(true),
+            "and nothing is left to retry with afterwards"
+        );
     }
 }

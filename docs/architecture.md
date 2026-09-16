@@ -78,6 +78,8 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      Invoke を届けられなかった場合 (handler は未開始、OutcomeUnknown にしない):
      encode 不能 → 500 platform_error (Host.InvokeTooLarge)。書き込み失敗 → guest が閉じる前に送った
      Exited を読めれば 502 crash (Runtime.Exited)、無ければ 502 crash (Host.BridgeDisconnectedBeforeInvoke)。
+     再利用環境 (warm) への書き込み失敗も同じ手順・同じ分類で attempt に記録する。分類は誰が dispatch したかで
+     変わらない。warm だけはその後 cold で 1 回だけやり直す (§4「環境 pool と再利用キー」)。
   9 Response / Error を execution_deadline まで待つ。
      - Response          → Succeeded (output inline ≤ config inline_output_max, http_status は http event のみ)
      - Error(Handler)    → Failed{user_error}     - Error(Panic)  → Failed{crash}
@@ -184,9 +186,11 @@ invoke 後の環境を破棄せず `Idle` で残し、次の invoke に渡す仕
 - `release_to_pool`: attempt が健全に終わった環境だけを `Idle` に戻す。`max_idle_per_revision` / `max_total_idle` を超える分と、epoch がずれた古い複製は拒否され、呼び出し側が今までどおり terminate する。「健全」は **attempt の結果**でも判定する: 成功と `UserError`（handler が返したエラー。guest は生きている）だけが対象で、`Crash` / `InitError` / `Timeout` / `PlatformError` / `OutcomeUnknown`、cancel、shutdown 中はいずれも戻さない。戻す前に、直前の attempt が残した frame を必ず drain する（`BridgeSession::drain_stale`）: 残った `Log` は**前の** invocation に付け、`Response` / `Error` は stale として捨て、`Exited` や EOF を見たら session を使用不可にして pool 入りを拒否する。`Exited` は attempt id も epoch も持たないので、lease では fence できない。
 - pool は session と台帳の行を**同時に**公開する（`release` は session map の lock を握ったまま `release_to_pool` を呼ぶ）。行だけ見えて session が無い瞬間は存在しないので、claim 側が健全な環境を「死んでいる」と誤認して terminate することはない。
 - epoch が進むことで、前の attempt が遅れて送ってきた frame は `ExecutionLease::accepts(attempt_id, epoch)` に一致せず捨てられる（`docs/threat-model.md` T05）。再利用が入って初めてこの fencing が効く。
-- 取り出した warm 環境に `Invoke` frame を**渡せなかった**場合（idle の間に guest が死んでいた等）は、handler が始まっていないことが確定しているので、その環境を retire して **cold で 1 回だけ**やり直す。やり直しは cold 固定なので再帰しない。台帳には attempt が 2 行残り（1 行目が `Host.WarmEnvironmentGone` で失敗）、usage には死んだ環境の `EnvironmentStopped` が 1 回だけ出る。
+- 取り出した warm 環境に `Invoke` frame を**渡せなかった**場合（idle の間に guest が死んでいた等）は、handler が始まっていないことが確定しているので、その環境を retire して **cold で 1 回だけ**やり直す。やり直しは cold 固定なので再帰しない。失敗した 1 行目の attempt の分類は cold と同じ規則で決める（`docs/threat-model.md` §9）: 書き込み失敗の後、guest が閉じる前に送った frame を短時間読み、`Exited` があれば `Crash` / `Runtime.Exited`、無ければ `Crash` / `Host.BridgeDisconnectedBeforeInvoke`。同じ guest の挙動が「warm だったから」別の分類になることはなく、warm 固有なのは**やり直すこと**だけである（やり直す理由は §9）。台帳には attempt が 2 行残り、usage には死んだ環境の `EnvironmentStopped` が 1 回だけ出る。
 
-**回収**。`idle_ttl_seconds` を過ぎた環境は sweeper（gateway が `idle_ttl/2` 間隔で起動）が terminate する。graceful shutdown では TTL に関係なく全部落とす（pool の session はプロセスと運命を共にするため、跨いで生き残らせない）。terminate に成功した環境だけが `Stopped` になり、そのとき pool が `UsageEvent{EnvironmentStopped}`（host 観測の生存時間。id は `<env>:<epoch>:pool-stopped`）を出す。terminate が失敗した環境は `Draining` のまま残し（`list_active` に残るので起動時 reconcile から見えるし、pool からは配られない）、次の sweep で再試行する。再起動後は台帳上の非 terminal な環境がすべて `Lost` になり、host に残った実体は起動時 reconcile が orphan として回収する（前節）。
+**回収**。`idle_ttl_seconds` を過ぎた環境は sweeper（gateway が `idle_ttl/2` 間隔で起動）が terminate する。graceful shutdown では TTL に関係なく全部落とす（pool の session はプロセスと運命を共にするため、跨いで生き残らせない）。terminate に成功した環境だけが terminal になり、そのとき pool が `UsageEvent{EnvironmentStopped}`（id は `<env>:<epoch>:pool-stopped`）を出す。terminate が失敗した環境は `Draining` のまま残し（`list_active` に残るので起動時 reconcile から見えるし、pool からは配られない）、次の sweep で再試行する。claim した環境が使えずに **retire** する場合（session が無い、guest が死んでいた）も同じ経路を通る: 先に `Draining` にしてから terminate し、成功したら `Failed` にして計測、失敗したら `Draining` のまま再試行を queue して**まだ計測しない**。再起動後は台帳上の非 terminal な環境がすべて `Lost` になり、host に残った実体は起動時 reconcile が orphan として回収する（前節）。
+
+**計測**。1 つの環境が生涯に出す `EnvironmentStopped` はちょうど 1 回で、それは誰が終わらせたか（driver / sweeper / drain / retire / 失敗した terminate の再試行）に依らない。`monotonic_duration_ms` も 1 種類だけ:「台帳の `created_at` から終了時刻まで」の host 観測の生存時間である（`crates/application/src/services/pool.rs::environment_lifetime_ms`）。再利用される環境は個々の attempt より長く生きるので、attempt の stopwatch では測れない。`UsageEvent.sequence` は**環境ごとに単調**で、warm 再利用でも続き番号になる（pool が session と一緒に carry し、driver はその続きから採番する）。したがって 1 環境の event は `sequence` で並べられ、`event_id` = `<env>:<epoch>:<sequence>` も衝突しない。
 
 **範囲**。この pool は 1 プロセス内だけのものである。guest への open な stream（`BridgeSession`）は永続化できないため in-process に留まり、複数プロセス間の原子性（pool membership、slot、Lease 期限）は本 store では依然として表現できない。方針は `docs/adr/0003-execution-state-persistence.md`。
 

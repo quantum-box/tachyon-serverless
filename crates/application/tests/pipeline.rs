@@ -26,7 +26,8 @@ use tachyon_serverless_domain::{
     RevisionStatus, Sha256Digest, TenantId, Timestamp, UsageEventType,
 };
 use tachyon_serverless_protocol::{
-    FrameCodec, GuestMessage, HostMessage, PROTOCOL_VERSION, decode_message, encode_message,
+    FrameCodec, GuestErrorKind, GuestMessage, HostMessage, PROTOCOL_VERSION, decode_message,
+    encode_message,
 };
 use tachyon_serverless_provider_fake::{
     CustomScriptContext, FakeExecutionProvider, FakeGuestScript, FakeProviderOptions, ScriptFuture,
@@ -2841,6 +2842,12 @@ async fn a_reaped_pooled_environment_reports_its_lifetime_to_usage() {
 struct DeadWhenArmed {
     inner: Box<dyn BridgeStream>,
     armed: Arc<AtomicBool>,
+    /// Wire bytes the guest had queued before it died. They become readable
+    /// only once a write has failed, i.e. once the host tries to use the
+    /// session again: a pooled session that could read them earlier would be
+    /// refused when it is claimed and never dispatched into at all.
+    queued: Arc<std::sync::Mutex<Vec<u8>>>,
+    write_failed: bool,
 }
 
 impl DeadWhenArmed {
@@ -2859,6 +2866,16 @@ impl AsyncRead for DeadWhenArmed {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         if self.gone() {
+            if self.write_failed {
+                let mut queued = self.queued.lock().unwrap();
+                if !queued.is_empty() {
+                    let n = queued.len().min(buf.remaining());
+                    let take: Vec<u8> = queued.drain(..n).collect();
+                    drop(queued);
+                    buf.put_slice(&take);
+                    return Poll::Ready(Ok(()));
+                }
+            }
             return Poll::Pending;
         }
         Pin::new(&mut self.inner).poll_read(cx, buf)
@@ -2872,12 +2889,14 @@ impl AsyncWrite for DeadWhenArmed {
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         if self.gone() {
+            self.write_failed = true;
             return Poll::Ready(Err(Self::broken_pipe()));
         }
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         if self.gone() {
+            self.write_failed = true;
             return Poll::Ready(Err(Self::broken_pipe()));
         }
         Pin::new(&mut self.inner).poll_flush(cx)
@@ -2895,6 +2914,9 @@ impl AsyncWrite for DeadWhenArmed {
 struct DiesWhenArmed {
     inner: Arc<FakeExecutionProvider>,
     armed: Arc<AtomicBool>,
+    /// What that guest leaves in the pipe when it dies (empty: it died
+    /// without saying anything).
+    queued: Arc<std::sync::Mutex<Vec<u8>>>,
     created: AtomicUsize,
 }
 
@@ -2925,6 +2947,8 @@ impl ExecutionProvider for DiesWhenArmed {
             handle.stream = Box::new(DeadWhenArmed {
                 inner: handle.stream,
                 armed: self.armed.clone(),
+                queued: self.queued.clone(),
+                write_failed: false,
             });
         }
         Ok(handle)
@@ -2962,6 +2986,7 @@ async fn a_warm_dispatch_into_a_dead_guest_falls_back_to_a_cold_start() {
     let provider = Arc::new(DiesWhenArmed {
         inner: fake.clone(),
         armed: armed.clone(),
+        queued: Arc::new(std::sync::Mutex::new(Vec::new())),
         created: AtomicUsize::new(0),
     });
     let h = harness_with(fake, provider, POOL_ON, None);
@@ -3002,8 +3027,11 @@ async fn a_warm_dispatch_into_a_dead_guest_falls_back_to_a_cold_start() {
     assert_eq!(attempts[0].0.environment_id, dead);
     match &attempts[0].0.status {
         AttemptStatus::Failed { error } => {
-            assert_eq!(error.error_type, "Host.WarmEnvironmentGone");
-            assert_eq!(error.class, ErrorClass::PlatformError);
+            // This guest died without saying anything, so it is classified
+            // exactly like a cold dispatch into a connection that is already
+            // gone (docs/threat-model.md §9).
+            assert_eq!(error.error_type, "Host.BridgeDisconnectedBeforeInvoke");
+            assert_eq!(error.class, ErrorClass::Crash);
         }
         other => panic!("expected the warm attempt to be failed, got {other:?}"),
     }
@@ -3051,4 +3079,269 @@ async fn a_warm_dispatch_into_a_dead_guest_falls_back_to_a_cold_start() {
             .count(),
         1
     );
+}
+
+/// The wire bytes of one guest frame, as the guest itself would have written
+/// them (length prefix included).
+async fn frame_bytes(msg: &GuestMessage) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    FramedWrite::new(&mut out, FrameCodec)
+        .send(encode_message(msg).unwrap())
+        .await
+        .expect("a frame encodes into a buffer");
+    out
+}
+
+/// Custom guest: answers the first `Invoke` with `payload` and reports a panic
+/// for every one after it. One environment therefore serves a cold attempt,
+/// goes into the pool, and is then ended by the **driver** on the warm attempt
+/// (a panicked guest is never pooled) instead of by the pool.
+fn respond_then_panic(payload: serde_json::Value) -> FakeGuestScript {
+    FakeGuestScript::Custom(Arc::new(move |ctx: CustomScriptContext| -> ScriptFuture {
+        let payload = payload.clone();
+        Box::pin(async move {
+            let (r, w) = tokio::io::split(ctx.stream);
+            let mut reader = FramedRead::new(r, FrameCodec);
+            let mut writer = FramedWrite::new(w, FrameCodec);
+            let hello = GuestMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                bridge_version: "test-guest".into(),
+                environment_id: ctx.environment_id.to_string(),
+                guest_boot_id: Some("test-boot".into()),
+                architecture: "aarch64".into(),
+            };
+            if writer.send(encode_message(&hello).unwrap()).await.is_err() {
+                return;
+            }
+            if !matches!(reader.next().await, Some(Ok(_))) {
+                return;
+            }
+            let ready = encode_message(&GuestMessage::Ready { init_ms: 1 }).unwrap();
+            if writer.send(ready).await.is_err() {
+                return;
+            }
+            let mut served = 0u32;
+            while let Some(Ok(frame)) = reader.next().await {
+                let Ok(HostMessage::Invoke {
+                    attempt_id, epoch, ..
+                }) = decode_message::<HostMessage>(&frame)
+                else {
+                    continue;
+                };
+                served += 1;
+                let answer = if served == 1 {
+                    GuestMessage::Response {
+                        attempt_id,
+                        epoch,
+                        payload: payload.clone(),
+                        handler_ms: Some(1),
+                    }
+                } else {
+                    GuestMessage::Error {
+                        attempt_id,
+                        epoch,
+                        error: GuestErrorKind::Panic,
+                        error_type: "Runtime.Panic".into(),
+                        message: "the handler panicked".into(),
+                        stack_trace: None,
+                        handler_ms: Some(1),
+                    }
+                };
+                if writer.send(encode_message(&answer).unwrap()).await.is_err() {
+                    return;
+                }
+            }
+        })
+    }))
+}
+
+/// Regression (review R1): an environment's life is metered as one quantity —
+/// the host-observed span from its ledger `created_at` to the moment it ended
+/// — whoever ends it. Here the **driver** ends a reused environment, because
+/// its guest panics on the warm attempt, and it must report the same span the
+/// pool reports for one it reaps itself, not just the last attempt's.
+#[tokio::test]
+async fn an_environment_the_driver_ends_reports_its_whole_life() {
+    use tachyon_serverless_domain::StartKind;
+    let offset = Arc::new(AtomicI64::new(0));
+    let clock: Arc<dyn Clock> = Arc::new(ShiftedClock(offset.clone()));
+    let fake = warm_fake();
+    fake.set_default_script(Some(respond_then_panic(serde_json::json!({"ok": true}))));
+    let h = pool_harness_with(fake, POOL_ON, Some(clock), None);
+    let (function, _) = deploy(&h, &h.a, "driver-ends").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let env = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &env), EnvironmentState::Idle);
+    assert!(
+        stopped_events(&h, &env).is_empty(),
+        "an environment in the pool has not stopped"
+    );
+
+    // Two minutes later it is handed to a second invocation, whose guest
+    // panics: the environment is ended by the driver, not by the pool.
+    offset.store(120_000, Ordering::SeqCst);
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(failed_error(&second).class, ErrorClass::Crash);
+    assert_eq!(attempt_of(&second).start_kind, StartKind::Warm);
+    assert_eq!(attempt_of(&second).environment_id, env);
+    assert!(
+        h.app.repos.environments.list_idle().unwrap().is_empty(),
+        "a crashed guest is not pooled again"
+    );
+
+    let stopped = stopped_events(&h, &env);
+    assert_eq!(
+        stopped.len(),
+        1,
+        "exactly one stop event over the environment's whole life"
+    );
+    assert!(
+        stopped[0].monotonic_duration_ms.unwrap_or(0) >= 100_000,
+        "the driver reported the last attempt's span instead of the environment's life: {:?}",
+        stopped[0].monotonic_duration_ms
+    );
+    assert_usage_event_ids_are_unique(&h);
+}
+
+/// Regression (review R3): `UsageEvent.sequence` is monotonic per environment
+/// (`crates/domain/src/usage.rs`). A reused environment continues its own
+/// count instead of restarting it for every invocation, so two events of one
+/// environment never share a sequence — the pool's own stop event included.
+#[tokio::test]
+async fn the_usage_sequence_of_a_reused_environment_never_restarts() {
+    use tachyon_serverless_domain::StartKind;
+    let h = pool_harness(warm_fake(), POOL_ON);
+    let (function, _) = deploy(&h, &h.a, "sequences").await;
+    for n in 0..3 {
+        let out = h
+            .app
+            .invoke
+            .invoke(invoke_request(
+                &h.a,
+                &function,
+                serde_json::json!({ "n": n }),
+            ))
+            .await
+            .unwrap();
+        assert!(out.succeeded(), "{:?}", out.invocation().status);
+        if n > 0 {
+            assert_eq!(attempt_of(&out).start_kind, StartKind::Warm);
+        }
+    }
+    let created = h.fake.created();
+    assert_eq!(created.len(), 1, "one environment served all three");
+    let env = created[0].clone();
+    // The pool ends it, so its stop event is the last number of its life.
+    assert_eq!(h.app.drain_pool().await.reaped, 1);
+
+    let events: Vec<_> = h
+        .app
+        .usage
+        .events()
+        .into_iter()
+        .filter(|e| e.environment_id == env)
+        .collect();
+    let kinds: Vec<UsageEventType> = events.iter().map(|e| e.event_type).collect();
+    let sequences: Vec<u64> = events.iter().map(|e| e.sequence).collect();
+    assert_eq!(
+        sequences.len(),
+        8,
+        "one boot, three handlers and one stop: {kinds:?}"
+    );
+    assert!(
+        sequences.windows(2).all(|w| w[0] < w[1]),
+        "the sequence must be monotonic over the environment's whole life: {sequences:?} for {kinds:?}"
+    );
+    assert_eq!(
+        events.last().unwrap().event_type,
+        UsageEventType::EnvironmentStopped
+    );
+    assert_usage_event_ids_are_unique(&h);
+}
+
+/// Regression (review R4): an `Invoke` the guest never received is classified
+/// by one rule, cold or warm — from the frames the guest queued before it
+/// closed (docs/threat-model.md §9). A guest that exited says so, and reusing
+/// its environment must not relabel that. Only the retry is warm-specific.
+#[tokio::test]
+async fn an_undelivered_warm_dispatch_is_classified_like_a_cold_one() {
+    use tachyon_serverless_domain::StartKind;
+    let fake = warm_fake();
+    let armed = Arc::new(AtomicBool::new(false));
+    // The guest exited while the environment was pooled; the frame saying so
+    // is still in the pipe when the host tries to dispatch into it.
+    let queued = frame_bytes(&GuestMessage::Exited {
+        exit_code: Some(9),
+        signal: None,
+    })
+    .await;
+    let provider = Arc::new(DiesWhenArmed {
+        inner: fake.clone(),
+        armed: armed.clone(),
+        queued: Arc::new(std::sync::Mutex::new(queued)),
+        created: AtomicUsize::new(0),
+    });
+    let h = harness_with(fake, provider, POOL_ON, None);
+    let (function, _) = deploy(&h, &h.a, "exited-warm").await;
+
+    let first = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 1})))
+        .await
+        .unwrap();
+    assert!(first.succeeded(), "{:?}", first.invocation().status);
+    let dead = attempt_of(&first).environment_id.clone();
+    assert_eq!(environment_state(&h, &dead), EnvironmentState::Idle);
+
+    armed.store(true, Ordering::SeqCst);
+    let second = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({"n": 2})))
+        .await
+        .unwrap();
+    assert!(
+        second.succeeded(),
+        "the cold retry serves the invocation: {:?}",
+        second.invocation().status
+    );
+    assert_eq!(second.output, Some(serde_json::json!({"n": 2})));
+
+    let attempts = &second.detail.attempts;
+    assert_eq!(attempts.len(), 2, "the failed warm attempt and its retry");
+    assert_eq!(attempts[0].0.start_kind, StartKind::Warm);
+    assert_eq!(attempts[0].0.environment_id, dead);
+    match &attempts[0].0.status {
+        AttemptStatus::Failed { error } => {
+            assert_eq!(
+                error.error_type, "Runtime.Exited",
+                "the guest said why it went away; a warm dispatch must not relabel it"
+            );
+            assert_eq!(error.class, ErrorClass::Crash);
+        }
+        other => panic!("expected the warm attempt to be failed, got {other:?}"),
+    }
+    assert_eq!(attempts[1].0.start_kind, StartKind::Cold);
+    assert_eq!(attempts[1].0.status, AttemptStatus::Succeeded);
+    assert_ne!(attempts[1].0.environment_id, dead);
+
+    assert_eq!(
+        stopped_events(&h, &dead).len(),
+        1,
+        "the dead environment is metered once, over its whole life"
+    );
+    assert_usage_event_ids_are_unique(&h);
 }
