@@ -50,3 +50,8 @@ value = "demo-secret-value-a"
 tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
 binding_ref = "demo-secret"
 value = "demo-secret-value-b"
+
+# 起動時の後始末。既定は true で、台帳の収束と孤児環境の回収を listener を
+# 開ける前に行う（docs/architecture.md §4「起動時の後始末」）。
+# [reconcile]
+# on_startup = true
