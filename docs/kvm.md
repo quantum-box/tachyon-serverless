@@ -123,7 +123,7 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 | enforce_resource_limits | unverified（M9 で vcpu / mem の guest 側一致と超過 alloc の `crash` 分類は実測済み。ephemeral storage は未制御のため unverified のまま。`docs/evidence/isolation-20260916T020934Z/`） |
 | host_metering | unverified |
 | egress_restricted / egress_public_web | unsupported（ネットワークデバイス未設定） |
-| idle_quiesce / idle_resume | unverified（PLT-4633 で `PATCH /vm {state: Paused/Resumed}` を実装。実機で未計測なので既定では再利用に入らない。計測は §3.7） |
+| idle_quiesce / idle_resume | supported（PLT-4633 で `PATCH /vm {state: Paused/Resumed}` を実装し §3.7 で実機計測。証跡 `docs/evidence/warm-20260916T162532Z/`。再利用に入るかは `[pool] enabled`、既定 off） |
 | snapshot_create / snapshot_clone | unsupported（未実装） |
 | dev_only | false |
 
@@ -371,7 +371,7 @@ TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
 
 - host と同じアーキテクチャの guest のみ。`validate_artifact` は ELF の `e_machine` を revision の宣言と host の両方に照合し、`PT_INTERP` があるバイナリ（動的リンク）は `artifact rejected`（rootfs に libc が無い）。
 - ネットワークなし。`EgressProfile::None` 以外の spec は `InvalidSpec`。
-- 1 環境 1 実行。snapshot は `Unsupported`。warm 再利用（idle 休止・再開）は実装済みだが `Unverified`（実機未計測）なので既定では働かず、destroy-after-invoke のままである。計測は §3.7、gate は `docs/architecture.md` §4。
+- 1 環境 1 実行。snapshot は `Unsupported`。warm 再利用（idle 休止・再開）は §3.7 の実機計測を経て `Supported` だが、`[pool]` の既定が off なので既定では働かず、destroy-after-invoke のままである。gate は `docs/architecture.md` §4。
 - `ephemeral_storage_mib` は未制御（function drive は read-only、`/tmp` は guest の tmpfs で上限なし）。
 - 課金・メータリング用の host 側計測は timings のみ（`host_metering = Unverified`）。
 - jailer なし。Firecracker は実行ユーザーとして動く。seccomp は Firecracker 既定。

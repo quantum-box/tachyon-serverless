@@ -1,0 +1,70 @@
+# Tachyon Serverless gateway — Firecracker (Linux/KVM) 設定
+#
+# profile = "production" のため dev 専用 provider（process）は選べません。
+# .kvm/ 配下の成果物は docs/protocol.md §C の規約で用意します。
+# token / secret はデモ用のダミー値です。実運用の秘密は別の secret backend から供給してください。
+
+listen = "127.0.0.1:8080"
+profile = "dev"                # measurement run (scripts/kvm/measure-warm.sh)
+data_dir = "./data"
+
+[provider]
+kind = "firecracker"
+
+[provider.firecracker]
+firecracker_binary = ".kvm/bin/firecracker"
+kernel = ".kvm/vmlinux"
+rootfs = ".kvm/rootfs.ext4"    # read-only base rootfs（/sbin/tachyon-init = runtime-bridge）
+workdir = ".kvm/run"           # 環境ごとの API socket / vsock uds / function drive / log
+vsock_port = 5000
+
+[capacity]
+max_concurrency = 8
+max_queue = 32
+queue_timeout_seconds = 10
+
+[invoke]
+inline_output_max_bytes = 65536
+cancel_grace_ms = 1000
+preflight_ttl_seconds = 30
+handshake_timeout_ms = 10000
+
+[[identity.tokens]]
+token = "dev-token-tenant-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "dev-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "dev-token-tenant-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "dev-b"
+roles = ["deploy", "invoke"]
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+binding_ref = "demo-secret"
+value = "demo-secret-value-a"
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+binding_ref = "demo-secret"
+value = "demo-secret-value-b"
+
+# 起動時の後始末。既定は true で、台帳の収束と孤児環境の回収を listener を
+# 開ける前に行う（docs/architecture.md §4「起動時の後始末」）。
+# [reconcile]
+# on_startup = true
+
+# Added by scripts/kvm/measure-warm.sh (PLT-4633).
+#
+# allow_unverified_idle accepts the provider's "unverified" idle capability so that
+# this measurement can be taken at all. It does not make the configuration verified:
+# GET /v1/provider reports reuse.verified = false and the gateway warns at startup.
+# It is refused under profile = "production", which is why the copy above is dev.
+[pool]
+enabled = true
+allow_unverified_idle = true
+max_idle_per_revision = 1
+idle_ttl_seconds = 300
+max_total_idle = 4

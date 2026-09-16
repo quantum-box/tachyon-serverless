@@ -129,21 +129,18 @@ impl FirecrackerProvider {
             egress_restricted: Support::unsupported("no network device is configured in P1"),
             egress_public_web: Support::unsupported("no network device is configured in P1"),
             host_metering: Support::unverified("host-side timings only; no cgroup/KVM stats"),
-            // PLT-4633: implemented (`PATCH /vm`), deliberately *not*
-            // `Supported`. Nobody has measured a pause/resume cycle on KVM
-            // yet, and a capability without a measurement must not advertise
-            // itself as warm-capable (docs/architecture.md §4). Until
-            // `scripts/kvm/measure-warm.sh` has run and its evidence is
-            // recorded, reuse only happens for an operator who explicitly sets
-            // `[pool] allow_unverified_idle` to take that measurement.
-            idle_quiesce: Support::unverified(
-                "PATCH /vm {\"state\":\"Paused\"} is implemented but not measured on KVM; \
-                 measure with scripts/kvm/measure-warm.sh before reporting it as supported",
-            ),
-            idle_resume: Support::unverified(
-                "PATCH /vm {\"state\":\"Resumed\"} is implemented but not measured on KVM; \
-                 measure with scripts/kvm/measure-warm.sh before reporting it as supported",
-            ),
+            // PLT-4633, measured on real KVM and promoted from `Unverified`
+            // (docs/evidence/warm-20260916T162532Z, taken with
+            // scripts/kvm/measure-warm.sh): 5 of 6 invocations were served warm
+            // on one environment reused across 6 epochs, resume 9 ms and
+            // readiness 9 ms (median), while the paused VMM used 0 CPU ticks
+            // over 3 s and held its 38 MiB RSS - pausing stops the vCPUs, it
+            // does not return the memory. The run is aarch64 under nested
+            // virtualization; x86_64, bare metal, and the failure paths (a
+            // refused resume, a guest that stops answering) are covered by
+            // tests rather than by that measurement (docs/adr/0001 §5).
+            idle_quiesce: Support::Supported,
+            idle_resume: Support::Supported,
             snapshot_create: Support::unsupported("not implemented in P1"),
             snapshot_clone: Support::unsupported("not implemented in P1"),
             dev_only: false,
@@ -941,19 +938,14 @@ mod tests {
         for s in [&c.snapshot_create, &c.snapshot_clone] {
             assert!(matches!(s, Support::Unsupported { .. }));
         }
-        // PLT-4633: pause/resume is implemented but nobody has measured it on
-        // KVM, so it stays `Unverified` and the environment pool keeps this
-        // provider on destroy-after-invoke by default (docs/architecture.md
-        // §4). Turning these into `Supported` is a separate, reviewed change
-        // that needs evidence under docs/evidence/.
+        // PLT-4633: pause/resume was measured on real KVM
+        // (docs/evidence/warm-20260916T162532Z), so both idle capabilities are
+        // `Supported` and an operator who sets `[pool] enabled` gets warm reuse
+        // without the measurement switch. `[pool]` still defaults to off, so
+        // the default configuration is unchanged (docs/architecture.md §4).
         for s in [&c.idle_quiesce, &c.idle_resume] {
-            assert!(matches!(s, Support::Unverified { .. }), "{s:?}");
-            assert!(!s.is_supported());
+            assert!(s.is_supported(), "{s:?}");
         }
-        let Support::Unverified { note } = &c.idle_quiesce else {
-            unreachable!("checked above");
-        };
-        assert!(note.contains("measure-warm.sh"), "{note}");
     }
 
     /// PLT-4633 (review F1): "already in that state" is success only for the

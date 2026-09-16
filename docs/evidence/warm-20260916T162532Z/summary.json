@@ -1,0 +1,142 @@
+{
+  "run_id": "warm-20260916T162532Z",
+  "architecture": "aarch64",
+  "host": "Linux 7.0.0-28-generic aarch64",
+  "gateway_config": "/home/takanorifukuyama.guest/tsls/docs/evidence/warm-20260916T162532Z/gateway.toml",
+  "base_config": "/home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml",
+  "function": "warm-probe",
+  "revision": "rev_01m2ngkxy4fyyyab8fdq1k7xp8",
+  "requested": {
+    "invocations": 6,
+    "memory_mib": 256,
+    "cpu_millis": 500
+  },
+  "reuse": {
+    "enabled": "true",
+    "verified": "false",
+    "reason": "[pool] allow_unverified_idle accepts an idle capability nobody has measured: this is a measurement run, not a verified warm configuration",
+    "measurement_only": true
+  },
+  "comparison": {
+    "invocations": 6,
+    "cold_count": 1,
+    "warm_count": 5,
+    "other_count": 0,
+    "environments": 1,
+    "cold": {
+      "boot_ms": 12513,
+      "init_ms": 1484,
+      "handler_ms": 270,
+      "total_ms": 14663,
+      "client_ms": 14979
+    },
+    "warm": {
+      "resume_ms": 9,
+      "readiness_ms": 9,
+      "handler_ms": 113,
+      "total_ms": 230,
+      "client_ms": 430
+    },
+    "saved_ms": 14433
+  },
+  "paused_vmm": {
+    "sampled": true,
+    "environment_id": "env_01m2ngkypcaryckhp8evqp4rdc",
+    "pid": 330723,
+    "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2ngkypcaryckhp8evqp4rdc",
+    "note": "sampled while the environment was idle in the pool, i.e. after idle_quiesce returned",
+    "gap_seconds": 3,
+    "samples": [
+      {
+        "at": "2026-09-16T16:26:08Z",
+        "ps_rss_kib": 38896,
+        "ps_vsz_kib": 269988,
+        "ps_state": "Sl",
+        "vm_rss_kib": 38896,
+        "vm_size_kib": 269988,
+        "threads": 3,
+        "cpu_ticks": {
+          "utime": 654,
+          "stime": 759
+        }
+      },
+      {
+        "at": "2026-09-16T16:26:11Z",
+        "ps_rss_kib": 38896,
+        "ps_vsz_kib": 269988,
+        "ps_state": "Sl",
+        "vm_rss_kib": 38896,
+        "vm_size_kib": 269988,
+        "threads": 3,
+        "cpu_ticks": {
+          "utime": 654,
+          "stime": 759
+        }
+      }
+    ],
+    "cpu_ticks_during_gap": 0
+  },
+  "orphans": "clean",
+  "findings": [],
+  "generated_at": "2026-09-16T16:26:16Z",
+  "steps": [
+    {
+      "name": "build gateway, cli and the guest function",
+      "status": "PASS",
+      "duration_ms": 4069,
+      "message": ""
+    },
+    {
+      "name": "write a gateway config with reuse on",
+      "status": "PASS",
+      "duration_ms": 136,
+      "message": ""
+    },
+    {
+      "name": "gateway healthz/readyz",
+      "status": "PASS",
+      "duration_ms": 14072,
+      "message": ""
+    },
+    {
+      "name": "provider is firecracker and reuse is on",
+      "status": "PASS",
+      "duration_ms": 215,
+      "message": ""
+    },
+    {
+      "name": "function warm-probe (idempotent)",
+      "status": "PASS",
+      "duration_ms": 150,
+      "message": ""
+    },
+    {
+      "name": "deploy revision (256 MiB)",
+      "status": "PASS",
+      "duration_ms": 1204,
+      "message": ""
+    },
+    {
+      "name": "invocation 1 of 6 (cold)",
+      "status": "PASS",
+      "duration_ms": 15430,
+      "message": ""
+    },
+    {
+      "name": "sample the paused VMM on the host",
+      "status": "PASS",
+      "duration_ms": 3747,
+      "message": ""
+    },
+    {
+      "name": "invocations 2..6 (expected warm)",
+      "status": "PASS",
+      "duration_ms": 3002,
+      "message": ""
+    }
+  ],
+  "passed": 9,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

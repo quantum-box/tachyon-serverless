@@ -15,7 +15,7 @@ public な独立リポジトリ単体で、次を通す。
 
 - 実行 provider は **Firecracker (Linux/KVM)** を第一候補とし、`ExecutionProvider` trait の背後に隠す。
 - macOS などの開発機では **process provider**（隔離なし、dev 専用）で同じ縦断を確認できる。process provider の成功は microVM の成功ではない。gateway は `profile = "production"` で dev_only provider を拒否する。
-- P1 は 1 環境 1 同時実行、destroy-after-invoke。環境 pool（warm 再利用）は §4「環境 pool と再利用キー」の 2 重 gate の背後にあり、既定では働かない。process は `idle_quiesce` / `idle_resume` を `Unsupported`、firecracker は PLT-4633 で実装済みだが実機未計測のため `Unverified` と報告するので、**既定の設定では同梱のどちらの provider でも destroy-after-invoke のまま**である。snapshot は未対応（Capability に `Unsupported` と明示）。
+- P1 は 1 環境 1 同時実行、destroy-after-invoke。環境 pool（warm 再利用）は §4「環境 pool と再利用キー」の 2 重 gate の背後にあり、既定では働かない。process は `idle_quiesce` / `idle_resume` を `Unsupported`、firecracker は PLT-4633 の実機計測（`docs/evidence/warm-20260916T162532Z/`）を経て `Supported` と報告する。`[pool]` の既定が off なので、**既定の設定では同梱のどちらの provider でも destroy-after-invoke のまま**である。snapshot は未対応（Capability に `Unsupported` と明示）。
 
 ## 2. crate 構成と依存方向
 
@@ -163,7 +163,7 @@ value = "s3cr3t-a"
 
 invoke 後の環境を破棄せず `Idle` で残し、次の invoke に渡す仕組み（`crates/application/src/services/pool.rs`）。**2 つの gate が両方開いたときだけ**働く。
 
-1. **capability**: provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と報告すること。`Unverified`（コードはあるが実機で測っていない）では足りない。process は `Unsupported`、firecracker は `Unverified` なので、既定では同梱のどちらでも何も pool されない（`docs/adr/0001` §5）。
+1. **capability**: provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と報告すること。`Unverified`（コードはあるが実機で測っていない）では足りない。process は `Unsupported` のまま、firecracker は実機計測を経て `Supported`（`docs/evidence/warm-20260916T162532Z/`、`docs/adr/0001` §5）なので、firecracker で pool が働くかどうかは 2 つめの gate（`[pool] enabled`、既定 off）だけで決まる。
 2. **設定**: `[pool] enabled = true`。既定は `false`。
 
 どちらかが閉じていれば `EnvironmentPool` は「再利用しない」としか答えず、invoke pipeline は P1 と同じ destroy-after-invoke になる。理由は起動ログと `PoolPolicy::disabled_reason()` / `PoolPolicy::reason()` に出る。
@@ -190,7 +190,7 @@ gate が開いているとき、pool は環境の**休止と再開そのもの**
 
 - `GET /v1/provider` は `reuse` を返す（`enabled` / `verified` / `reason` / `idle_quiesce` / `idle_resume`）。`enabled` は「この gateway が再利用するか」、`verified` は「**provider** が両方の idle capability を `supported` と申告しているか（＝実機で計測済みか）」で、2 つは独立である（再利用が off でも provider が計測済みなら `verified = true`）。switch で動いている間は `enabled = true` かつ **`verified = false`** で、`reason` は「計測のための実行であって検証済みの warm 構成ではない」と述べる。
 - 起動ログは `environment_reuse` / `reuse_verified` / `reuse_reason` を必ず出し、switch で動いている場合はさらに `warn` を 1 行出す。
-- 計測は `scripts/kvm/measure-warm.sh`（`docs/kvm.md` §3.7）で取り、証跡は `docs/evidence/warm-<UTC>/` に残す。`Unverified` → `Supported` への昇格は、その証跡を引用した別の変更である（`docs/adr/0001` §「決定」5）。
+- 計測は `scripts/kvm/measure-warm.sh`（`docs/kvm.md` §3.7）で取り、証跡は `docs/evidence/warm-<UTC>/` に残す。`Unverified` → `Supported` への昇格は、その証跡を引用した別の変更である（`docs/adr/0001` §「決定」5）。firecracker はこの手順で `docs/evidence/warm-20260916T162532Z/` を取り、昇格済みである。
 
 **再利用キー**（`ReuseKey`、RFC §5.3）は 8 field の複合キーで、**全 field が一致した環境だけ**が再利用される。1 field でも違えば別環境になる。
 
@@ -241,4 +241,4 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 
 snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted/public-web、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。
 
-warm 再利用と idle 休止・再開は実装済み（§4「環境 pool と再利用キー」「idle 休止・再開と計測 gate」）だが、provider が `idle_quiesce` / `idle_resume` を `Supported` と報告しない限り働かない。process は `Unsupported`、firecracker は実機未計測の `Unverified` を返すため、**既定の構成では P1 と同じ destroy-after-invoke** であり、それを `crates/application/tests/pipeline.rs` が検査する。firecracker で再利用を動かせるのは計測用の `[pool] allow_unverified_idle` を明示的に立てたときだけで、その構成は API とログで一貫して「未検証」と表示される。
+warm 再利用と idle 休止・再開は実装済み（§4「環境 pool と再利用キー」「idle 休止・再開と計測 gate」）だが、provider が `idle_quiesce` / `idle_resume` を `Supported` と報告しない限り働かない。process は `Unsupported`、firecracker は実機計測を経た `Supported` を返す。`[pool]` の既定が off なので **既定の構成では P1 と同じ destroy-after-invoke** であり、それを `crates/application/tests/pipeline.rs` が検査する。firecracker で再利用が働くのは `[pool] enabled = true` にしたときで、`Unverified` の provider を測るための `[pool] allow_unverified_idle` は別の switch として残る（その構成は API とログで一貫して「未検証」と表示される）。

@@ -58,9 +58,10 @@ value = "demo-secret-value-b"
 
 # 環境 pool（warm 再利用）。既定は off。
 # on にしても、provider が idle_quiesce / idle_resume を Supported と報告しない
-# 限り再利用は行われない。process は Unsupported、firecracker は PLT-4633 で
-# 実装済みだが実機未計測のため Unverified を報告するので、既定ではどちらも
-# destroy-after-invoke のままである。docs/architecture.md §4「環境 pool と再利用キー」。
+# 限り再利用は行われない。process は Unsupported なので常に destroy-after-invoke。
+# firecracker は PLT-4633 の実機計測（docs/evidence/warm-20260916T162532Z/）を経て
+# Supported なので、enabled = true にすれば warm 再利用が働く。
+# docs/architecture.md §4「環境 pool と再利用キー」。
 # [pool]
 # enabled = false
 # max_idle_per_revision = 1     # reuse key ごとに idle で残す環境数

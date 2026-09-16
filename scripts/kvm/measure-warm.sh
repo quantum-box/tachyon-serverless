@@ -39,12 +39,13 @@
 #      not happen, which is a loud failure on purpose
 #   2  the measurement could not be taken (build, gateway, deploy or invoke failure)
 #
-# This script never changes the provider's Capabilities. The Firecracker provider
-# reports idle_quiesce / idle_resume as "unverified", and reuse only runs here because
-# the generated config sets [pool] allow_unverified_idle. The evidence records that
-# the run was a measurement, not a verified warm configuration: promoting the
-# capability to Supported is a separate, reviewed decision that cites this evidence
-# (docs/architecture.md section 4, docs/adr/0001).
+# This script never changes the provider's Capabilities. It generates a config with
+# [pool] allow_unverified_idle so that a provider reporting idle_quiesce / idle_resume
+# as "unverified" can be measured at all; on a provider that already reports them as
+# "supported" - Firecracker since docs/evidence/warm-20260916T162532Z - the switch is
+# redundant and the run is an ordinary warm run. Either way the evidence records which
+# it was: promoting a capability to Supported is a separate, reviewed decision that
+# cites the evidence (docs/architecture.md section 4, docs/adr/0001).
 #
 # The step functions run through `step` (scripts/e2e/lib.sh) and `cleanup` through a trap,
 # neither of which shellcheck can follow (SC2317).
