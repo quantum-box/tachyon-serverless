@@ -308,6 +308,31 @@ impl Invocation {
         }
     }
 
+    /// Record a further attempt on an invocation that is already `Running`.
+    ///
+    /// Only for a dispatch the host knows never reached its guest (the
+    /// `Invoke` frame was not delivered, so the handler cannot have started —
+    /// docs/threat-model.md §9). The deadlines move to the new attempt;
+    /// `started_at` keeps the first dispatch. A result is never re-executed
+    /// through this: `mark_running` stays the only way into `Running`.
+    pub fn mark_retry(
+        &mut self,
+        attempt_id: AttemptId,
+        execution_deadline: Timestamp,
+        init_deadline: Timestamp,
+    ) -> Result<(), DomainError> {
+        self.ensure_not_terminal()?;
+        match self.status {
+            InvocationStatus::Running => {
+                self.deadlines.execution_deadline = Some(execution_deadline);
+                self.deadlines.init_deadline = Some(init_deadline);
+                self.attempt_ids.push(attempt_id);
+                Ok(())
+            }
+            _ => Err(self.illegal("retry")),
+        }
+    }
+
     pub fn mark_succeeded(
         &mut self,
         output: Option<PayloadRef>,
@@ -571,6 +596,48 @@ mod tests {
     fn cannot_succeed_before_running() {
         let mut inv = accept();
         assert!(inv.mark_succeeded(None, None, now()).is_err());
+    }
+
+    /// A retry after an undelivered dispatch records a second attempt without
+    /// leaving `Running`, and is refused anywhere else.
+    #[test]
+    fn a_retry_records_another_attempt_only_while_running() {
+        let mut inv = accept();
+        let first = AttemptId::generate();
+        assert!(
+            inv.mark_retry(first.clone(), now(), now()).is_err(),
+            "nothing to retry before the first dispatch"
+        );
+        inv.mark_running(
+            first.clone(),
+            now() + Duration::seconds(30),
+            now() + Duration::seconds(5),
+            now(),
+        )
+        .unwrap();
+        let started = inv.started_at;
+
+        let second = AttemptId::generate();
+        inv.mark_retry(
+            second.clone(),
+            now() + Duration::seconds(60),
+            now() + Duration::seconds(35),
+        )
+        .unwrap();
+        assert_eq!(inv.status, InvocationStatus::Running);
+        assert_eq!(inv.attempt_ids, vec![first, second]);
+        assert_eq!(inv.started_at, started, "the first dispatch stands");
+        assert_eq!(
+            inv.deadlines.execution_deadline,
+            Some(now() + Duration::seconds(60)),
+            "the deadlines follow the new attempt"
+        );
+
+        inv.mark_succeeded(None, None, now()).unwrap();
+        assert!(
+            inv.mark_retry(AttemptId::generate(), now(), now()).is_err(),
+            "a settled invocation is never retried"
+        );
     }
 
     #[test]

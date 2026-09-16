@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tachyon_serverless_domain::{Clock, IdGenerator, Limits, SystemClock, UlidGenerator};
 use tachyon_serverless_provider_port::{
-    ArtifactStore, ExecutionProvider, IdentityProvider, SecretProvider,
+    ArtifactStore, ExecutionProvider, IdentityProvider, SecretProvider, UsageSink,
 };
 
 use crate::config::{GatewayConfig, Profile, ProviderConfig};
@@ -17,8 +17,9 @@ use crate::local_ports::{
 use crate::repository::{InMemoryStore, Repositories};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::{
-    AliasService, ArtifactService, FunctionService, HistoryService, InvokeService, LogService,
-    ProviderService, ReconcileReport, ReconcileService, RevisionService,
+    AliasService, ArtifactService, EnvironmentPool, FunctionService, HistoryService, InvokeService,
+    LogService, PoolPolicy, PoolSweep, ProviderService, ReconcileReport, ReconcileService,
+    RevisionService,
 };
 
 /// Builds the execution provider selected by configuration. The gateway
@@ -52,6 +53,9 @@ pub struct Application {
     pub history: Arc<HistoryService>,
     pub provider_service: Arc<ProviderService>,
     pub reconcile: Arc<ReconcileService>,
+    /// Warm environment pool. Inert unless both the provider's idle
+    /// capabilities and `[pool] enabled` allow reuse.
+    pub pool: Arc<EnvironmentPool>,
 }
 
 impl std::fmt::Debug for Application {
@@ -70,6 +74,10 @@ pub struct BootstrapOptions {
     pub ids: Arc<dyn IdGenerator>,
     /// Write `state.json` through under `data_dir`. Artifacts are always on disk.
     pub persist_state: bool,
+    /// Secret backend to use instead of the static one built from
+    /// `[[secrets.bindings]]`. Tests use it to rotate a value at runtime and
+    /// observe that the reuse key's secret generation follows.
+    pub secrets: Option<Arc<dyn SecretProvider>>,
 }
 
 impl Default for BootstrapOptions {
@@ -78,6 +86,7 @@ impl Default for BootstrapOptions {
             clock: Arc::new(SystemClock),
             ids: Arc::new(UlidGenerator),
             persist_state: true,
+            secrets: None,
         }
     }
 }
@@ -136,8 +145,9 @@ impl Application {
         )?);
         let identity: Arc<dyn IdentityProvider> =
             Arc::new(StaticIdentityProvider::from_config(&config.identity.tokens));
-        let secrets: Arc<dyn SecretProvider> =
-            Arc::new(StaticSecretProvider::from_config(&config.secrets.bindings));
+        let secrets: Arc<dyn SecretProvider> = options.secrets.clone().unwrap_or_else(|| {
+            Arc::new(StaticSecretProvider::from_config(&config.secrets.bindings))
+        });
         let usage = Arc::new(InMemoryUsageSink::new());
         let provider_workdir: PathBuf = config
             .provider
@@ -175,6 +185,20 @@ impl Application {
             provider.clone(),
             clock.clone(),
         ));
+        // Both gates are decided once, here: the provider's idle capabilities
+        // and the `[pool]` section. Everything downstream only asks the
+        // policy (docs/architecture.md §4).
+        let policy = PoolPolicy::decide(&caps, &config.pool);
+        // The pool gets the usage sink because it, not the driver, is what
+        // ends a pooled environment's life (TTL sweep, drain, retire) and
+        // therefore what has to report it (docs/architecture.md §4).
+        let pool = Arc::new(EnvironmentPool::new(
+            repos.clone(),
+            provider.clone(),
+            usage.clone() as Arc<dyn UsageSink>,
+            clock.clone(),
+            policy,
+        ));
         let invoke = InvokeService::new(InvokeServiceDeps {
             repos: repos.clone(),
             artifacts: artifacts.clone(),
@@ -188,11 +212,14 @@ impl Application {
             capacity: config.capacity.clone(),
             invoke: config.invoke.clone(),
             entrypoints,
+            pool: pool.clone(),
         });
         tracing::info!(
             profile = config.profile.as_str(),
             provider = provider.kind().as_str(),
             dev_only = caps.dev_only,
+            environment_reuse = policy.reuse_enabled(),
+            reuse_disabled = ?policy.disabled_reason(),
             data_dir = %config.data_dir.display(),
             "application bootstrapped"
         );
@@ -217,7 +244,25 @@ impl Application {
             history,
             provider_service,
             reconcile,
+            pool,
         }))
+    }
+
+    /// Terminate every pooled environment that is past its idle TTL. The
+    /// gateway runs this on a timer; tests call it directly. Returns `None`
+    /// when reuse is gated off, because nothing can be pooled then.
+    pub async fn sweep_idle_environments(&self) -> Option<PoolSweep> {
+        if !self.pool.policy().reuse_enabled() {
+            return None;
+        }
+        Some(self.pool.sweep().await)
+    }
+
+    /// Terminate everything the pool holds, whatever its TTL. Called on
+    /// graceful shutdown: a pooled environment must never outlive the process
+    /// that holds its bridge session (docs/threat-model.md T10).
+    pub async fn drain_pool(&self) -> PoolSweep {
+        self.pool.drain().await
     }
 
     /// Reclaim environments a previous process left behind: the provider is

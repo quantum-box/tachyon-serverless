@@ -228,6 +228,9 @@ pub struct BridgeSession {
     disconnected: bool,
     /// A write failed; frames already queued by the guest may still be read.
     write_closed: bool,
+    /// The guest process reported `Exited`. The stream may still be open, but
+    /// nothing behind it can serve another attempt.
+    guest_exited: bool,
 }
 
 impl std::fmt::Debug for BridgeSession {
@@ -260,6 +263,7 @@ impl BridgeSession {
             stale_results: 0,
             disconnected: false,
             write_closed: false,
+            guest_exited: false,
         };
         let deadline = Instant::now() + timeout;
         let hello = loop {
@@ -348,6 +352,85 @@ impl BridgeSession {
 
     pub fn logs(&self) -> &LogForwarder {
         &self.logs
+    }
+
+    /// True while the session can still carry another attempt. A session whose
+    /// stream is gone in either direction, or whose guest process has exited,
+    /// must never go back into the pool.
+    pub fn is_usable(&self) -> bool {
+        !self.disconnected && !self.write_closed && !self.guest_exited
+    }
+
+    /// Consume what the finished attempt left in the read buffer, so that it
+    /// cannot settle the next attempt on this session.
+    ///
+    /// Only frames that are *already* readable are taken (the deadline is
+    /// now). `Log` lines are forwarded under the context currently installed —
+    /// the one of the attempt they belong to, which is why this runs before
+    /// [`Self::rearm`]; `Response` and `Error` frames are counted as stale;
+    /// and an `Exited` frame or an EOF makes the session unusable, so the pool
+    /// refuses it and the caller terminates the environment instead. `Exited`
+    /// carries no attempt id or epoch, so draining it here is the only thing
+    /// that keeps [`Self::wait_result`] from reporting it as the *next*
+    /// attempt's crash.
+    ///
+    /// Returns the number of frames drained.
+    pub async fn drain_stale(&mut self) -> u32 {
+        let deadline = Instant::now();
+        let mut drained = 0;
+        while self.is_usable() {
+            match self.next_message(deadline, "stale").await {
+                Ok(GuestMessage::Log {
+                    stream,
+                    phase,
+                    attempt_id,
+                    line,
+                    ..
+                }) => self.logs.forward_guest(stream, phase, attempt_id, &line),
+                Ok(GuestMessage::Response {
+                    attempt_id, epoch, ..
+                })
+                | Ok(GuestMessage::Error {
+                    attempt_id, epoch, ..
+                }) => {
+                    // Whatever the lease still says, the attempt this belongs
+                    // to is already settled.
+                    self.stale_results += 1;
+                    tracing::warn!(
+                        environment_id = %self.environment_id,
+                        %attempt_id,
+                        epoch,
+                        "dropping a result the finished attempt left behind"
+                    );
+                }
+                Ok(GuestMessage::Exited { exit_code, signal }) => {
+                    self.guest_exited = true;
+                    tracing::info!(
+                        environment_id = %self.environment_id,
+                        ?exit_code,
+                        ?signal,
+                        "the guest process exited; this session cannot carry another attempt"
+                    );
+                    return drained + 1;
+                }
+                Ok(_) => {}
+                // `Timeout` means nothing more is buffered; anything else has
+                // already marked the session disconnected.
+                Err(_) => return drained,
+            }
+            drained += 1;
+        }
+        drained
+    }
+
+    /// Re-point a pooled session at the next attempt: record the environment's
+    /// new epoch, attribute log lines to the new invocation and drop the
+    /// previous lease, so a frame the previous attempt left behind is counted
+    /// as stale instead of settling the new one.
+    pub fn rearm(&mut self, epoch: u64, logs: LogForwarder) {
+        self.epoch = epoch;
+        self.logs = logs;
+        self.lease = None;
     }
 
     /// Wait for `Ready` until `deadline`.
@@ -1013,6 +1096,106 @@ mod tests {
             s.shutdown("done").await,
             Err(SessionError::Disconnected)
         ));
+    }
+
+    /// Regression (review F6): what the finished attempt left in the buffer is
+    /// drained under *its* context, and an `Exited` frame — which carries no
+    /// attempt id or epoch, so the lease cannot fence it — makes the session
+    /// unusable instead of settling the next attempt.
+    #[tokio::test]
+    async fn draining_attributes_trailing_frames_to_the_attempt_that_left_them() {
+        let (host, guest) = tokio::io::duplex(64 * 1024);
+        let env = EnvironmentId::generate();
+        let (store, logs, inv) = setup(&env);
+        let mut g = Guest::new(guest);
+        let e2 = env.clone();
+        let guest_task = tokio::spawn(async move {
+            g.send(&hello(&e2)).await;
+            g.recv().await.unwrap();
+            g.send(&GuestMessage::Ready { init_ms: 1 }).await;
+            let HostMessage::Invoke {
+                attempt_id, epoch, ..
+            } = g.recv().await.unwrap()
+            else {
+                panic!("expected invoke")
+            };
+            g.send(&GuestMessage::Response {
+                attempt_id: attempt_id.clone(),
+                epoch,
+                payload: serde_json::json!({"ok": 1}),
+                handler_ms: None,
+            })
+            .await;
+            // Everything below is what the finished attempt leaves behind.
+            g.send(&GuestMessage::Log {
+                stream: tachyon_serverless_protocol::LogStream::Stdout,
+                phase: tachyon_serverless_protocol::LogPhase::Handler,
+                attempt_id: Some(attempt_id.clone()),
+                ts_ms: 0,
+                line: "trailing".into(),
+            })
+            .await;
+            g.send(&GuestMessage::Response {
+                attempt_id,
+                epoch,
+                payload: serde_json::json!("late duplicate"),
+                handler_ms: None,
+            })
+            .await;
+            g.send(&GuestMessage::Exited {
+                exit_code: Some(0),
+                signal: None,
+            })
+            .await;
+            // The stream stays open: only a read reveals the exit.
+            std::future::pending::<()>().await;
+        });
+
+        let (mut s, _) = BridgeSession::handshake(
+            Box::new(host),
+            &env,
+            1,
+            params(),
+            logs,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+        s.wait_ready(Instant::now() + Duration::from_secs(1))
+            .await
+            .unwrap();
+        let att = AttemptId::generate();
+        s.send_invoke(InvokeParams {
+            invocation_id: inv.clone(),
+            attempt_id: att.clone(),
+            epoch: 1,
+            event_type: "tachyon.invoke.v1".into(),
+            deadline_ms: 0,
+            trace_id: "t".into(),
+            payload: serde_json::json!({}),
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            s.wait_result(Instant::now() + Duration::from_secs(1)).await,
+            Outcome::Response { .. }
+        ));
+        assert!(s.is_usable(), "nothing has been read past the result yet");
+
+        let drained = s.drain_stale().await;
+        assert_eq!(drained, 3, "log + duplicate result + exited");
+        assert_eq!(s.stale_results(), 1, "the duplicate result was dropped");
+        assert!(
+            !s.is_usable(),
+            "a guest that exited must never go back into the pool"
+        );
+        // The trailing line belongs to the invocation that produced it.
+        let q = store.query(&inv);
+        assert_eq!(q.records.len(), 1, "{:?}", q.records);
+        assert_eq!(q.records[0].line, "trailing");
+        assert_eq!(q.records[0].attempt_id, Some(att));
+        assert_eq!(q.records[0].phase, LogPhase::Handler);
+        guest_task.abort();
     }
 
     #[tokio::test]

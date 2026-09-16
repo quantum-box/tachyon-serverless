@@ -84,7 +84,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 3. `config/gateway.{dev,firecracker}.toml` は operator だけが読める。token・secret 値の保管はファイル権限に依存する。
 4. `IdentityProvider` は token を `Principal` に解決する以上のことをしない。IAM / policy は将来の adapter（`docs/inventory-tachyon-apps.md` §3.7）。
 5. KVM と Firecracker の隔離境界は upstream の設計を信頼する（`docs/adr/0001-execution-provider-firecracker-first.md`）。本リポジトリで hypervisor の脆弱性は扱わない。
-6. 1 環境は 1 tenant の 1 revision にしか使われず、invoke 後に破棄される（`ExecutionPolicy.concurrency_per_environment = 1`、`min_ready = 0`、destroy-after-invoke）。warm 再利用は無い。
+6. 1 環境は 1 tenant の 1 revision にしか使われない（`ExecutionPolicy.concurrency_per_environment = 1`、`min_ready = 0`）。warm 再利用は `[pool] enabled` と provider の `idle_quiesce` / `idle_resume` = `Supported` が両方揃ったときだけ働き（`docs/architecture.md` §4「環境 pool と再利用キー」）、同梱の firecracker / process はどちらも `Unsupported` を返すので destroy-after-invoke のまま。再利用する場合も ReuseKey の 8 field 完全一致が条件で、tenant / revision / 設定 / secret generation をまたいで 1 環境が共有されることはない。
 7. clock は host のもの（`Clock` trait）。guest の時刻は信頼しない。
 
 ## 6. 原則
@@ -166,6 +166,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 - frame の protocol 違反 → `Failed{PlatformError}`（`docs/architecture.md` §3-9 の分類に従う）。
 - 再起動時に `Accepted` / `Queued` のまま残っていた → 一度も dispatch していない＝ handler は開始していないので `Failed{PlatformError}` / `Host.Restarted`（`crates/application/src/repository.rs::reconcile_after_restart`、`docs/architecture.md` §4）。
 - `Invoke` frame が guest に届かなかった（handler は開始していない）→ `Failed`。encode できない（`FrameTooLarge`、何も書いていない）→ `PlatformError` / `Host.InvokeTooLarge`（環境は健全なので `Stopped`）。書き込み失敗（接続断）→ guest が閉じる前に送った frame を短時間読み、`Exited` なら `Crash` / `Runtime.Exited`、無ければ `Crash` / `Host.BridgeDisconnectedBeforeInvoke`。同じ guest の挙動が書き込みの競合で分類を変えないようにするため。
+- **warm（pool から取り出した再利用環境）への書き込み失敗も同じ規則**。drain してから同じ 2 分類のどちらかを attempt に記録する。環境が再利用だったことは分類を変えない。warm だけが違うのは、その attempt を失敗として残したうえで **cold で 1 回だけ dispatch をやり直す**ことである（`docs/architecture.md` §4。やり直しは cold 固定なので再帰しない）。やり直す根拠は分類ではなく guest が死んだ場所にある: warm の guest は前の invocation で `Ready` を報告して実際に動いた後、idle の間に死んだので、新しい環境なら同じ request を実行できる見込みが高い。cold の guest は **この invocation のための初期化中**に死んでおり、やり直しても同じ失敗を繰り返すだけなので再実行しない。どちらの場合も `Invoke` は届いておらず handler は開始していないので、やり直しても at-most-once は破れない（`OutcomeUnknown` の「自動再実行しない」は handler が走ったかもしれない場合の話であり、ここには当たらない）。
 
 契約:
 

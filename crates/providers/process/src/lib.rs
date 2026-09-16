@@ -914,6 +914,13 @@ mod tests {
         assert!(!c.enforce_resource_limits.is_supported());
         assert!(!c.egress_none.is_supported());
         assert!(!c.snapshot_create.is_supported());
+        // destroy-after-invoke: the environment pool only ever hands out an
+        // environment for a provider that reports both idle capabilities as
+        // `Supported` (docs/architecture.md §4), so this provider stays on the
+        // P1 behaviour whatever `[pool] enabled` says.
+        for s in [&c.idle_quiesce, &c.idle_resume] {
+            assert!(matches!(s, Support::Unsupported { .. }), "{s:?}");
+        }
         assert_eq!(p.kind(), ProviderKind::Process);
     }
 
