@@ -18,7 +18,7 @@ use crate::repository::{InMemoryStore, Repositories};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::{
     AliasService, ArtifactService, FunctionService, HistoryService, InvokeService, LogService,
-    ProviderService, RevisionService,
+    ProviderService, ReconcileReport, ReconcileService, RevisionService,
 };
 
 /// Builds the execution provider selected by configuration. The gateway
@@ -51,6 +51,7 @@ pub struct Application {
     pub logs: Arc<LogService>,
     pub history: Arc<HistoryService>,
     pub provider_service: Arc<ProviderService>,
+    pub reconcile: Arc<ReconcileService>,
 }
 
 impl std::fmt::Debug for Application {
@@ -169,6 +170,11 @@ impl Application {
             provider.clone(),
             config.invoke.preflight_ttl(),
         ));
+        let reconcile = Arc::new(ReconcileService::new(
+            repos.clone(),
+            provider.clone(),
+            clock.clone(),
+        ));
         let invoke = InvokeService::new(InvokeServiceDeps {
             repos: repos.clone(),
             artifacts: artifacts.clone(),
@@ -210,6 +216,23 @@ impl Application {
             logs,
             history,
             provider_service,
+            reconcile,
         }))
+    }
+
+    /// Reclaim environments a previous process left behind: the provider is
+    /// asked what it still runs and every environment this gateway does not
+    /// know as active is terminated (docs/architecture.md §4).
+    ///
+    /// `serve()` calls this before the listener accepts; tests call it
+    /// directly. It never fails: a provider that cannot be listed is logged
+    /// and startup continues. Returns `None` when `[reconcile] on_startup`
+    /// is off.
+    pub async fn reconcile_on_startup(&self) -> Option<ReconcileReport> {
+        if !self.config.reconcile.on_startup {
+            tracing::info!("startup reconcile disabled by configuration");
+            return None;
+        }
+        Some(self.reconcile.reconcile().await)
     }
 }

@@ -52,7 +52,12 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
     };
     (
         status,
-        Json(serde_json::json!({ "ready": report.ok, "preflight": report })),
+        Json(serde_json::json!({
+            "ready": report.ok,
+            "preflight": report,
+            // `null` until the startup reconcile ran (or when it is off).
+            "reconcile": state.reconcile.last_report(),
+        })),
     )
         .into_response()
 }
