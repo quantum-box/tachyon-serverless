@@ -150,6 +150,48 @@ build_all() {
   for b in "$TSLS_BIN" "$GATEWAY_BIN" "$FUNCTION_BIN"; do
     [ -x "$b" ] || { echo "missing binary: $b (run scripts/kvm/bootstrap.sh first)" >&2; return 1; }
   done
+  check_rootfs_bridge || return 1
+}
+
+# The protocol version is compiled into the guest bridge (docs/protocol.md section A)
+# and the handshake requires both sides to agree exactly, so a rootfs built before a
+# protocol change fails every boot - which, in the middle of a measurement, reads as a
+# provider fault. Compare what is inside the image with the bridge that was just built
+# and name the rebuild instead.
+check_rootfs_bridge() {
+  local rootfs bridge dumped debugfs_bin
+  rootfs="$(sed -n 's/^[[:space:]]*rootfs[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$BASE_CONFIG" | head -n1)"
+  if [ -z "$rootfs" ]; then
+    e2e_warn "no rootfs key in $BASE_CONFIG: skipping the guest bridge check"
+    return 0
+  fi
+  case "$rootfs" in /*) ;; *) rootfs="$REPO_ROOT/${rootfs#./}" ;; esac
+  bridge="$GUEST_DIR/tachyon-serverless-runtime-bridge"
+  if [ ! -f "$rootfs" ] || [ ! -f "$bridge" ]; then
+    e2e_warn "cannot compare the guest bridge (missing $rootfs or $bridge): skipping the check"
+    return 0
+  fi
+  debugfs_bin="$(command -v debugfs || true)"
+  if [ -z "$debugfs_bin" ] && [ -x /usr/sbin/debugfs ]; then
+    debugfs_bin=/usr/sbin/debugfs
+  fi
+  if [ -z "$debugfs_bin" ]; then
+    e2e_warn "debugfs not found (e2fsprogs): cannot check that $rootfs carries the current bridge"
+    return 0
+  fi
+  dumped="$WORK_DIR/rootfs-tachyon-init"
+  if ! "$debugfs_bin" -R "dump /sbin/tachyon-init $dumped" "$rootfs" >/dev/null 2>&1 || [ ! -s "$dumped" ]; then
+    e2e_warn "cannot read /sbin/tachyon-init out of $rootfs: skipping the guest bridge check"
+    return 0
+  fi
+  if [ "$(sha256sum "$dumped" | awk '{print $1}')" = "$(sha256sum "$bridge" | awk '{print $1}')" ]; then
+    e2e_log "guest bridge in $(basename "$rootfs") matches the build"
+    return 0
+  fi
+  echo "the guest bridge inside $rootfs is not the one that was just built." >&2
+  echo "Rebuild the image before measuring: scripts/kvm/build-rootfs.sh" >&2
+  echo "(the protocol version is compiled into the bridge and the handshake requires an exact match)" >&2
+  return 1
 }
 
 # A copy of the base config with environment reuse switched on. Written into the
@@ -233,6 +275,12 @@ check_provider() {
   REUSE_VERIFIED="$(printf '%s' "$provider" | jq -r '.reuse.verified')"
   REUSE_REASON="$(printf '%s' "$provider" | jq -r '.reuse.reason')"
   e2e_log "reuse: enabled=$REUSE_ENABLED verified=$REUSE_VERIFIED ($REUSE_REASON)"
+  # `step` runs this function in a subshell, so the parent gets these facts back
+  # through the state directory (load_reuse_facts). Without that the summary records
+  # "unknown" for the gate the run exists to document.
+  state_set reuse.enabled "$REUSE_ENABLED"
+  state_set reuse.verified "$REUSE_VERIFIED"
+  state_set reuse.reason "$REUSE_REASON"
   printf '%s\n' "  idle_quiesce=$(printf '%s' "$provider" | jq -r '.capabilities.idle_quiesce.status')"
   printf '%s\n' "  idle_resume=$(printf '%s' "$provider" | jq -r '.capabilities.idle_resume.status')"
   if [ "$REUSE_ENABLED" != "true" ]; then
@@ -242,6 +290,13 @@ check_provider() {
   if [ "$REUSE_VERIFIED" = "true" ]; then
     e2e_log "note: this provider already reports both idle capabilities as supported"
   fi
+}
+
+# What check_provider learned about the gate, read back in the parent shell.
+load_reuse_facts() {
+  REUSE_ENABLED="$(state_get reuse.enabled unknown)"
+  REUSE_VERIFIED="$(state_get reuse.verified unknown)"
+  REUSE_REASON="$(state_get reuse.reason "not read")"
 }
 
 # ---------------------------------------------------------------------------
@@ -555,6 +610,7 @@ main() {
   start_gateway
   step "gateway healthz/readyz" wait_gateway
   step "provider is firecracker and reuse is on" check_provider
+  load_reuse_facts
   step "function $FUNCTION_NAME (idempotent)" ensure_function
   step "deploy revision (${WARM_MEMORY_MIB} MiB)" deploy_revision
   step "invocation 1 of $INVOCATIONS (cold)" run_invocations

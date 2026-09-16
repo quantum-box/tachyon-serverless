@@ -262,7 +262,7 @@ KVM の記録に共通する制約:
 
 ## PLT-4632 ExecutionEnvironment pool・再利用キー・reconciler
 
-環境の再利用は二重の gate の内側にある。provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と申告し、かつ `[pool] enabled = true` のときだけ有効になる。Firecracker と process はどちらも `Unsupported` を返し、`[pool]` の既定は無効なので、**出荷している両 provider の挙動は P1 と同じ destroy-after-invoke のまま**である。したがって本節に KVM 実機の記録はなく、検証は fake provider による自動テストで行っている。
+環境の再利用は二重の gate の内側にある。provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と申告し、かつ `[pool] enabled = true` のときだけ有効になる。process は `Unsupported` のままで、Firecracker は PLT-4633 で休止・再開を実装したが実機で測るまでは `Unverified` であり、計測専用の `[pool] allow_unverified_idle` を明示しない限り再利用経路に入らない。`[pool]` の既定も無効なので、**既定の挙動は P1 と同じ destroy-after-invoke のまま**である。本節の検証は fake provider による自動テストで行っており、実機の休止・再開は「PLT-4633 idle 休止・再開」の節に記録する。
 
 | # | 受入条件 | 状態 | 証跡 |
 |---|---|---|---|
@@ -278,7 +278,7 @@ KVM の記録に共通する制約:
 | 10 | secret 値そのものが再利用キーや台帳へ入らない | 実装済み | `crates/application/src/services/pool.rs::the_secret_generation_is_salted_and_unambiguous`（プロセスごとの salt 付き digest） |
 | 11 | release と claim が競合しても、session の無い行を掴まない | 実装済み | `crates/application/src/services/pool.rs::a_claim_racing_a_release_never_takes_a_row_without_its_session` |
 | 12 | 再試行に必要な間だけ payload を保持する | 実装済み | `crates/application/src/services/invoke.rs::a_dispatched_payload_is_retained_only_while_a_cold_retry_can_need_it` |
-| 13 | KVM 実機での再利用 | 未検証 | 現行 provider は `idle_quiesce` / `idle_resume` が `Unsupported` のため再利用経路に入らない。実機で測るには provider 側の休止・再開の実装（PLT-4633）が要る |
+| 13 | KVM 実機での再利用 | PLT-4633 で計測 | provider 側の休止・再開は PLT-4633 で実装した。実機の記録は「PLT-4633 idle 休止・再開」の節を参照 |
 | 14 | 複数プロセス間での slot・lease・pool membership の原子性 | 未着手 | pool は 1 プロセス内。`docs/adr/0003-execution-state-persistence.md` の方針に沿って PLT-4631 で扱う |
 
 ## ADR-0001 残る測定の状況

@@ -199,6 +199,8 @@ idle_ttl_seconds = 300         # 計測中に sweeper が回収しない長さ
 max_total_idle = 4
 ```
 
+計測を始める前に、`.kvm/rootfs.ext4` の中の `/sbin/tachyon-init` が今ビルドした bridge と同一かを sha256 で照合する（`debugfs`＝e2fsprogs を使う）。protocol の版は bridge に埋め込まれていて handshake は完全一致を要求するので（`docs/protocol.md` §A）、protocol を変えたあとに image を作り直していないと全 boot が失敗し、provider の障害のように見える。違っていれば `scripts/kvm/build-rootfs.sh` を促して中断する。
+
 | ステップ | 内容 | 期待 |
 |---|---|---|
 | provider | `GET /v1/provider` の `reuse` と capability を記録 | `reuse.enabled = true`、`reuse.verified = false`（= 計測のための実行）。`enabled` が false なら測る対象が無いので中断する |
