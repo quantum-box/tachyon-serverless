@@ -1,0 +1,22 @@
+== before 2026-09-17T07:07:07Z
+ 16:07:07 up  4:54,  1 user,  load average: 0.29, 0.21, 0.28
+               total        used        free      shared  buff/cache   available
+Mem:            7913         553        4131           1        3421        7360
+/dev/vda1        38G   13G   25G  35% /
+== after 2026-09-17T07:09:06Z
+ 16:09:06 up  4:55,  1 user,  load average: 1.16, 0.54, 0.39
+               total        used        free      shared  buff/cache   available
+Mem:            7913         563        4116           1        3426        7350
+/dev/vda1        38G   13G   25G  35% /
+--- leftovers
+-- processes
+none
+-- cgroups
+none
+-- jails
+-- run dir
+/home/takanorifukuyama.guest/tsls/.kvm/run/_archive
+-- taps
+(end taps)
+-- nft
+table ip nat

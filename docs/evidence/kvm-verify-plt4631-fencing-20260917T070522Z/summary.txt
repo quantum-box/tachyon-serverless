@@ -1,0 +1,21 @@
+PASS  a-ready  gateway A on :18485
+gateway A pid=113694 (sudo 113690)
+PASS  a-invoke  {"greeting":null,"message":"hello, a","secret_present":false,"unisolated":false}
+PASS  a-env-pooled  environment env_01m2q2yzvn5vvwr6h28t8ehs99 idle=1
+A's VMM pids in /sys/fs/cgroup/tachyon/env_01m2q2yzvn5vvwr6h28t8ehs99: 113735  ( 113735 Sl   firecracker;)
+PASS  a-vmm-alive  cgroup /sys/fs/cgroup/tachyon/env_01m2q2yzvn5vvwr6h28t8ehs99 procs=[113735 ]
+2026-09-17T07:06:03.207137386Z SIGSTOP gateway A (113694)
+PASS  b-ready  gateway B on :18486 (5738 ms after SIGSTOP)
+gateway B pid=113783
+2026-09-17T07:06:03.280986Z  INFO tachyon_serverless_application::services::reconcile: startup reconcile finished provider="firecracker" found=1 adopted=0 terminated=0 disowned=0 failed=0 lost=0 foreign=1 reclaimed_dispatchers=0 fenced_terminated=0 fenced_pending=0
+PASS  b-settled-a-env  2026-09-17T07:06:11.207744Z  INFO tachyon_serverless_application::services::reconcile: fenced environment terminated and settled environment_id=env_01m2q2yzvn5vvwr6h28t8ehs99 owner=Some(DispatcherId(dsp_01m2q2ybn6h0p9frtwhp4w3k0k)) was_running=true
+PASS  a-vmm-gone  vmm_alive=0 cgroup_present=0
+VMM first seen dead: 2026-09-17T07:06:11.345171080Z ; settle logged: 2026-09-17T07:06:11.207744Z
+PASS  terminated-before-settled  B's log: provider terminate (was_running=true) at line 10, ledger settle at line 11; 0.2 s poller first saw the VMM dead at 2026-09-17T07:06:11.345171080Z
+PASS  b-invoke-new-cold-env  rc=0 start_kind=cold env=env_01m2q2zvxqvrpbxf6nts2ajmpg (A's was env_01m2q2yzvn5vvwr6h28t8ehs99)
+2026-09-17T07:06:18.91070659Z SIGCONT gateway A
+PASS  a-fenced-after-resume  readyz=503 invoke=503 {"error":{"code":"provider_unavailable","message":"provider unavailable: this gateway lost its dispatcher lease; retry against a live gateway","request_id":"01m2q301kwc0mc4ab4spdd28c1"}}
+gateway B exit=0
+gateway A exit=0
+PASS  no-leftovers  see host.txt
+exit=0

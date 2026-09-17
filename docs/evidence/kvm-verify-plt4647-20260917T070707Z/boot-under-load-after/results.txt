@@ -1,0 +1,36 @@
+1-1 200 
+1-2 200 
+1-3 200 
+2-1 200 
+2-2 200 
+2-3 200 
+3-1 200 
+3-2 200 
+3-3 200 
+4-1 200 
+4-2 200 
+4-3 200 
+5-1 200 
+5-2 200 
+5-3 200 
+6-1 200 
+6-2 200 
+6-3 200 
+7-1 200 
+7-2 200 
+7-3 200 
+8-1 200 
+8-2 200 
+8-3 200 
+9-1 200 
+9-2 200 
+9-3 200 
+10-1 502 {"code":"init_error","message":"invocation inv_01m2q3xh9qewajrm8x5qpns9ah failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3xhb5babzc46t5kv3qqn7/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...\n[   10.742742] HugeTLB: r
+10-2 502 {"code":"init_error","message":"invocation inv_01m2q3xhbstzm4x651dy4h694g failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3xhc3m0gqxm7ccehn7swf/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...es\r\n[   11.631664] HugeTL
+10-3 502 {"code":"init_error","message":"invocation inv_01m2q3xh90xhjpbrayjvs4rkb2 failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3xh94aq6w0erw31qq5jhk/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...s: Registered thermal gover
+11-1 502 {"code":"init_error","message":"invocation inv_01m2q3yhgbwkhde780ymde24yq failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3yhgnaf1nkz8wgkt6vtrh/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...693] HugeTLB: registered 32
+11-2 502 {"code":"init_error","message":"invocation inv_01m2q3yhhpzd3nftkma3cpdtxf failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3yhmd523w5wwpe3agc2pd/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...res=1\r\n[    8.433737] cpu
+11-3 502 {"code":"init_error","message":"invocation inv_01m2q3yhf3y7mw08vbrdgxe0qz failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3yhfjb15a7mycnx6dx9jz/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...s: Registered thermal gover
+12-1 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3rysepaz65q98ap1dgq21 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3zjg4spfvtdwnamn5byf9","reason":"circuit_open"}
+12-2 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3rysepaz65q98ap1dgq21 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3zjhrp34w6n4jsxd7hyf6","reason":"circuit_open"}
+12-3 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3rysepaz65q98ap1dgq21 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3zjcfqv3c4f3phpbcw4hs","reason":"circuit_open"}

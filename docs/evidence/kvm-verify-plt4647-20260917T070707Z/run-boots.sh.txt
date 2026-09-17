@@ -1,0 +1,45 @@
+#!/bin/bash
+# PLT-4647 follow-up: many jailed cold starts while the VM's vCPUs are saturated, counting
+# "firecracker exited before creating the API socket" failures. LABEL names the build.
+. "$(dirname "$0")/common.sh"
+LABEL="${LABEL:-before}"; ROUNDS="${ROUNDS:-12}"; CONC="${CONC:-3}"; BUSY="${BUSY:-8}"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+E="$REPO/docs/evidence/kvm-verify-plt4647-boot-under-load-$LABEL-$STAMP"; mkdir -p "$E"
+W=$VERIFY/boots; sudo rm -rf "$W"; mkdir -p "$W"
+PORT=18488
+mkcfg "$W/gateway.toml" $PORT "$W/data"
+sed -i 's/^queue_timeout_seconds = .*/queue_timeout_seconds = 300/; s/^max_queue = .*/max_queue = 64/' "$W/gateway.toml"
+cp "$W/gateway.toml" "$E/gateway.toml"
+git_sha="$(cat "$REPO/.vmrun/SHA" 2>/dev/null || echo unknown)"
+echo "label=$LABEL source=$git_sha rounds=$ROUNDS concurrency=$CONC busy_loops=$BUSY" | tee "$E/summary.txt"
+sha256sum target/debug/tachyon-serverless-gateway | tee -a "$E/summary.txt"
+hostinfo "$E/host.txt" before
+sudo -n env LOG_FORMAT=json "$REPO/target/debug/tachyon-serverless-gateway" --config "$W/gateway.toml" > "$E/gateway.log" 2>&1 &
+GW=$!
+export TSLS_API_URL=http://127.0.0.1:$PORT TSLS_TOKEN=dev-token-tenant-a
+for _ in $(seq 1 120); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$TSLS_API_URL/readyz")" = 200 ] && break; sleep 0.5; done
+T=target/debug/tsls
+FN="$($T functions create --name boots --description plt-4647 --json | jq -r .id)"
+$T functions deploy --function "$FN" --binary target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --max-concurrency 8 --json > /dev/null 2>&1
+busy=""; for i in $(seq 1 "$BUSY"); do (while :; do :; done) & busy="$busy $!"; done
+sleep 2; uptime | tee -a "$E/host.txt"
+for r in $(seq 1 "$ROUNDS"); do
+  for c in $(seq 1 "$CONC"); do
+    curl -sS -o "$W/$r-$c.body" -w '%{http_code}\n' -X POST -H "authorization: Bearer $TSLS_TOKEN" \
+      -H 'content-type: application/json' --data '{"name":"load"}' "$TSLS_API_URL/v1/functions/$FN/invoke" > "$W/$r-$c.status" &
+  done
+  wait $(jobs -p | grep -v -x -e "$GW" $(for b in $busy; do printf -- '-e %s ' "$b"; done)) 2>/dev/null
+  uptime >> "$E/host.txt"
+done
+kill $busy; sleep 1
+hostinfo "$E/host.txt" after
+for f in "$W"/*.status; do n="${f%.status}"; printf '%s %s %s\n' "$(basename "$n")" "$(cat "$f")" "$(jq -c '.error // empty' "$n.body" 2>/dev/null | cut -c1-300)"; done | sort -V > "$E/results.txt"
+sudo kill -TERM $GW; wait $GW
+sudo chown -R "$(id -u):$(id -g)" "$E" "$W" "$REPO/.kvm/run" 2>/dev/null
+{ echo "--- leftovers"; leftovers; } >> "$E/host.txt" 2>&1
+total=$(wc -l < "$E/results.txt"); ok=$(awk '$2==200' "$E/results.txt" | wc -l)
+apisock=$(grep -c "exited before creating the API socket" "$E/results.txt")
+echo "requests=$total ok=$ok api_socket_exit_failures=$apisock other_failures=$((total-ok-apisock))" | tee -a "$E/summary.txt"
+awk '$2!=200' "$E/results.txt" | tee -a "$E/summary.txt" | head -20
+grep -o '"boot_ms":[0-9]*\|environment_boot_ms=[0-9]*' "$E/gateway.log" | head -3
+echo "$E"

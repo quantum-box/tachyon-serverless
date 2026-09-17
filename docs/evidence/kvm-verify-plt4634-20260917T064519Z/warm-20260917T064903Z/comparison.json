@@ -1,0 +1,22 @@
+{
+  "invocations": 6,
+  "cold_count": 1,
+  "warm_count": 5,
+  "other_count": 0,
+  "environments": 1,
+  "cold": {
+    "boot_ms": 5251,
+    "init_ms": 591,
+    "handler_ms": 116,
+    "total_ms": 6028,
+    "client_ms": 6050
+  },
+  "warm": {
+    "resume_ms": 1,
+    "readiness_ms": 2,
+    "handler_ms": 35,
+    "total_ms": 45,
+    "client_ms": 60
+  },
+  "saved_ms": 5983
+}

@@ -1,0 +1,82 @@
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-hello (1507368 bytes, arch aarch64)
+artifact sha256:faa04ecf5ccb129277ab442f1a46b59ed5b7222069ad74b66cd234fe0e93bee5
+revision rev_01m2q4bv661wn5hrtdkhmn3bns (#2) created: pending
+revision rev_01m2q4bv661wn5hrtdkhmn3bns is preparing
+revision rev_01m2q4bv661wn5hrtdkhmn3bns is ready
+error: init_error (HTTP 502): invocation inv_01m2q4bw5v5a0qthbvqbwq2571 failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q4bw5xdkhrqyn2bmk97399/root/v.sock_5000 after 30s
+--- console.log (tail) ---
+...blk virtio0: 1/0/0 default/read/poll queues
+[   15.667417] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[   15.933492] virtio_blk virtio0: [vda] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)
+[   15.933492] virtio_blk virtio0: [vda] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)
+[   16.522279] virtio_blk virtio1: 1/0/0 default/read/poll queues
+[   16.522279] virtio_blk virtio1: 1/0/0 default/read/poll queues
+[   16.673622] virtio_blk virtio1: [vdb] 20480 512-byte logical blocks (10.5 MB/10.0 MiB)
+[   16.673622] virtio_blk virtio1: [vdb] 20480 512-byte logical blocks (10.5 MB/10.0 MiB)
+[   17.273393] virtio_blk virtio2: 1/0/0 default/read/poll queues
+[   17.273393] virtio_blk virtio2: 1/0/0 default/read/poll queues
+[   17.650664] virtio_blk virtio2: [vdc] 524288 512-byte logical blocks (268 MB/256 MiB)
+[   17.650664] virtio_blk virtio2: [vdc] 524288 512-byte logical blocks (268 MB/256 MiB)
+[   18.220103] Loading iSCSI transport class v2.0-870.
+[   18.220103] Loading iSCSI transport class v2.0-870.
+[   18.334563] iscsi: registered transport (tcp)
+[   18.334563] iscsi: registered transport (tcp)
+[   18.827232] rtc-pl031 40001000.rtc: registered as rtc0
+[   18.827232] rtc-pl031 40001000.rtc: registered as rtc0
+[   19.101502] rtc-pl031 40001000.rtc: setting system clock to 2026-09-17T07:30:40 UTC (1789630240)
+[   19.101502] rtc-pl031 40001000.rtc: setting system clock to 2026-09-17T07:30:40 UTC (1789630240)
+[   19.501996] vmclock 801fe000.ptp: vmclock0: registered miscdev
+[   19.501996] vmclock 801fe000.ptp: vmclock0: registered miscdev
+[   19.731212] hid: raw HID events driver (C) Jiri Kosina
+[   19.731212] hid: raw HID events driver (C) Jiri Kosina
+[   20.128774] Initializing XFRM netlink socket
+[   20.128774] Initializing XFRM netlink socket
+[   20.167337] NET: Registered PF_INET6 protocol family
+[   20.167337] NET: Registered PF_INET6 protocol family
+[   20.703970] Segment Routing with IPv6
+[   20.703970] Segment Routing with IPv6
+[   20.730756] In-situ OAM (IOAM) with IPv6
+[   20.730756] In-situ OAM (IOAM) with IPv6
+[   21.194950] bpfilter: Loaded bpfilter_umh pid 46
+[   21.194950] bpfilter: Loaded bpfilter_umh pid 46
+[   21.607907] NET: Registered PF_PACKET protocol family
+[   21.607907] NET: Registered PF_PACKET protocol family
+[   21.821234] Bridge firewalling registered
+[   21.821234] Bridge firewalling registered
+[   21.920908] Key type dns_resolver registered
+[   21.920908] Key type dns_resolver registered
+[   22.090889] NET: Registered PF_VSOCK protocol family
+[   22.090889] NET: Registered PF_VSOCK protocol family
+[   22.430708] registered taskstats version 1
+[   22.430708] registered taskstats version 1
+[   22.522093] Loading compiled-in X.509 certificates
+[   22.522093] Loading compiled-in X.509 certificates
+[   22.687609] zswap: loaded using pool lzo/zbud
+[   22.687609] zswap: loaded using pool lzo/zbud
+[   22.718808] Key type .fscrypt registered
+[   22.718808] Key type .fscrypt registered
+[   22.811264] Key type fscrypt-provisioning registered
+[   22.811264] Key type fscrypt-provisioning registered
+[   22.910539] Key type encrypted registered
+[   22.910539] Key type encrypted registered
+[   23.001340] clk: Disabling unused clocks
+[   23.001340] clk: Disabling unused clocks
+[   23.292214] EXT4-fs (vda): write access unavailable, skipping orphan cleanup
+[   23.292214] EXT4-fs (vda): write access unavailable, skipping orphan cleanup
+[   23.384598] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.
+[   23.384598] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.
+[   23.425502] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[   23.425502] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[   23.517399] devtmpfs: mounted
+[   23.517399] devtmpfs: mounted
+[   23.597255] Freeing unused kernel memory: 2240K
+[   23.597255] Freeing unused kernel memory: 2240K
+[   23.619408] Run /sbin/tachyon-init as init process
+[   23.619408] Run /sbin/tachyon-init as init process
+
+--- fc.log (tail) ---
+2026-09-17T07:30:15.624640425 [env-01m2q4bw5xdkhrqyn2bmk97399:main] If the VM was restored from snapshot, boot-source, machine-config.smt, and machine-config.cpu_template will all be empty.
+2026-09-17T07:30:16.073906155 [env-01m2q4bw5xdkhrqyn2bmk97399:main] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T07:30:16.074351943 [env-01m2q4bw5xdkhrqyn2bmk97399:main] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T07:30:16.075142673 [env-01m2q4bw5xdkhrqyn2bmk97399:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+ [type=Host.EnvironmentBootFailed] [invocation=inv_01m2q4bw5v5a0qthbvqbwq2571] [request=01m2q4bw5k6vsjydr37nzvw2sd]

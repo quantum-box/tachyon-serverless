@@ -1,0 +1,12 @@
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-hello (1507368 bytes, arch aarch64)
+artifact sha256:faa04ecf5ccb129277ab442f1a46b59ed5b7222069ad74b66cd234fe0e93bee5
+revision rev_01m2q4ffj53m06ps6qe1fm2961 (#3) created: pending
+revision rev_01m2q4ffj53m06ps6qe1fm2961 is preparing
+revision rev_01m2q4ffj53m06ps6qe1fm2961 is ready
+alias       prod
+function    fn_01m2q48k0pkfsgzp3h132nh81c
+from        rev_01m2q4ffj53m06ps6qe1fm2961
+to          rev_01m2q48mnjjy1be1jkxynpq1nv
+generation  2 -> 3
+ALIAS  REVISION                        GENERATION  PREVIOUS                        UPDATED
+prod   rev_01m2q48mnjjy1be1jkxynpq1nv  3           rev_01m2q4ffj53m06ps6qe1fm2961  2026-09-17T07:32:26.618Z

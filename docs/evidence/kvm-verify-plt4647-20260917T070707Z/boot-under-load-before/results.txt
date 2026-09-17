@@ -1,0 +1,36 @@
+1-1 200 
+1-2 200 
+1-3 200 
+2-1 200 
+2-2 200 
+2-3 200 
+3-1 502 {"code":"init_error","message":"invocation inv_01m2q3gr60jjjdwkf4ve7mmw6h failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3gr6ap4wj2s4p6qjz2evr/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...(67.1 MB/64.0 MiB)\r\n[   1
+3-2 502 {"code":"init_error","message":"invocation inv_01m2q3gr6x1whptkzqhd9xxccr failed: Host.EnvironmentBootFailed: boot failed: firecracker exited before creating the API socket (vmm pid 119173 is gone)\n--- console.log (tail) ---\n<empty>\n--- fc.log (tail) ---\n<empty>","request_id":"01m2q3gr65zwahz0r9
+3-3 502 {"code":"init_error","message":"invocation inv_01m2q3gr7gcygyzt6ae0yee68r failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3gr7nm653qwstfb9ktnbd/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...blk virtio0: 1/0/0 default/
+4-1 200 
+4-2 200 
+4-3 200 
+5-1 200 
+5-2 200 
+5-3 200 
+6-1 200 
+6-2 200 
+6-3 200 
+7-1 502 {"code":"init_error","message":"invocation inv_01m2q3ktcdaxdvn7ctwvp923g3 failed: Host.InitTimeout: guest did not become ready within 30 s","request_id":"01m2q3ktcc21ns9s2k4596q9yf","invocation_id":"inv_01m2q3ktcdaxdvn7ctwvp923g3","error_type":"Host.InitTimeout"}
+7-2 502 {"code":"init_error","message":"invocation inv_01m2q3ktq3cn9ve1gj7g99637p failed: Host.InitTimeout: guest did not become ready within 30 s","request_id":"01m2q3ktk82wf9rgz2kvdg63d6","invocation_id":"inv_01m2q3ktq3cn9ve1gj7g99637p","error_type":"Host.InitTimeout"}
+7-3 502 {"code":"init_error","message":"invocation inv_01m2q3ktj3e65cpmrc9qrbsa0w failed: Host.InitTimeout: guest did not become ready within 30 s","request_id":"01m2q3kth2k0jhw3assmvad46v","invocation_id":"inv_01m2q3ktj3e65cpmrc9qrbsa0w","error_type":"Host.InitTimeout"}
+8-1 502 {"code":"init_error","message":"invocation inv_01m2q3mtxgmaf1mdw4txwwyjmx failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3mtxpwrxeeydxzfza8ab5/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...336379] virtio_blk virtio1:
+8-2 502 {"code":"init_error","message":"invocation inv_01m2q3mtzsxfxbyehcvevvyp1k failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3mv060d86cmzk3anax1ek/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...iB)\r\n[   14.263861] virti
+8-3 502 {"code":"init_error","message":"invocation inv_01m2q3mttpac36hbxgtcb9yndx failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q3mtvrmem27vb5pvxbwd2f/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...blk virtio0: 1/0/0 default/
+9-1 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3ntq77nczx4hjmqbfjjyy","reason":"circuit_open"}
+9-2 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3ntq58dpvjq8e7g32p4cs","reason":"circuit_open"}
+9-3 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3ntq8r5qr40v628ksh161","reason":"circuit_open"}
+10-1 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3ntwjp0r55c0gb40edymy","reason":"circuit_open"}
+10-2 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3ntxapb86vc2yzv3t3gyj","reason":"circuit_open"}
+10-3 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3ntxen6wmzf6gxjf7ds1b","reason":"circuit_open"}
+11-1 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3nv4xm37xjehbbysmbsnk","reason":"circuit_open"}
+11-2 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3nv4y63bnsxznjqd1c4ta","reason":"circuit_open"}
+11-3 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3nv3ar74cp786j8by7zyw","reason":"circuit_open"}
+12-1 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3nv9ekxnjeps7xa2qbcrt","reason":"circuit_open"}
+12-2 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3nva551jhy2p9mpzk935n","reason":"circuit_open"}
+12-3 503 {"code":"provider_unavailable","message":"circuit_open: revision rev_01m2q3fpww234xa6rjbjs11fb8 failed to start repeatedly; starts are paused (circuit breaker open)","request_id":"01m2q3nv9d2ynsadtjzqc9ary4","reason":"circuit_open"}

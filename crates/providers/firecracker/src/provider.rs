@@ -71,8 +71,8 @@ use crate::network::{HostNetwork, VerifiedPolicy, host_support};
 use crate::preflight::{DigestCache, probe_firecracker_version, run_preflight};
 use crate::vmm::{
     EnvPaths, Launcher, MAX_UNIX_SOCKET_PATH, create_fc_log, instance_id_for, kill_process_group,
-    kill_vmm, pid_alive, pid_belongs_to_env, pid_cmdline_contains, read_pid_file, spawn_vmm,
-    tail_of_file, wait_pid_gone, write_pid_file,
+    kill_vmm, pid_alive, pid_belongs_to_env, pid_cmdline_contains, pid_is_zombie, read_pid_file,
+    spawn_vmm, tail_of_file, wait_pid_gone, write_pid_file,
 };
 
 /// Name of the directory under `workdir` that keeps logs of terminated environments.
@@ -116,7 +116,10 @@ impl Tracked {
                 Err(e) => Some(format!("try_wait failed: {e}")),
             },
             None => {
+                // An empty command line (the jailer is still exec'ing
+                // Firecracker) is no verdict; a zombie is gone.
                 let ours = pid_alive(self.pid)
+                    && !pid_is_zombie(self.pid)
                     && pid_cmdline_contains(self.pid, self.instance_id.as_bytes()) != Some(false);
                 (!ours).then(|| format!("vmm pid {} is gone", self.pid))
             }

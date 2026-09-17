@@ -241,10 +241,45 @@ pub fn pid_cmdline_contains(pid: u32, needle: &[u8]) -> Option<bool> {
         return None;
     }
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    cmdline_contains(&raw, needle)
+}
+
+/// Whether a raw `/proc/<pid>/cmdline` (NUL-separated) has an argument
+/// containing `needle`. An **empty** command line proves nothing either way
+/// (`None`): the kernel returns it for a live process in the middle of
+/// `execve` (the new image's argv is not set up yet), for a zombie and for a
+/// kernel thread. The jailer turns into Firecracker with an `execve` while the
+/// provider polls for the API socket; reading that window as "not ours" made a
+/// VMM that was still starting look gone ("firecracker exited before creating
+/// the API socket" with empty logs, seen under host load, PLT-4647).
+fn cmdline_contains(raw: &[u8], needle: &[u8]) -> Option<bool> {
+    if raw.is_empty() {
+        return None;
+    }
     Some(
         raw.split(|b| *b == 0)
             .any(|arg| arg.windows(needle.len()).any(|w| w == needle)),
     )
+}
+
+/// True when `pid` is a zombie (or dead) according to `/proc/<pid>/stat`: it
+/// still answers signal 0 but will never run again. `false` when unknown.
+pub fn pid_is_zombie(pid: u32) -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
+    std::fs::read(format!("/proc/{pid}/stat"))
+        .ok()
+        .is_some_and(|stat| stat_is_zombie(&stat))
+}
+
+/// The state field of `/proc/<pid>/stat` follows the last `)` (the command
+/// name may itself contain parentheses and spaces).
+fn stat_is_zombie(stat: &[u8]) -> bool {
+    let Some(close) = stat.iter().rposition(|b| *b == b')') else {
+        return false;
+    };
+    matches!(stat.get(close + 2), Some(b'Z' | b'X' | b'x'))
 }
 
 /// Wait until `pid` is gone or `grace` elapses. Returns true when it exited.
@@ -295,6 +330,58 @@ pub fn read_pid_file(path: &Path) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_cmdline_is_unknown_not_foreign() {
+        // What /proc/<pid>/cmdline reads back while the jailer execs Firecracker.
+        assert_eq!(cmdline_contains(b"", b"env-01"), None);
+        assert_eq!(
+            cmdline_contains(b"firecracker\0--id\0env-01\0", b"env-01"),
+            Some(true)
+        );
+        assert_eq!(
+            cmdline_contains(b"firecracker\0--id\0env-02\0", b"env-01"),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn zombie_state_is_read_after_the_last_parenthesis() {
+        assert!(stat_is_zombie(b"42 (firecracker) Z 1 42 42 0 -1"));
+        assert!(!stat_is_zombie(b"42 (fc (vcpu) Z) S 1 42 42 0 -1"));
+        assert!(stat_is_zombie(b"42 (a) b) X 1"));
+        assert!(!stat_is_zombie(b"42 (firecracker) R 1 42"));
+        assert!(!stat_is_zombie(b"garbage"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_live_process_is_not_a_zombie_and_matches_its_cmdline() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        assert!(!pid_is_zombie(pid));
+        // Right after spawn the child may still be inside exec, when
+        // /proc/<pid>/cmdline reads back empty (`None`): the very race the
+        // provider now tolerates. Wait for exec to finish before asserting.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut matched = pid_cmdline_contains(pid, b"30");
+        while matched.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            matched = pid_cmdline_contains(pid, b"30");
+        }
+        assert_eq!(matched, Some(true));
+        child.kill().expect("kill");
+        // Killed but not reaped: a zombie, which must never count as a running VMM.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !pid_is_zombie(pid) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(pid_is_zombie(pid));
+        child.wait().expect("reap");
+    }
 
     #[test]
     fn instance_id_replaces_underscore() {

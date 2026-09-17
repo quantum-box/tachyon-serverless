@@ -1,0 +1,1 @@
+error: init_error (HTTP 502): invocation inv_01m2q26kcqja0nff116n801fw1 failed: Runtime.PreCheckpointFailed: Demo.BootstrapFailure: RESTORE_AWARE_FAIL=bootstrap [type=Runtime.PreCheckpointFailed] [invocation=inv_01m2q26kcqja0nff116n801fw1] [request=01m2q26kcq8yscgjrmqyrd73dh]

@@ -1,0 +1,8 @@
+revision ok: rev_01m2q2667sarxczhv8p2yedrcc
+revision fail-bootstrap: rev_01m2q266m207b1825w9c8drf0p
+revision fail-after-restore: rev_01m2q26711h4xnznn34ka4bgyz
+invoke-prime exit=0
+invoke-composite exit=0
+fail-bootstrap exit=3
+fail-after-restore exit=3
+gateway exit=0

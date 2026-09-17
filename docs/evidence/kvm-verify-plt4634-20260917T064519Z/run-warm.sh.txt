@@ -1,0 +1,13 @@
+#!/bin/bash
+. "$(dirname "$0")/common.sh"
+W=$VERIFY/warm; sudo rm -rf "$W"; mkdir -p "$W"
+mkcfg "$W/gateway.toml" 18482 "$W/data"
+hostinfo "$W/host.txt" before
+sudo -n env PATH="$PATH" HOME="$HOME" TMPDIR=/tmp TSLS_SKIP_BUILD=1 \
+  TSLS_GATEWAY_CONFIG="$W/gateway.toml" TSLS_API_URL=http://127.0.0.1:18482 \
+  bash scripts/kvm/measure-warm.sh > "$W/stdout.txt" 2>&1
+echo "measure-warm exit=$?" | tee -a "$W/host.txt"
+hostinfo "$W/host.txt" after
+sudo chown -R "$(id -u):$(id -g)" "$REPO/docs/evidence" "$W" "$REPO/.kvm/run" 2>/dev/null
+leftovers >> "$W/host.txt" 2>&1
+tail -40 "$W/stdout.txt"

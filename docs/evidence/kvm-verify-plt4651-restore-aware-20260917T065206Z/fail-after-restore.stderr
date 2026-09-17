@@ -1,0 +1,1 @@
+error: init_error (HTTP 502): invocation inv_01m2q26s0q1594kh5gmsgtz4km failed: Runtime.AfterRestoreFailed: Demo.AfterRestoreFailure: RESTORE_AWARE_FAIL=after_restore [type=Runtime.AfterRestoreFailed] [invocation=inv_01m2q26s0q1594kh5gmsgtz4km] [request=01m2q26s0q1zvx75ezevg4z53a]
