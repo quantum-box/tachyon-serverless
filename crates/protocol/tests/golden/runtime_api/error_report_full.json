@@ -1,0 +1,5 @@
+{
+  "error_type": "Handler.Error",
+  "message": "boom",
+  "stack_trace": "at main"
+}

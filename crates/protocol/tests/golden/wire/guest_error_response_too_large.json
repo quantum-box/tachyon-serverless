@@ -1,0 +1,14 @@
+{
+  "attempt_id": "att_01j0000000000000000000000a",
+  "epoch": 3,
+  "error": {
+    "kind": "response_too_large",
+    "max_bytes": 6000000,
+    "size_bytes": 7000000
+  },
+  "error_type": "Handler.Error",
+  "handler_ms": 4,
+  "message": "boom",
+  "stack_trace": "at main",
+  "type": "error"
+}

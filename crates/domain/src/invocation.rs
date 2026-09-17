@@ -704,6 +704,41 @@ mod tests {
         assert!(r.is_err());
     }
 
+    /// PLT-4645: `rejects_elapsed_client_deadline_and_bad_key` also passes an
+    /// invalid idempotency key, which is rejected first, so it cannot tell
+    /// whether the deadline check itself works (scripts/ci/prove-gates.sh
+    /// showed that removing the check went unnoticed). Each reason on its own.
+    #[test]
+    fn an_elapsed_client_deadline_alone_is_rejected() {
+        let accept = |d: Deadlines| {
+            Invocation::accept(
+                InvocationId::generate(),
+                TenantId::generate(),
+                FunctionId::generate(),
+                None,
+                RevisionId::generate(),
+                InvocationMode::Sync,
+                EventKind::Json,
+                d,
+                Some("key-1".into()),
+                Sha256Digest::of_bytes(b""),
+                0,
+                "t".into(),
+                now(),
+            )
+        };
+        let mut elapsed = deadlines();
+        elapsed.client_deadline = now() - Duration::seconds(1);
+        match accept(elapsed) {
+            Err(DomainError::Validation { field, .. }) => assert_eq!(field, "client_deadline"),
+            other => panic!("an elapsed client deadline must be rejected, got {other:?}"),
+        }
+        assert!(
+            accept(deadlines()).is_ok(),
+            "the same request with a future deadline is accepted"
+        );
+    }
+
     #[test]
     fn attempt_terminal_once() {
         let mut a = InvocationAttempt::dispatch(

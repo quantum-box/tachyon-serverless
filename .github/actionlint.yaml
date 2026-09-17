@@ -1,0 +1,5 @@
+# actionlint configuration (PLT-4645)
+self-hosted-runner:
+  # labels of the dedicated KVM runner used by .github/workflows/kvm-integration.yml (docs/ci.md)
+  labels:
+    - kvm

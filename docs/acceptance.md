@@ -90,7 +90,7 @@ KVM の記録に共通する制約:
 | 2 | bootstrap スクリプトで `firecracker` バイナリ・kernel（CI kernel v1.17 系列）・rootfs を取得し、digest を検証する | 実装済み・KVM実測あり（`CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1`） / 未検証（既定の日付 prefix 自動解決、§6 の「v1.17 系列」kernel） | `scripts/kvm/bootstrap.sh`（Firecracker v1.17.0 の tgz を公開 `.sha256.txt` で検証。kernel は upstream の digest が無いため取得時の sha256 を `.kvm/manifest.json` に記録し、再実行時に照合）、`scripts/kvm/build-rootfs.sh`、`docs/evidence/kvm-20260915T080221Z/summary.txt`（kernel / rootfs の sha256）、`docs/evidence/kvm-20260915T080221Z/hello-console.txt`（`Linux version 6.1.155+`） |
 | 3 | teardown スクリプトで環境・ソケット・drive・workdir を全削除し、orphan 0 を確認する | 実装済み（スクリプト） / 未検証（KVM 上で `scripts/kvm/teardown.sh` を実行した記録が evidence に無い） | `scripts/kvm/teardown.sh`。orphan 0 そのものは fc-smoke の `leftovers`（`docs/evidence/kvm-20260915T080221Z/hello.json`、`timeout.json`）と E2E step 19・27（`scripts/e2e/orphan-check.sh`）で確認 |
 | 4 | `ExecutionProvider::preflight` が host 要件を検査し、`GET /readyz` に反映する | 実装済み・KVM実測あり | `crates/provider-port/src/execution.rs`（`PreflightReport`）、`crates/providers/firecracker/src/preflight.rs::{preflight_reports_structured_failures_on_any_host, digest_cache_hits_until_file_changes, concurrent_digests_are_deduplicated_and_survive_cancellation}`、`crates/providers/firecracker/src/provider.rs::preflight_never_fails_and_kind_is_firecracker`、`apps/gateway/tests/gateway_integration.rs::full_api_roundtrip`（`/readyz`）、`docs/evidence/20260915T125610Z-firecracker/steps/02-gateway_healthz_readyz.log` |
-| 5 | 本番 cluster・remote に触れない | 実装済み（規則） | `docs/inventory-tachyon-apps.md` §3.12、`docs/adr/0001-execution-provider-firecracker-first.md` §「決定」、`.github/workflows/kvm-integration.yml`（手動起動のみ、secret なし） |
+| 5 | 本番 cluster・remote に触れない | 実装済み（規則） | `docs/inventory-tachyon-apps.md` §3.12、`docs/adr/0001-execution-provider-firecracker-first.md` §「決定」、`.github/workflows/kvm-integration.yml`（PLT-4645 以降: fork PR では KVM job を起動しない、`permissions: contents: read`、secret なし。`docs/ci.md` §4） |
 
 ## PLT-4616 Firecracker / CH / Kata 比較と ExecutionProvider 方針
 
@@ -111,7 +111,7 @@ KVM の記録に共通する制約:
 | 2 | domain が framework / hypervisor に依存しない（boundary test） | 実装済み | `crates/domain/src/boundary.rs::domain_has_no_framework_dependencies` |
 | 3 | `ExecutionProvider` ほか port trait が定義され、`Capabilities` に `Supported / Unsupported / Unverified` がある | 実装済み | `crates/provider-port/src/execution.rs`、`artifact.rs`、`secret.rs`、`identity.rs`、`usage.rs` |
 | 4 | fake provider で pipeline を KVM なしでテストできる | 実装済み | `crates/providers/fake/src/lib.rs::{respond_ok_speaks_protocol_and_records_lifecycle, init_error_and_duplicate_id, disconnect_after_invoke_closes_stream, capabilities_are_dev_only}`、`crates/application/tests/pipeline.rs`（23 テスト）、`apps/gateway/tests/gateway_integration.rs` |
-| 5 | CI（fmt / clippy `-D warnings` / test）が PR で走る | 実装済み（workflow 定義） / 未検証（この更新では GitHub Actions 上の実行結果を確認していない） | `.github/workflows/ci.yml`（fmt / clippy / test / build、x86_64 musl の guest ビルドと static 確認、`bash -n`・shellcheck・`scripts/e2e/selftest.sh`）。`.github/workflows/kvm-integration.yml` は手動起動のみで、self-hosted KVM runner は未用意 |
+| 5 | CI（fmt / clippy `-D warnings` / test）が PR で走る | 実装済み（workflow 定義） / 未検証（この更新では GitHub Actions 上の実行結果を確認していない） | `.github/workflows/ci.yml`（fmt / clippy / test / build、x86_64 musl の guest ビルドと static 確認、`bash -n`・shellcheck・`scripts/e2e/selftest.sh`）。KVM 統合と変更範囲別 gate は PLT-4645（`docs/ci.md`）。self-hosted KVM runner は未用意 |
 | 6 | 依存の追加はルート `[workspace.dependencies]` 経由のみ | 実装済み（規約） / 未検証（自動検査なし） | `Cargo.toml`。検査するテストは存在しない |
 
 ## PLT-4618 Function・Invocation・実行環境のモデルと DB migration
@@ -405,7 +405,7 @@ gateway プロセスごとの dispatcher（owner）と lease、slot の原子的
 | bare metal（nested virtualization なし）での測定 | 未検証 | 同上 |
 | baseline profile どおりの測定（N ≥ 20、中央値・p95、hello / http-axum / cpu-burn） | 未検証 | 記録は E2E 1 回分（11 attempt）と fc-smoke 2 回 |
 | 別開発者・別 host による追試 | 未着手 | 記録は 1 人・1 host |
-| self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未着手 | runner が未用意（workflow のコメント） |
+| self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未検証 | workflow・gate（`kvm-gate`）・runner 登録手順は PLT-4645 で用意（`docs/ci.md` §5）。runner が未登録のため `kvm` job は一度も実行されていない |
 | TiDB 永続化（PLT-4618） | 未着手 | ADR-0003 で単一 host は埋め込み SQLite（`state.db`、migration 実装済み）と決定。TiDB は将来の adapter |
 | cgroup 等による host 側の資源強制、network の帯域上限 | 未着手 | egress restricted / public-web は PLT-4622 で実装・実測済み（ADR-0005）。VMM への host 側 cgroup、drive と NIC の `rate_limiter`、2 tenant 同居時の干渉（noisy neighbor）は未着手。egress の実測も aarch64 nested 1 host だけ |
 | Kata / Cloud Hypervisor adapter | 未着手 | ADR-0001 で後続 adapter と決めた |

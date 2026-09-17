@@ -1,0 +1,14 @@
+{
+  "attempt_id": "att_01j0000000000000000000000a",
+  "epoch": 3,
+  "error": {
+    "exit_code": 101,
+    "kind": "crash",
+    "signal": null
+  },
+  "error_type": "Handler.Error",
+  "handler_ms": 4,
+  "message": "boom",
+  "stack_trace": "at main",
+  "type": "error"
+}

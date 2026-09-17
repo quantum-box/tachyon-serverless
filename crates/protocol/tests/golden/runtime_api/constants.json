@@ -1,0 +1,51 @@
+{
+  "default_vsock_port": 5000,
+  "env": {
+    "environment_id": "TACHYON_ENVIRONMENT_ID",
+    "runtime_api": "TACHYON_RUNTIME_API",
+    "unisolated": "TACHYON_UNISOLATED"
+  },
+  "event_types": {
+    "http": "tachyon.http.v1",
+    "json": "tachyon.invoke.v1"
+  },
+  "frame_envelope_headroom": 65536,
+  "headers": {
+    "attempt_id": "tachyon-attempt-id",
+    "deadline_ms": "tachyon-deadline-ms",
+    "epoch": "tachyon-epoch",
+    "event_type": "tachyon-event-type",
+    "invocation_id": "tachyon-invocation-id",
+    "trace_id": "tachyon-trace-id"
+  },
+  "lifecycle": {
+    "error_types": {
+      "after_restore_failed": "Runtime.AfterRestoreFailed",
+      "after_restore_timeout": "Runtime.AfterRestoreTimeout",
+      "checkpoint_timeout": "Runtime.CheckpointTimeout",
+      "lifecycle_violation": "Runtime.LifecycleViolation",
+      "pre_checkpoint_failed": "Runtime.PreCheckpointFailed",
+      "pre_checkpoint_timeout": "Runtime.PreCheckpointTimeout"
+    },
+    "header_version": "tachyon-lifecycle-version",
+    "paths": {
+      "bootstrap": "/runtime/v1/lifecycle/bootstrap",
+      "checkpoint": "/runtime/v1/lifecycle/checkpoint",
+      "continue": "/runtime/v1/lifecycle/continue",
+      "error": "/runtime/v1/lifecycle/error"
+    },
+    "version": 1
+  },
+  "max_error_report_bytes": 1048576,
+  "max_frame_bytes": 8388608,
+  "max_response_payload_bytes": 8323072,
+  "paths": {
+    "error": "/runtime/v1/invocations/{attempt_id}/error",
+    "init_error": "/runtime/v1/init/error",
+    "next": "/runtime/v1/next",
+    "ready": "/runtime/v1/ready",
+    "response": "/runtime/v1/invocations/{attempt_id}/response"
+  },
+  "protocol_name": "tachyon-invoke-v1",
+  "protocol_version": 2
+}
