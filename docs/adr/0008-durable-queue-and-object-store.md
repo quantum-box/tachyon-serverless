@@ -142,3 +142,8 @@ consumer は durable pull consumer で `ack_policy = explicit`、`deliver_policy
 - ADR-0003（台帳）、ADR-0007（設定配信）
 - `docs/architecture.md` §4「durable queue と object store（PLT-4638）」
 - `docs/threat-model.md` B6、T27〜T30、§14-11
+
+
+## 追記: クラッシュ後の配送回数（2026-09-17、CI の初回 Linux 実行で判明）
+
+`scripts/queue/verify.sh` の再起動試験で、`kill -9` の時点で処理中だった 10 件は Linux（GitHub Actions）でも再起動後にすべて再配送されたが、その配送回数（redelivered）は 0 に戻っていた。macOS では保持されていた。JetStream の consumer 状態は stream 本体と同じ頻度では永続化されないためで、**クラッシュをまたぐと `max_deliver` は再試行回数の上限として当てにできない**。再試行回数と DLQ への移送は DB 台帳の attempt 記録で判定する（PLT-4640）。検証スクリプトは「未 ack の全件が再配送される」ことを合否条件にし、配送回数は参考値として記録する。

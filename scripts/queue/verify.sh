@@ -141,9 +141,14 @@ record restart.stored_after_restart "$([ "$after" = "$expected" ] && echo ok || 
 sleep 3 # past ack_wait: the in-flight deliveries from before the kill become deliverable again
 out="$EVIDENCE/2-consume-after-restart.txt"
 probe "$S" "$P" --ack-wait-ms 2000 consume --max "$COUNT" --wait-ms 3000 >"$out"
+# The criterion is that every unacked message is delivered again. The redelivery
+# counter of the messages that were in flight at the kill is informational only:
+# JetStream's consumer state is not fsynced like the stream, so after SIGKILL the
+# counter may come back reset (observed on Linux CI, kept on macOS). max_deliver
+# therefore cannot bound retries across a crash; the ledger decides (ADR-0008).
 record restart.all_unacked_delivered \
-  "$([ "$(kv unique "$out")" = "$expected" ] && [ "$(kv redelivered "$out")" -ge 10 ] && echo ok || echo FAIL)" \
-  "received=$(kv received "$out") unique=$(kv unique "$out") redelivered=$(kv redelivered "$out")"
+  "$([ "$(kv unique "$out")" = "$expected" ] && echo ok || echo FAIL)" \
+  "received=$(kv received "$out") unique=$(kv unique "$out") redelivered=$(kv redelivered "$out") (redelivered is informational)"
 probe "$S" "$P" --ack-wait-ms 2000 stats >"$EVIDENCE/2-stats-drained.txt"
 record restart.drained "$([ "$(kv stream_messages "$EVIDENCE/2-stats-drained.txt")" = 0 ] && echo ok || echo FAIL)" \
   "stream_messages=$(kv stream_messages "$EVIDENCE/2-stats-drained.txt")"
