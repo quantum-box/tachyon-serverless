@@ -13,14 +13,23 @@
 
 CHAOS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$CHAOS_LIB_DIR/../.." && pwd)"
+# TSLS_PROVIDER=process (default) | firecracker (scripts/kvm/provider-lib.sh). With firecracker the
+# whole matrix runs as root (jailer + host cgroup required), CHAOS_TMP must be on the file system of
+# the jailer's chroot_base (/srv/jailer; drives are hard-linked into the jail), the warm pool is on
+# unless CH_POOL=false, and idempotent-async keeps its records in the external store of
+# scripts/queue/effects-netns.sh (egress restricted).
+# shellcheck source=scripts/kvm/provider-lib.sh
+. "$REPO_ROOT/scripts/kvm/provider-lib.sh"
+provider_init "$REPO_ROOT" || exit 2
 
 GATEWAY_BIN="$REPO_ROOT/target/debug/tachyon-serverless-gateway"
 TSLS_BIN="$REPO_ROOT/target/debug/tsls"
 PROBE_BIN="$REPO_ROOT/target/debug/tachyon-queue-probe"
 BRIDGE_BIN="$REPO_ROOT/target/debug/tachyon-serverless-runtime-bridge"
-HELLO_BIN="$REPO_ROOT/target/debug/example-hello"
-ASYNC_BIN="$REPO_ROOT/target/debug/example-idempotent-async"
-BURN_BIN="$REPO_ROOT/target/debug/example-cpu-burn"
+HELLO_BIN="$GUEST_DIR/example-hello"
+ASYNC_BIN="$GUEST_DIR/example-idempotent-async"
+BURN_BIN="$GUEST_DIR/example-cpu-burn"
+ISOLATION_PROBE_BIN="$GUEST_DIR/example-isolation-probe"
 
 TENANT="tn_01hzzzzzzzzzzzzzzzzzzzzzza"
 TOKEN="chaos-token-a"
@@ -142,6 +151,13 @@ sc_cleanup() {
     "$REPO_ROOT/scripts/queue/down.sh" >/dev/null 2>&1
     cp "$QUEUE_STATE_DIR/nats-server.log" "$SC_DIR/nats-server.log" 2>/dev/null
   fi
+  if provider_is_fc; then
+    cp "${EFFECTS_STORE_LOG:-/nonexistent}" "$SC_DIR/effects-store.log" 2>/dev/null
+    "$REPO_ROOT/scripts/queue/effects-netns.sh" down >/dev/null 2>&1
+    # What the scenario left on the host after its gateways stopped (evidence; checked in
+    # cv_clean_after_stop while the scenario still runs).
+    provider_leftovers >"$SC_DIR/host-leftovers-at-cleanup.txt" 2>&1
+  fi
   # Leftovers of this scenario only (argv names its scratch directory).
   pkill -KILL -f -- "$WORK/" 2>/dev/null
   cp "$WORK"/gateway-*.log "$SC_DIR/" 2>/dev/null
@@ -200,20 +216,15 @@ listen = "127.0.0.1:$port"
 profile = "dev"
 data_dir = "$WORK/data"
 
-[provider]
-kind = "process"
-
-[provider.process]
-bridge_binary = "$BRIDGE_BIN"
-workdir = "$WORK/data/process"
+$(provider_toml "$WORK/data" "$BRIDGE_BIN")
 
 [capacity]
 max_concurrency = ${CH_CAPACITY:-8}
 max_queue = ${CH_MAX_QUEUE:-32}
-queue_timeout_seconds = 30
+queue_timeout_seconds = $(provider_is_fc && echo 90 || echo 30)
 
 [pool]
-enabled = ${CH_POOL:-false}
+enabled = ${CH_POOL:-$(provider_is_fc && echo true || echo false)}
 allow_unverified_idle = ${CH_POOL:-false}
 idle_ttl_seconds = 300
 
@@ -418,19 +429,23 @@ inv_error_type() { sql "SELECT json_extract(body, '\$.status.error.error_type') 
 # workload
 # ---------------------------------------------------------------------------
 
-# deploy GW NAME BINARY ENV_VARS_JSON SECRETS_JSON TIMEOUT MAX_CONCURRENCY -> prints function id
+# deploy GW NAME BINARY ENV_VARS_JSON SECRETS_JSON TIMEOUT MAX_CONCURRENCY [EXTRA_JSON] -> prints
+# function id. EXTRA_JSON is merged into the revision request (e.g. egress, resources).
 deploy() {
-  local gw="$1" name="$2" bin="$3" envs="$4" secrets="$5" timeout="$6" conc="$7" fid digest rev
+  local gw="$1" name="$2" bin="$3" envs="$4" secrets="$5" timeout="$6" conc="$7" extra="${8:-}" fid digest rev init=10
+  [ -n "$extra" ] || extra='{}'
+  # A cold microVM boot (inside the initialization deadline) takes seconds on a nested host.
+  if provider_is_fc; then init=60; fi
   printf '{"name":"%s","description":"PLT-4646 chaos"}' "$name" >"$WORK/fn-$name.json"
   api "$gw" POST /v1/functions "$WORK/fn-$name.json"
   fid="$(jqb .id)"
   digest="$(curl -s --max-time 60 -X POST -H "authorization: Bearer $TOKEN" \
     -H 'content-type: application/octet-stream' --data-binary "@$bin" "$(gw_url "$gw")/v1/artifacts" | jq -r .digest)"
   jq -nc --arg d "$digest" --arg a "$ARCH" --argjson env "$envs" --argjson sec "$secrets" \
-    --argjson t "$timeout" --argjson c "$conc" \
+    --argjson t "$timeout" --argjson c "$conc" --argjson init "$init" --argjson extra "$extra" \
     '{artifact: {kind: "binary", digest: $d}, architecture: $a,
-      execution: {timeout_seconds: $t, initialization_timeout_seconds: 10, max_concurrency: $c},
-      env_vars: $env, secrets: $sec, publish_to_prod: true}' >"$WORK/rev-$name.json"
+      execution: {timeout_seconds: $t, initialization_timeout_seconds: $init, max_concurrency: $c},
+      env_vars: $env, secrets: $sec, publish_to_prod: true} + $extra' >"$WORK/rev-$name.json"
   api "$gw" POST "/v1/functions/$fid/revisions" "$WORK/rev-$name.json"
   rev="$(jqb .id)"
   for _ in $(seq 1 200); do
@@ -446,9 +461,22 @@ deploy() {
 # webhook fire F_HELLO).
 # Sets F_ASYNC (idempotent-async), F_HELLO (hello with a secret), F_BURN (cpu-burn), CRON_ID, HOOK_ID.
 wl_setup() {
-  local gw="$1" cron="${2:-1}" hook="${3:-1}" secrets
+  local gw="$1" cron="${2:-1}" hook="${3:-1}" secrets async_env async_extra='{}'
   secrets="$(jq -nc --arg r "$SECRET_REF" '[{env_name: "DEMO_SECRET", binding_ref: $r}]')"
-  F_ASYNC="$(deploy "$gw" chaos-async "$ASYNC_BIN" "$(jq -nc --arg d "$WORK/effects" '[["IDEMPOTENT_ASYNC_DIR", $d]]')" "$secrets" 20 4)"
+  async_env="$(jq -nc --arg d "$WORK/effects" '[["IDEMPOTENT_ASYNC_DIR", $d]]')"
+  if provider_is_fc; then
+    # The idempotency records live outside the microVM (scripts/queue/effects-netns.sh), in the
+    # same files ($WORK/effects) the checks read.
+    local store_env url allow
+    "$REPO_ROOT/scripts/queue/effects-netns.sh" down >/dev/null 2>&1 || true
+    store_env="$("$REPO_ROOT/scripts/queue/effects-netns.sh" up "$WORK/effects")" || return 1
+    url="$(printf '%s\n' "$store_env" | sed -n 's/^IDEMPOTENT_ASYNC_URL=//p')"
+    allow="$(printf '%s\n' "$store_env" | sed -n 's/^EFFECTS_ALLOW=//p')"
+    EFFECTS_STORE_LOG="$(printf '%s\n' "$store_env" | sed -n 's/^EFFECTS_STORE_LOG=//p')"
+    async_env="$(jq -nc --arg u "$url" '[["IDEMPOTENT_ASYNC_URL", $u]]')"
+    async_extra="$(jq -nc --arg c "${allow%:*}" --argjson p "${allow##*:}" '{egress: "restricted", egress_allow: [{cidr: $c, ports: [$p]}]}')"
+  fi
+  F_ASYNC="$(deploy "$gw" chaos-async "$ASYNC_BIN" "$async_env" "$secrets" 20 4 "$async_extra")"
   F_HELLO="$(deploy "$gw" chaos-hello "$HELLO_BIN" '[["GREETING","chaos"]]' "$secrets" 10 4)"
   F_BURN="$(deploy "$gw" chaos-burn "$BURN_BIN" '[]' "$secrets" 30 4)"
   [ -n "$F_ASYNC" ] && [ -n "$F_HELLO" ] && [ -n "$F_BURN" ] || return 1
@@ -655,6 +683,18 @@ cv_usage() {
   dup_attempts="$(sqldb "$ledger" "SELECT COUNT(*) FROM (SELECT attempt_id FROM function_usage_events WHERE event_type = 'attempt_settled' GROUP BY attempt_id HAVING COUNT(*) > 1)")"
   ck cv.usage_counted_once "$([ "$pending" = 0 ] && [ "$events" = "$distinct" ] && [ "$dup_attempts" = 0 ] && echo 0 || echo 1)" \
     "journal_pending=$pending ledger_events=$events distinct=$distinct attempts_settled_twice=$dup_attempts duplicates_ignored=$(curl -s --max-time 2 "$(gw_url "$gw")/readyz" | jq -r .usage.ledger.duplicates_ignored)"
+  if provider_is_fc; then
+    # Host cost from cgroup accounting: every environment that stopped so far reported its VMM
+    # cgroup's usage_usec and memory.peak (provider_reported). Environments still pooled report when
+    # they stop (after this check), so only the ones already stopped are counted.
+    local stopped reported
+    stopped="$(sqldb "$ledger" "SELECT COUNT(*) FROM function_usage_events WHERE event_type = 'environment_stopped'")"
+    reported="$(sqldb "$ledger" "SELECT COUNT(*) FROM function_usage_events WHERE event_type = 'environment_stopped' AND json_extract(body, '\$.resources.cgroup_cpu_usec.measurement') = 'provider_reported' AND json_extract(body, '\$.resources.cgroup_cpu_usec.value') > 0 AND json_extract(body, '\$.resources.cgroup_memory_peak_bytes.measurement') = 'provider_reported' AND json_extract(body, '\$.resources.cgroup_memory_peak_bytes.value') > 0")"
+    obs usage.environment_stopped_events "$stopped"
+    obs usage.environment_stopped_with_cgroup_usage "$reported"
+    ck cv.usage_from_cgroup_accounting "$([ "$stopped" -ge 1 ] && [ "$reported" = "$stopped" ] && echo 0 || echo 1)" \
+      "environment_stopped=$stopped with provider_reported cgroup cpu usec and memory.peak=$reported"
+  fi
 }
 
 # cron_disable GW: stop new fires so the queue can drain for the checks
@@ -684,10 +724,36 @@ cv_cron() {
 # scenario_processes -> `pid command` of processes whose argv names this scenario's scratch
 # directory, excluding gateways and nats-server (bridges and user processes).
 scenario_processes() {
+  if provider_is_fc; then
+    # A jailed VMM's argv does not name the scratch directory; the matrix is the host's only
+    # Firecracker user, so every firecracker / jailer process counts.
+    # shellcheck disable=SC2009 # the full command line is needed
+    ps -eo pid=,args= | grep -E '^ *[0-9]+ ([^ ]*/)?(firecracker|jailer)( |$)' || true
+    return 0
+  fi
   # shellcheck disable=SC2009 # the full command line is needed (pgrep -f matches, ps prints)
   ps -axo pid=,command= | grep -F -- "$WORK/" | grep -v -e 'tachyon-serverless-gateway' -e 'nats-server' -e 'grep ' -e 'curl ' -e 'python3' -e 'sqlite3' || true
 }
-env_dirs() { find "$WORK/data/process" -mindepth 1 -maxdepth 1 -type d -name 'env_*' 2>/dev/null | wc -l | tr -d ' '; }
+env_dirs() { find "$WORK/data/process" "$WORK/data/fc" -mindepth 1 -maxdepth 1 -type d -name 'env_*' 2>/dev/null | wc -l | tr -d ' '; }
+
+# env_host_leftovers ENV_ID -> what of one environment still exists on the host: processes naming
+# it, and with firecracker its jail (chroot), VMM cgroup and env dir (empty = gone). Taps and the
+# egress table are host-wide and checked by cv_clean_after_stop.
+env_host_leftovers() {
+  local env="$1" inst
+  inst="env-${env#env_}"
+  # shellcheck disable=SC2009 # the full command line is needed
+  ps -eo pid=,args= | grep -F -e "$env" -e "$inst" | grep -v -e 'grep ' -e 'python3' -e 'tachyon-serverless-gateway' | sed 's/^/process /' || true
+  if provider_is_fc; then
+    [ -e "/srv/jailer/firecracker/$inst" ] && echo "jail /srv/jailer/firecracker/$inst"
+    [ -e "/sys/fs/cgroup/tachyon/$env" ] && echo "cgroup /sys/fs/cgroup/tachyon/$env"
+    [ -e "$WORK/data/fc/$env" ] && echo "env_dir $WORK/data/fc/$env"
+  fi
+  return 0
+}
+
+# vmm_pids ENV_ID -> pids in the environment's VMM cgroup (firecracker)
+vmm_pids() { cat "/sys/fs/cgroup/tachyon/$1/cgroup.procs" 2>/dev/null || true; }
 
 # cv_clean_after_stop: every gateway stopped; nothing of this scenario runs; no environment is
 # left open in the ledger; no secret value on disk.
@@ -700,10 +766,30 @@ cv_clean_after_stop() {
   open_envs="$(sql "SELECT COUNT(*) FROM environments WHERE terminal = 0")"
   ck cv.no_open_environments "$([ "$open_envs" = 0 ] && echo 0 || echo 1)" "non_terminal_environment_rows=$open_envs"
   hits="$(secret_hits)"
-  ck cv.no_secret_value_on_disk "$([ "$hits" = 0 ] && echo 0 || echo 1)" "files_containing_the_secret_value=$hits (config excluded)"
+  ck cv.no_secret_value_on_disk "$([ "$hits" = 0 ] && echo 0 || echo 1)" "files_containing_the_secret_value=$hits (config excluded; $(secret_scan_scope))"
+  if provider_is_fc; then
+    local left
+    wait_eq 30 0 nlines provider_leftovers || true
+    left="$(provider_leftovers | wc -l | tr -d ' ')"
+    [ "$left" = 0 ] || provider_leftovers >"$SC_DIR/leftover-host-state.txt"
+    ck cv.no_vmm_jail_cgroup_tap_or_table_left "$([ "$left" = 0 ] && echo 0 || echo 1)" \
+      "firecracker/jailer processes, /sys/fs/cgroup/tachyon/*, /srv/jailer/firecracker/*, tsls* taps, table inet tachyon_egress: $left"
+  fi
 }
 
-# secret_hits -> files under the scratch directory (config excluded) containing the secret value
+# secret_scan_scope -> the directories secret_hits reads
+secret_scan_scope() {
+  if provider_is_fc; then
+    echo "$WORK (data_dir, provider workdir with function/scratch drives, console and fc logs, snapshots) /srv/jailer (jails)"
+  else
+    echo "$WORK"
+  fi
+}
+
+# secret_hits -> files (config excluded) containing the secret value: the scratch directory, and
+# with firecracker the jails (drives and logs hard-linked into chroots).
 secret_hits() {
-  { grep -rlaF --exclude='gw-*.toml' -- "$SECRET_VALUE" "$WORK" 2>/dev/null || true; } | wc -l | tr -d ' '
+  local dirs=("$WORK")
+  if provider_is_fc && [ -d /srv/jailer ]; then dirs+=(/srv/jailer); fi
+  { grep -rlaF --exclude='gw-*.toml' -- "$SECRET_VALUE" "${dirs[@]}" 2>/dev/null || true; } | wc -l | tr -d ' '
 }

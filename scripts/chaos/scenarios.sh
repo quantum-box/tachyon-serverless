@@ -26,6 +26,11 @@ worker_user_process_kill_sync
 worker_bridge_kill_async
 control_plane_outage
 orphan_recovery_after_crash"
+# A guest kernel exists only with firecracker (TSLS_PROVIDER, scripts/kvm/provider-lib.sh).
+if provider_is_fc; then
+  SCENARIOS="$SCENARIOS
+worker_user_process_oom_sync"
+fi
 
 scenario_fault() {
   case "$1" in
@@ -44,9 +49,14 @@ scenario_fault() {
     broker_sigkill) echo "nats-server SIGKILL with messages in flight, then restart on the same store" ;;
     object_store_unavailable) echo "object root unreadable/unwritable (chmod 000) + orphan object from a SIGKILL after the put" ;;
     usage_journal_full_and_replay) echo "usage journal bound reached with the collector stopped; SIGKILL; collector SIGKILL after ledger commit; replay" ;;
-    worker_bridge_kill_sync) echo "SIGKILL the runtime bridge (worker) of a running sync invocation" ;;
+    worker_bridge_kill_sync)
+      if provider_is_fc; then echo "SIGKILL the Firecracker VMM (vsock to the guest bridge lost) of a running sync invocation"
+      else echo "SIGKILL the runtime bridge (worker) of a running sync invocation"; fi ;;
     worker_user_process_kill_sync) echo "SIGKILL the user process of a running sync invocation" ;;
-    worker_bridge_kill_async) echo "SIGKILL the runtime bridge of a running async invocation" ;;
+    worker_bridge_kill_async)
+      if provider_is_fc; then echo "SIGKILL the Firecracker VMM of a running async invocation"
+      else echo "SIGKILL the runtime bridge of a running async invocation"; fi ;;
+    worker_user_process_oom_sync) echo "user process allocates 512 MiB in a 128 MiB guest (guest OOM killer; firecracker only)" ;;
     control_plane_outage) echo "control plane (management gateway) stopped past config TTL and auth lease (scripts/control-plane/outage-e2e.sh)" ;;
     orphan_recovery_after_crash) echo "SIGKILL gateway holding busy environments (secret-bound workload), unsent outbox rows, the scheduler lease, an orphan object" ;;
     *) echo "?" ;;
@@ -104,9 +114,19 @@ executions_of() {
   n="$(grep -c "^$1 .*${2:-}\$" "$WORK/effects/executions.log" 2>/dev/null || true)"
   printf '%s\n' "${n:-0}"
 }
-bridge_pid_of_env() { cat "$WORK/data/process/$1/bridge.pid" 2>/dev/null || true; }
-# shellcheck disable=SC2009 # the full command line is needed
-procs_of_env() { ps -axo pid=,command= | grep -F -- "$1" | grep -v -e 'grep ' -e 'python3' -e 'tachyon-serverless-gateway' || true; }
+# The environment's worker: the runtime bridge (process provider) or the VMM (firecracker; killing
+# it breaks the vsock connection to the guest bridge, the microVM equivalent of losing the bridge).
+bridge_pid_of_env() {
+  if provider_is_fc; then vmm_pids "$1" | head -n 1; else cat "$WORK/data/process/$1/bridge.pid" 2>/dev/null || true; fi
+}
+# procs_of_env ENV -> one line per thing of the environment still on the host. Process provider: its
+# processes. Firecracker: the VMM / jailer processes and also its jail, VMM cgroup and env dir
+# (env_host_leftovers), so every "terminated" check below proves the host side is gone too.
+procs_of_env() {
+  if provider_is_fc; then env_host_leftovers "$1"; return 0; fi
+  # shellcheck disable=SC2009 # the full command line is needed
+  ps -axo pid=,command= | grep -F -- "$1" | grep -v -e 'grep ' -e 'python3' -e 'tachyon-serverless-gateway' || true
+}
 
 # ---------------------------------------------------------------------------
 # baseline
@@ -160,6 +180,12 @@ scenario_sync_gateway_kill() {
   gw_wait_dead a 10
   wait
   obs before.worker_processes_after_kill "$(procs_of_env "$env_id" | wc -l | tr -d ' ')"
+  if provider_is_fc; then
+    # The VMM is not a child of the gateway: it survives the SIGKILL and reconcile must end it.
+    procs_of_env "$env_id" >"$SC_DIR/env-host-state-after-kill.txt"
+    ck fault.vmm_survived_gateway_sigkill "$([ -n "$(vmm_pids "$env_id")" ] && echo 0 || echo 1)" \
+      "env=$env_id vmm_pids=$(vmm_pids "$env_id" | paste -sd, -) host_state=$(wc -l <"$SC_DIR/env-host-state-after-kill.txt" | tr -d ' ') lines"
+  fi
   ck client.no_answer_from_killed_gateway "$([ "$(cat "$WORK/slow1.code")" = 000 ] && [ "$(cat "$WORK/slow2.code")" = 000 ] && echo 0 || echo 1)" \
     "running_client=$(cat "$WORK/slow1.code") queued_client=$(cat "$WORK/slow2.code") (transport error: the client retries or reads the status URL)"
   mark_restored
@@ -797,6 +823,55 @@ worker_kill_sync() {
 
 scenario_worker_bridge_kill_sync() { worker_kill_sync worker_bridge_kill_sync bridge; }
 scenario_worker_user_process_kill_sync() { worker_kill_sync worker_user_process_kill_sync user; }
+
+# The user process runs out of memory inside the guest (firecracker: the guest kernel's OOM killer
+# ends it; the host cgroup limit, guest memory + overhead, is not reached). Process provider: the
+# allocation is not bounded by a guest, so the scenario is firecracker-only.
+scenario_worker_user_process_oom_sync() {
+  sc_begin worker_user_process_oom_sync "$(scenario_fault worker_user_process_oom_sync)"
+  if ! provider_is_fc; then
+    ck harness.requires_firecracker 1 "TSLS_PROVIDER=$PROVIDER: no guest kernel, nothing bounds the allocation"
+    SC_COMPLETE=1
+    return 0
+  fi
+  common_start 0 0
+  wl_steady a 1 pre
+  steady_checks 1
+  local f_oom inv env_id st code etype console peak
+  f_oom="$(deploy a chaos-oom "$ISOLATION_PROBE_BIN" '[]' '[]' 30 1 '{"resources": {"memory_mib": 128}}')"
+  mark_injected
+  wl_sync a "$f_oom" '{"probe":"resources","alloc_mib":512}'
+  code="$HTTP_CODE"
+  etype="$(jqb '.error.code // "-"')"
+  inv="$SYNC_ID"
+  printf '%s\n' "$HTTP_BODY" >"$SC_DIR/oom-response.json"
+  mark_restored
+  wait_eq 30 1 sql "SELECT terminal FROM invocations WHERE id = '$inv'" || true
+  st="$(api_status a "$inv")"
+  env_id="$(env_of_invocation "$inv")"
+  obs_s client.answer "$code $etype $(jqb '.error.error_type // "-"')"
+  ck classify.guest_oom_is_user_process_crash "$([ "$st" = "failed Runtime.Crash" ] && [ "$etype" = crash ] && echo 0 || echo 1)" \
+    "status=$st client=$code/$etype message=$(jqb '.error.message // "-"')"
+  api a GET "/v1/invocations/$inv/logs"
+  printf '%s\n' "$HTTP_BODY" >"$SC_DIR/oom-logs.json"
+  console="$(find "$WORK/data/fc/_archive/$env_id" "$WORK/data/fc/$env_id" -name console.log 2>/dev/null | head -n 1)"
+  if [ -n "$console" ]; then cp "$console" "$SC_DIR/oom-console.log"; fi
+  ck evidence.guest_kernel_oom_killer "$(grep -qiE 'out of memory|oom-kill|oom_reaper' "$SC_DIR/oom-console.log" 2>/dev/null && echo 0 || echo 1)" \
+    "console=$([ -n "$console" ] && echo "${console#"$WORK"/}" || echo missing) oom_lines=$(grep -ciE 'out of memory|oom-kill' "$SC_DIR/oom-console.log" 2>/dev/null || echo 0)"
+  wait_eq 30 0 nlines procs_of_env "$env_id" || true
+  wait_eq 30 1 sql "SELECT terminal FROM environments WHERE id = '$env_id'" || true
+  mark_recovered
+  ck cleanup.environment_terminated "$([ "$(procs_of_env "$env_id" | wc -l | tr -d ' ')" = 0 ] && [ "$(sql "SELECT terminal FROM environments WHERE id = '$env_id'")" = 1 ] && echo 0 || echo 1)" \
+    "env=$env_id state=$(sql "SELECT state FROM environments WHERE id = '$env_id'") host_leftovers=$(procs_of_env "$env_id" | wc -l | tr -d ' ')"
+  # The host cgroup (guest 128 MiB + 64 MiB overhead) held: its peak stays under memory.max.
+  wait_ge 30 1 sqldb "$WORK/data/usage/ledger.db" "SELECT COUNT(*) FROM function_usage_events WHERE event_type = 'environment_stopped' AND body LIKE '%$env_id%'" || true
+  peak="$(sqldb "$WORK/data/usage/ledger.db" "SELECT json_extract(body, '\$.resources.cgroup_memory_peak_bytes.value') FROM function_usage_events WHERE event_type = 'environment_stopped' AND body LIKE '%$env_id%' LIMIT 1")"
+  ck host.vmm_cgroup_peak_below_memory_max "$([ -n "$peak" ] && [ "$peak" -le $(((128 + 64) * 1048576)) ] && echo 0 || echo 1)" \
+    "memory.peak=${peak:-unknown} bytes, memory.max=$(((128 + 64) * 1048576))"
+  wl_sync a "$f_oom" '{"probe":"resources","alloc_mib":16}'
+  ck recovery.next_invoke_of_the_same_function_succeeds "$([ "$HTTP_CODE" = 200 ] && echo 0 || echo 1)" "code=$HTTP_CODE"
+  common_finish a
+}
 
 scenario_worker_bridge_kill_async() {
   sc_begin worker_bridge_kill_async "$(scenario_fault worker_bridge_kill_async)"

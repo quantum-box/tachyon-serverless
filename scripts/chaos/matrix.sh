@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # scripts/chaos/matrix.sh - the PLT-4646 failure matrix: controller / DB / queue / object store /
-# usage journal / worker failures on ONE host, with the process provider.
+# usage journal / worker failures on ONE host, with the process provider (default) or Firecracker
+# microVMs (TSLS_PROVIDER=firecracker, as root; see scripts/chaos/lib.sh for what changes).
 #
 # Every scenario (scripts/chaos/scenarios.sh) runs in its own subshell with its own scratch
 # data_dir, its own pinned nats-server (scripts/queue/up.sh on free ports) and its own gateway
@@ -29,7 +30,7 @@
 #   scripts/chaos/matrix.sh [--only ID[,ID...]] [--retries N] [--evidence DIR] [--list]
 #
 # Environment: TSLS_SKIP_BUILD=1 skips cargo build; CHAOS_KEEP_WORK=1 keeps scratch directories;
-# CHAOS_TMP overrides the scratch root (default $TMPDIR).
+# CHAOS_TMP overrides the scratch root (default $TMPDIR); TSLS_PROVIDER=process|firecracker.
 # Exit 0 only when every scenario passed on its first attempt or on a retry (flaky ones are
 # reported as such).
 set -euo pipefail
@@ -72,6 +73,10 @@ if [ "${TSLS_SKIP_BUILD:-0}" != 1 ]; then
   cargo build -q -p tachyon-serverless-queue-nats --bin tachyon-queue-probe
   cargo build -q -p tachyon-serverless-cli -p tachyon-serverless-runtime-bridge \
     -p example-hello -p example-idempotent-async -p example-cpu-burn
+  if provider_is_fc; then
+    cargo build -q --release --target "$(uname -m)-unknown-linux-musl" \
+      -p example-hello -p example-idempotent-async -p example-cpu-burn -p example-isolation-probe
+  fi
 fi
 for b in "$GATEWAY_BIN" "$TSLS_BIN" "$PROBE_BIN" "$BRIDGE_BIN" "$HELLO_BIN" "$ASYNC_BIN" "$BURN_BIN"; do
   [ -x "$b" ] || { echo "missing binary: $b" >&2; exit 1; }
@@ -106,10 +111,11 @@ jq -n \
   --arg lib_sha256 "$(digest_of "$SCRIPT_DIR/lib.sh")" \
   --arg scenarios_sha256 "$(digest_of "$SCRIPT_DIR/scenarios.sh")" \
   --arg selected "${selected# }" --argjson retries "$RETRIES" \
+  --arg provider "$(if provider_is_fc; then echo "firecracker (jailed microVMs, host cgroup required, warm pool ${CH_POOL:-true})"; else echo "process (dev-only, no isolation)"; fi)" \
   --arg seed "${CHAOS_SEED:-none: scenarios use fixed timings; secrets and keys are random per scenario}" \
   '{stamp: $stamp, commit: $commit, uncommitted_files: ($dirty | tonumber), os: $os, os_version: $os_version,
     cpus: $cpus, rustc: $rustc, nats_server: $nats, bash: $bash, python_sqlite: $sqlite,
-    provider: "process (dev-only, no isolation)", build: "debug, --features failpoints",
+    provider: $provider, build: "debug gateway with --features failpoints",
     gateway_sha256: $gateway_sha256, harness_sha256: {lib: $lib_sha256, scenarios: $scenarios_sha256},
     config_digest_note: "each attempt stores its gateway configuration (secret redacted) next to its result; results carry their sha256",
     scenarios: ($selected | split(" ")), retries: $retries, seeds: $seed,
@@ -156,7 +162,7 @@ done
 {
   echo "# PLT-4646 failure matrix — $STAMP"
   echo
-  echo "commit \`$(jq -r .commit "$RUN_DIR/profile.json")\`, $(jq -r .os "$RUN_DIR/profile.json"), $(jq -r .rustc "$RUN_DIR/profile.json"), nats-server $(jq -r .nats_server "$RUN_DIR/profile.json"), process provider, debug build with failpoints."
+  echo "commit \`$(jq -r .commit "$RUN_DIR/profile.json")\`, $(jq -r .os "$RUN_DIR/profile.json"), $(jq -r .rustc "$RUN_DIR/profile.json"), nats-server $(jq -r .nats_server "$RUN_DIR/profile.json"), provider $(jq -r .provider "$RUN_DIR/profile.json"), debug gateway with failpoints."
   echo
   echo "Single host. These results are not a multi-host HA guarantee."
   echo

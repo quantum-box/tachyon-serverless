@@ -30,6 +30,10 @@
 # Environment (all optional):
 #   TSLS_SKIP_BUILD=1     do not run cargo build
 #   TSLS_EVIDENCE_DIR     evidence root (default docs/evidence)
+#   TSLS_PROVIDER         process (default) | firecracker (scripts/kvm/provider-lib.sh: jailed
+#                         microVMs; run as root, e.g. `sudo -n env PATH="$PATH" HOME="$HOME"
+#                         TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 scripts/usage/budget-e2e.sh`;
+#                         additionally checks that no VMM, jail, cgroup or tap is left)
 #
 # Exit 0 only when every check passed.
 #
@@ -42,11 +46,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=scripts/e2e/lib.sh
 . "$REPO_ROOT/scripts/e2e/lib.sh"
 
+# shellcheck source=scripts/kvm/provider-lib.sh
+. "$REPO_ROOT/scripts/kvm/provider-lib.sh"
+
 require_tools curl jq cargo python3 || e2e_die "missing tools"
+provider_init "$REPO_ROOT" || e2e_die "provider"
 
 TENANT_A_ID="tn_01hzzzzzzzzzzzzzzzzzzzzzza"
 TENANT_B_ID="tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
-RUN_ID="budget-$(date -u +%Y%m%dT%H%M%SZ)-process"
+RUN_ID="budget-$(date -u +%Y%m%dT%H%M%SZ)-$PROVIDER"
 EVIDENCE_DIR="${TSLS_EVIDENCE_DIR:-$REPO_ROOT/docs/evidence}/$RUN_ID"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tsls-budget.XXXXXX")"
 DATA_DIR="$WORK_DIR/data"
@@ -54,7 +62,7 @@ BUDGETS="$WORK_DIR/budgets.toml"
 mkdir -p "$EVIDENCE_DIR" "$DATA_DIR/usage"
 GATEWAY_BIN="$REPO_ROOT/target/debug/tachyon-serverless-gateway"
 TSLS_BIN="$REPO_ROOT/target/debug/tsls"
-GUEST="$REPO_ROOT/target/debug/example-cpu-burn"
+GUEST="$GUEST_DIR/example-cpu-burn"
 case "$(uname -m)" in
   x86_64 | amd64) ARCH=x86_64 ;;
   *) ARCH=aarch64 ;;
@@ -80,6 +88,9 @@ rc_of() { if "$@"; then echo 0; else echo 1; fi; }
 if [ "${TSLS_SKIP_BUILD:-0}" != "1" ]; then
   (cd "$REPO_ROOT" && cargo build -q -p tachyon-serverless-gateway -p tachyon-serverless-cli \
     -p tachyon-serverless-runtime-bridge -p example-cpu-burn)
+  if provider_is_fc; then
+    (cd "$REPO_ROOT" && cargo build -q --release --target "$(uname -m)-unknown-linux-musl" -p example-cpu-burn)
+  fi
 fi
 [ -x "$GUEST" ] || e2e_die "missing $GUEST"
 
@@ -104,12 +115,7 @@ listen = "127.0.0.1:$PORT"
 profile = "dev"
 data_dir = "$DATA_DIR"
 
-[provider]
-kind = "process"
-
-[provider.process]
-bridge_binary = "$REPO_ROOT/target/debug/tachyon-serverless-runtime-bridge"
-workdir = "$DATA_DIR/process"
+$(provider_toml "$DATA_DIR")
 
 [usage]
 collect_interval_ms = 300
@@ -331,6 +337,11 @@ budget_a > "$EVIDENCE_DIR/budget-final.json"
 
 stop_process "$GATEWAY_PID" 15
 GATEWAY_PID=""
+if provider_is_fc; then
+  provider_leftovers > "$EVIDENCE_DIR/leftovers-after.txt" 2>&1
+  check "12-no-vmm-jail-cgroup-tap-left" "$(rc_of test ! -s "$EVIDENCE_DIR/leftovers-after.txt")" \
+    "$(wc -l < "$EVIDENCE_DIR/leftovers-after.txt" | tr -d ' ') leftovers"
+fi
 
 echo "evidence: $EVIDENCE_DIR" | tee -a "$EVIDENCE_DIR/summary.txt"
 if [ "$FAILED" -ne 0 ]; then
