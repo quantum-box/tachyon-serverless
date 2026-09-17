@@ -120,6 +120,22 @@ fn kvm_capabilities_hash() -> Result<Sha256Digest, ProviderError> {
     Err(ProviderError::Unavailable("KVM needs Linux".into()))
 }
 
+/// Owner `(uid, gid)` and mode a snapshot file must have before a clone links
+/// it into its chroot: what [`FirecrackerProvider::snapshot_impl`] leaves.
+/// The snapshot service re-creates a missing plaintext file from the sealed
+/// store as root 0600 (PLT-4654 found this on KVM: the jail then refused the
+/// function drive as not world-readable), so the clone path re-applies this.
+fn snapshot_file_access(name: &str, jail_gid: u32) -> (u32, u32, u32) {
+    match name {
+        // Read by the jailed VMM through a hard link; never writable.
+        files::MEMORY | files::VMSTATE => (0, jail_gid, 0o640),
+        // A read-only drive like every environment's function drive.
+        files::FUNCTION_DRIVE => (0, 0, 0o644),
+        // Copied per clone, never linked.
+        _ => (0, 0, 0o600),
+    }
+}
+
 /// `chown uid:gid` + `chmod mode` of a path.
 fn own(path: &Path, uid: u32, gid: u32, mode: u32) -> Result<(), ProviderError> {
     use std::os::unix::fs::PermissionsExt;
@@ -394,6 +410,8 @@ impl FirecrackerProvider {
                     clone.snapshot_dir.display()
                 )));
             }
+            let (uid, gid, mode) = snapshot_file_access(name, jailer.gid);
+            own(&clone.snapshot_dir.join(name), uid, gid, mode)?;
         }
         tokio::fs::create_dir_all(&paths.dir).await?;
         let mut slot: Option<Tracked> = None;
@@ -648,5 +666,33 @@ impl FirecrackerProvider {
                 doorbell_at,
             },
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_files_are_readable_by_the_jail_but_never_writable_or_public() {
+        let gid = 64000;
+        for name in [files::MEMORY, files::VMSTATE] {
+            let (uid, g, mode) = snapshot_file_access(name, gid);
+            assert_eq!((uid, g), (0, gid), "{name}");
+            assert_eq!(mode & 0o040, 0o040, "{name}: group-readable for the jail");
+            assert_eq!(mode & 0o222, 0o200, "{name}: only root may write");
+            assert_eq!(
+                mode & 0o007,
+                0,
+                "{name}: guest memory is not world-readable"
+            );
+        }
+        // A decrypted function drive (root 0600) must become world-readable,
+        // or the jail refuses it (seen on KVM, PLT-4654).
+        let (_, _, mode) = snapshot_file_access(files::FUNCTION_DRIVE, gid);
+        assert_eq!(mode & 0o004, 0o004);
+        assert_eq!(mode & 0o022, 0);
+        let (_, _, mode) = snapshot_file_access(files::SCRATCH, gid);
+        assert_eq!(mode, 0o600);
     }
 }
