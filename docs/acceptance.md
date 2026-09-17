@@ -919,7 +919,7 @@ gate: `shellcheck 0.10.0 -x -P scripts/e2e`（全 tracked `.sh`）、`scripts/ci
 | 7 | HA、国内 DC、鍵管理、実請求、サポート / abuse、SLA、性能原価を後続判断として整理 | 実装済み（文書） | 文書 §6.1〜§6.11（選択肢と tradeoff。Kata vs Firecracker、KVM CI runner、Console 認証、jailer uid / netns、IO 上限を含む） |
 | 8 | 有償 β へ進む条件を検証 / 契約 / 運用の単位で示す | 実装済み（文書、条件はすべて未達） | 文書 §7（V0〜V10、C1〜C6、O1〜O8、各項目に証明の方法） |
 | 9 | 公開・購入・本番移行・実請求を実行しない | 守った | 文書 §8。Linear の状態は変更していない |
-| 10 | knowledge 更新は PR 経由、無断 merge しない | draft PR を作成（未 merge、owner のレビュー待ち） | quantum-box/knowledge の draft PR（branch `serverless/prototype-constraints-20260917`、`src/infrastructure/tachyon-serverless-prototype-constraints-20260917.md`）。URL は下の「検証」 |
+| 10 | knowledge 更新は PR 経由、無断 merge しない | draft PR を作成（未 merge、owner のレビュー待ち） | quantum-box/knowledge#287 の draft PR（branch `serverless/prototype-constraints-20260917`、`src/infrastructure/tachyon-serverless-prototype-constraints-20260917.md`）。URL は下の「検証」 |
 
 検証:
 
@@ -927,7 +927,7 @@ gate: `shellcheck 0.10.0 -x -P scripts/e2e`（全 tracked `.sh`）、`scripts/ci
 |---|---|---|
 | 受入証跡・性能結果から差分表をレビュー | 自己レビューのみ（作成した agent が各数値を `docs/benchmark.md`・`docs/evidence/bench-20260917T055450Z/summary.md`・`docs/failure-matrix.md`・ADR と照合） / 未実施（owner によるレビュー） | 文書 §2 の各行に出典 |
 | 文書内リンクが実在する file / directory を指す | 実装済み（ローカルの link 検査） | commit 時に markdown の相対リンクを検査（全件解決） |
-| knowledge PR | draft で作成、merge していない | KNOWLEDGE_PR_URL |
+| knowledge PR | draft で作成、merge していない（owner のレビュー待ち） | https://github.com/quantum-box/knowledge/pull/287 |
 
 ## ADR-0001 残る測定の状況
 
