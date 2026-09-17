@@ -206,7 +206,10 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | trace id（`x-tachyon-trace-id` request header） | 256 bytes | 400 |
 | env 変数名 | 128 文字、`TACHYON_` prefix 禁止、重複禁止 | 400（`validate_env_name`） |
 | timeout | 1..=900 s（execution）、1..=120 s（init） | 400 |
-| memory / cpu / ephemeral | 128..=4096 MiB / 250..=2000 m / ≤ 2048 MiB | 400 |
+| memory / cpu / ephemeral | 128..=4096 MiB / 250..=2000 m / 32..=2048 MiB（既定 256 / 500 / 256） | 400（deploy 時の `RevisionSpec::validate`） |
+| guest の `/tmp`（Firecracker） | `ephemeral_storage_mib` ちょうどの scratch drive（ext4、環境作成時に host 側で確保）。`/` と `/function` は read-only drive | guest 内で `ENOSPC` / `EROFS`。host の空きは減らない（PLT-4622、`docs/evidence/isolation-20260917T011555Z/`） |
+| 環境ごとの host 側ログ（Firecracker） | `console.log` 4 MiB + marker、`fc.log` 4 MiB（1 秒ごとの watchdog） | 超過分を捨てる / truncate（`docs/kvm.md` §3.6） |
+| 環境作成時の host の空き | 環境の budget（artifact + drive 2 本 + ログ上限）+ 512 MiB | 何も書かずに `Unavailable` → invoke は `Failed{PlatformError}`（`Host.ProviderError`） |
 | `max_concurrency`（revision） | 1..=1000。加えて gateway 全体 `capacity.max_concurrency` と `max_queue` | 429 |
 | Heartbeat | 5 s ごと。host は無視してよい | 無視 |
 
@@ -234,6 +237,8 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | T18 | operator の越権（他 tenant の出力 / ログ / secret 参照、invoke） | §7: operator は自 tenant の function / revision / alias metadata のみ。他 tenant は 404、invocation / usage / logs 403、mutation / invoke 403 | — |
 | T19 | `readyz` が provider 不能を隠す | `preflight` 失敗で `readyz` 503、invoke は 503 `provider_unavailable` | — |
 | T20 | OCI artifact を「実行できる」と誤認 | `ArtifactRef::OciImage` は受理するが validation で理由付き `Failed`（`Support::Unsupported`） | — |
+| T21 | guest が書き込みで host のディスクを使い切る（`/tmp` の fill、rootfs の remount、serial console の洪水、VMM ログ） | rootfs と function drive は Firecracker に `is_read_only` で渡す。書ける drive は `ephemeral_storage_mib` の scratch drive だけで、作成時に `fallocate` で確保。`console.log` は pipe 経由で上限付き、`fc.log` は watchdog。作成前に budget + 512 MiB の空きを確認（`crates/providers/firecracker/src/host_guard.rs`）。KVM 実測: 64 MiB に 256 MiB 書こうとして 58 MiB で `ENOSPC`、`/` `/function` は `EROFS`、host の空きの減少は drive の確保分（`docs/evidence/isolation-20260917T011555Z/`） | console 洪水と `fc.log` の上限は fake VMM と unit test だけで、KVM 上では未計測。`fallocate` 非対応の fs では sparse になり確保されない（warn と `scratch_drive_reserved=false`）。drive の IO 帯域（`rate_limiter`）は未設定で、隣の環境の IO を遅くできる |
+| T22 | network policy が効く前に user code が動く（egress の race） | P1 は NIC を付けない（egress none）。`InstanceStart` の前に、送る API に `/network-interfaces` `/mmds` が無いことと、`GET /vm/config` の `network-interfaces` が空で `mmds-config` が null であることを確認し、違えば起動しない（`crates/providers/firecracker/src/egress_gate.rs`、`tests/fake_vmm.rs::egress_gate_refuses_to_start_a_vm_with_a_network_interface`）。guest の init と user code はその後にしか動かない。M8 実測で guest は `lo` だけ | `restricted` / `public-web` を実装するときは NIC を付けた上で policy の適用完了を同じ場所で待つ必要がある（未設計）。IPv6 も NIC が無いので経路が無いだけで、個別の検査はしていない |
 
 ## 13. process provider が守らないもの
 
@@ -255,10 +260,14 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 ## 14. 残存リスクと未解決事項
 
 1. **artifact の tenant 境界（解消済み）。** `ArtifactStore`（`crates/provider-port/src/artifact.rs`）は content-addressed で tenant を持たないが、`POST /v1/artifacts` は `ArtifactService::upload` を通り、`(tenant_id, digest)` の所有を `state.json`（`artifact_owners`）に記録する。revision の作成と validation は revision の tenant が所有する digest しか解決せず、他 tenant だけが upload した digest は存在しない digest と同じ結果（`size_bytes = 0`、`failed` の理由 `artifact unavailable: artifact not found: <digest>`）になるので、digest の存在も漏れない。同じ bytes を自分で upload すれば参照できる。port の変更は無い。残り: 修正前の版で作られた Ready revision は再検証しない。テスト: `crates/application/tests/pipeline.rs::revisions_cannot_reference_another_tenants_artifact`、`apps/gateway/tests/gateway_integration.rs::foreign_artifact_digest_is_indistinguishable_from_a_missing_one`。
-2. **jailer 未使用。** P1 の firecracker プロセスは gateway と同じユーザー・同じ mount namespace で走る。VMM 脱出時の影響範囲を狭めていない。PLT-4622 以降で jailer / 専用ユーザー / seccomp を検討する。
+2. **jailer 未使用。** P1 の firecracker プロセスは gateway と同じユーザー・同じ mount namespace で走り、chroot・専用 uid・cgroup が無い。VMM 脱出時の影響範囲を狭めていない。PLT-4622 は Kata / seccomp / ServiceAccount token を挙げていたが、ADR-0001 で Firecracker を選んだので次のように読み替えた。
+   - Kata の sandbox 境界 → Firecracker の microVM（KVM）。1 環境 = 1 VM = 1 tenant × 1 revision。
+   - seccomp → Firecracker が既定で VMM の各 thread に入れる seccomp filter（provider は `--no-seccomp` を渡さない）。jailer による chroot / uid / namespace / cgroup は **未導入**。
+   - ServiceAccount token → guest に platform の資格情報を置かない。rootfs は bridge だけ、function drive は artifact だけで、guest に渡るのは revision の env と Secret binding（PLT-4623）の値だけ。metadata service（MMDS）は構成せず、egress gate で拒否する。
+   jailer / 専用ユーザー / host 側 cgroup（VMM の CPU quota と memory 上限）は後続。
 3. **平文 HTTP と静的 token。** B1 の保護は deployment 依存（§5-2, 5-3）。
 4. **`state.json` の権限。** invocation の入出力（inline）と log を含むため、ファイル権限は `config/gateway.{dev,firecracker}.toml` と同じ扱いにする。
-5. **hypervisor 側の DoS（fork bomb、大量 fd）。** microVM の vCPU / memory 上限は Firecracker の `machine-config` で与えるが、実効性は未測定（`docs/inventory-tachyon-apps.md` §5）。
+5. **hypervisor 側の DoS（fork bomb、大量 fd）。** microVM の vCPU / memory 上限は Firecracker の `machine-config` で与え、guest から見える値と超過 alloc の `crash` 分類は実測した（ADR-0001 M9、`docs/evidence/isolation-20260917T011555Z/`）。CPU は vCPU 単位（500 m でも 1 vCPU を占有できる）で、VMM スレッドに host 側の cgroup quota は無い。同じ host に 2 tenant の環境を並べて負荷をかけた干渉（noisy neighbor）の計測はしていない。
 6. **時刻の単調性。** deadline は wall-clock。host の時刻が飛ぶと deadline 判定がずれる。P1 では `AttemptTimings` に `Instant` を使い、deadline だけ wall-clock とする。
 7. **`OutcomeUnknown` 後の副作用の可視化。** ledger は「不明」としか言えない。
 

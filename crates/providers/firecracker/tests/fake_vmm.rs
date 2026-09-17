@@ -6,12 +6,14 @@
 //!
 //! - prints to stdout (the provider redirects it to `console.log`),
 //! - serves the API on `--api-sock`, records every call to `<env>/api.jsonl`
-//!   and answers 204 (or 400 in `fail-api` mode),
+//!   and answers 204 (or 400 in `fail-api` mode); `GET /vm/config` answers the
+//!   configuration it was given (plus a network interface in `nic` mode),
 //! - after `InstanceStart` connects back to `<uds_path>_<port>` (the port is
 //!   parsed from the recorded kernel `boot_args`, exactly like the guest would)
 //!   and sends a `Hello` frame, then powers off (exit 0) on `Shutdown`.
 //!
-//! `mkfs.ext4` is replaced by a script that records its arguments.
+//! `mkfs.ext4` is replaced by a script that records its arguments (one block
+//! per call in `<env>/mkfs.args`) and the mode of the staged `/app`.
 
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
@@ -160,6 +162,13 @@ mod fake {
             .write_all(b"fake fc.log: logger initialised\n")
             .unwrap();
         println!("fake console: firecracker starting id={id}");
+        if mode == "flood" {
+            // A guest spamming its serial port (PLT-4622).
+            let line = "fake console: flood ".repeat(50);
+            for _ in 0..1000 {
+                println!("{line}");
+            }
+        }
         // Safety net against orphans if a test fails half-way.
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(60));
@@ -178,6 +187,7 @@ mod fake {
             .unwrap();
         let mut boot_args = String::new();
         let mut uds_path = String::new();
+        let mut drives: Vec<serde_json::Value> = Vec::new();
         for conn in listener.incoming() {
             let mut conn = conn.unwrap();
             let (method, path, body) = read_request(&mut conn);
@@ -188,6 +198,27 @@ mod fake {
                     serde_json::Value::Bool(Path::new(&format!("{uds_path}_{port}")).exists());
             }
             writeln!(record, "{entry}").unwrap();
+            if method == "GET" && path == "/vm/config" {
+                let nics = if mode == "nic" {
+                    serde_json::json!([{"iface_id": "eth0", "host_dev_name": "tap0"}])
+                } else {
+                    serde_json::json!([])
+                };
+                let cfg = serde_json::json!({
+                    "drives": drives,
+                    "network-interfaces": nics,
+                    "mmds-config": null,
+                })
+                .to_string();
+                write!(
+                    conn,
+                    "HTTP/1.1 200 OK\r\nServer: Firecracker API\r\nConnection: keep-alive\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    cfg.len(),
+                    cfg
+                )
+                .unwrap();
+                continue;
+            }
             // PLT-4633: the two answers a state change can get. Pausing is
             // told "already paused" (which the provider must treat as the
             // state it asked for) and resuming is refused outright.
@@ -225,6 +256,7 @@ mod fake {
                 "/boot-source" => {
                     boot_args = body["boot_args"].as_str().unwrap_or_default().to_owned();
                 }
+                p if p.starts_with("/drives/") => drives.push(body.clone()),
                 "/vsock" => {
                     uds_path = body["uds_path"].as_str().unwrap_or_default().to_owned();
                 }
@@ -293,7 +325,15 @@ fn fixture(mode: &str) -> Fixture {
     let mkfs = root.join("mkfs.ext4");
     write_exec(
         &mkfs,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$5\")/mkfs.args\"\nexit 0\n",
+        concat!(
+            "#!/bin/sh\n",
+            "n=$#; i=0; img=\n",
+            "for a in \"$@\"; do i=$((i+1)); [ $i -eq $((n-1)) ] && img=$a; done\n",
+            "d=$(dirname \"$img\")\n",
+            "[ \"$3\" = -d ] && { stat -c %a \"$4/app\" 2>/dev/null || stat -f %Lp \"$4/app\"; } > \"$d/stage-app.mode\"\n",
+            "{ printf '%s\\n' \"$@\"; echo --; } >> \"$d/mkfs.args\"\n",
+            "exit 0\n",
+        ),
     );
     std::fs::write(root.join("vmlinux"), b"not really a kernel").unwrap();
     std::fs::write(root.join("rootfs.ext4"), b"not really a rootfs").unwrap();
@@ -308,6 +348,7 @@ fn fixture(mode: &str) -> Fixture {
         mkfs_ext4: mkfs,
         kill_grace: Duration::from_secs(2),
         boot_args_extra: Some("loglevel=8".into()),
+        ..Default::default()
     });
     Fixture {
         _dir: dir,
@@ -388,6 +429,10 @@ async fn full_lifecycle_with_fake_vmm() {
     assert_eq!(d["mem_mib"], 512);
     assert_eq!(d["vsock_port"], 5000);
     assert_eq!(d["function_drive_bytes"], 9 * 1024 * 1024);
+    assert_eq!(d["scratch_drive_bytes"], 128 * 1024 * 1024);
+    assert_eq!(d["network_interfaces"], 0);
+    assert_eq!(d["console_log_max_bytes"], 4 * 1024 * 1024);
+    assert!(d["host_disk_budget_bytes"].as_u64().unwrap() >= (128 + 9 + 8) * 1024 * 1024);
     assert_eq!(d["instance_id"], env_id.as_str().replace('_', "-"));
     assert!(d["kernel_sha256"].as_str().unwrap().len() == 64);
     assert!(d["rootfs_sha256"].as_str().unwrap().len() == 64);
@@ -398,27 +443,53 @@ async fn full_lifecycle_with_fake_vmm() {
         std::fs::metadata(&paths.function_drive).unwrap().len(),
         9 * 1024 * 1024
     );
-    let mode = std::fs::metadata(&paths.stage_app)
-        .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o755);
+    // The staged copy was 0755 when the drive was built, and is gone now.
     assert_eq!(
-        std::fs::metadata(&paths.stage_app).unwrap().len(),
-        artifact_len
+        std::fs::read_to_string(paths.dir.join("stage-app.mode"))
+            .unwrap()
+            .trim(),
+        "755"
+    );
+    assert!(artifact_len > 0);
+    assert!(!paths.stage.exists(), "stage is removed after mkfs");
+    // PLT-4622: the scratch drive is exactly ephemeral_storage_mib.
+    assert_eq!(
+        std::fs::metadata(&paths.scratch_drive).unwrap().len(),
+        128 * 1024 * 1024
     );
     let mkfs_args = std::fs::read_to_string(paths.dir.join("mkfs.args")).unwrap();
-    let mkfs_args: Vec<&str> = mkfs_args.lines().collect();
+    let blocks: Vec<Vec<&str>> = mkfs_args
+        .split("--\n")
+        .filter(|b| !b.is_empty())
+        .map(|b| b.lines().collect())
+        .collect();
     assert_eq!(
-        mkfs_args,
+        blocks,
         vec![
-            "-q",
-            "-F",
-            "-d",
-            paths.stage.to_str().unwrap(),
-            paths.function_drive.to_str().unwrap(),
-            "9M"
+            vec![
+                "-q",
+                "-F",
+                "-d",
+                paths.stage.to_str().unwrap(),
+                paths.function_drive.to_str().unwrap(),
+                "9M"
+            ],
+            vec![
+                "-q",
+                "-F",
+                "-b",
+                "4096",
+                "-m",
+                "0",
+                "-O",
+                "^has_journal",
+                "-E",
+                "nodiscard,lazy_itable_init=0",
+                "-L",
+                "tachyon-scratch",
+                paths.scratch_drive.to_str().unwrap(),
+                "128M"
+            ],
         ]
     );
     assert_eq!(
@@ -436,11 +507,27 @@ async fn full_lifecycle_with_fake_vmm() {
             "/boot-source",
             "/drives/rootfs",
             "/drives/function",
+            "/drives/scratch",
             "/vsock",
+            "/vm/config",
             "/actions"
         ]
     );
-    assert!(calls.iter().all(|c| c["method"] == "PUT"));
+    // PLT-4622 egress gate: the VMM's configuration is read back after every
+    // device is configured and before InstanceStart.
+    assert_eq!(calls[6]["method"], "GET");
+    assert!(
+        calls
+            .iter()
+            .enumerate()
+            .all(|(i, c)| i == 6 || c["method"] == "PUT")
+    );
+    assert!(calls.iter().all(|c| {
+        !c["path"]
+            .as_str()
+            .unwrap()
+            .starts_with("/network-interfaces")
+    }));
     assert_eq!(
         calls[0]["body"],
         serde_json::json!({"vcpu_count": 2, "mem_size_mib": 512, "smt": false})
@@ -454,7 +541,7 @@ async fn full_lifecycle_with_fake_vmm() {
         boot_args.starts_with("console=ttyS0 reboot=k panic=1 pci=off init=/sbin/tachyon-init ")
     );
     assert!(boot_args.contains(&format!(
-        "tachyon.env_id={env_id} tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb"
+        "tachyon.env_id={env_id} tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc"
     )));
     assert!(boot_args.ends_with("loglevel=8"));
     assert_eq!(
@@ -471,14 +558,18 @@ async fn full_lifecycle_with_fake_vmm() {
     );
     assert_eq!(
         calls[4]["body"],
-        serde_json::json!({"guest_cid": 3, "uds_path": paths.vsock_uds})
+        serde_json::json!({"drive_id": "scratch", "path_on_host": paths.scratch_drive, "is_root_device": false, "is_read_only": false})
     );
     assert_eq!(
         calls[5]["body"],
+        serde_json::json!({"guest_cid": 3, "uds_path": paths.vsock_uds})
+    );
+    assert_eq!(
+        calls[7]["body"],
         serde_json::json!({"action_type": "InstanceStart"})
     );
     assert_eq!(
-        calls[5]["listener_present_at_start"], true,
+        calls[7]["listener_present_at_start"], true,
         "host must listen before InstanceStart"
     );
 
@@ -545,7 +636,7 @@ async fn full_lifecycle_with_fake_vmm() {
             .iter()
             .any(|c| c == &format!("process-group:{pid}"))
     );
-    for expect in [&paths.function_drive, &paths.stage, &paths.dir] {
+    for expect in [&paths.function_drive, &paths.scratch_drive, &paths.dir] {
         assert!(
             report
                 .cleaned
@@ -737,6 +828,79 @@ async fn boot_error_on_api_400_kills_vmm_and_cleans_up() {
     );
 }
 
+/// PLT-4622 egress gate: a VMM that reports a network interface before
+/// `InstanceStart` is never started, and nothing of the environment remains.
+#[tokio::test]
+async fn egress_gate_refuses_to_start_a_vm_with_a_network_interface() {
+    let f = fixture("nic");
+    let spec = spec(&f, Duration::from_secs(5));
+    let env_id = spec.environment_id.clone();
+    let err = f.provider.create_environment(spec).await.unwrap_err();
+    let ProviderError::Boot(msg) = &err else {
+        panic!("expected Boot, got {err}");
+    };
+    assert!(msg.contains("egress gate"), "{msg}");
+    assert!(msg.contains("eth0"), "{msg}");
+    assert!(!f.root.join("run").join(env_id.as_str()).exists());
+    assert_eq!(
+        f.provider.observe_environment(&env_id).await.unwrap(),
+        EnvironmentObservation::NotFound
+    );
+}
+
+/// PLT-4622: the guest serial console cannot grow `console.log` past its cap;
+/// the rest is drained and counted, never written.
+#[tokio::test]
+async fn console_log_is_capped() {
+    let mut f = fixture("flood");
+    let cap = 256u64;
+    let cfg = FirecrackerConfig {
+        console_log_max_bytes: cap,
+        ..f.provider.config().clone()
+    };
+    f.provider = FirecrackerProvider::new(cfg);
+    let spec = spec(&f, Duration::from_secs(10));
+    let env_id = spec.environment_id.clone();
+    let handle = f.provider.create_environment(spec).await.expect("create");
+    drop(handle);
+    f.provider
+        .terminate_environment(&env_id, TerminateReason::Timeout)
+        .await
+        .unwrap();
+    // The capture thread writes its closing marker after the VMM is gone.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let archive = f.root.join("run").join(ARCHIVE_DIR).join(env_id.as_str());
+    let console = std::fs::read(archive.join("console.log")).unwrap();
+    let text = String::from_utf8_lossy(&console);
+    assert!(text.contains("reached its cap of 256 bytes"), "{text}");
+    assert!(text.contains("bytes of console output"), "{text}");
+    assert!(
+        (console.len() as u64) < cap + 256,
+        "console.log is {} bytes with a cap of {cap}",
+        console.len()
+    );
+}
+
+/// PLT-4622: an environment whose host-side budget does not fit in the free
+/// space of the workdir is refused before anything is written.
+#[tokio::test]
+async fn create_fails_closed_when_the_host_disk_cannot_hold_the_budget() {
+    let mut f = fixture("normal");
+    let cfg = FirecrackerConfig {
+        min_host_free_bytes: u64::MAX / 2,
+        ..f.provider.config().clone()
+    };
+    f.provider = FirecrackerProvider::new(cfg);
+    let spec = spec(&f, Duration::from_secs(5));
+    let env_id = spec.environment_id.clone();
+    let err = f.provider.create_environment(spec).await.unwrap_err();
+    assert!(
+        matches!(&err, ProviderError::Unavailable(m) if m.contains("host disk too full")),
+        "{err}"
+    );
+    assert!(!f.root.join("run").join(env_id.as_str()).exists());
+}
+
 #[tokio::test]
 async fn boot_times_out_when_guest_never_connects() {
     let f = fixture("no-connect");
@@ -748,7 +912,11 @@ async fn boot_times_out_when_guest_never_connects() {
         panic!("expected Boot, got {err}");
     };
     assert!(msg.contains("timeout waiting for guest bridge"), "{msg}");
-    assert!(started.elapsed() < Duration::from_secs(5));
+    // Bounded by the connect timeout, not by anything open-ended. The margin
+    // is wide because the first exec of the freshly written fake scripts can
+    // take seconds on a loaded macOS host (measured ~2.5 s with every test of
+    // this file running in parallel).
+    assert!(started.elapsed() < Duration::from_secs(15));
     assert!(!f.root.join("run").join(env_id.as_str()).exists());
     assert!(f.provider.list_environments().await.unwrap().is_empty());
 }

@@ -276,6 +276,7 @@ async fn run_inner(
         arch: ArchArg::Auto,
         memory_mib: None,
         cpu_millis: None,
+        ephemeral_storage_mib: None,
         timeout_seconds: Some(args.timeout_seconds),
         init_timeout_seconds: None,
         max_concurrency: Some(1),

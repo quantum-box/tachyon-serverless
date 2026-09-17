@@ -77,7 +77,7 @@ tsls functions list
 ```
 tsls functions deploy --function <name|id> --binary <path>
     [--arch auto|x86_64|aarch64]          # auto = CLI を動かしているホストの arch
-    [--memory-mib 256] [--cpu-millis 500]
+    [--memory-mib 256] [--cpu-millis 500] [--ephemeral-storage-mib 256]  # /tmp の上限（32..=2048）
     [--timeout-seconds 30] [--init-timeout-seconds 30] [--max-concurrency 4]
     [--env KEY=VALUE]... [--secret ENV_NAME=binding_ref]...
     [--description <text>]

@@ -6,13 +6,17 @@ use tachyon_serverless_domain::Architecture;
 pub const GUEST_INIT: &str = "/sbin/tachyon-init";
 /// Guest block device the function drive appears as (second virtio-blk).
 pub const FUNCTION_DEV: &str = "/dev/vdb";
+/// Guest block device the scratch drive appears as (third virtio-blk). The
+/// guest init mounts it read-write at `/tmp` (PLT-4622).
+pub const SCRATCH_DEV: &str = "/dev/vdc";
 /// Entrypoint of the user function inside the guest.
 pub const GUEST_ENTRYPOINT: &str = "/function/app";
 
 /// Compose the kernel command line for one environment.
 ///
 /// `console=ttyS0 reboot=k panic=1 pci=off init=/sbin/tachyon-init
-/// tachyon.env_id=<id> tachyon.vsock_port=<port> tachyon.function_dev=/dev/vdb`
+/// tachyon.env_id=<id> tachyon.vsock_port=<port> tachyon.function_dev=/dev/vdb
+/// tachyon.scratch_dev=/dev/vdc`
 /// plus ` keep_bootcon` on aarch64, plus `boot_args_extra` (trimmed) if any.
 pub fn compose_boot_args(
     arch: Architecture,
@@ -22,7 +26,8 @@ pub fn compose_boot_args(
 ) -> String {
     let mut s = format!(
         "console=ttyS0 reboot=k panic=1 pci=off init={GUEST_INIT} \
-         tachyon.env_id={env_id} tachyon.vsock_port={vsock_port} tachyon.function_dev={FUNCTION_DEV}"
+         tachyon.env_id={env_id} tachyon.vsock_port={vsock_port} tachyon.function_dev={FUNCTION_DEV} \
+         tachyon.scratch_dev={SCRATCH_DEV}"
     );
     if arch == Architecture::Aarch64 {
         s.push_str(" keep_bootcon");
@@ -44,7 +49,8 @@ mod tests {
         assert_eq!(
             s,
             "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/tachyon-init \
-             tachyon.env_id=env_01abc tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb"
+             tachyon.env_id=env_01abc tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb \
+             tachyon.scratch_dev=/dev/vdc"
         );
     }
 

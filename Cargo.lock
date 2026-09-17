@@ -417,6 +417,7 @@ dependencies = [
 name = "example-isolation-probe"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde_json",
  "tachyon-serverless-sdk",
  "tokio",

@@ -18,7 +18,11 @@ pub struct Limits {
     /// CPU bounds in millicores.
     pub min_cpu_millis: u32,
     pub max_cpu_millis: u32,
-    /// Ephemeral storage upper bound in MiB.
+    /// Ephemeral storage bounds in MiB: the size of the writable scratch
+    /// space (`/tmp`) an environment gets. The Firecracker provider backs it
+    /// with a per-environment ext4 drive of exactly this size, so it is also
+    /// the host disk an environment's guest can consume (PLT-4622).
+    pub min_ephemeral_storage_mib: u32,
     pub max_ephemeral_storage_mib: u32,
     /// Maximum number of log lines retained per invocation.
     pub max_log_lines_per_invocation: u32,
@@ -41,6 +45,7 @@ impl Default for Limits {
             max_memory_mib: 4096,
             min_cpu_millis: 250,
             max_cpu_millis: 2000,
+            min_ephemeral_storage_mib: 32,
             max_ephemeral_storage_mib: 2048,
             max_log_lines_per_invocation: 2000,
             max_log_bytes_per_invocation: 1024 * 1024,

@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# scripts/kvm/measure-isolation.sh - measure ADR-0001 M8 (egress none) and M9 (resource limits)
-# on a real Firecracker guest, through the gateway and the `tsls` CLI.
+# scripts/kvm/measure-isolation.sh - measure ADR-0001 M8 (egress none), M9 (resource limits) and
+# the PLT-4622 ephemeral storage limit (DISK) on a real Firecracker guest, through the gateway and
+# the `tsls` CLI.
 #
 # Flow: build (host tools + the guest musl probe) -> start a gateway with
 # config/gateway.firecracker.toml -> deploy examples/isolation-probe -> run the egress probe
 # and assert that every target failed to connect -> print the guest interface list -> run the
 # resource probe and compare the vCPU / memory the guest sees with what the revision asked for
 # -> deploy a revision with a small memory limit, run the allocation probe past that limit and
-# record how the platform classified the invocation -> stop the gateway -> PASS/FAIL table.
+# record how the platform classified the invocation -> deploy a revision with a small
+# ephemeral_storage_mib, fill /tmp from the guest until the write fails while sampling the host's
+# free space and the provider workdir, and check that the write stopped at the cap, that / and
+# /function refused writes and that the host lost no more than the environment's budget -> stop
+# the gateway -> PASS/FAIL table.
 #
 # Usage:
 #   scripts/kvm/measure-isolation.sh            # Linux/KVM, see docs/kvm.md section 3.6
@@ -26,16 +31,25 @@
 #   MEM_TOLERANCE_PCT     lowest MemTotal accepted, in percent of the requested memory
 #                         (default 70; a guest kernel always reserves some of it)
 #   CONNECT_TIMEOUT_MS / DNS_TIMEOUT_MS   per-target probe timeouts (default 2000 / 5000)
+#   DISK_STORAGE_MIB      ephemeral_storage_mib of the disk revision (default 64)
+#   DISK_FILL_MIB         MiB the guest tries to write (default 4 x DISK_STORAGE_MIB)
+#   DISK_TOLERANCE_PCT    lowest accepted write, in percent of DISK_STORAGE_MIB (default 80;
+#                         ext4 metadata takes a few percent of a small file system)
+#   DISK_HOST_SLACK_MIB   host free space the run may lose beyond the environment's scratch drive
+#                         (default 64: function drive, capped logs, gateway data)
 #
 # Output: docs/evidence/isolation-<UTC>/{egress.json,resources.json,alloc-invoke.json,
 #   alloc-invocation.json,alloc-logs.txt,revision-baseline.json,revision-alloc.json,
-#   provider.json,gateway.log,steps/,summary.json,summary.txt} plus a PASS/FAIL table for
-#   M8 and M9 on stdout.
+#   disk.json,disk-invocation.json,disk-logs.txt,disk-host-samples.txt,disk-host.json,
+#   revision-disk.json,provider.json,gateway.log,steps/,summary.json,summary.txt} plus a
+#   PASS/FAIL table for M8, M9 and DISK on stdout.
 #
 # Exit codes:
-#   0  the measurement ran and M8 passed (M9 findings are reported, not fatal)
+#   0  the measurement ran, M8 and DISK passed (M9 findings are reported, not fatal)
 #   1  a probe reached the network: the security-relevant failure (M8 FAIL)
 #   2  the measurement could not be taken (build, gateway, deploy or probe failure)
+#   3  the guest wrote past its ephemeral storage cap, wrote to a read-only drive, or the host
+#      lost more free space than the environment's budget (DISK FAIL)
 #
 # Idempotent: the function is reused when it already exists, every run writes a new evidence
 # directory, and the gateway started here is always stopped again. This script never changes
@@ -68,6 +82,10 @@ ALLOC_MIB="${ALLOC_MIB:-$(( ALLOC_MEMORY_MIB * 4 ))}"
 MEM_TOLERANCE_PCT="${MEM_TOLERANCE_PCT:-70}"
 CONNECT_TIMEOUT_MS="${CONNECT_TIMEOUT_MS:-2000}"
 DNS_TIMEOUT_MS="${DNS_TIMEOUT_MS:-5000}"
+DISK_STORAGE_MIB="${DISK_STORAGE_MIB:-64}"
+DISK_FILL_MIB="${DISK_FILL_MIB:-$(( DISK_STORAGE_MIB * 4 ))}"
+DISK_TOLERANCE_PCT="${DISK_TOLERANCE_PCT:-80}"
+DISK_HOST_SLACK_MIB="${DISK_HOST_SLACK_MIB:-64}"
 
 [ -f "$CONFIG_PATH" ] || e2e_die "gateway config not found: $CONFIG_PATH"
 
@@ -105,6 +123,8 @@ M8_STATUS="UNKNOWN"
 M8_DETAIL="the egress probe did not produce a report"
 M9_STATUS="UNKNOWN"
 M9_DETAIL="the resource probe did not produce a report"
+DISK_STATUS="UNKNOWN"
+DISK_DETAIL="the disk probe did not produce a report"
 ORPHAN_NOTE="not checked"
 FINDINGS=""
 
@@ -226,6 +246,12 @@ deploy_baseline() {
   deploy_revision baseline "$PROBE_MEMORY_MIB" "isolation probe baseline"
 }
 
+deploy_disk_revision() {
+  deploy_revision disk "$PROBE_MEMORY_MIB" \
+    "isolation probe disk fill ${DISK_FILL_MIB} MiB into ${DISK_STORAGE_MIB} MiB of ephemeral storage" \
+    --ephemeral-storage-mib "$DISK_STORAGE_MIB" --no-publish
+}
+
 deploy_alloc_revision() {
   deploy_revision alloc "$ALLOC_MEMORY_MIB" \
     "isolation probe alloc ${ALLOC_MIB} MiB in a ${ALLOC_MEMORY_MIB} MiB environment" --no-publish
@@ -286,6 +312,56 @@ run_alloc_probe() {
   grep -c 'alloc touched' "$EVIDENCE_DIR/alloc-logs.txt" >/dev/null 2>&1 &&
     tail -n 3 "$EVIDENCE_DIR/alloc-logs.txt"
   return 0
+}
+
+# Bytes available on the file system holding the provider workdir, and bytes allocated under it.
+host_avail_bytes() { df -B1 --output=avail "$FC_RUN_DIR" | tail -n 1 | tr -d ' '; }
+run_dir_bytes() { du -sB1 "$FC_RUN_DIR" 2>/dev/null | cut -f1; }
+
+# Fill /tmp from the guest while a sampler records the host side every 200 ms.
+run_disk_probe() {
+  local payload id sampler before_avail samples="$EVIDENCE_DIR/disk-host-samples.txt"
+  mkdir -p "$FC_RUN_DIR"
+  before_avail="$(host_avail_bytes)"
+  : > "$samples"
+  (
+    while :; do
+      printf '%s %s %s\n' "$(now_ms)" "$(host_avail_bytes)" "$(run_dir_bytes)" >> "$samples"
+      sleep 0.2
+    done
+  ) &
+  sampler=$!
+  payload="$(jq -nc --argjson mib "$DISK_FILL_MIB" '{probe: "disk", fill_mib: $mib}')"
+  invoke_capture "$FUNCTION_NAME" "$payload" --revision-id "$(state_get rev.disk)"
+  kill "$sampler" 2>/dev/null || true
+  wait "$sampler" 2>/dev/null || true
+  printf '%s\n' "$INVOKE_ERR" >&2
+  printf '%s\n' "$INVOKE_OUT" > "$EVIDENCE_DIR/disk.json"
+  id="$INVOKE_ID"
+  if [ -n "$id" ]; then
+    tsls functions invocation "$id" --json > "$EVIDENCE_DIR/disk-invocation.json" || true
+    tsls functions logs --invocation "$id" > "$EVIDENCE_DIR/disk-logs.txt" 2>/dev/null || true
+  fi
+  # Once the environment is gone its scratch drive must be gone too.
+  sleep 1
+  jq -n --argjson before "$before_avail" --argjson after "$(host_avail_bytes)" \
+    --argjson min_avail "$(awk 'NR==1||$2<m{m=$2} END{print m+0}' "$samples")" \
+    --argjson max_run_dir "$(awk '$3>m{m=$3} END{print m+0}' "$samples")" \
+    --argjson samples "$(wc -l < "$samples" | tr -d ' ')" \
+    --arg run_dir "$FC_RUN_DIR" \
+    '{run_dir: $run_dir, samples: $samples, host_avail_before_bytes: $before,
+      host_avail_min_bytes: $min_avail, host_avail_after_bytes: $after,
+      host_avail_max_drop_bytes: ($before - $min_avail), run_dir_max_bytes: $max_run_dir}' \
+    > "$EVIDENCE_DIR/disk-host.json"
+  assert_eq 0 "$INVOKE_RC" "disk probe exit code" || return 1
+  jq -e '.disk.fill.written_bytes != null' "$EVIDENCE_DIR/disk.json" >/dev/null || {
+    echo "the disk probe did not report how much it wrote" >&2
+    return 1
+  }
+  jq -r '.disk | "wrote \(.fill.written_mib) MiB into \(.dir) (\(.mount.device // "-") \(.mount.fs_type // "-")), stopped_by=\(.fill.stopped_by) \(.fill.error_kind // "")"' \
+    "$EVIDENCE_DIR/disk.json"
+  jq -r '"host avail drop max \(.host_avail_max_drop_bytes) B, run dir max \(.run_dir_max_bytes) B over \(.samples) samples"' \
+    "$EVIDENCE_DIR/disk-host.json"
 }
 
 # ---------------------------------------------------------------------------
@@ -387,6 +463,55 @@ evaluate_m9() {
   M9_DETAIL="$detail"
 }
 
+evaluate_disk() {
+  local file="$EVIDENCE_DIR/disk.json" host="$EVIDENCE_DIR/disk-host.json"
+  local written stopped device fstype cap_bytes floor_bytes drop allowed ro_ok ok=1 detail
+  if ! json_file_ok "$file" || ! jq -e '.disk' "$file" >/dev/null 2>&1; then
+    DISK_STATUS="UNKNOWN"
+    DISK_DETAIL="no disk report (see steps/ and gateway.log)"
+    return 0
+  fi
+  written="$(jq -r '.disk.fill.written_bytes' "$file")"
+  stopped="$(jq -r '.disk.fill.stopped_by' "$file")"
+  device="$(jq -r '.disk.mount.device // "-"' "$file")"
+  fstype="$(jq -r '.disk.mount.fs_type // "-"' "$file")"
+  cap_bytes=$(( DISK_STORAGE_MIB * 1024 * 1024 ))
+  floor_bytes=$(( cap_bytes * DISK_TOLERANCE_PCT / 100 ))
+  detail="wrote $(( written / 1024 / 1024 )) MiB of ${DISK_FILL_MIB} MiB into ${DISK_STORAGE_MIB} MiB (${device} ${fstype}), stopped_by=${stopped}"
+
+  if [ "$written" -gt "$cap_bytes" ]; then
+    ok=0
+    note_finding "DISK: the guest wrote ${written} bytes, more than the ${cap_bytes} byte cap"
+  fi
+  if [ "$stopped" != "enospc" ]; then
+    ok=0
+    note_finding "DISK: the fill stopped by ${stopped}, expected enospc at the cap"
+  elif [ "$written" -lt "$floor_bytes" ]; then
+    ok=0
+    note_finding "DISK: ENOSPC after ${written} bytes, below ${DISK_TOLERANCE_PCT}% of the cap"
+  fi
+  ro_ok="$(jq -r '[.disk.read_only_checks[] | select(.refused and .read_only_fs)] | length' "$file")"
+  if [ "$ro_ok" != "$(jq -r '.disk.read_only_checks | length' "$file")" ]; then
+    ok=0
+    note_finding "DISK: a read-only path accepted a write or failed with something other than EROFS: $(jq -c '.disk.read_only_checks' "$file")"
+  fi
+  detail="$detail; read-only refused ${ro_ok}/$(jq -r '.disk.read_only_checks | length' "$file")"
+  if json_file_ok "$host"; then
+    drop="$(jq -r '.host_avail_max_drop_bytes' "$host")"
+    allowed=$(( cap_bytes + DISK_HOST_SLACK_MIB * 1024 * 1024 ))
+    detail="$detail; host avail drop max $(( drop / 1024 / 1024 )) MiB (allowed $(( allowed / 1024 / 1024 )) MiB)"
+    if [ "$drop" -gt "$allowed" ]; then
+      ok=0
+      note_finding "DISK: the host lost ${drop} bytes of free space during the fill, more than ${allowed}"
+    fi
+  else
+    ok=0
+    note_finding "DISK: no host-side samples"
+  fi
+  if [ "$ok" -eq 1 ]; then DISK_STATUS="PASS"; else DISK_STATUS="FAIL"; fi
+  DISK_DETAIL="$detail"
+}
+
 orphan_note() {
   local out
   if [ ! -x "$REPO_ROOT/scripts/e2e/orphan-check.sh" ] || ! command -v pgrep >/dev/null 2>&1; then
@@ -454,12 +579,31 @@ write_summary_txt() {
       grep 'alloc touched' "$EVIDENCE_DIR/alloc-logs.txt" | tail -n 2 | sed 's/^/    /' || true
     fi
     echo
+    echo "== DISK ephemeral storage (expected: ENOSPC at ${DISK_STORAGE_MIB} MiB, host unaffected) =="
+    if json_file_ok "$EVIDENCE_DIR/disk.json" && jq -e .disk "$EVIDENCE_DIR/disk.json" >/dev/null 2>&1; then
+      jq -r '.disk | "  fill: \(.path) wrote \(.fill.written_bytes) B (\(.fill.written_mib) MiB) stopped_by=\(.fill.stopped_by) error=\(.fill.error // "-")"' \
+        "$EVIDENCE_DIR/disk.json"
+      jq -r '.disk | "  mount: \(.mount.device // "-") on \(.mount.mount_point // "-") \(.mount.fs_type // "-") \(.mount.options // "-")"' \
+        "$EVIDENCE_DIR/disk.json"
+      jq -r '.disk | "  statvfs before: total \(.fs_before.total_bytes // "-") B avail \(.fs_before.avail_bytes // "-") B; after fill avail \(.fs_after_fill.avail_bytes // "-") B; after cleanup avail \(.fs_after_cleanup.avail_bytes // "-") B"' \
+        "$EVIDENCE_DIR/disk.json"
+      jq -r '.disk.read_only_checks[] | "  write into \(.dir): refused=\(.refused) \(.error // "")"' \
+        "$EVIDENCE_DIR/disk.json"
+    else
+      echo "  no disk report"
+    fi
+    if json_file_ok "$EVIDENCE_DIR/disk-host.json"; then
+      jq -r '"  host: avail before \(.host_avail_before_bytes) B, min \(.host_avail_min_bytes) B, after \(.host_avail_after_bytes) B; run dir max \(.run_dir_max_bytes) B (\(.samples) samples)"' \
+        "$EVIDENCE_DIR/disk-host.json"
+    fi
+    echo
     echo "== findings =="
     if [ -n "$FINDINGS" ]; then printf '%s' "$FINDINGS" | sed 's/^/  - /'; else echo "  none"; fi
     echo
     echo "== verdict =="
     printf '  %-4s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
     printf '  %-4s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
+    printf '  %-4s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
   } > "$SUMMARY_TXT"
 }
 
@@ -469,6 +613,7 @@ print_table() {
   printf '%-4s %-8s %s\n' "---" "------" "----------------------------------------"
   printf '%-4s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
   printf '%-4s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
+  printf '%-4s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
   echo
   echo "evidence: $EVIDENCE_DIR"
   echo "summary:  $SUMMARY_TXT"
@@ -491,6 +636,8 @@ main() {
   step "M9: resource probe" run_resource_probe
   step "deploy allocation revision (${ALLOC_MEMORY_MIB} MiB)" deploy_alloc_revision
   step "M9: allocate ${ALLOC_MIB} MiB past the limit" run_alloc_probe
+  step "deploy disk revision (${DISK_STORAGE_MIB} MiB ephemeral storage)" deploy_disk_revision
+  step "DISK: fill /tmp with ${DISK_FILL_MIB} MiB" run_disk_probe
 
   local gw_rc=0
   if [ -n "$GATEWAY_PID" ]; then
@@ -503,6 +650,7 @@ main() {
 
   evaluate_m8
   evaluate_m9
+  evaluate_disk
   write_summary_txt
 
   steps_write_summary "$EVIDENCE_DIR/summary.json" \
@@ -511,15 +659,21 @@ main() {
         --arg baseline "$(state_get rev.baseline)" --arg alloc_rev "$(state_get rev.alloc)" \
         --arg m8 "$M8_STATUS" --arg m8_detail "$M8_DETAIL" \
         --arg m9 "$M9_STATUS" --arg m9_detail "$M9_DETAIL" \
+        --arg disk "$DISK_STATUS" --arg disk_detail "$DISK_DETAIL" \
+        --arg disk_rev "$(state_get rev.disk)" \
+        --argjson disk_storage_mib "$DISK_STORAGE_MIB" --argjson disk_fill_mib "$DISK_FILL_MIB" \
         --arg orphans "$ORPHAN_NOTE" --arg findings "$FINDINGS" \
         --argjson memory_mib "$PROBE_MEMORY_MIB" --argjson cpu_millis "$PROBE_CPU_MILLIS" \
         --argjson alloc_memory_mib "$ALLOC_MEMORY_MIB" --argjson alloc_mib "$ALLOC_MIB" \
         '{run_id: $run, architecture: $arch, host: $host, gateway_config: $config,
           function: $function, baseline_revision: $baseline, alloc_revision: $alloc_rev,
+          disk_revision: $disk_rev,
           requested: {memory_mib: $memory_mib, cpu_millis: $cpu_millis,
-                      alloc_memory_mib: $alloc_memory_mib, alloc_mib: $alloc_mib},
+                      alloc_memory_mib: $alloc_memory_mib, alloc_mib: $alloc_mib,
+                      disk_storage_mib: $disk_storage_mib, disk_fill_mib: $disk_fill_mib},
           measurements: {M8: {status: $m8, detail: $m8_detail},
-                         M9: {status: $m9, detail: $m9_detail}},
+                         M9: {status: $m9, detail: $m9_detail},
+                         DISK: {status: $disk, detail: $disk_detail}},
           orphans: $orphans,
           findings: ($findings | split("\n") | map(select(length > 0)))}')"
 
@@ -532,11 +686,15 @@ main() {
     echo "FAIL: a probe reached the network from the guest" >&2
     exit 1
   fi
-  if [ "$failed" -ne 0 ] || [ "$M8_STATUS" = "UNKNOWN" ]; then
+  if [ "$DISK_STATUS" = "FAIL" ]; then
+    echo "FAIL: the ephemeral storage limit did not hold (see findings)" >&2
+    exit 3
+  fi
+  if [ "$failed" -ne 0 ] || [ "$M8_STATUS" = "UNKNOWN" ] || [ "$DISK_STATUS" = "UNKNOWN" ]; then
     echo "INCOMPLETE: the measurement could not be taken ($failed step(s) failed)" >&2
     exit 2
   fi
-  echo "M8 PASS (M9 $M9_STATUS; findings are reported, not fatal)"
+  echo "M8 PASS, DISK PASS (M9 $M9_STATUS; M9 findings are reported, not fatal)"
   exit 0
 }
 

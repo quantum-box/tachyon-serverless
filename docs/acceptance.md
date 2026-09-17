@@ -162,12 +162,15 @@ KVM の記録に共通する制約:
 | # | 受入条件 | 状態 | 証跡 |
 |---|---|---|---|
 | 1 | `Capabilities` で egress / resource / isolation を明示し、未測定は `Unverified` | 実装済み・KVM実測あり | `crates/provider-port/src/execution.rs`、`crates/providers/firecracker/src/provider.rs::capabilities_are_explicit`、`crates/providers/process/src/lib.rs::capabilities_are_dev_only_and_explicit`、`crates/providers/fake/src/lib.rs::capabilities_are_dev_only`、各 E2E の `provider.json` と step 04 |
-| 2 | revision の resource / timeout / env の範囲検査 | 実装済み | `crates/domain/src/revision.rs::invalid_specs_are_rejected` |
+| 2 | revision の resource / timeout / env の範囲検査 | 実装済み | `crates/domain/src/revision.rs::invalid_specs_are_rejected`（`ephemeral_storage_mib` は PLT-4622 で下限 32 を追加し 32..=2048。CLI は `--ephemeral-storage-mib`） |
 | 3 | `TACHYON_` prefix の env と重複を拒否する | 実装済み | 同上 |
-| 4 | P1 は tap を作らず egress none。`Restricted` / `PublicWeb` を要求する revision は拒否 | 実装済み・KVM実測あり（M8: 3 宛先すべて `NetworkUnreachable`、DNS 解決せず、interface は loopback のみ。`docs/evidence/isolation-20260916T020934Z/`） | `crates/providers/firecracker/src/provider.rs::create_rejects_non_none_egress`、capability `egress_restricted` / `egress_public_web` = unsupported。注: revision の作成・validate は `restricted` / `public-web` を受理して `Ready` にし、拒否は invoke 時の環境作成で起きる（受入条件の「revision を拒否」とは異なる）。process provider は host の network を共有する |
-| 5 | vCPU / memory が `machine-config` に反映され、超過 alloc が `Crash` に分類される | 実装済み・KVM実測あり（M9: guest の vCPU 1 = 要求 1、MemTotal 232 MiB / 要求 256 MiB、128 MiB 環境で 512 MiB 確保は 80 MiB 到達後に `crash` / `Runtime.Crash`。`docs/evidence/isolation-20260916T020934Z/`） | `hello.json` の `evidence.details.{vcpus, mem_mib}`（1 / 256）、capability `enforce_resource_limits` = unverified。cgroup 等による host 側の資源強制は無い |
+| 4 | P1 は tap を作らず egress none。`Restricted` / `PublicWeb` を要求する revision は拒否 | 実装済み・KVM実測あり（M8: 3 宛先すべて `NetworkUnreachable`、DNS 解決せず、interface は loopback のみ。`docs/evidence/isolation-20260916T020934Z/`、再計測 `docs/evidence/isolation-20260917T011555Z/` でも同じ） | `crates/providers/firecracker/src/provider.rs::create_rejects_non_none_egress`、capability `egress_restricted` / `egress_public_web` = unsupported。注: revision の作成・validate は `restricted` / `public-web` を受理して `Ready` にし、拒否は invoke 時の環境作成で起きる（受入条件の「revision を拒否」とは異なる）。process provider は host の network を共有する |
+| 5 | vCPU / memory が `machine-config` に反映され、超過 alloc が `Crash` に分類される | 実装済み・KVM実測あり（M9: guest の vCPU 1 = 要求 1、MemTotal 232 MiB / 要求 256 MiB、128 MiB 環境で 512 MiB 確保は 80 MiB 到達後に `crash` / `Runtime.Crash`。`docs/evidence/isolation-20260916T020934Z/`、再計測 `docs/evidence/isolation-20260917T011555Z/` でも同じ） | `hello.json` の `evidence.details.{vcpus, mem_mib}`（1 / 256）、capability `enforce_resource_limits` = supported（PLT-4622 で昇格。下の 5b と合わせて）。CPU は vCPU 単位で、VMM への host 側 cgroup quota は無い |
+| 5b | ephemeral storage の上限: guest が host のディスクを使い切れない | 実装済み・KVM実測あり（DISK: `ephemeral_storage_mib = 64` の環境で `/tmp` に 256 MiB 書こうとして 58 MiB で `ENOSPC`（`/dev/vdc` の ext4、差は ext4 のメタデータ）、`/` と `/function` への書き込みは `EROFS`、fill 中の host の空きの減少は最大 73,224,192 B（約 70 MiB。確保済みの scratch drive 64 MiB と function drive）。`docs/evidence/isolation-20260917T011555Z/`） | `crates/providers/firecracker/src/drive.rs::{scratch_drive_is_exactly_the_requested_size, reserved_image_has_requested_length}`、`crates/providers/firecracker/src/host_guard.rs`（console の cap、`fc.log` の watchdog、空き容量の budget 検査）、`tests/fake_vmm.rs::{full_lifecycle_with_fake_vmm, console_log_is_capped, create_fails_closed_when_the_host_disk_cannot_hold_the_budget}`、`crates/runtime-bridge/src/init.rs`（`tachyon.scratch_dev` を `/tmp` に mount）、`examples/isolation-probe` の `{"probe":"disk"}`、`scripts/kvm/measure-isolation.sh`（exit 3 = DISK FAIL）。未検証: console 洪水と `fc.log` の上限の KVM 実測（fake VMM と unit test だけ）、drive の `rate_limiter`（未設定） |
+| 5c | egress の起動ゲート: network policy が効く前に user code が動かない | 実装済み・KVM実測あり（起動した環境の `evidence.details.network_interfaces` = 0 を記録、Firecracker v1.17 の `GET /vm/config` は起動前に `"network-interfaces": []`。`docs/evidence/isolation-20260917T011555Z/disk-invocation.json`） | `crates/providers/firecracker/src/egress_gate.rs`（`InstanceStart` 前に API 計画と `GET /vm/config` を検査し、NIC / MMDS があれば起動しない）、`tests/fake_vmm.rs::egress_gate_refuses_to_start_a_vm_with_a_network_interface`。NIC を付けた VM を実機で拒否させる試験はしていない（fake VMM だけ）。IPv6 は NIC が無いので経路が無いだけで個別に試していない |
 | 6 | 1 environment = 1 tenant × 1 revision × 1 attempt、破棄後に再利用しない | 実装済み・KVM実測あり | `crates/domain/src/revision.rs`（`ExecutionPolicy`）、`crates/application/tests/pipeline.rs::happy_path_records_timings_evidence_secrets_and_cleanup`、`docs/evidence/20260915T125610Z-firecracker/gateway.log`（invoke ごとに別の env id で `firecracker spawned` → `environment terminated`） |
-| 7 | jailer / 専用ユーザーの検討 | 未着手 | `docs/threat-model.md` §14-2 |
+| 7 | jailer / 専用ユーザーの検討 | 検討のみ（未導入） | `docs/threat-model.md` §14-2 に Kata / seccomp / ServiceAccount token を Firecracker の microVM / VMM の既定 seccomp filter / guest に資格情報を置かない、へ読み替えた対応と、jailer（chroot・uid・namespace・cgroup）が未導入であることを記録 |
+| 8 | 2 tenant を同じ host に並べた干渉（noisy neighbor）の計測 | 未検証 | 計測はすべて 1 環境ずつ。CPU の host 側 quota と drive の IO 帯域制限が無いため、同時実行時の干渉は未知 |
 
 ## PLT-4623 実行 identity・Secret binding・準備完了ゲート
 
@@ -314,7 +317,7 @@ KVM の記録に共通する制約:
 | M6 | 未検証 | KVM 上で 2 回目の `terminate_environment` を呼んだ記録が無い。単体テストは `crates/providers/firecracker/src/provider.rs::terminate_missing_env_is_idempotent_noop` |
 | M7 | 実装済み・KVM実測あり | E2E step 19・27（13 invocation の後に `orphan-check: clean (firecracker)`）、fc-smoke の `leftovers` |
 | M8 | 実測済み | 3 宛先（1.1.1.1:443 / 169.254.169.254:80 / 10.0.2.2:80）すべて `NetworkUnreachable`、DNS 解決なし、interface は loopback のみ、default route 0。`docs/evidence/isolation-20260916T020934Z/egress.json` |
-| M9 | 実測済み（ephemeral storage を除く） | guest vCPU 1、MemTotal 232 MiB（要求 256 MiB）、128 MiB 環境での 512 MiB 確保は `crash` / `Runtime.Crash`。ephemeral storage は依然として未強制。`docs/evidence/isolation-20260916T020934Z/resources.json`、`docs/evidence/isolation-20260916T020934Z/alloc-invocation.json` |
+| M9 | 実測済み | guest vCPU 1、MemTotal 232 MiB（要求 256 MiB）、128 MiB 環境での 512 MiB 確保は `crash` / `Runtime.Crash`（`docs/evidence/isolation-20260916T020934Z/resources.json`、`alloc-invocation.json`）。ephemeral storage は PLT-4622 で強制し、64 MiB の環境で 58 MiB 書いて `ENOSPC`（`docs/evidence/isolation-20260917T011555Z/disk.json`） |
 | M10 | 未検証 | fake provider の `crates/application/tests/pipeline.rs::capacity_exceeded_and_queue_timeout` だけ |
 | M11 | 未検証 | fake provider の `crates/application/tests/pipeline.rs::disconnect_after_invoke_is_outcome_unknown` だけ |
 | M12 | 実装済み・KVM実測あり（nested virtualization） | 上記の evidence はすべて aarch64 |
@@ -330,7 +333,7 @@ KVM の記録に共通する制約:
 | 別開発者・別 host による追試 | 未着手 | 記録は 1 人・1 host |
 | self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未着手 | runner が未用意（workflow のコメント） |
 | TiDB 永続化と migration（PLT-4618） | 未着手 | P1 非対象 |
-| egress 制御（restricted / public-web）と、cgroup 等による host 側の資源強制（PLT-4622） | 未着手 | P1 は NIC を付けない egress none と `machine-config` だけ。その実効性（M8・M9）も未検証 |
+| egress 制御（restricted / public-web）と、cgroup 等による host 側の資源強制 | 未着手 | P1 は NIC を付けない egress none（M8 実測済み）、`machine-config` の vCPU / memory（M9 実測済み）、scratch drive の大きさによる ephemeral storage（PLT-4622 で実測済み）まで。VMM への host 側 cgroup、drive の `rate_limiter`、2 tenant 同居時の干渉は未着手 |
 | Kata / Cloud Hypervisor adapter | 未着手 | ADR-0001 で後続 adapter と決めた |
 | OCI image の pull・実行 | 未着手 | P1 非対象（参照の受理と理由付き `Failed` だけ） |
 | jailer / 専用ユーザー | 未着手 | `docs/threat-model.md` §14-2 |

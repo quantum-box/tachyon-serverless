@@ -212,10 +212,15 @@ impl RevisionSpec {
                 ),
             ));
         }
-        if r.ephemeral_storage_mib > limits.max_ephemeral_storage_mib {
+        if r.ephemeral_storage_mib < limits.min_ephemeral_storage_mib
+            || r.ephemeral_storage_mib > limits.max_ephemeral_storage_mib
+        {
             return Err(DomainError::validation(
                 "resources.ephemeral_storage_mib",
-                format!("must be <= {}", limits.max_ephemeral_storage_mib),
+                format!(
+                    "must be within {}..={}",
+                    limits.min_ephemeral_storage_mib, limits.max_ephemeral_storage_mib
+                ),
             ));
         }
         let e = &self.execution;
@@ -465,6 +470,25 @@ mod tests {
         let mut s = spec();
         s.resources.memory_mib = 1;
         assert!(s.validate(&limits).is_err());
+
+        // PLT-4622: the scratch drive is sized from this, so both ends are bounded.
+        for mib in [
+            0,
+            limits.min_ephemeral_storage_mib - 1,
+            limits.max_ephemeral_storage_mib + 1,
+        ] {
+            let mut s = spec();
+            s.resources.ephemeral_storage_mib = mib;
+            assert!(s.validate(&limits).is_err(), "ephemeral_storage_mib={mib}");
+        }
+        for mib in [
+            limits.min_ephemeral_storage_mib,
+            limits.max_ephemeral_storage_mib,
+        ] {
+            let mut s = spec();
+            s.resources.ephemeral_storage_mib = mib;
+            s.validate(&limits).unwrap();
+        }
 
         let mut s = spec();
         s.execution.concurrency_per_environment = 2;
