@@ -1,0 +1,21 @@
+provider=process warm_pool=false drain_timeout=5s reconcile=500ms
+PASS  1-zero-before-traffic  provisioned=0
+PASS  2-burst-served  200s=7/7
+PASS  2-burst-coalesced  max provisioned=3 (revision max_concurrency 3)
+PASS  3-idle-to-zero  provisioned=0 warm_pool=false last_scale_event={"kind":"scale_up","reason":"backlog","at":"2026-09-17T06:21:59.066124Z"}
+NOTE  3  warm pool off: environments ended with their invocations (destroy-after-invoke); nothing idle to scale down
+PASS  3-no-runtime-process-left  orphan-check: clean (process) 
+PASS  4-reaccess-cold-start  status=200 start_kind=cold
+PASS  5-new-admission-on-new-revision  after: revision=rev_01m2q0eyp72246fn83nt4z0chx alias_generation=2
+PASS  5-running-invocation-not-switched  long: status=200 revision=rev_01m2q0etdpsgrns1gxhcbzg4qe alias_generation=1
+PASS  5-route-generation-at-admission  long=1 < after=2
+PASS  5-old-revision-drained  rev1 provisioned=0 route_state=superseded
+PASS  6-drain-timeout  status=504 error_type=Host.DrainTimeout after 7s (drain timeout 5s)
+PASS  7-deleting  deletion_state=deleting
+PASS  7-new-invocation-refused  status=409 {"code":"function_deleted","message":"function deleted: function fn_01m2q0et324qxaad2ntvdjz5jn is deleted","request_id":"01m2q0f8x1nth99m58819qwsrb","error_type":"Host.FunctionDeleted"}
+PASS  7-in-flight-completed  status=200 body={"burned_seconds":3.00008075,"cancelled":false,"iterations":385800000}
+PASS  7-retry-after-delete-refused  status=409 {"code":"function_deleted","message":"function deleted: function fn_01m2q0et324qxaad2ntvdjz5jn is deleted","request_id":"01m2q0fbsnwwjj784da1xtptjp","error_type":"Host.FunctionDeleted"}
+PASS  7-deletion-drained  {"deletion_state":"deleted","deleted_at":"2026-09-17T06:22:11.343331Z","drained_at":"2026-09-17T06:22:14.572844Z"}
+PASS  7-no-environment-left  provisioned=0
+PASS  8-zero-environments-is-not-zero-host-cost  zero environments is not zero host cost: the gateway, its store and the node keep running; hosts=1
+PASS  8-no-orphans  orphan-check: clean (process) 

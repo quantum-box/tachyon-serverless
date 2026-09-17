@@ -60,7 +60,8 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      function / route / revision / policy はすべて設定 cache から読み、管理 store は読まない。期限切れ → 503
      Host.ConfigExpired、route の先や pin した revision が未配信 → 503 Host.ConfigNotDelivered、egress が policy 外 →
      403 Host.PolicyDenied。環境再利用が off なら cold start の可否 (§4) もここで判定する。
-     Revision は受付時に固定される。実行中に alias を変えても版は変わらない。
+     Revision は受付時に固定される。実行中に alias を変えても版は変わらない。route を選んだ alias の generation を
+     Invocation.alias_generation に記録する（受付時刻 = route の解決時刻、PLT-4635）。削除中の function（deleting）も 409。
   3 payload 上限 (limits.max_payload_bytes → 413)、trace id ≤ 256 bytes、Idempotency-Key 1..=256 文字 (→ 400)。
      ここまで何も記録しない (拒否された request は key を消費しない)。Idempotency-Key が既存 Invocation に
      結び付いていれば、容量に関係なくそれを返す (同キー・異なる input digest → 409 conflict、本文に結び付いた
@@ -86,6 +87,8 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      おらず、control plane が到達不能なら [control_plane_outage] allow_cold_start = true であることを確認する。
      満たさなければ環境を作らず Failed{platform_error, Host.ConfigExpired | Host.AuthLeaseExpired |
      Host.ProviderControlUnavailable | Host.ColdStartRestricted} (HTTP 503)。
+     待機中・環境の用意の前・dispatch の直前に function が削除されていれば、handler を起動せず
+     Failed{platform_error, Host.FunctionDeleted} (HTTP 409、PLT-4635)。
      ExecutionEnvironment(Requested→Provisioning) を作成し、HelloAck(entrypoint, env(+secrets), limits) を組み立てる。
      secret binding を解決できなければ環境を作らずに 502 init_error (Host.SecretBindingUnavailable。他 tenant の
      binding と存在しない binding は同じ応答)。secret backend の障害は 500 platform_error (Host.SecretBackend)。
@@ -173,6 +176,12 @@ cooldown_seconds = 30
 
 [capacity.autoscaler]
 rate_window_seconds = 10
+
+[scaling]                      # PLT-4635。scale reconciler（idle sweep・min_ready・drain）
+reconcile_interval_ms = 1000   # reconcile の周期
+scale_down_cooldown_seconds = 30  # scale-up / 活性化の後、この間は scale-down しない（revision の既定）
+drain_timeout_seconds = 300    # drain（alias 切替・削除）開始からこれを過ぎて実行中の invocation は Host.DrainTimeout
+prestart_backoff_seconds = 5   # min_ready の先行起動が失敗した後の待ち
 
 [store]
 backend = "sqlite"             # sqlite（<data_dir>/state.db、既定）| memory（再起動で消える）
@@ -332,11 +341,23 @@ gateway 全体の semaphore を、資源で予約する admission に置き換�
 - **予約（capacity ledger）**: 1 環境 = revision の `resources` + `[capacity.node]` の per-environment overhead（VMM + bridge + host 側の成果物）。状態は `Starting`（起動を許可した時点）→ `Busy`（Ready）→ `Parking`（pool が quiesce 中）→ `Idle` → `Draining`（terminate 中）→ 解放。warm の約束（`Promised`）は in-flight に数えるが資源は持たない（idle 環境がすでに持つ）。予約は `Grant` という値で、driver → pool → 次の driver と所有者が移り、最後の所有者が drop した時点で解放されるので、二重加算も取り残しも起きない。terminate に失敗した pool の環境は、再試行が成功するまで予約を持ち続ける。
 - **node の上限**: `[capacity.node]` の cpu / memory / ephemeral storage（省略した次元は上限なし）と、`[capacity] max_concurrency`（Starting + Busy + Promised）。1 環境が node に一度も収まらなければ即時 429 `capacity`。
 - **公平 queue**: tenant ごとの sub-queue。in-flight / weight の小さい tenant から、同値は最後の割り当てが古い順。node 全体の制約で止まった待機者より後ろには cold start を許さない。件数 `max_queue`、payload bytes `max_queue_bytes`、tenant の持ち分 `max_queue`、各待機者の `queue_deadline` で有界。admission は preemptive ではないので、1 tenant が先に全枠を取るのを防ぐのは tenant quota（`tenant_defaults.max_concurrency` を node の `max_concurrency` 未満にする）。
-- **autoscaler**: revision ごとの `desired = ceil((max(到着率 × 平均時間, in_flight) + 待機数) / concurrency_per_environment)` を `[min_ready, min(max_concurrency, tenant quota)]` に clamp。`Starting + Busy + Idle + Parking < desired` のときだけ cold start する（N 件の burst は N 件起動しない）。起動は待機中の invocation の分だけで、先行起動・zero-scale は PLT-4635（`min_ready = 0` 固定）。縮小は pool の idle TTL / drain と、資源不足時の idle eviction（`EnvironmentPool::evict_idle`）。
+- **autoscaler**: revision ごとの `desired = ceil((max(到着率 × 平均時間, in_flight) + 待機数) / concurrency_per_environment)` を `[min_ready, min(max_concurrency, tenant quota)]` に clamp。`Starting + Busy + Idle + Parking < desired` のときだけ cold start する（N 件の burst は N 件起動しない）。起動は待機中の invocation の分だけで、例外は `min_ready` の先行起動（次節「スケール to zero・min_ready・drain」）。縮小は scale reconciler の idle sweep / drain と、資源不足時の idle eviction（`EnvironmentPool::evict_idle`）。
 - **start rate / breaker**: node 全体の token bucket（`[capacity.start_rate]`）。revision ごとの起動失敗 breaker（`[capacity.circuit_breaker]`、create / handshake / init の失敗が連続 K 回で open、cooldown 後に probe 1 件）。open 中は 503 `circuit_open`。
 - **配置**: `[capacity.node] region` と、tenant（`[[capacity.tenants]] required_region`）・revision（`required_region`、`RevisionSpec.placement`）の要求が一致しなければ、負荷に関係なく 503 `placement`。緩めない。
 - **host と環境の区別**: `GET /v1/capacity`（`tsls capacity`）は node（`hosts = 1`、`host_scale_out = "not_supported"`、容量、overhead）と、予約・状態別の環境数・queue・start rate・拒否数・呼び出し元 tenant の revision を分けて返す。host の追加はこの prototype の範囲外。
 - 状態はプロセスのメモリだけにある（再起動で到着率・breaker は消える。環境は起動時 reconcile が片付ける）。同じ `data_dir` を共有する 2 つ目の gateway は自分の予約しか数えないので、node の上限は 1 host 1 gateway の前提でだけ守られる。
+
+### スケール to zero・min_ready・drain（PLT-4635）
+
+決定と理由は `docs/adr/0009-scale-to-zero-and-drain.md`。実装は `crates/application/src/services/scaling.rs`（`ScaleController`）と admission の `try_scale_down` / `try_prestart` / `begin_drain`。
+
+- **scale policy**（revision の `execution`）: `min_ready`（既定 0）、`idle_ttl_seconds`（既定 `[pool] idle_ttl_seconds`）、`scale_down_cooldown_seconds`（既定 `[scaling] scale_down_cooldown_seconds`）。環境数の上限は `max_concurrency`。
+- **reconciler**: gateway が `[scaling] reconcile_interval_ms` ごとに `Application::reconcile_scaling` を呼ぶ（reuse の有無に関係なく常に動く）。1 回の処理は (1) 有効な設定 cache から route と削除済み function を読み、route から外れた revision（alias 切替）と削除された function の revision の drain を始める（cache が期限切れなら観測を保持して何もしない）、(2) drain timeout を過ぎた in-flight を止める（`Host.DrainTimeout`）、(3) pool の idle sweep、(4) `min_ready` の先行起動、(5) 削除の確定（`drained_at`、`combined` の gateway だけ）。
+- **idle sweep**: pool は `Idle` の行ごとに予約へ `try_scale_down` を問い、admission が 1 つの lock の下で「待機者なし・約束済みでない・TTL 経過・cooldown 経過・route されていれば `min_ready` を割らない」（drain 中なら TTL / cooldown / `min_ready` を見ない）を確認して予約を `Draining` にしてから、台帳の CAS（`take_idle_for_termination`）で行を取る。claim が先なら何もしない（claimer が予約を `Busy` に戻す）。`Busy` の環境は列挙されない。
+- **zero**: `min_ready = 0` の revision の最後の idle 環境が消えると環境数 0。次の invoke は cold start。環境数 0 でも gateway・`state.db`・node は動いており、host 費用は 0 にならない。pool が無い構成では環境は invocation と一緒に終わる。
+- **min_ready**: route されていて drain 中でない revision で、provisioned（`Starting + Busy + Parking + Idle`）が `min_ready` 未満なら、待機者がいない場合に限り、全 cap の内側で admission の予約（`Starting`）を取って起動し、`Ready`（epoch 0）のまま pool に渡す。台帳は一度も割り当てられていない `Ready` だけを `Idle` にする。pool の per-key 上限は `min_ready` まで引き上げ、`max_total_idle` に達していれば起動しない。失敗は `prestart_backoff_seconds` 待つ。
+- **drain**: alias 切替・関数削除の revision と、secret の値の変化で古くなった reuse key（invocation / 先行起動が計算した最新の key と違うもの）の環境は、pool に戻さず（`EnvironmentPool::release_for` が拒否）、idle は次の sweep で TTL に関係なく終える（待機者と約束は守る）。関数削除では待機中の invocation を `Host.FunctionDeleted` で終え、実行中は完了を待ち、何も残らなければ `drained_at` を記録する（`deletion_state`: `live` → `deleting` → `deleted`）。
+- **観測**: `GET /v1/capacity` の revision ごとの `min_ready` / `idle_ttl_seconds` / `scale_down_cooldown_seconds` / `route_state` / `last_scale_event` と node 全体の `scaling`（`docs/api.md` §5.1.1・§8）。metrics は PLT-4637。
 
 ### 環境 pool と再利用キー（PLT-4632）
 
@@ -393,7 +414,7 @@ gate が開いているとき、pool は環境の**休止と再開そのもの**
 - epoch が進むことで、前の attempt が遅れて送ってきた frame は `ExecutionLease::accepts(attempt_id, epoch)` に一致せず捨てられる（`docs/threat-model.md` T05）。再利用が入って初めてこの fencing が効く。
 - 取り出した warm 環境に `Invoke` frame を**渡せなかった**場合（idle の間に guest が死んでいた等）は、handler が始まっていないことが確定しているので、その環境を retire して **cold で 1 回だけ**やり直す。やり直しは cold 固定なので再帰しない。失敗した 1 行目の attempt の分類は cold と同じ規則で決める（`docs/threat-model.md` §9）: 書き込み失敗の後、guest が閉じる前に送った frame を短時間読み、`Exited` があれば `Crash` / `Runtime.Exited`、無ければ `Crash` / `Host.BridgeDisconnectedBeforeInvoke`。同じ guest の挙動が「warm だったから」別の分類になることはなく、warm 固有なのは**やり直すこと**だけである（やり直す理由は §9）。台帳には attempt が 2 行残り、usage には死んだ環境の `EnvironmentStopped` が 1 回だけ出る。
 
-**回収**。`idle_ttl_seconds` を過ぎた環境は sweeper（gateway が `idle_ttl/2` 間隔で起動）が terminate する。graceful shutdown では TTL に関係なく全部落とす（pool の session はプロセスと運命を共にするため、跨いで生き残らせない）。terminate に成功した環境だけが terminal になり、そのとき pool が `UsageEvent{EnvironmentStopped}`（id は `<env>:<epoch>:pool-stopped`）を出す。terminate が失敗した環境は `Draining` のまま残し（`list_active` に残るので起動時 reconcile から見えるし、pool からは配られない）、次の sweep で再試行する。claim した環境が使えずに **retire** する場合（session が無い、guest が死んでいた）も同じ経路を通る: 先に `Draining` にしてから terminate し、成功したら `Failed` にして計測、失敗したら `Draining` のまま再試行を queue して**まだ計測しない**。再起動後は台帳上の非 terminal な環境がすべて `Lost` になり、host に残った実体は起動時 reconcile が orphan として回収する（前節）。
+**回収**。idle TTL（revision の `idle_ttl_seconds`、既定 `[pool] idle_ttl_seconds`）を過ぎた環境は、scale reconciler（`[scaling] reconcile_interval_ms` ごと）の sweep が admission の判定（待機者・約束・cooldown・`min_ready`。前節「スケール to zero・min_ready・drain」）を通ったものだけ terminate する。graceful shutdown では TTL に関係なく全部落とす（pool の session はプロセスと運命を共にするため、跨いで生き残らせない）。terminate に成功した環境だけが terminal になり、そのとき pool が `UsageEvent{EnvironmentStopped}`（id は `<env>:<epoch>:pool-stopped`）を出す。terminate が失敗した環境は `Draining` のまま残し（`list_active` に残るので起動時 reconcile から見えるし、pool からは配られない）、次の sweep で再試行する。claim した環境が使えずに **retire** する場合（session が無い、guest が死んでいた）も同じ経路を通る: 先に `Draining` にしてから terminate し、成功したら `Failed` にして計測、失敗したら `Draining` のまま再試行を queue して**まだ計測しない**。再起動後は台帳上の非 terminal な環境がすべて `Lost` になり、host に残った実体は起動時 reconcile が orphan として回収する（前節）。
 
 **計測**。1 つの環境が生涯に出す `EnvironmentStopped` はちょうど 1 回で、それは誰が終わらせたか（driver / sweeper / drain / retire / 失敗した terminate の再試行）に依らない。`monotonic_duration_ms` も 1 種類だけ:「台帳の `created_at` から終了時刻まで」の host 観測の生存時間である（`crates/application/src/services/pool.rs::environment_lifetime_ms`）。再利用される環境は個々の attempt より長く生きるので、attempt の stopwatch では測れない。`UsageEvent.sequence` は**環境ごとに単調**で、warm 再利用でも続き番号になる（pool が session と一緒に carry し、driver はその続きから採番する）。したがって 1 環境の event は `sequence` で並べられ、`event_id` = `<env>:<epoch>:<sequence>` も衝突しない。
 
@@ -432,6 +453,7 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 12. 永続化は `<data_dir>/state.db`（埋め込み SQLite、§4「永続化」、`docs/adr/0003-execution-state-persistence.md`）。repository を経由しない読み書きをしない。更新は「読んだ値を条件にした CAS」で、負けたら読み直す（`AliasService::apply`）。新しい列や表は migration を追加して入れ、適用済みの migration を書き換えない。TiDB は将来の adapter で §6 のとおり非対象のまま。
 13. invoke の経路（認証・function / route / revision / policy の解決・cold start の可否）は `ConfigCache` / `InvokeGate`（`crates/application/src/control/`）だけを読み、`FunctionRepository` / `AliasRepository` / `RevisionRepository` を直接読まない。設定の有効期限切れで実行中の invocation を止めない（§4「設定配信と認可 lease」、ADR-0007）。
 14. queue の ACK を「実行した」「終わった」の根拠にしない。決定は台帳の CAS で行い、ACK はその commit の後に送る。object は必ず `ObjectScope`（tenant, region）と一緒に扱い、非 terminal の invocation が参照する object を消さない（§4「durable queue と object store」、ADR-0008）。
+15. pool の環境を終わらせる経路（sweep・drain）は admission の `Grant::try_scale_down` を通し、その後で台帳の CAS を取る。待機者・約束・cooldown・`min_ready` を見ない terminate を足さない（例外は資源不足時の `evict_idle` と shutdown の drain）。環境を起動するのは待機中の invocation か `min_ready` の先行起動（`AdmissionController::try_prestart`）だけ（§4「スケール to zero・min_ready・drain」、ADR-0009）。
 
 ## 6. 非対象（P1）
 

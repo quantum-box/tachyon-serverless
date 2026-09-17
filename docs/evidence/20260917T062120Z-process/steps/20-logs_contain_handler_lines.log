@@ -1,0 +1,7 @@
+2026-09-17T06:21:28.198Z [platform/boot] creating environment env_01m2q0dyje8sen74c2rp2hfd8w with provider process
+2026-09-17T06:21:28.807Z [platform/boot] bridge connected after 608 ms (host_pid=Some(6224))
+2026-09-17T06:21:28.809Z [platform/init] user process started (pid 6254)
+2026-09-17T06:21:29.168Z [stderr/init] hello: starting (unisolated=true)
+2026-09-17T06:21:29.171Z [stdout/handler] hello: handling invocation=inv_01m2q0dyje7cpq37arts18fkkj attempt=att_01m2q0dzphh4vhvegvxh1avv77 remaining_ms=29997
+2026-09-17T06:21:29.171Z [stderr/handler] hello: payload={"name":"demo"}
+2026-09-17T06:21:29.175Z [platform/shutdown] environment terminated (Completed); cleaned: /tmp/tsls-01m2q0dyje8sen74c2rp2hfd8w.sock, /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/target/e2e-demo/data/process/env_01m2q0dyje8sen74c2rp2hfd8w/bridge.sock, /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/target/e2e-demo/data/process/env_01m2q0dyje8sen74c2rp2hfd8w/bridge.pid, /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/target/e2e-demo/data/process/env_01m2q0dyje8sen74c2rp2hfd8w/bridge.stdout, /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/target/e2e-demo/data/process/env_01m2q0dyje8sen74c2rp2hfd8w/bridge.stderr, /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/target/e2e-demo/data/process/env_01m2q0dyje8sen74c2rp2hfd8w
