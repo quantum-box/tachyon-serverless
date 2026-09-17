@@ -37,6 +37,7 @@
 | `docs/evidence/20260915T125610Z-firecracker/` | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` の同じファイル群 | 上と同じ VM、`config/gateway.firecracker.toml`（`profile = "production"`） | 27/27 PASS |
 | `docs/evidence/20260915T171415Z-process/` | `scripts/e2e/demo.sh`（レビュー指摘修正の統合後、secret 値の検査ステップを含む 28 ステップ） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260915T171631Z-firecracker/` | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`（同上、commit `95af2ba`） | 上と同じ VM | 28/28 PASS |
+| `docs/evidence/20260917T020229Z-process/` | `scripts/e2e/demo.sh`（PLT-4618: 台帳が `state.db`。step 27 は `state.db` と `state.db-wal` も検査。port 8080 が使用中のため `config/gateway.dev.toml` の listen と data_dir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定） | macOS、process provider（隔離なし） | 28/28 PASS |
 
 本文の「E2E step NN」は各 E2E ディレクトリの `steps/NN-*.log`（例: step 23 = `steps/23-cross-tenant_get_invoke_-__404.log`）。特に断らない限り process と firecracker の両方で PASS している。
 
@@ -134,7 +135,7 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 | 4 | tenant 越境を拒否する | 実装済み | `contract_tests.rs::{rows_never_cross_a_tenant, idempotency_key_is_bound_with_its_invocation, artifact_ownership_is_per_tenant}`（他 tenant の function の revision / invocation、他 tenant の revision を指す alias、他 tenant の invocation の attempt、他 tenant の revision の environment、reuse key の tenant 不一致、他 tenant の environment の lease、tenant の書き換え）。API 層の越境は既存の `pipeline.rs` / `gateway_integration.rs` |
 | 5 | ID 重複を拒否する | 実装済み | `contract_tests.rs::{duplicate_ids_are_refused_for_every_entity, revision_numbers_are_allocated_and_unique_per_function, function_name_unique_per_tenant}` |
 | 6 | revision 改変を拒否する | 実装済み | `contract_tests.rs::a_revision_cannot_be_tampered_with_and_its_final_status_is_final`（spec / spec_digest / number / function / tenant の変更、Ready 後の状態変更を拒否） |
-| 7 | 空 DB へ migration を適用できる | 実装済み | `sqlite/tests.rs::migrations_apply_to_an_empty_database`、E2E（`docs/evidence/<この PR の run>-process/gateway.log` の `state store opened` `migrations_applied=[1, 2]`） |
+| 7 | 空 DB へ migration を適用できる | 実装済み | `sqlite/tests.rs::migrations_apply_to_an_empty_database`、E2E（`docs/evidence/20260917T020229Z-process/gateway.log` の `state store opened` `migrations_applied=[1, 2]`） |
 | 8 | 既存 DB（古い schema）へ migration を適用できる | 実装済み | `sqlite/tests.rs::{migrations_upgrade_a_database_at_an_older_version, a_database_newer_than_the_binary_is_refused, a_failing_migration_leaves_the_previous_schema_intact}` |
 | 9 | 既存の `state.json` 台帳を DB に移行できる | 実装済み | `sqlite/tests.rs::{a_p1_state_json_is_imported_once_and_moved_aside, an_interrupted_import_only_finishes_the_rename, a_state_json_next_to_a_populated_database_is_refused, corrupt_state_file_is_refused_with_a_hint, state_without_artifact_owners_still_loads}`。手動確認: 開発機の P1 `data/state.json`（210 KiB、function 3 / revision 27 / invocation 54 / attempt 36 / environment 54）の**コピー**を gateway で 2 回起動し、1 回目で全行を取り込み rename、2 回目は再 import しないことを確認（自動化していない） |
 | 10 | expand / contract と index 設計のレビュー | 実装済み（設計と規則の文書化、index 利用のテスト） / 未検証（第三者レビュー、10k 行での計測） | `sqlite/migrations/001_initial.sql` 冒頭の規則と各 index の用途コメント、`sqlite/migrations.rs` の expand → 切り替え → contract の規則、`002_output_retention.sql`（expand のみ）、`sqlite/tests.rs::pool_lookups_use_their_indexes`（`EXPLAIN QUERY PLAN`）。contract migration の実例はまだ無い |
