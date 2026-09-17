@@ -1,0 +1,19 @@
+commit 4076afe4d5c8b59b2673b923d95f1b8454f9f781
+host_note Apple M4 Mac; Lima vz VM tsls-kvm; nested virtualization; 4 vCPU 8 GiB; shared developer machine
+virt apple
+host_uname Linux 7.0.0-31-generic aarch64
+host_cpu 0x000
+host_vcpus 4
+host_mem_kib 8103308
+firecracker Firecracker v1.17.0
+sha256 fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c 3377624 .kvm/bin/firecracker
+sha256 4d8d2dd4dfc1d47932b2bd261479181dd0c54f0a2f32714421a7e7f9f07ddec8 2012584 .kvm/bin/jailer
+sha256 e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591 17111552 .kvm/vmlinux
+sha256 1a704a72bd8d5136d7c41d46ab56b1289cf6b7e65d69f2c3bdef1dcd09edc1a0 67108864 .kvm/x1/rootfs-restore.ext4
+sha256 3f60188450ed3391852f93eef945bc465f56efd6bacc1e7e8957f0df4074c808 30542880 target/x1-restore/release/tachyon-serverless-gateway
+sha256 376dd4902f8647e332e0671fb434f48f5eb42e45939aca871d6e98a13f599463 7795648 target/x1-restore/release/tsls
+sha256 2936b64e2398f596d9aac13bec565491796bcf0f9bfb8cf2f25bf2bef70d777d 5229048 target/x1-restore/aarch64-unknown-linux-musl/release/tachyon-serverless-runtime-bridge
+sha256 f9ca2056124cb9c55d147540fb90e0f5dec7d1bfa855fac5e7d62f2619f66b7a 3973096 target/x1-restore/aarch64-unknown-linux-musl/release/example-restore-verify
+sha256 bdf26aa6809dbdcab4898e5b54d441620b5c4c0bd41e5dda09ba98b2a8728a1b 6937 /home/takanorifukuyama.guest/rv-full/gateway-cold.toml
+sha256 1aca9978cd336865653981e5bb004c62ca96cfbd7252d738075cfaf19b3c0755 7076 /home/takanorifukuyama.guest/rv-full/gateway-warm.toml
+params cold_n=20 cold_miss_n=10 warm_n=20 restore_n=30 miss_n=20 plain_miss_n=5 conc=4 conc_rounds=2 cycles=5 dataset_mib=64 passes=1 memory_mib=256 cpu_millis=1000 clock_tolerance_ms=1000

@@ -43,6 +43,7 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 | [runbook.md](runbook.md) | **最初に読む運用手順**。入口 `scripts/lab/lab.sh`（preflight / bootstrap / up / demo p1〜p3 / status / logs / down / teardown）と pin の一覧 `deploy/lab/versions.lock`。事前条件と必要権限の明示リスト、quickstart、phase ごとの期待出力、component ごとの health 確認、失敗時の復旧（取得失敗・checksum 不一致、KVM 権限、jailer / cgroup、migration と新しい schema、port、nats、設定、disk 満杯、残った環境）、自分の lab だけを消す teardown と孤児検査、データ・region・秘密情報・費用の注意、まだ再現できないこと | PLT-4648 || [kvm.md](kvm.md) | KVM 検証 host の要件、preflight / bootstrap / smoke / teardown、gateway での利用、証跡の読み方、macOS での Lima + nested virtualization 手順（確認済み）と実測値、失敗時の切り分け | PLT-4615 / PLT-4621 |
 | [metrics.md](metrics.md) | `GET /metrics` の catalog・認証・cardinality、boot identity、detector と alert rule（`deploy/prometheus/alerts.yml`）、負荷シナリオ（`scripts/load/scenarios.sh`）の上限と出力。数値は観測値で SLA ではない | PLT-4637 |
 | [benchmark.md](benchmark.md) | cold / warm の first response・同時実行・資源原価のベンチマーク（`scripts/kvm/bench.sh`）の手順・集計規則・結果・RFC 仮目標との比較。SLA・価格ではない | PLT-4647 |
+| [x1-results.md](x1-results.md) | X1 実験: 復元した Rust 関数の identity・接続・整合性の検査と cold / warm / restored の first response・memory・storage（`scripts/x1/restore-verify.sh`）。P0〜P4 と別に判定 | PLT-4654 |
 | [api.md](api.md) | 管理 API と Invoke API の使い方、認証 header、エラー応答、OpenAPI の場所 | PLT-4619 / PLT-4626 |
 | [console.md](console.md) | Functions 最小 console（`apps/console`、Next.js static export、gateway の `[console]` で `/console/` に配信）の構成・実行・E2E・秘密情報の扱い・制約 | PLT-4644 |
 | [console-integration.md](console-integration.md) | 既存 Tachyon Console（tachyon-apps）への統合計画（未着手、設計のみ）: 置き場所・認証 adapter・置き換える部分 | PLT-4644 |
@@ -50,7 +51,7 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 
 ## 実行記録（evidence）
 
-`scripts/e2e/demo.sh` は `evidence/<UTC>-<provider>/`、`scripts/kvm/smoke.sh` は `evidence/kvm-<UTC>/` に書く。`scripts/kvm/bench.sh` は `evidence/bench-<UTC>/`（[benchmark.md](benchmark.md) §4）。`scripts/load/scenarios.sh` は `evidence/load-<scenario>-<UTC>-<provider>/`（[metrics.md](metrics.md) §6）。smoke の読み方は [kvm.md](kvm.md) §4、E2E の中身はリポジトリの [README](../README.md)「E2E デモ」。
+`scripts/e2e/demo.sh` は `evidence/<UTC>-<provider>/`、`scripts/kvm/smoke.sh` は `evidence/kvm-<UTC>/` に書く。`scripts/kvm/bench.sh` は `evidence/bench-<UTC>/`（[benchmark.md](benchmark.md) §4）。`scripts/x1/restore-verify.sh` は `evidence/x1-restore-verify-<UTC>/`（[x1-results.md](x1-results.md) §9）。`scripts/load/scenarios.sh` は `evidence/load-<scenario>-<UTC>-<provider>/`（[metrics.md](metrics.md) §6）。smoke の読み方は [kvm.md](kvm.md) §4、E2E の中身はリポジトリの [README](../README.md)「E2E デモ」。
 
 | ディレクトリ | 内容 | 結果 |
 |---|---|---|

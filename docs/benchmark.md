@@ -148,7 +148,7 @@ cold の内訳（hello、p50 / p95）: queue 0 / 0、boot 5102 / 5315、init 501
 | cold first response（小さな Rust 関数、image cache hit）p95 ≤ 3 秒 | **未達** | hello cold p95 6037 ms（n=20、失敗 0） | boot p95 5315 ms のうち大半が guest kernel の起動で、500 m の cgroup quota に throttle され続けている（throttled period 比 0.99）。nested virtualization の serial console が重い。bare metal・console 抑制・quota 変更時の値は未測定なので、構造的に 3 秒を超えるかは判断できない |
 | cache miss を別集計 | 記録のみ | hello 6158 / 7609（n=5）、http-axum 5908 / 6128、cpu-burn 6925 / 14106 | RFC に数値目標は無い |
 | warm の基盤追加遅延 p95 ≤ 20 ms（handler 除く） | **一部未達**（hello 17 ms・cpu-burn 17 ms は達成、http-axum 31 ms は未達） | host 計測の total − handler。client から見た client − handler は 23 / 51 / 30 ms | 逐次・loopback・1 host の値。http-axum の p95 は readiness（p95 15 ms）を含む。内訳ごとの揺れの原因は調べていない。RFC の「同一 region・所定負荷」の条件ではない |
-| Fast Restore が cold より p95 / p99 と原価で改善 | 未測定 | — | snapshot restore が未実装（§8） |
+| Fast Restore が cold より p95 / p99 と原価で改善 | **一部達成**（X1、別判定） | `examples/restore-verify` で client p95 / p99: cold 9572 / 10546、restored 1674 / 1861 ms（n=20 / 30）。生きている環境の private memory 103 → 6 MiB | 同時 4 restore と平文 cache なしは悪化、snapshot ごとに disk 約 596 MiB と共有 page cache。nested aarch64 の 1 host だけ。`docs/x1-results.md`（PLT-4654） |
 | 正常 invoke の可用性 99.9% | 未測定 | 失敗率は逐次の group で 0、並列 8 で 8〜17% | 数百 request・1 host の記録は可用性の測定ではない |
 
 ### 6.5 P0 の Kata / Knative 条件との比較
@@ -169,6 +169,8 @@ P0（PLT-4613 / PLT-4616）では Kata・Cloud Hypervisor・Knative のどれも
 
 snapshot restore（PLT-4653 以降）が provider に入ったら、`bench.sh` に `restore-hit` / `restore-miss` の scenario を足す。手順は `warm` と同じ構造にし、同じ `request` / `enrich` / `bench-report.sh` を通して client の p50 / p95 / p99、失敗率、`AttemptTimings` の内訳（restore 用の timing が増える場合はそれも）、restore 後の環境の memory.current を並べる。RFC §13.5・§19 のとおり、restore API の完了時間ではなく **最初の応答まで**を比べ、cold と同じ表に置く。snapshot が使えず通常起動に落ちた attempt は除外せず、start kind で数える。
 
+**PLT-4654 で実測した**（`docs/x1-results.md`、`scripts/x1/restore-verify.sh`）。`bench.sh` には scenario を足さず、同じ集計規則（nearest-rank、失敗を含む全 attempt、内訳は値を持つ attempt だけ）を `scripts/x1/restore-verify-report.sh` で使った。sample は `examples/restore-verify`（64 MiB の合成表、revision 256 MiB・1000 m）で、本節 §6 の hello（500 m）とは条件が違うので同じ表に並べていない。
+
 ## 9. 未測定・未検証
 
 | 項目 | 状態 | 理由 |
@@ -178,4 +180,4 @@ snapshot restore（PLT-4653 以降）が provider に入ったら、`bench.sh` �
 | guest 内の memory 内訳（kernel / bridge / 関数） | 未測定 | host から見えない。VMM RSS と cgroup の値だけ |
 | vsock の転送 byte 数、1 MiB payload / 6 MiB response（ADR-0001 M13） | 未測定 | 本計測の payload は数十 bytes |
 | open loop の到着率負荷、長時間の soak、memory pressure、noisy neighbor 下の first response | 未測定 | noisy neighbor の CPU 隔離は `docs/kvm.md` §3.6 NOISY で別に測っている |
-| Fast Restore | 未測定 | 実装なし（§8） |
+| Fast Restore | 一部 KVM実測あり（X1、1 host） | `docs/x1-results.md`（PLT-4654）。x86_64・bare metal・別 host は未測定 |
