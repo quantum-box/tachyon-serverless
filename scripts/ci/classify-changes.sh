@@ -60,6 +60,9 @@ is_kvm() {
     crates/provider-port/*) return 0 ;;           # ExecutionProvider / capabilities / usage port
     crates/application/src/bridge_session.rs) return 0 ;; # host half of the wire protocol
     crates/application/src/services/pool.rs) return 0 ;;  # quiesce / resume of real VMs
+    crates/domain/src/egress.rs) return 0 ;;              # egress allowlist -> host nftables / tap policy
+    # Not KVM: services/dispatcher.rs, repository/slot.rs (PLT-4631 lease / fencing): control-plane
+    # CAS logic verified deterministically by the security regression group (lease_epoch).
     # future billing / usage / metering code anywhere under crates/ (`*` also matches `/` here)
     crates/*billing* | crates/*usage* | crates/*metering*) return 0 ;;
     scripts/kvm/*) return 0 ;;                    # bootstrap / smoke / measurements / teardown

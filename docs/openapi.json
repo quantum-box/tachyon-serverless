@@ -241,6 +241,13 @@
               "null"
             ]
           },
+          "egress_allow": {
+            "description": "Destinations a `restricted` revision may open (required for\n`restricted`, refused for the other profiles). IPv4 CIDRs only;\nspecial-purpose ranges (private, link-local, metadata, loopback, ...)\nare refused.",
+            "items": {
+              "$ref": "#/components/schemas/EgressAllowRequest"
+            },
+            "type": "array"
+          },
           "env_vars": {
             "items": {
               "items": false,
@@ -307,6 +314,36 @@
         "required": [
           "queue_deadline",
           "client_deadline"
+        ],
+        "type": "object"
+      },
+      "EgressAllowRequest": {
+        "description": "One allowlist entry of a `restricted` revision.",
+        "properties": {
+          "cidr": {
+            "description": "IPv4 network, e.g. `203.0.113.7/32` (a bare address means `/32`).",
+            "type": "string"
+          },
+          "ports": {
+            "description": "Destination ports (1..=16 entries).",
+            "items": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "protocol": {
+            "description": "`tcp` (default) or `udp`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "cidr",
+          "ports"
         ],
         "type": "object"
       },

@@ -54,8 +54,8 @@ add_case tenant-check-removed security:tenant_authz crates/application/src/authz
   '    if true || &principal.tenant_id == owner {' \
   "ensure_tenant lets a principal reach another tenant's resource"
 add_case reuse-key-ignored security:reuse_key crates/application/src/repository/memory.rs \
-  'matches!(e.state, EnvironmentState::Idle) && &e.reuse_key == key' \
-  'matches!(e.state, EnvironmentState::Idle) && (&e.reuse_key == key || true)' \
+  '                && &e.reuse_key == key\n' \
+  '                && (&e.reuse_key == key || true)\n' \
   'an idle environment is claimed without comparing its reuse key'
 add_case epoch-fencing-removed security:lease_epoch crates/domain/src/environment.rs \
   '&self.attempt_id == attempt_id && self.epoch == epoch' \
@@ -66,8 +66,8 @@ add_case elapsed-client-deadline-accepted security:deadline crates/domain/src/in
   '        if false && deadlines.client_deadline < now {' \
   'an invocation whose client deadline already elapsed is accepted'
 add_case egress-gate-result-ignored security:egress_gate crates/providers/firecracker/src/provider.rs \
-  '        check_vm_config(&vm_config).map_err(|e| Self::boot_error(paths, e))?;' \
-  '        let _ = check_vm_config(&vm_config);' \
+  '        check_vm_config(&vm_config, expected_nic.as_ref())\n            .map_err(|e| Self::boot_error(paths, e))?;' \
+  '        let _ = check_vm_config(&vm_config, expected_nic.as_ref());' \
   'the pre-boot egress check is not enforced, so a VM with a NIC reaches InstanceStart'
 add_case memory-lower-bound-removed security:resource_limits crates/domain/src/revision.rs \
   'if r.memory_mib < limits.min_memory_mib || r.memory_mib > limits.max_memory_mib {' \

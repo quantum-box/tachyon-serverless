@@ -23,7 +23,7 @@ branch protection で required にするのは **`ci-gate` と `kvm-gate` の 2 
 | `contracts`（`contracts`） | ci.yml | docs-only 以外 | `ci-gate` 経由で required | 下の 3 step | 同上 |
 | └ OpenAPI snapshot | | | | `apps/gateway/tests/openapi_snapshot.rs`: utoipa から生成した文書が `docs/openapi.json` と違えば失敗（route・schema・status の変更をレビュー対象の diff にする）。`/v1/` の全 operation に bearer security があること | |
 | └ protocol golden | | | | `crates/protocol/tests/golden.rs`: host↔bridge の全 frame 種別・全 `GuestErrorKind`・length prefix のバイト列、Runtime API の JSON body（error report / HTTP event / HTTP response / continuation）と定数（path・header・event type・上限・`PROTOCOL_VERSION`）を双方向（fixture → decode、sample → encode）で照合。fixture の過不足も検出 | |
-| └ security regression group | | | | `scripts/ci/security-regression.sh`: `scripts/ci/security-regression.list` の 63 テスト（tenant 認可 16、reuse key 7、lease / epoch 10、deadline 11、egress 起動ゲート順序 6、資源上限 13）を `--exact` で実行し、**list にあるテストが実行結果に現れなければ失敗**（rename・削除・`#[ignore]` で coverage が黙って落ちない） | |
+| └ security regression group | | | | `scripts/ci/security-regression.sh`: `scripts/ci/security-regression.list` の 83 テスト（tenant 認可 16、reuse key 7、lease / epoch 20、deadline 11、egress（起動ゲートの順序・allowlist・nftables 規則）15、資源上限 14）を `--exact` で実行し、**list にあるテストが実行結果に現れなければ失敗**（rename・削除・`#[ignore]` で coverage が黙って落ちない） | |
 | `guest musl build`（`guest-musl-build`） | ci.yml | docs-only 以外 | `ci-gate` 経由で required | guest 側（bridge・examples）の x86_64 musl static build | 同上 |
 | `shell scripts`（`scripts`） | ci.yml | 常に | `ci-gate` 経由で required | `bash -n`、shellcheck、`scripts/e2e/selftest.sh`、`scripts/ci/selftest.sh`（分類規則・kvm-gate 判定・security list の検証を固定） | skip しない |
 | **`ci-gate`** | ci.yml | 常に（`if: always()`） | **required** | 上の job の集約。failure / cancelled は失敗。skip は docs-only のときだけ許す | — |
@@ -49,12 +49,13 @@ PR は `base...merge commit`、main への push は `before...sha` の差分で�
 | 分類 | path | 効果 |
 |---|---|---|
 | docs-only | すべての path が `docs/**`（`docs/openapi.json` を除く）、`*.md`、`LICENSE*`、`.github/ISSUE_TEMPLATE/**` | `rust` / `contracts` / `guest-musl-build` を skip。`scripts` と `ci-gate` は走る |
-| KVM 必要 | `crates/providers/firecracker/**`、`crates/runtime-bridge/**`、`crates/protocol/**`、`crates/provider-port/**`、`crates/application/src/bridge_session.rs`、`crates/application/src/services/pool.rs`、`crates/**` のうち path に `billing` / `usage` / `metering` を含むもの、`scripts/kvm/**`、`scripts/e2e/**`、`scripts/ci/kvm-*`、`config/gateway.firecracker.toml`、`examples/{hello,cpu-burn,isolation-probe}/**`、`.github/workflows/kvm-integration.yml`、`rust-toolchain.toml`（いずれも `*.md` を除く） | `kvm-gate` が KVM 実行を要求する |
+| KVM 必要 | `crates/providers/firecracker/**`、`crates/runtime-bridge/**`、`crates/protocol/**`、`crates/provider-port/**`、`crates/application/src/bridge_session.rs`、`crates/application/src/services/pool.rs`、`crates/domain/src/egress.rs`（egress allowlist。host の nftables / tap 規則になる）、`crates/**` のうち path に `billing` / `usage` / `metering` を含むもの、`scripts/kvm/**`、`scripts/e2e/**`、`scripts/ci/kvm-*`、`config/gateway.firecracker.toml`、`examples/{hello,cpu-burn,isolation-probe}/**`、`.github/workflows/kvm-integration.yml`、`rust-toolchain.toml`（いずれも `*.md` を除く） | `kvm-gate` が KVM 実行を要求する |
 | contract（参考） | `crates/protocol/**`、`crates/api-types/**`、`apps/gateway/**`、`docs/openapi.json`、`scripts/ci/security-regression.list` | 表示だけ（contract gate は docs-only 以外で常に走る） |
 
 判断メモ:
 
 - `Cargo.lock` は KVM 必要に含めていない。依存更新のたびに KVM を要求すると、runner が無い現状では merge が止まるため。`tokio-vsock` など guest に入る依存を上げる PR は、レビューで `kvm` label を付けるか dispatch する。
+- PLT-4631 の `crates/application/src/services/dispatcher.rs`・`crates/application/src/repository/slot.rs`（dispatcher lease、slot の CAS、fencing）は KVM 必要にしない。provider に依存しない control plane の排他で、`crates/application/tests/leases.rs` と repository 契約テスト（別プロセスの競合を含む）が決定的に検査し、security regression group（`lease_epoch`）に入れている。
 - `crates/application` の lease / fencing / deadline のロジックは fake provider で決定的に試験できるので、KVM ではなく security regression group で守る（`bridge_session.rs` と `services/pool.rs` だけは実 VM の frame・休止に依存するので KVM 必要）。
 - 分類は path だけを見る保守的な規則で、変更の中身は見ない。docs 以外の path が 1 つでもあれば docs-only にはならない。
 

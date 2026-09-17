@@ -38,6 +38,10 @@ classify false false "gateway code" apps/gateway/src/handlers.rs
 classify false false "application lease code (unit / property gates only)" crates/application/src/services/invoke.rs
 classify false false "ci workflow" .github/workflows/ci.yml
 classify false true "firecracker provider" crates/providers/firecracker/src/egress_gate.rs
+classify false true "firecracker network policy" crates/providers/firecracker/src/network.rs
+classify false true "domain egress allowlist" crates/domain/src/egress.rs
+classify false false "dispatcher lease (security group, not KVM)" crates/application/src/services/dispatcher.rs
+classify false false "slot store (security group, not KVM)" crates/application/src/repository/slot.rs
 classify false true "runtime bridge" crates/runtime-bridge/src/session.rs
 classify false true "protocol" crates/protocol/src/wire.rs
 classify false true "kvm scripts" scripts/kvm/smoke.sh

@@ -49,6 +49,16 @@ lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlit
 lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::releasing_respects_the_pool_caps_and_refuses_a_stale_copy
 lease_epoch tachyon-serverless-application lib repository::sqlite::tests::cas_holds_across_separate_connections_to_the_same_file
 lease_epoch tachyon-serverless-application test:pipeline a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one
+lease_epoch tachyon-serverless-domain lib environment::tests::a_fenced_environment_is_never_reusable_and_its_old_epoch_is_stale
+lease_epoch tachyon-serverless-domain lib environment::tests::a_lease_is_renewed_only_while_unexpired_and_expires_past_the_skew
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::acquire_is_a_cas_with_exactly_one_winner_per_epoch
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::a_completion_with_a_stale_epoch_never_overwrites_state
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::a_fenced_dispatcher_can_neither_renew_nor_acquire
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::reclaim_happens_once_fences_and_only_a_confirmed_terminate_settles
+lease_epoch tachyon-serverless-application lib repository::sqlite::tests::separate_processes_racing_for_one_slot_or_one_key_have_one_winner
+lease_epoch tachyon-serverless-application test:leases two_gateways_on_one_data_dir_never_settle_each_others_work
+lease_epoch tachyon-serverless-application test:leases a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced
+lease_epoch tachyon-serverless-application test:leases a_fenced_environment_stays_fenced_until_its_terminate_succeeds
 
 # --- deadline enforcement: the host enforces deadlines, clients can only shorten them ---------
 deadline tachyon-serverless-domain lib invocation::tests::queue_timeout_fails_from_queued
@@ -65,16 +75,26 @@ deadline tachyon-serverless-runtime-bridge lib session::tests::a_resumed_guest_g
 
 # --- egress gate ordering: a VM with networking is refused BEFORE it boots --------------------
 egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_without_networking_pass
-egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_with_networking_fail_closed
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_with_networking_fail_closed_without_a_policy
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_policy_allows_exactly_its_interface_once_and_never_mmds
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_exactly_the_policed_nic_passes
 egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_without_nic_passes
 egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed
-egress_gate tachyon-serverless-provider-firecracker lib provider::tests::create_rejects_non_none_egress
+egress_gate tachyon-serverless-provider-firecracker lib provider::tests::create_rejects_non_none_egress_where_it_cannot_be_enforced
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::restricted_accepts_only_the_allowlist_and_ends_in_drop
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::public_web_denies_special_ranges_and_foreign_dns_before_accepting
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::read_back_fails_closed_on_any_divergence
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::base_script_is_default_deny_for_taps
+egress_gate tachyon-serverless-domain lib egress::tests::allow_rules_refuse_special_ranges_empty_ports_and_ipv6
+egress_gate tachyon-serverless-domain lib egress::tests::blocked_ranges_cover_management_metadata_and_private_space
+egress_gate tachyon-serverless-domain lib revision::tests::egress_allowlists_are_validated_per_profile
 egress_gate tachyon-serverless-provider-firecracker test:fake_vmm egress_gate_refuses_to_start_a_vm_with_a_network_interface
 
 # --- resource limit validation: specs, frames, responses, logs and scratch drives are bounded --
 resource_limits tachyon-serverless-domain lib revision::tests::invalid_specs_are_rejected
 resource_limits tachyon-serverless-application lib config::tests::limits_overrides_apply
 resource_limits tachyon-serverless-application lib config::tests::limits_must_leave_frame_headroom
+resource_limits tachyon-serverless-application lib config::tests::firecracker_network_section_defaults_and_refuses_unsafe_values
 resource_limits tachyon-serverless-application lib bridge_session::tests::oversized_invoke_is_refused_without_touching_the_session
 resource_limits tachyon-serverless-application lib repository::contract_tests::sqlite::inline_output_is_bounded
 resource_limits tachyon-serverless-application lib repository::contract_tests::sqlite::logs_are_bounded_per_invocation
