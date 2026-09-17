@@ -478,6 +478,11 @@ pub struct StoreConfig {
     /// finished. After that only its digest and size remain. `0` keeps it for
     /// as long as the row exists.
     pub output_retention_seconds: u64,
+    /// Seconds an `Idempotency-Key` keeps answering after its invocation
+    /// finished (PLT-4631). A key never expires while its invocation is in
+    /// flight. After that the key can be used for a new invocation and the
+    /// binding is purged. `0` keeps it for as long as the row exists.
+    pub idempotency_retention_seconds: u64,
 }
 
 impl Default for StoreConfig {
@@ -485,17 +490,69 @@ impl Default for StoreConfig {
         Self {
             backend: StoreBackend::Sqlite,
             output_retention_seconds: 7 * 24 * 60 * 60,
+            idempotency_retention_seconds: 24 * 60 * 60,
         }
     }
 }
 
+fn seconds(n: u64) -> Option<chrono::Duration> {
+    (n > 0).then(|| chrono::Duration::seconds(n.min(i64::MAX as u64 / 1000) as i64))
+}
+
 impl StoreConfig {
     pub fn output_retention(&self) -> Option<chrono::Duration> {
-        (self.output_retention_seconds > 0).then(|| {
-            chrono::Duration::seconds(
-                self.output_retention_seconds.min(i64::MAX as u64 / 1000) as i64
-            )
-        })
+        seconds(self.output_retention_seconds)
+    }
+
+    pub fn idempotency_retention(&self) -> Option<chrono::Duration> {
+        seconds(self.idempotency_retention_seconds)
+    }
+}
+
+/// Dispatcher identity and ownership leases (PLT-4631,
+/// docs/architecture.md §4).
+///
+/// Every gateway process registers as a new dispatcher in the store, renews
+/// its lease (and the slot leases of its in-flight attempts) every
+/// `heartbeat_interval_seconds`, and only reclaims the work of another
+/// dispatcher once that one's lease is `lease_ttl_seconds` old plus
+/// `max_clock_skew_ms`, or once it stopped, or once it is the previous
+/// incarnation of the same `instance` on the same host and its process is
+/// gone.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DispatcherConfig {
+    /// Stable name of this gateway instance. Defaults to `gateway@<listen>`.
+    /// Two gateways that share a `data_dir` must not share an instance name.
+    pub instance: Option<String>,
+    pub lease_ttl_seconds: u64,
+    pub heartbeat_interval_seconds: u64,
+    /// Clock difference tolerated between dispatchers on the host.
+    pub max_clock_skew_ms: u64,
+}
+
+impl Default for DispatcherConfig {
+    fn default() -> Self {
+        Self {
+            instance: None,
+            lease_ttl_seconds: 30,
+            heartbeat_interval_seconds: 10,
+            max_clock_skew_ms: 2_000,
+        }
+    }
+}
+
+impl DispatcherConfig {
+    pub fn lease_ttl(&self) -> chrono::Duration {
+        chrono::Duration::seconds(self.lease_ttl_seconds.min(i64::MAX as u64 / 1000) as i64)
+    }
+
+    pub fn heartbeat_interval(&self) -> Duration {
+        Duration::from_secs(self.heartbeat_interval_seconds)
+    }
+
+    pub fn max_clock_skew(&self) -> chrono::Duration {
+        chrono::Duration::milliseconds(self.max_clock_skew_ms.min(i64::MAX as u64) as i64)
     }
 }
 
@@ -539,6 +596,8 @@ pub struct GatewayConfig {
     pub pool: PoolConfig,
     #[serde(default)]
     pub store: StoreConfig,
+    #[serde(default)]
+    pub dispatcher: DispatcherConfig,
 }
 
 fn default_listen() -> String {
@@ -647,6 +706,24 @@ impl GatewayConfig {
                  measured. Take the measurement under profile = \"dev\" \
                  (scripts/kvm/measure-warm.sh), then promote the capability"
                     .into(),
+            ));
+        }
+        if self.dispatcher.lease_ttl_seconds == 0
+            || self.dispatcher.heartbeat_interval_seconds == 0
+            || self.dispatcher.heartbeat_interval_seconds >= self.dispatcher.lease_ttl_seconds
+        {
+            return Err(ConfigError::Invalid(
+                "[dispatcher] needs 0 < heartbeat_interval_seconds < lease_ttl_seconds".into(),
+            ));
+        }
+        if self
+            .dispatcher
+            .instance
+            .as_deref()
+            .is_some_and(|i| i.is_empty() || i.len() > 256)
+        {
+            return Err(ConfigError::Invalid(
+                "[dispatcher] instance must be 1..=256 bytes".into(),
             ));
         }
         if self.capacity.max_concurrency == 0 {

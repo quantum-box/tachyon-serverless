@@ -17,11 +17,20 @@
 //! or one the provider re-created) is reclaimed and its row marked `Lost`,
 //! because nothing in this process holds a session to it.
 //!
-//! It is meant to run once, before the listener accepts, so everything the
-//! ledger still reports as active belongs to the previous process. An
-//! environment of a live invocation of *this* process is recorded in the
-//! ledger before `create_environment` is called, so it is always part of the
-//! known set and is never terminated here.
+//! It is meant to run once, before the listener accepts. An environment of a
+//! live invocation of *this* process is recorded in the ledger before
+//! `create_environment` is called, so it is always part of the known set and
+//! is never terminated here.
+//!
+//! **Other dispatchers (PLT-4631).** Another gateway may share the
+//! `data_dir` (and the provider's workdir). An environment owned by a
+//! dispatcher that is still live is left entirely alone: not adopted, not
+//! terminated, not marked `Lost`. Before any of that, [`ReconcileService::reclaim`]
+//! reclaims the work of dispatchers that lost their lease (the ledger half,
+//! [`crate::services::Dispatcher::reclaim_ledger`]) and terminates the
+//! environments that reclaim fenced, settling each one only once the
+//! provider confirmed the terminate. The gateway also runs `reclaim` on its
+//! heartbeat timer.
 //!
 //! A pass never fails: a provider that cannot be listed is logged and startup
 //! continues.
@@ -32,12 +41,13 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::Serialize;
 
-use tachyon_serverless_domain::{Clock, EnvironmentId, ExecutionEnvironment};
+use tachyon_serverless_domain::{Clock, DispatcherId, EnvironmentId, ExecutionEnvironment};
 use tachyon_serverless_provider_port::{
     EnvironmentObservation, ExecutionProvider, TerminateReason,
 };
 
 use crate::repository::Repositories;
+use crate::services::Dispatcher;
 
 /// Result of one reconcile pass. Also rendered by `GET /readyz`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -55,7 +65,31 @@ pub struct ReconcileReport {
     pub failed: usize,
     /// Known environments the provider no longer tracks: marked `Lost`.
     pub lost: usize,
+    /// Environments owned by another live dispatcher: left alone.
+    pub foreign: usize,
+    /// What the reclaim before the pass did.
+    pub reclaim: ReclaimSummary,
     /// Why the pass could not complete. Startup continues either way.
+    pub error: Option<String>,
+}
+
+/// One reclaim of the work of dispatchers that lost their lease (PLT-4631).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ReclaimSummary {
+    /// Dispatchers marked reclaimed by this pass.
+    pub dispatchers: usize,
+    /// Slot leases released because their owner lost its lease.
+    pub leases: usize,
+    /// Invocations settled (`OutcomeUnknown` once dispatched).
+    pub invocations: usize,
+    /// Environments fenced by this pass.
+    pub fenced: usize,
+    /// Fenced environments (from this or an earlier pass) whose terminate the
+    /// provider confirmed: settled as `Lost`.
+    pub terminated: usize,
+    /// Fenced environments whose terminate failed: still `Draining`, retried
+    /// by the next pass, never reused or counted free.
+    pub pending: usize,
     pub error: Option<String>,
 }
 
@@ -65,6 +99,7 @@ pub struct ReconcileService {
     repos: Repositories,
     provider: Arc<dyn ExecutionProvider>,
     clock: Arc<dyn Clock>,
+    dispatcher: Arc<Dispatcher>,
     last: Mutex<Option<ReconcileReport>>,
 }
 
@@ -73,13 +108,98 @@ impl ReconcileService {
         repos: Repositories,
         provider: Arc<dyn ExecutionProvider>,
         clock: Arc<dyn Clock>,
+        dispatcher: Arc<Dispatcher>,
     ) -> Self {
         Self {
             repos,
             provider,
             clock,
+            dispatcher,
             last: Mutex::new(None),
         }
+    }
+
+    /// Reclaim the work of dispatchers that lost their lease, then terminate
+    /// every fenced environment and settle the ones whose terminate the
+    /// provider confirmed. Lease expiry alone never frees an environment: one
+    /// whose terminate fails stays fenced (`Draining`) for the next pass.
+    pub async fn reclaim(&self) -> ReclaimSummary {
+        let mut summary = ReclaimSummary::default();
+        match self.dispatcher.reclaim_ledger() {
+            Ok(r) => {
+                summary.dispatchers = r.dispatchers.len();
+                summary.leases = r.leases;
+                summary.invocations = r.invocations;
+                summary.fenced = r.fenced.len();
+            }
+            Err(e) => summary.error = Some(format!("ledger: {e}")),
+        }
+        let fenced = match self.repos.slots.list_fenced() {
+            Ok(v) => v,
+            Err(e) => {
+                summary.error = Some(format!("ledger: {e}"));
+                return summary;
+            }
+        };
+        for env in fenced {
+            match self
+                .provider
+                .terminate_environment(&env.id, TerminateReason::Reconcile)
+                .await
+            {
+                Ok(done) => {
+                    match self
+                        .repos
+                        .slots
+                        .confirm_terminated(&env.id, env.epoch, self.clock.now())
+                    {
+                        Ok(true) => {
+                            summary.terminated += 1;
+                            tracing::info!(
+                                environment_id = %env.id,
+                                owner = ?env.owner,
+                                was_running = done.was_running,
+                                "fenced environment terminated and settled"
+                            );
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
+                            summary.pending += 1;
+                            tracing::warn!(error = %e, environment_id = %env.id, "cannot settle a fenced environment");
+                        }
+                    }
+                }
+                Err(e) => {
+                    summary.pending += 1;
+                    tracing::warn!(
+                        error = %e,
+                        environment_id = %env.id,
+                        "terminating a fenced environment failed; it stays fenced"
+                    );
+                }
+            }
+        }
+        summary
+    }
+
+    /// Dispatchers other than this one that are still live.
+    fn live_foreign_owners(&self) -> BTreeSet<DispatcherId> {
+        match self.repos.slots.list_dispatchers() {
+            Ok(records) => records
+                .into_iter()
+                .filter(|d| d.is_live() && &d.id != self.dispatcher.id())
+                .map(|d| d.id)
+                .collect(),
+            // Without the list nothing may be treated as ours to reclaim.
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot list dispatchers");
+                BTreeSet::new()
+            }
+        }
+    }
+
+    fn is_foreign(&self, env: &ExecutionEnvironment, live: &BTreeSet<DispatcherId>) -> bool {
+        env.owner.as_ref().is_some_and(|o| live.contains(o))
     }
 
     /// The most recent pass, if one ran.
@@ -91,7 +211,10 @@ impl ReconcileService {
     /// the provider still runs, mark environments the provider no longer
     /// knows as `Lost`, and record the summary.
     pub async fn reconcile(&self) -> ReconcileReport {
-        let mut report = ReconcileReport::default();
+        let mut report = ReconcileReport {
+            reclaim: self.reclaim().await,
+            ..ReconcileReport::default()
+        };
         // The ledger is read first: an environment this gateway knows as
         // active belongs to a live invocation or to the pool and must never
         // be terminated here. Without that snapshot nothing may be
@@ -103,6 +226,13 @@ impl ReconcileService {
                 return self.finish(report);
             }
         };
+        let live = self.live_foreign_owners();
+        // Fenced environments belong to the reclaim above; environments of a
+        // live dispatcher belong to that dispatcher. Neither is judged here.
+        let (skipped, known): (Vec<_>, Vec<_>) = known
+            .into_iter()
+            .partition(|e| e.is_fenced() || self.is_foreign(e, &live));
+        let skipped: BTreeSet<EnvironmentId> = skipped.into_iter().map(|e| e.id).collect();
         let known_by_id: BTreeMap<EnvironmentId, ExecutionEnvironment> =
             known.iter().map(|e| (e.id.clone(), e.clone())).collect();
         let listed = match self.provider.list_environments().await {
@@ -116,6 +246,19 @@ impl ReconcileService {
         let mut seen: BTreeSet<EnvironmentId> = BTreeSet::new();
         for id in listed {
             seen.insert(id.clone());
+            if skipped.contains(&id) {
+                report.foreign += 1;
+                continue;
+            }
+            // Not in the snapshot: another dispatcher may have recorded it
+            // since. Read it again before treating it as an orphan.
+            if !known_by_id.contains_key(&id)
+                && let Ok(Some(env)) = self.repos.environments.get(&id)
+                && (env.is_fenced() || self.is_foreign(&env, &self.live_foreign_owners()))
+            {
+                report.foreign += 1;
+                continue;
+            }
             let disowned = match known_by_id.get(&id) {
                 Some(env) if self.owns(env).await => {
                     report.adopted += 1;
@@ -239,6 +382,10 @@ impl ReconcileService {
                 disowned = report.disowned,
                 failed = report.failed,
                 lost = report.lost,
+                foreign = report.foreign,
+                reclaimed_dispatchers = report.reclaim.dispatchers,
+                fenced_terminated = report.reclaim.terminated,
+                fenced_pending = report.reclaim.pending,
                 "startup reconcile incomplete"
             ),
             None => tracing::info!(
@@ -249,6 +396,10 @@ impl ReconcileService {
                 disowned = report.disowned,
                 failed = report.failed,
                 lost = report.lost,
+                foreign = report.foreign,
+                reclaimed_dispatchers = report.reclaim.dispatchers,
+                fenced_terminated = report.reclaim.terminated,
+                fenced_pending = report.reclaim.pending,
                 "startup reconcile finished"
             ),
         }

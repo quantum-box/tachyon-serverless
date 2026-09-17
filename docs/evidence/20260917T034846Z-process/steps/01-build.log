@@ -1,0 +1,34 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.21s
+   Compiling syn v3.0.5
+   Compiling serde_derive v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling futures-macro v0.3.34
+   Compiling thiserror-impl v2.0.20
+   Compiling clap_derive v4.6.7
+   Compiling tokio v1.53.1
+   Compiling futures-util v0.3.34
+   Compiling thiserror v2.0.20
+   Compiling clap v4.6.7
+   Compiling serde v1.0.229
+   Compiling multer v3.1.0
+   Compiling futures-executor v0.3.34
+   Compiling futures v0.3.34
+   Compiling chrono v0.4.45
+   Compiling serde_urlencoded v0.7.1
+   Compiling tracing-serde v0.2.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling tachyon-serverless-domain v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad80e77d9ff878f6b/crates/domain)
+   Compiling hyper v1.11.1
+   Compiling tokio-util v0.7.19
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.20
+   Compiling axum v0.8.9
+   Compiling tachyon-serverless-protocol v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad80e77d9ff878f6b/crates/protocol)
+   Compiling tachyon-serverless-sdk v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad80e77d9ff878f6b/crates/sdk)
+   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad80e77d9ff878f6b/crates/runtime-bridge)
+   Compiling example-hello v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad80e77d9ff878f6b/examples/hello)
+   Compiling example-cpu-burn v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad80e77d9ff878f6b/examples/cpu-burn)
+   Compiling example-http-axum v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad80e77d9ff878f6b/examples/http-axum)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.53s

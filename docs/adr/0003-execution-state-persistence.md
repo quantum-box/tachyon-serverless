@@ -2,7 +2,7 @@
 
 ## ステータス
 
-Accepted（2026-09-17、PLT-4618 で決定 2〜4 と移行を実装）。提案は 2026-09-16。実装の内容と、決定・受入条件のうちまだ入っていないものは「実装メモ（PLT-4618、2026-09-17）」にある。lease の期限評価と複数プロセスでの検証は PLT-4631。
+Accepted（2026-09-17、PLT-4618 で決定 2〜4 と移行を実装、PLT-4631 で決定 1・5 と受入条件 A1〜A3・A6 を実装）。提案は 2026-09-16。実装の内容と、決定・受入条件のうちまだ入っていないものは「実装メモ（PLT-4618、2026-09-17）」と「実装メモ（PLT-4631、2026-09-17）」にある。後者が前者の表を上書きする。
 
 ## コンテキスト
 
@@ -193,11 +193,11 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 
 | 項目 | 状態 | 内容 |
 |---|---|---|
-| 決定 1（slot / lease / pool を別 port `SlotStore` に分ける） | 未着手 | PLT-4632 が pool を `EnvironmentRepository::{claim_for_reuse, release_to_pool, take_idle_for_termination}` として先に入れており、この issue ではその signature を変えていない。両方とも同じ SQLite file に載るので、分割は TiDB adapter を作るときの作業として残る |
-| 決定 5（lease の `expires_at` を取得・renew・失効で評価する） | 一部 | lease は `leases` 表に永続化される。期限の評価・renew・他プロセスからの回収は未実装（PLT-4631） |
+| 決定 1（slot / lease / pool を別 port `SlotStore` に分ける） | 未着手 → **PLT-4631 で実装**（下記） | PLT-4632 が pool を `EnvironmentRepository::{claim_for_reuse, release_to_pool, take_idle_for_termination}` として先に入れており、この issue ではその signature を変えていない。両方とも同じ SQLite file に載るので、分割は TiDB adapter を作るときの作業として残る |
+| 決定 5（lease の `expires_at` を取得・renew・失効で評価する） | 一部 → **PLT-4631 で実装**（下記） | lease は `leases` 表に永続化される。期限の評価・renew・他プロセスからの回収は未実装（PLT-4631） |
 | 決定 6（epoch を進める） | 実装済み（PLT-4632） | `ExecutionEnvironment::reassign` と `claim_for_reuse` の CAS |
-| A1 / A6（N 個の **OS プロセス**で slot / idempotency key を奪い合う） | 未検証 | 同じ file に別々の connection を持つ**スレッド**で alias CAS と claim を奪い合うテストだけがある（`repository/sqlite/tests.rs::cas_holds_across_separate_connections_to_the_same_file`）。プロセスを分けたテストは PLT-4631 |
-| A2 / A3（lease の失効と回収、期限切れ renew の拒否） | 未着手 | 上の決定 5 |
+| A1 / A6（N 個の **OS プロセス**で slot / idempotency key を奪い合う） | 未検証 → **PLT-4631 で実装**（下記） | 同じ file に別々の connection を持つ**スレッド**で alias CAS と claim を奪い合うテストだけがある（`repository/sqlite/tests.rs::cas_holds_across_separate_connections_to_the_same_file`）。プロセスを分けたテストは PLT-4631 |
+| A2 / A3（lease の失効と回収、期限切れ renew の拒否） | 未着手 → **PLT-4631 で実装**（下記） | 上の決定 5 |
 | A4（再起動後も Ready / Idle の環境が pool に残る） | 未着手（意図的） | 起動時の台帳 reconcile は P1 と同じく非 terminal の環境をすべて `Lost` にする。pool の環境は bridge session を失っており、再起動後に駆動できないため（`crates/application/tests/pipeline.rs::a_pooled_environment_is_reclaimed_after_a_restart`）。**このため同じ `data_dir` を複数の gateway が同時に開く構成は対象外**（後から開いた側が先の側の in-flight を `Lost` / `OutcomeUnknown` にする） |
 | A5（reuse key の完全一致と index） | 実装済み（10k 行では未計測） | 8 field の完全一致は両 store の契約テスト、index 利用は `pool_lookups_use_their_indexes`（50 行 + `ANALYZE` の `EXPLAIN QUERY PLAN`） |
 | A7（書き込み量が台帳サイズに比例しない） | 未検証 | 構造上は触れた行だけを書くが、書き込み量を測るテストは無い |
@@ -215,7 +215,53 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 5. **外部キー**: 使っていない（TiDB 6.6 未満は無視する）。親の存在と tenant の一致は `guard.rs` がトランザクション内で確認している。
 6. **SQLite 固有の箇所**: `sqlite_master`（`migrations::current_version`）、`PRAGMA`、`EXPLAIN QUERY PLAN`、`ANALYZE`、`?N` placeholder の番号付き再利用（`(?8 IS NULL OR state = ?8)`）。前 2 つは `information_schema` と接続設定に、placeholder は位置引数に置き換える。
 7. **API**: repository trait は同期で、invoke driver から同期に呼ばれる。ネットワーク越しの DB では blocking pool に逃がすか、trait を async にする（`crates/application` 全体に波及する。「比較」表の (3)）。
-8. **reconcile**: 起動時に「非 terminal を全部 `Lost`」とする規則は、複数 gateway が同じ control-plane を共有した時点で成り立たない。lease の期限に基づく回収（決定 5、PLT-4631）が先に要る。
+8. **reconcile**: 起動時に「非 terminal を全部 `Lost`」とする規則は owner の無い行だけに狭めた。owner のある行は dispatcher の lease に基づく回収（PLT-4631）で扱う。TiDB では `reclaim_expired` の 1 トランザクション（dispatcher 表の全件読み + 期限切れ lease の読み + 書き戻し）を、行ごとの CAS（`reclaimed_at IS NULL`、`released = 0`）を残したまま小さなトランザクションに割る必要がある。「環境 1 つにつき未 release の lease は 1 つ」は現在トランザクション内の確認（`BEGIN IMMEDIATE` が直列化する）で守っているので、`environments` に `active_lease_id` 列を置いて CAS に含めるか、部分一意 index の代わりの一意制約を用意する。
+9. **時刻**: lease の期限は判定する側の wall clock と文字列比較（固定幅 RFC 3339）で評価している。control-plane を複数 host で共有する時点で、DB の時刻（`NOW(6)`）を基準にするか、skew の許容を host 間の NTP 精度に合わせて見直す。
+
+## 実装メモ（PLT-4631、2026-09-17）
+
+決定 1・5 と受入条件 A1・A2・A3・A6 を実装し、「同じ `data_dir` を複数の gateway が同時に開く」構成を対象に入れた。コードは `crates/application/src/repository/slot.rs`（port）、`repository/sqlite/slot.rs` と `repository/memory.rs`（実装）、`services/dispatcher.rs`、`services/reconcile.rs`、`services/invoke.rs`。schema は `003_slot_leases.sql`（expand のみ）。ADR が決めていなかった点は「選んだこと」に書いた。
+
+### 入ったもの
+
+| 項目 | 実装 |
+|---|---|
+| 決定 1（port の分割） | `SlotStore` を `EnvironmentRepository` から分けた。`EnvironmentRepository` は `insert` / `get` / `update` / `list_active` だけで、`update` は `Busy` への遷移・epoch の変更・owner と fencing の変更を拒否する（`guard::environment_update`）。pool（`list_idle` / `claim_for_reuse` / `release_to_pool` / `take_idle_for_termination`）、dispatcher（`register_dispatcher` / `heartbeat` / `stop_dispatcher` / `list_dispatchers`）、slot（`acquire` / `complete` / `release_lease` / `renew_lease` / `get_lease`）、回収（`reclaim_expired` / `list_fenced` / `confirm_terminated`）は `SlotStore`。`insert_lease` / `update_lease` は削除した（lease は acquire でしか作れず、complete / release / reclaim でしか閉じない）。`Repositories::slots` から使う |
+| 決定 5（lease の期限を評価する） | lease は owner（`DispatcherId`）と所有期限 `expires_at` を持つ。取得: `acquire` が `now + lease_ttl_seconds`。renew: dispatcher の heartbeat が期限前の lease だけを延ばす（`ExecutionLease::renew` は期限後を拒否）。失効: `reclaim_expired` が `expires_at + max_clock_skew_ms` を過ぎた lease と、lease を失った dispatcher の lease を 1 回だけ release する |
+| 決定 6（epoch） | 取得のたびに進める（`ExecutionEnvironment::assign`、0 → 1 → …）。fence でも 1 進める。pool の claim は `Idle` → `Ready` の予約で epoch を動かさない |
+| slot の原子的取得 | `SlotStore::acquire`: 環境の `(state ∈ {Ready, Idle}, epoch)`、fenced でない、未 release の lease が無い、環境の owner = lease の owner、owner の dispatcher が live、Invocation が terminal でない、を 1 つの `BEGIN IMMEDIATE` で確認し、`UPDATE environments ... WHERE epoch = ? AND state = ?` の CAS の後に lease・attempt・invocation を書く |
+| fencing | `SlotStore::complete`（遅れた callback を含む完了通知）は、未 release の同じ lease、同じ `(attempt_id, epoch)`、同じ epoch で fenced でない環境、terminal でない attempt / invocation を確認してから書く。どれかが違えば `Stale` で何も書かない |
+| 失効と終了確認 | lease を失った dispatcher の環境は fence（`Draining`、epoch + 1、`fenced_at`、`fenced = 1`）。pool・acquire・capacity の対象外で、`confirm_terminated`（provider の terminate 成功後、同じ epoch の CAS）でだけ `Lost` になる。terminate に失敗したものは fenced のまま `list_fenced` から次の周期で再試行する |
+| 再起動の台帳 reconcile | `SqliteStore::open` の P1 規則は owner の無い行だけに適用する。owner のある行は `Application::bootstrap` が dispatcher を登録した直後の `reclaim_ledger` で扱う |
+| Idempotency-Key | 結び付けに `expires_at` 列（Invocation が terminal になった時点で `finished_at + [store] idempotency_retention_seconds`、実行中は NULL）。`lookup` と `insert_bound` は失効した結び付きを無いものとして扱い、`purge_expired_idempotency` が削除する（起動時と 10 分ごと）。一意性は従来どおり主キー。別 gateway が実行中の invocation への replay は台帳を追って待つ。409 は `AppError::IdempotencyConflict`（`invocation_id` と `Host.IdempotencyKeyReused`） |
+| 受入条件 A1・A6（OS プロセス） | `repository/sqlite/tests.rs::separate_processes_racing_for_one_slot_or_one_key_have_one_winner`（テスト binary 自身を 6 プロセス起動し、全員の準備完了後に同時に acquire / bind）、スレッド版 `concurrent_acquires_on_separate_connections_have_one_winner_per_epoch`、`reclaim_and_key_binding_are_exactly_once_across_connections`、両 store の `contract_tests::acquire_is_a_cas_with_exactly_one_winner_per_epoch` |
+| 受入条件 A2（OS プロセス） | `repository/sqlite/tests.rs::a_lease_left_by_an_exited_process_is_reclaimed_once_and_only_after_expiry`（子プロセスが lease を取って release せず exit。別 instance は期限前・skew 内では回収できず、以後 1 回だけ回収、遅れた完了は `Stale`。同じ instance の再起動は pid の不在で即回収） |
+| 受入条件 A3 | `contract_tests::{leases_renew_only_while_unexpired_and_expire_past_the_clock_skew, a_fenced_dispatcher_can_neither_renew_nor_acquire}` |
+| 2 つの gateway が同じ data_dir | `crates/application/tests/leases.rs::{two_gateways_on_one_data_dir_never_settle_each_others_work, a_key_replayed_on_another_gateway_returns_the_same_invocation_and_never_runs_twice, a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced, renewal_keeps_the_lease_and_a_graceful_stop_hands_over_at_once, a_fenced_environment_stays_fenced_until_its_terminate_succeeds}` |
+
+### 選んだこと（ADR に書いていなかった点）
+
+1. **lease の所有者は dispatcher（gateway プロセスの incarnation）**で、環境の owner は作った dispatcher から変わらない。bridge session がプロセス内にしか無いので、別 dispatcher が環境を引き継いで dispatch することはできない。他の dispatcher ができるのは fence と terminate だけ。
+2. **renew は dispatcher 単位の heartbeat**（その dispatcher の全 lease を 1 トランザクションで延ばす）。driver ごとの renew は行わない。単体の `renew_lease` も port にある。
+3. **時計のずれの許容**: 他者の期限は `expires_at + max_clock_skew_ms`（既定 2 s）を自分の時計で過ぎてから。
+4. **期限を待たずに回収できる例外**: graceful shutdown で `stopped` になった dispatcher と、**同じ host 名・同じ instance 名**で pid が存在しない（または同じプロセス内で handle が drop 済みの）前の incarnation。A2 の「`expires_at` より前には回収できない」は、それ以外の dispatcher（別 instance）に対して成り立つ。instance の既定は `gateway@<listen>`。
+5. **lease を失った dispatcher は自ら fenced になる**: heartbeat が拒否されたら新しい invoke を 503 で断り、`/readyz` を 503 にする。reclaim された dispatcher は acquire もできない。再登録（新しい id での復帰）はせず、再起動を運用に任せる。
+6. **acquire は attempt と invocation `Running` まで同じトランザクション**に含めた（「slot を取ったのに attempt が無い」状態を作らない）。
+7. **reclaim の分類**: dispatch 済み（lease あり）は `OutcomeUnknown`、dispatch 前は `Failed{platform_error}`。原因が期限切れなら `Host.LeaseExpired`、stopped / 前の incarnation なら `Host.Restarted`。自動再実行はしない。
+8. **別 gateway が駆動中の invocation の cancel は 409**（ledger だけを `Cancelled` にすると、handler が走り続けたまま「止めた」と報告することになるため）。
+9. **pool の上限**（`max_total_idle` / `max_idle_per_key`）は owner をまたいで数える（host 全体の上限）。
+
+### 残るもの
+
+| 項目 | 状態 | 内容 |
+|---|---|---|
+| A4（再起動後も Ready / Idle の環境が pool に残る） | 未着手（意図的） | 前の incarnation の pool の環境は fence → terminate → `Lost`（`crates/application/tests/pipeline.rs::a_pooled_environment_is_reclaimed_after_a_restart`）。session を失っているので駆動できない |
+| A7 | 未検証 | PLT-4618 から変化なし |
+| 2 つの gateway **プロセス**を HTTP で並べた E2E | 未検証 | 2 つの `Application` を 1 プロセスに置いた統合テストと、store を直接使う OS プロセスのテストだけ。`scripts/e2e/demo.sh` は gateway 1 つ |
+| Firecracker / KVM 上での fence → terminate | 未検証 | fake provider での統合テストだけ |
+| heartbeat の停止・時刻の飛び | 未検証（設計上の残存） | `max_clock_skew_ms` を超える時刻のずれや `lease_ttl + skew` を超える停止では生きている gateway の仕事が回収され、handler は terminate で止まる（台帳は fencing で守られる）。`docs/threat-model.md` §14-8 |
+| `dispatchers` 表の retention | 未着手 | 起動ごとに 1 行増える |
+| 複数 host | 非対象 | 本 ADR の「非対象」のまま |
 
 ## 参照
 

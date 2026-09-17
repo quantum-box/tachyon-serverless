@@ -6,14 +6,17 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tachyon_serverless_domain::{
-    AliasName, AttemptId, AttemptStatus, EnvironmentState, ErrorClass, ExecutionLease,
-    FunctionAlias, FunctionId, InvocationStatus, LeaseId, Limits, PayloadRef, RevisionId,
-    Sha256Digest, TenantId,
+    AliasName, AttemptId, AttemptStatus, DispatcherId, EnvironmentState, ErrorClass,
+    ExecutionEnvironment, ExecutionLease, FunctionAlias, FunctionId, InvocationAttempt,
+    InvocationStatus, LeaseId, Limits, PayloadRef, RevisionId, Sha256Digest, StartKind, TenantId,
 };
 
 use super::super::contract_tests::fx::{self, now};
 use super::*;
-use crate::repository::HOST_RESTARTED;
+use crate::repository::{
+    AcquireOutcome, CompletionOutcome, DispatcherRecord, HOST_RESTARTED, PoolLimits,
+    ReclaimRequest, SlotAcquire, SlotCompletion, SlotStore,
+};
 
 fn open(dir: &Path) -> SqliteStore {
     SqliteStore::open(dir, Limits::default(), SqliteOptions::default(), now()).unwrap()
@@ -78,10 +81,15 @@ fn migrations_apply_to_an_empty_database() {
         "revisions",
         "schema_version",
         "store_meta",
+        "dispatchers",
     ] {
         assert!(t.contains(&table.to_string()), "{table} in {t:?}");
     }
     assert!(columns(&conn, "invocations").contains(&"output_expires_at".to_string()));
+    assert!(columns(&conn, "invocations").contains(&"owner_id".to_string()));
+    assert!(columns(&conn, "environments").contains(&"fenced".to_string()));
+    assert!(columns(&conn, "leases").contains(&"expires_at".to_string()));
+    assert!(columns(&conn, "idempotency").contains(&"expires_at".to_string()));
     drop(conn);
     drop(store);
 
@@ -139,12 +147,13 @@ fn migrations_upgrade_a_database_at_an_older_version() {
         Limits::default(),
         SqliteOptions {
             output_retention: Some(retention),
+            ..SqliteOptions::default()
         },
         now(),
     )
     .unwrap();
-    assert_eq!(store.open_report().migrations_applied, vec![2]);
-    assert_eq!(store.open_report().schema_version, 2);
+    assert_eq!(store.open_report().migrations_applied, vec![2, 3]);
+    assert_eq!(store.open_report().schema_version, 3);
     assert_eq!(FunctionRepository::get(&store, &f.id).unwrap(), Some(f));
     assert_eq!(
         InvocationRepository::get(&store, &inv.id).unwrap(),
@@ -258,7 +267,7 @@ fn persistence_roundtrip_and_restart_reconcile() {
     let digest = Sha256Digest::of_bytes(b"binary");
     let inv = fx::invocation(&t, &f.id, Some("k"));
     let mut pooled = fx::ready_environment(&key);
-    pooled.mark_busy(now()).unwrap();
+    pooled.assign(now()).unwrap();
     pooled.mark_idle(now()).unwrap();
     let mut done = fx::ready_environment(&key);
     done.mark_stopped(now()).unwrap();
@@ -281,7 +290,8 @@ fn persistence_roundtrip_and_restart_reconcile() {
             now(),
             now(),
         );
-        store.insert_lease(lease).unwrap();
+        // A lease without an owner, as a schema-2 gateway left it.
+        insert_lease_row(&store.conn.lock(), &lease).unwrap();
         store.flush().unwrap();
     }
     assert!(dir.path().join(SqliteStore::FILE_NAME).exists());
@@ -316,7 +326,7 @@ fn persistence_roundtrip_and_restart_reconcile() {
     assert!(store.is_owned_by(&t, &digest).unwrap());
     assert_eq!(
         store
-            .lookup(&t, &f.id, "k")
+            .lookup(&t, &f.id, "k", now())
             .unwrap()
             .map(|b| b.invocation_id),
         Some(inv.id.clone())
@@ -402,7 +412,7 @@ fn restart_separates_dispatched_work_from_work_that_never_started() {
 
     let store = open(dir.path());
     assert_eq!(store.open_report().settled.idempotency_dropped, 1);
-    assert_eq!(store.lookup(&t, &f, "dangling").unwrap(), None);
+    assert_eq!(store.lookup(&t, &f, "dangling", now()).unwrap(), None);
     let load = |id: &InvocationId| InvocationRepository::get(&store, id).unwrap().unwrap();
     match load(&queued_id).status {
         InvocationStatus::Failed { error } => {
@@ -596,8 +606,8 @@ fn a_p1_state_json_is_imported_once_and_moved_aside() {
     assert_eq!(report.settled.attempts, 1);
     assert_eq!(report.settled.environments, 1);
     assert_eq!(report.settled.idempotency_dropped, 1);
-    assert!(store.lookup(&t, &f, "replay").unwrap().is_some());
-    assert!(store.lookup(&t, &f, "dangling").unwrap().is_none());
+    assert!(store.lookup(&t, &f, "replay", now()).unwrap().is_some());
+    assert!(store.lookup(&t, &f, "dangling", now()).unwrap().is_none());
     drop(store);
 
     // The second start does not import again.
@@ -684,6 +694,7 @@ fn inline_output_is_replaced_by_its_digest_after_retention() {
     let retention = chrono::Duration::hours(1);
     let options = SqliteOptions {
         output_retention: Some(retention),
+        ..SqliteOptions::default()
     };
     let store = SqliteStore::open(dir.path(), Limits::default(), options.clone(), now()).unwrap();
     let t = TenantId::generate();
@@ -794,7 +805,7 @@ fn cas_holds_across_separate_connections_to_the_same_file() {
         }
         AliasRepository::insert(&store, alias.clone()).unwrap();
         let mut env = fx::ready_environment(&key);
-        env.mark_busy(now()).unwrap();
+        env.assign(now()).unwrap();
         env.mark_idle(now()).unwrap();
         EnvironmentRepository::insert(&store, env).unwrap();
     }
@@ -804,7 +815,7 @@ fn cas_holds_across_separate_connections_to_the_same_file() {
     // pool it again through one connection.
     let pooled_env = {
         let mut env = fx::ready_environment(&key);
-        env.mark_busy(now()).unwrap();
+        env.assign(now()).unwrap();
         env.mark_idle(now()).unwrap();
         EnvironmentRepository::insert(&*stores[0], env.clone()).unwrap();
         env.id
@@ -823,7 +834,7 @@ fn cas_holds_across_separate_connections_to_the_same_file() {
             std::thread::spawn(move || {
                 barrier.wait();
                 let alias_won = store.compare_and_set(next, 1).unwrap();
-                let claimed = store.claim_for_reuse(&key, now()).unwrap();
+                let claimed = SlotStore::claim_for_reuse(&*store, &key, None, now()).unwrap();
                 (alias_won, claimed)
             })
         })
@@ -837,7 +848,10 @@ fn cas_holds_across_separate_connections_to_the_same_file() {
         "one connection claims the idle environment"
     );
     assert_eq!(claims[0].id, pooled_env);
-    assert_eq!(claims[0].epoch, 2);
+    assert_eq!(
+        claims[0].epoch, 1,
+        "a claim reserves; the acquire moves the epoch"
+    );
 
     let check = open(dir.path());
     assert_eq!(
@@ -846,5 +860,545 @@ fn cas_holds_across_separate_connections_to_the_same_file() {
             .unwrap()
             .generation,
         2
+    );
+}
+
+// ---------------------------------------------------------------------------
+// slots across connections and OS processes (PLT-4631, ADR-0003 A1 / A2 / A6)
+// ---------------------------------------------------------------------------
+
+fn at(seconds: i64) -> Timestamp {
+    now() + chrono::Duration::seconds(seconds)
+}
+
+fn register(store: &dyn SlotStore, instance: &str, pid: u32, ttl_s: i64) -> DispatcherId {
+    let id = DispatcherId::generate();
+    store
+        .register_dispatcher(DispatcherRecord {
+            id: id.clone(),
+            instance: instance.into(),
+            hostname: crate::services::dispatcher::hostname(),
+            pid,
+            started_at: now(),
+            heartbeat_at: now(),
+            lease_expires_at: at(ttl_s),
+            stopped_at: None,
+            reclaimed_at: None,
+        })
+        .unwrap();
+    id
+}
+
+/// The acquire request of `env` (as stored) for `inv` by `owner`.
+fn request(
+    env: &ExecutionEnvironment,
+    inv: &Invocation,
+    owner: &DispatcherId,
+    ttl_s: i64,
+) -> SlotAcquire {
+    let mut assigned = env.clone();
+    assigned.assign(now()).unwrap();
+    let attempt = InvocationAttempt::dispatch(
+        AttemptId::generate(),
+        inv.id.clone(),
+        inv.tenant_id.clone(),
+        1,
+        env.id.clone(),
+        assigned.epoch,
+        StartKind::Cold,
+        now(),
+    );
+    let lease = ExecutionLease::acquire(
+        LeaseId::generate(),
+        env.id.clone(),
+        attempt.id.clone(),
+        env.tenant_id.clone(),
+        assigned.epoch,
+        at(600),
+        now(),
+    )
+    .owned_by(owner.clone(), at(ttl_s));
+    let mut running = inv.clone();
+    running
+        .mark_running(attempt.id.clone(), at(600), now(), now())
+        .unwrap();
+    SlotAcquire {
+        env: assigned,
+        expected_epoch: env.epoch,
+        lease,
+        attempt,
+        invocation: Some(running),
+    }
+}
+
+fn owned_invocation(store: &SqliteStore, tenant: &TenantId, owner: &DispatcherId) -> Invocation {
+    let mut inv = fx::invocation(tenant, &FunctionId::generate(), None);
+    inv.dispatcher_id = Some(owner.clone());
+    InvocationRepository::insert(store, inv.clone()).unwrap();
+    inv
+}
+
+fn ready_owned_env(store: &SqliteStore, owner: &DispatcherId) -> ExecutionEnvironment {
+    let key = fx::key(&TenantId::generate(), &RevisionId::generate());
+    let env = fx::ready_environment(&key).owned_by(owner.clone());
+    EnvironmentRepository::insert(store, env.clone()).unwrap();
+    env
+}
+
+/// Property (ADR-0003 A1 with threads): N connections, each its own SQLite
+/// connection to the same file, race to acquire the same slot at the same
+/// epoch. In every round exactly one wins and the epoch moves by one.
+#[test]
+fn concurrent_acquires_on_separate_connections_have_one_winner_per_epoch() {
+    let dir = tempfile::tempdir().unwrap();
+    let setup = open(dir.path());
+    let owner = register(&setup, "race", std::process::id(), 3600);
+    let env = ready_owned_env(&setup, &owner);
+    let big = PoolLimits {
+        max_idle_per_key: 64,
+        max_total_idle: 64,
+    };
+    for racers in [2usize, 4, 8, 12] {
+        let stores: Vec<Arc<SqliteStore>> =
+            (0..racers).map(|_| Arc::new(open(dir.path()))).collect();
+        let stored = EnvironmentRepository::get(&setup, &env.id)
+            .unwrap()
+            .unwrap();
+        let requests: Vec<SlotAcquire> = (0..racers)
+            .map(|_| {
+                let inv = owned_invocation(&setup, &env.tenant_id, &owner);
+                request(&stored, &inv, &owner, 30)
+            })
+            .collect();
+        let barrier = Arc::new(std::sync::Barrier::new(racers));
+        let handles: Vec<_> = stores
+            .into_iter()
+            .zip(requests.clone())
+            .map(|(store, req)| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.acquire(req).unwrap()
+                })
+            })
+            .collect();
+        let outcomes: Vec<AcquireOutcome> =
+            handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let winners: Vec<usize> = outcomes
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| **o == AcquireOutcome::Acquired)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(winners.len(), 1, "{racers} racers: {outcomes:?}");
+        let after = EnvironmentRepository::get(&setup, &env.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.epoch, stored.epoch + 1);
+        let leases: i64 = setup
+            .conn
+            .lock()
+            .query_row(
+                "SELECT COUNT(*) FROM leases WHERE environment_id = ?1 AND released = 0",
+                [env.id.as_str()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(leases, 1, "one live lease per slot");
+        let win = &requests[winners[0]];
+        let mut done = win.attempt.clone();
+        done.succeed(now()).unwrap();
+        assert_eq!(
+            setup
+                .complete(SlotCompletion {
+                    lease_id: win.lease.id.clone(),
+                    attempt: done,
+                    invocation: None,
+                    now: now(),
+                })
+                .unwrap(),
+            CompletionOutcome::Accepted
+        );
+        setup.release_to_pool(&after, big, now()).unwrap().unwrap();
+    }
+}
+
+/// The reclaim of an expired lease and the binding of one idempotency key
+/// each succeed exactly once when several connections race for them.
+#[test]
+fn reclaim_and_key_binding_are_exactly_once_across_connections() {
+    let dir = tempfile::tempdir().unwrap();
+    let setup = open(dir.path());
+    let dead = register(&setup, "dead", std::process::id(), 10);
+    let env = ready_owned_env(&setup, &dead);
+    let inv = owned_invocation(&setup, &env.tenant_id, &dead);
+    assert_eq!(
+        setup.acquire(request(&env, &inv, &dead, 10)).unwrap(),
+        AcquireOutcome::Acquired
+    );
+    let racers = 8;
+    let reclaimers: Vec<DispatcherId> = (0..racers)
+        .map(|i| register(&setup, &format!("r{i}"), std::process::id(), 3600))
+        .collect();
+    let stores: Vec<Arc<SqliteStore>> = (0..racers).map(|_| Arc::new(open(dir.path()))).collect();
+    let barrier = Arc::new(std::sync::Barrier::new(racers));
+    let handles: Vec<_> = stores
+        .iter()
+        .cloned()
+        .zip(reclaimers)
+        .map(|(store, me)| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                store
+                    .reclaim_expired(ReclaimRequest {
+                        reclaimer: me,
+                        now: at(20),
+                        skew: chrono::Duration::seconds(2),
+                        presumed_dead: Vec::new(),
+                    })
+                    .unwrap()
+            })
+        })
+        .collect();
+    let reports: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_eq!(reports.iter().map(|r| r.leases).sum::<usize>(), 1);
+    assert_eq!(reports.iter().map(|r| r.fenced.len()).sum::<usize>(), 1);
+    assert_eq!(
+        reports.iter().map(|r| r.dispatchers.len()).sum::<usize>(),
+        1
+    );
+
+    let t = TenantId::generate();
+    let f = FunctionId::generate();
+    let barrier = Arc::new(std::sync::Barrier::new(racers));
+    let handles: Vec<_> = stores
+        .into_iter()
+        .map(|store| {
+            let barrier = barrier.clone();
+            let inv = fx::invocation(&t, &f, Some("same-key"));
+            std::thread::spawn(move || {
+                barrier.wait();
+                (inv.id.clone(), store.insert_bound(inv).unwrap())
+            })
+        })
+        .collect();
+    let bound: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let inserted: Vec<_> = bound
+        .iter()
+        .filter(|(_, o)| *o == IdempotencyOutcome::Inserted)
+        .map(|(id, _)| id.clone())
+        .collect();
+    assert_eq!(inserted.len(), 1);
+    for (_, o) in &bound {
+        if let IdempotencyOutcome::Existing(b) = o {
+            assert_eq!(b.invocation_id, inserted[0]);
+        }
+    }
+}
+
+// -- OS processes ------------------------------------------------------------
+
+const CHILD_TEST: &str = "repository::sqlite::tests::slot_race_child";
+
+/// Not a test on its own: the body of a child process spawned by the tests
+/// below (it returns at once unless `TSLS_SLOT_RACE_DB` is set). Actions:
+///
+/// - `acquire`: race to acquire `TSLS_ENV` for `TSLS_INVOCATION` as
+///   `TSLS_OWNER`;
+/// - `bind`: race to bind the idempotency key `TSLS_KEY`;
+/// - `hold`: register as instance `child`, acquire a slot with a 10 s lease
+///   and exit without releasing it (a crashed dispatcher).
+///
+/// Every child waits for `<db dir>/go` before acting, so they start together,
+/// and writes its outcome to `TSLS_OUT`.
+#[test]
+fn slot_race_child() {
+    let Ok(dir) = std::env::var("TSLS_SLOT_RACE_DB") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let var = |k: &str| std::env::var(k).unwrap();
+    let store =
+        SqliteStore::open(&dir, Limits::default(), SqliteOptions::default(), now()).unwrap();
+    // Everything a racer reads, it reads before the start signal: every
+    // process then holds the same view of the slot, as racing dispatchers do.
+    let prepared = (var("TSLS_ACTION") == "acquire").then(|| {
+        let owner = DispatcherId::parse(&var("TSLS_OWNER")).unwrap();
+        let env_id = tachyon_serverless_domain::EnvironmentId::parse(&var("TSLS_ENV")).unwrap();
+        let inv_id = InvocationId::parse(&var("TSLS_INVOCATION")).unwrap();
+        let env = EnvironmentRepository::get(&store, &env_id)
+            .unwrap()
+            .unwrap();
+        let inv = InvocationRepository::get(&store, &inv_id).unwrap().unwrap();
+        request(&env, &inv, &owner, 30)
+    });
+    std::fs::write(format!("{}.ready", var("TSLS_OUT")), b"ready").unwrap();
+    let go = dir.join("go");
+    while !go.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let out = match var("TSLS_ACTION").as_str() {
+        "acquire" => match store.acquire(prepared.unwrap()).unwrap() {
+            AcquireOutcome::Acquired => "acquired".to_string(),
+            AcquireOutcome::Lost(_) => "lost".to_string(),
+        },
+        "bind" => {
+            let t = TenantId::parse(&var("TSLS_TENANT")).unwrap();
+            let f = FunctionId::parse(&var("TSLS_FUNCTION")).unwrap();
+            let inv = fx::invocation(&t, &f, Some(&var("TSLS_KEY")));
+            match store.insert_bound(inv.clone()).unwrap() {
+                IdempotencyOutcome::Inserted => format!("inserted {}", inv.id),
+                IdempotencyOutcome::Existing(b) => format!("existing {}", b.invocation_id),
+            }
+        }
+        "hold" => {
+            let owner = register(&store, "child", std::process::id(), 10);
+            let env = ready_owned_env(&store, &owner);
+            let inv = owned_invocation(&store, &env.tenant_id, &owner);
+            let req = request(&env, &inv, &owner, 10);
+            assert_eq!(
+                store.acquire(req.clone()).unwrap(),
+                AcquireOutcome::Acquired
+            );
+            format!(
+                "{} {} {} {} {}",
+                owner,
+                env.id,
+                req.lease.id,
+                req.attempt.id,
+                std::process::id()
+            )
+        }
+        other => panic!("unknown action {other}"),
+    };
+    std::fs::write(var("TSLS_OUT"), out).unwrap();
+    // Exit without dropping anything: nothing is released on the way out.
+    std::process::exit(0);
+}
+
+fn spawn_child(
+    dir: &Path,
+    n: usize,
+    action: &str,
+    vars: &[(&str, String)],
+) -> (std::process::Child, std::path::PathBuf) {
+    let out = dir.join(format!("out-{action}-{n}"));
+    let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+    cmd.args(["--exact", CHILD_TEST, "--nocapture", "--test-threads", "1"])
+        .env("TSLS_SLOT_RACE_DB", dir)
+        .env("TSLS_ACTION", action)
+        .env("TSLS_OUT", &out)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for (k, v) in vars {
+        cmd.env(k, v);
+    }
+    (cmd.spawn().unwrap(), out)
+}
+
+fn run_children(
+    dir: &Path,
+    children: Vec<(std::process::Child, std::path::PathBuf)>,
+) -> Vec<String> {
+    // Start them together: only once every child has prepared and is waiting.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    for (_, out) in &children {
+        let ready = std::path::PathBuf::from(format!("{}.ready", out.display()));
+        while !ready.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a child never got ready"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        std::fs::remove_file(ready).unwrap();
+    }
+    std::fs::write(dir.join("go"), b"go").unwrap();
+    children
+        .into_iter()
+        .map(|(child, out)| {
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "child failed: {}\n{}{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let text = std::fs::read_to_string(&out).unwrap();
+            let _ = std::fs::remove_file(&out);
+            text
+        })
+        .collect()
+}
+
+/// ADR-0003 A1 and A6 with **OS processes**: several gateway-like processes
+/// open the same `state.db`; for one slot exactly one acquire wins, and for
+/// one idempotency key exactly one binds while every other process gets the
+/// same invocation back.
+#[test]
+fn separate_processes_racing_for_one_slot_or_one_key_have_one_winner() {
+    let dir = tempfile::tempdir().unwrap();
+    let setup = open(dir.path());
+    let owner = register(&setup, "race", std::process::id(), 3600);
+    let env = ready_owned_env(&setup, &owner);
+    let processes = 6;
+    let children: Vec<_> = (0..processes)
+        .map(|n| {
+            let inv = owned_invocation(&setup, &env.tenant_id, &owner);
+            spawn_child(
+                dir.path(),
+                n,
+                "acquire",
+                &[
+                    ("TSLS_OWNER", owner.to_string()),
+                    ("TSLS_ENV", env.id.to_string()),
+                    ("TSLS_INVOCATION", inv.id.to_string()),
+                ],
+            )
+        })
+        .collect();
+    let results = run_children(dir.path(), children);
+    assert_eq!(
+        results.iter().filter(|r| *r == "acquired").count(),
+        1,
+        "{results:?}"
+    );
+    assert_eq!(
+        results.iter().filter(|r| *r == "lost").count(),
+        processes - 1
+    );
+    assert_eq!(
+        EnvironmentRepository::get(&setup, &env.id)
+            .unwrap()
+            .unwrap()
+            .epoch,
+        env.epoch + 1
+    );
+    std::fs::remove_file(dir.path().join("go")).unwrap();
+
+    let t = TenantId::generate();
+    let f = FunctionId::generate();
+    let children: Vec<_> = (0..processes)
+        .map(|n| {
+            spawn_child(
+                dir.path(),
+                n,
+                "bind",
+                &[
+                    ("TSLS_TENANT", t.to_string()),
+                    ("TSLS_FUNCTION", f.to_string()),
+                    ("TSLS_KEY", "one-key".to_string()),
+                ],
+            )
+        })
+        .collect();
+    let results = run_children(dir.path(), children);
+    let inserted: Vec<&str> = results
+        .iter()
+        .filter_map(|r| r.strip_prefix("inserted "))
+        .collect();
+    assert_eq!(inserted.len(), 1, "{results:?}");
+    for r in &results {
+        let id = r.split_once(' ').unwrap().1;
+        assert_eq!(id, inserted[0], "every process sees the same invocation");
+    }
+}
+
+/// ADR-0003 A2 with an **OS process**: a dispatcher process takes a slot and
+/// exits without releasing it. Another dispatcher (another instance) cannot
+/// reclaim it before its expiry (plus the skew), then reclaims it exactly
+/// once; the late completion of the dead process's attempt is refused. The
+/// same instance restarting on this host proves the process is gone and may
+/// reclaim at once.
+#[test]
+fn a_lease_left_by_an_exited_process_is_reclaimed_once_and_only_after_expiry() {
+    let dir = tempfile::tempdir().unwrap();
+    let store: Arc<SqliteStore> = Arc::new(open(dir.path()));
+    let child = spawn_child(dir.path(), 0, "hold", &[]);
+    let out = run_children(dir.path(), vec![child]);
+    let fields: Vec<&str> = out[0].split(' ').collect();
+    let dead_owner = DispatcherId::parse(fields[0]).unwrap();
+    let env_id = tachyon_serverless_domain::EnvironmentId::parse(fields[1]).unwrap();
+    let lease_id = LeaseId::parse(fields[2]).unwrap();
+    let attempt_id = AttemptId::parse(fields[3]).unwrap();
+    let child_pid: u32 = fields[4].parse().unwrap();
+    assert!(
+        !crate::services::dispatcher::pid_alive(child_pid),
+        "the child exited"
+    );
+
+    let other = register(&*store, "parent", std::process::id(), 3600);
+    let reclaim = |when| {
+        store
+            .reclaim_expired(ReclaimRequest {
+                reclaimer: other.clone(),
+                now: when,
+                skew: chrono::Duration::seconds(2),
+                presumed_dead: Vec::new(),
+            })
+            .unwrap()
+    };
+    // Dead, but another instance cannot know that: nothing before expiry.
+    assert!(reclaim(at(5)).is_empty());
+    assert!(reclaim(at(11)).is_empty(), "within the clock skew");
+    let report = reclaim(at(12));
+    assert_eq!(report.leases, 1);
+    assert_eq!(report.dispatchers, vec![dead_owner.clone()]);
+    assert_eq!(report.fenced.len(), 1);
+    assert!(reclaim(at(13)).is_empty(), "exactly once");
+
+    // The dead attempt's late result is stale.
+    let mut late = InvocationRepository::get_attempt(&*store, &attempt_id)
+        .unwrap()
+        .unwrap();
+    late.status = AttemptStatus::Dispatched;
+    let mut done = late.clone();
+    let _ = done.succeed(at(14));
+    let completion = store
+        .complete(SlotCompletion {
+            lease_id,
+            attempt: done,
+            invocation: None,
+            now: at(14),
+        })
+        .unwrap();
+    assert!(matches!(completion, CompletionOutcome::Stale(_)));
+    let env = EnvironmentRepository::get(&*store, &env_id)
+        .unwrap()
+        .unwrap();
+    assert!(env.is_fenced());
+    assert!(!env.is_terminal(), "fenced until a terminate is confirmed");
+
+    // The same instance on the same host proves the process gone at once.
+    let dir2 = tempfile::tempdir().unwrap();
+    let store2: Arc<SqliteStore> = Arc::new(open(dir2.path()));
+    let child = spawn_child(dir2.path(), 0, "hold", &[]);
+    let out = run_children(dir2.path(), vec![child]);
+    let dead2 = DispatcherId::parse(out[0].split(' ').next().unwrap()).unwrap();
+    let restarted = crate::services::Dispatcher::register(
+        store2.clone(),
+        Arc::new(tachyon_serverless_domain::FixedClock::new(at(1))),
+        &tachyon_serverless_domain::UlidGenerator,
+        crate::config::DispatcherConfig::default(),
+        "child".into(),
+    )
+    .unwrap();
+    assert_eq!(restarted.presumed_dead(), vec![dead2.clone()]);
+    let report = restarted.reclaim_ledger().unwrap();
+    assert_eq!(report.dispatchers, vec![dead2]);
+    assert_eq!(report.leases, 1);
+    let unrelated = crate::services::Dispatcher::register(
+        store2,
+        Arc::new(tachyon_serverless_domain::FixedClock::new(at(1))),
+        &tachyon_serverless_domain::UlidGenerator,
+        crate::config::DispatcherConfig::default(),
+        "another-instance".into(),
+    )
+    .unwrap();
+    assert!(
+        unrelated.presumed_dead().is_empty(),
+        "another instance never presumes a process dead"
     );
 }

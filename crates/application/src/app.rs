@@ -14,12 +14,13 @@ use crate::error::AppError;
 use crate::local_ports::{
     InMemoryUsageSink, LocalArtifactStore, StaticIdentityProvider, StaticSecretProvider,
 };
+use crate::repository::HeartbeatOutcome;
 use crate::repository::{InMemoryStore, Repositories, SqliteOptions, SqliteStore, StateStore};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::{
-    AliasService, ArtifactService, EnvironmentPool, FunctionService, HistoryService, InvokeService,
-    LogService, PoolPolicy, PoolSweep, ProviderService, ReconcileReport, ReconcileService,
-    RevisionService,
+    AliasService, ArtifactService, Dispatcher, EnvironmentPool, FunctionService, HistoryService,
+    InvokeService, LogService, PoolPolicy, PoolSweep, ProviderService, ReclaimSummary,
+    ReconcileReport, ReconcileService, RevisionService,
 };
 
 /// Builds the execution provider selected by configuration. The gateway
@@ -58,6 +59,8 @@ pub struct Application {
     /// Warm environment pool. Inert unless both the provider's idle
     /// capabilities and `[pool] enabled` allow reuse.
     pub pool: Arc<EnvironmentPool>,
+    /// This process's dispatcher identity and lease (PLT-4631).
+    pub dispatcher: Arc<Dispatcher>,
 }
 
 impl std::fmt::Debug for Application {
@@ -144,6 +147,7 @@ impl Application {
                     limits.clone(),
                     SqliteOptions {
                         output_retention: config.store.output_retention(),
+                        idempotency_retention: config.store.idempotency_retention(),
                     },
                     options.clock.now(),
                 )?;
@@ -158,14 +162,37 @@ impl Application {
                     settled_environments = report.settled.environments,
                     released_leases = report.settled.leases,
                     dropped_idempotency_keys = report.settled.idempotency_dropped,
+                    purged_idempotency_keys = report.settled.idempotency_purged,
                     outputs_purged = report.outputs_purged,
                     "state store opened"
                 );
                 Arc::new(sqlite)
             } else {
-                Arc::new(InMemoryStore::new(limits.clone()))
+                Arc::new(
+                    InMemoryStore::new(limits.clone())
+                        .with_idempotency_retention(config.store.idempotency_retention()),
+                )
             };
         let repos = Repositories::from_store(store.clone());
+        // A new dispatcher incarnation for this process, then the ledger half
+        // of the reclaim: only the work of dispatchers that lost their lease,
+        // stopped, or whose previous incarnation is gone is settled. A second
+        // gateway on the same data_dir leaves the first one's work alone.
+        let instance = config
+            .dispatcher
+            .instance
+            .clone()
+            .unwrap_or_else(|| format!("gateway@{}", config.listen));
+        let dispatcher = Dispatcher::register(
+            repos.slots.clone(),
+            options.clock.clone(),
+            options.ids.as_ref(),
+            config.dispatcher.clone(),
+            instance,
+        )?;
+        if let Err(e) = dispatcher.reclaim_ledger() {
+            tracing::warn!(error = %e, "reclaiming expired dispatchers failed; retried on the heartbeat");
+        }
         let artifacts: Arc<dyn ArtifactStore> = Arc::new(LocalArtifactStore::new(
             &config.data_dir,
             limits.max_artifact_bytes,
@@ -216,17 +243,21 @@ impl Application {
             repos.clone(),
             provider.clone(),
             clock.clone(),
+            dispatcher.clone(),
         ));
         // The pool gets the usage sink because it, not the driver, is what
         // ends a pooled environment's life (TTL sweep, drain, retire) and
         // therefore what has to report it (docs/architecture.md §4).
-        let pool = Arc::new(EnvironmentPool::new(
-            repos.clone(),
-            provider.clone(),
-            usage.clone() as Arc<dyn UsageSink>,
-            clock.clone(),
-            policy,
-        ));
+        let pool = Arc::new(
+            EnvironmentPool::new(
+                repos.clone(),
+                provider.clone(),
+                usage.clone() as Arc<dyn UsageSink>,
+                clock.clone(),
+                policy,
+            )
+            .owned_by(dispatcher.id().clone()),
+        );
         let invoke = InvokeService::new(InvokeServiceDeps {
             repos: repos.clone(),
             artifacts: artifacts.clone(),
@@ -241,6 +272,7 @@ impl Application {
             invoke: config.invoke.clone(),
             entrypoints,
             pool: pool.clone(),
+            dispatcher: dispatcher.clone(),
         });
         // Reuse is visible at startup, on or off, with the gate that decided
         // it and the two capabilities behind it (PLT-4633 acceptance 4). The
@@ -257,6 +289,7 @@ impl Application {
             idle_resume = caps.idle_resume.status_str(),
             data_dir = %config.data_dir.display(),
             store = store.backend(),
+            dispatcher_id = %dispatcher.id(),
             "application bootstrapped"
         );
         if policy.reuse_enabled() && !policy.idle_verified() {
@@ -291,7 +324,45 @@ impl Application {
             provider_service,
             reconcile,
             pool,
+            dispatcher,
         }))
+    }
+
+    /// Renew this dispatcher's lease and the slot leases of its in-flight
+    /// attempts. The gateway runs this every `[dispatcher]
+    /// heartbeat_interval_seconds`; tests call it directly.
+    pub fn heartbeat(&self) -> HeartbeatOutcome {
+        match self.dispatcher.heartbeat() {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                tracing::warn!(error = %e, "dispatcher heartbeat failed");
+                HeartbeatOutcome::Renewed { leases: 0 }
+            }
+        }
+    }
+
+    /// Reclaim the work of dispatchers that lost their lease and terminate
+    /// the environments that fenced (PLT-4631). The gateway runs this on its
+    /// heartbeat timer; tests call it directly.
+    pub async fn reclaim_expired(&self) -> ReclaimSummary {
+        self.reconcile.reclaim().await
+    }
+
+    /// Record a graceful stop of this dispatcher: whatever it still owns may
+    /// be reclaimed at once by another gateway.
+    pub fn stop_dispatcher(&self) {
+        self.dispatcher.stop();
+    }
+
+    /// Delete idempotency bindings past `[store] idempotency_retention_seconds`.
+    pub fn purge_expired_idempotency(&self) -> usize {
+        match self.store.purge_expired_idempotency(self.clock.now()) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(error = %e, "purging expired idempotency keys failed");
+                0
+            }
+        }
     }
 
     /// Replace inline invocation outputs past `[store]

@@ -16,6 +16,16 @@ pub enum AppError {
     NotFound(String),
     #[error("conflict: {0}")]
     Conflict(String),
+    /// The `Idempotency-Key` is bound to an invocation whose input differs
+    /// (409). Carries the bound invocation so the caller can look it up; the
+    /// key is scoped to the caller's own tenant and function.
+    #[error(
+        "conflict: idempotency key `{key}` is bound to invocation {invocation_id} with a different input"
+    )]
+    IdempotencyConflict {
+        key: String,
+        invocation_id: InvocationId,
+    },
     #[error("invalid request: {0}")]
     InvalidRequest(String),
     #[error("payload too large: {size} bytes (max {max})")]
@@ -54,7 +64,7 @@ impl AppError {
             Self::Unauthorized(_) => ErrorCode::Unauthorized,
             Self::Forbidden(_) => ErrorCode::Forbidden,
             Self::NotFound(_) => ErrorCode::NotFound,
-            Self::Conflict(_) => ErrorCode::Conflict,
+            Self::Conflict(_) | Self::IdempotencyConflict { .. } => ErrorCode::Conflict,
             Self::InvalidRequest(_) => ErrorCode::InvalidRequest,
             Self::PayloadTooLarge { .. } => ErrorCode::PayloadTooLarge,
             Self::CapacityExceeded(_) => ErrorCode::CapacityExceeded,
@@ -80,6 +90,10 @@ impl AppError {
                 Some(invocation_id.to_string()),
                 Some(error.error_type.clone()),
             ),
+            Self::IdempotencyConflict { invocation_id, .. } => (
+                Some(invocation_id.to_string()),
+                Some(IDEMPOTENCY_KEY_REUSED.to_string()),
+            ),
             _ => (None, None),
         };
         ApiErrorBody {
@@ -93,6 +107,10 @@ impl AppError {
         }
     }
 }
+
+/// `error.error_type` of the 409 for an `Idempotency-Key` reused with another
+/// input.
+pub const IDEMPOTENCY_KEY_REUSED: &str = "Host.IdempotencyKeyReused";
 
 /// Map a domain error class onto the API code.
 pub fn error_code_for_class(class: &ErrorClass) -> ErrorCode {

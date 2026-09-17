@@ -147,6 +147,14 @@ define_id!(
     LeaseId,
     "lse"
 );
+define_id!(
+    /// One running dispatcher (gateway process incarnation) that owns
+    /// invocations, environments and slot leases (PLT-4631). A new id is
+    /// minted on every start, so a restarted gateway never inherits the
+    /// leases of the process before it.
+    DispatcherId,
+    "dsp"
+);
 
 /// Alias name such as `prod`. Lowercase DNS-label-like, 1..=32 chars.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

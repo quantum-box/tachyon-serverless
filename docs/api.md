@@ -20,7 +20,7 @@
 | ヘッダ | 方向 | 意味 |
 |---|---|---|
 | `x-tachyon-tenant-id` | req | テナント id（任意、token と一致必須） |
-| `idempotency-key` | req (invoke) | 1..=256 文字。同キー・同 input digest なら既存 Invocation を返す（容量が満杯でも）。同キー・異なる digest → 409 `conflict`。受付前に拒否された request（400 / 413 / 429）は key を消費しない |
+| `idempotency-key` | req (invoke) | 1..=256 文字。scope は `(tenant, function, key)`。同キー・同 input digest なら既存 Invocation を返す（容量が満杯でも、実行中でも、完了後でも。§5.6「Idempotency-Key」）。同キー・異なる digest → 409 `conflict`（本文は §4）。受付前に拒否された request（400 / 413 / 429）は key を消費しない。Invocation が terminal になってから `[store] idempotency_retention_seconds`（既定 24 時間）で失効する |
 | `x-tachyon-client-timeout-ms` | req (invoke) | クライアント側の全体 deadline（相対 ms）。revision の timeout + init + queue で上限が掛かる。queue / init / execution の各 deadline はこれを超えず、handler の起動前に過ぎれば handler を起動しない（504 `timeout`、`Host.ClientDeadline`） |
 | `x-request-id` | req/res | リクエスト id（省略時は gateway が採番） |
 | `x-tachyon-invocation-id` | res (invoke/http) | 受け付けた Invocation の id |
@@ -31,7 +31,7 @@
 | Method | Path | 役割 | 200 系 | 主なエラー |
 |---|---|---|---|---|
 | GET | `/healthz` | liveness | 200 | — |
-| GET | `/readyz` | readiness（provider preflight OK） | 200 | 503 |
+| GET | `/readyz` | readiness（provider preflight OK かつ dispatcher lease が有効。本文に `dispatcher: {id, instance, fenced}`） | 200 | 503 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
 | POST | `/v1/artifacts` | 実行ファイルの生バイト (`application/octet-stream`) を upload → digest | 200 `ArtifactUploadResponse` | 401, 413 `payload_too_large` |
 | POST | `/v1/functions` | Function 作成 | 201 `FunctionResponse` | 400 `invalid_request`, 409 `conflict`（同名） |
@@ -71,14 +71,26 @@ invoke / cancel は `:invoke` `/invoke` の両形式を受け付ける。CLI は
 }
 ```
 
-`invocation_id` と `error_type` は invoke 系の失敗でのみ入る（履歴・ログを引くために使う）。
+`invocation_id` と `error_type` は invoke 系の失敗でのみ入る（履歴・ログを引くために使う）。例外は `Idempotency-Key` の衝突で、409 `conflict` に key が結び付いている Invocation の id と `error_type = "Host.IdempotencyKeyReused"` が入る:
+
+```json
+{
+  "error": {
+    "code": "conflict",
+    "message": "conflict: idempotency key `order-42` is bound to invocation inv_01j7z2k3m4n5p6q7r8s9t0v1w2 with a different input",
+    "request_id": "req_8f2b0c",
+    "invocation_id": "inv_01j7z2k3m4n5p6q7r8s9t0v1w2",
+    "error_type": "Host.IdempotencyKeyReused"
+  }
+}
+```
 
 | code | HTTP | 意味 | CLI exit |
 |---|---|---|---|
 | `unauthorized` | 401 | token 無し / 無効 | 2 |
 | `forbidden` | 403 | role 不足 | 2 |
 | `not_found` | 404 | 資源が無い（他テナントを含む） | 2 |
-| `conflict` | 409 | 同名 / generation 不一致 / idempotency 衝突 | 2 |
+| `conflict` | 409 | 同名 / generation 不一致 / idempotency 衝突（`Host.IdempotencyKeyReused`）/ 別の gateway が実行中の invocation の cancel | 2 |
 | `invalid_request` | 400 | 検証エラー | 2 |
 | `payload_too_large` | 413 | payload / artifact 上限超過 | 2 |
 | `capacity_exceeded` | 429 | queue も満杯 | 2 |
@@ -92,7 +104,7 @@ invoke / cancel は `:invoke` `/invoke` の両形式を受け付ける。CLI は
 | `cancelled` | 499 | cancel API による中断 | 3 |
 | `outcome_unknown` | 502 | 結果を確認できない（自動再実行しない） | 5 |
 | `platform_error` | 500 | provider / bridge / 内部エラー | 6 |
-| `provider_unavailable` | 503 | provider が使えない（例: `/dev/kvm` 無し） | 6 |
+| `provider_unavailable` | 503 | provider が使えない（例: `/dev/kvm` 無し）、shutdown 中、または dispatcher lease を失った gateway（別の gateway に送り直す） | 6 |
 
 ## 5. DTO とフィクスチャ
 
@@ -274,6 +286,22 @@ rollback は「`GET` → `previous_revision_id` を `expected_generation = gener
 ```
 
 失敗時は §4 のエラー本文（`invocation_id` 付き）。同期 invoke の deadline は受付時に固定され、クライアントが切断しても実行は deadline まで追跡・記録される。
+
+**再実行しない。** handler に dispatch した後の失敗（接続断、timeout、lease を失った gateway の reclaim）は `Failed` / `OutcomeUnknown` のまま返し、gateway が自動で再実行することはない。handler の外部副作用は exactly-once ではなく、client が再送すれば at-least-once、`outcome_unknown` なら不明である。副作用を 1 回にまとめたい handler は、`Idempotency-Key` とは別に自分の副作用先で冪等にする。
+
+**Idempotency-Key**（PLT-4631、`docs/threat-model.md` §10）:
+
+| 状況 | 応答 |
+|---|---|
+| 新しい key | 通常どおり実行し、key を Invocation と同じ store 更新で結び付ける |
+| 同 key・同 input digest、Invocation が終わっている（保持期間内） | 記録を返す（成功なら出力、失敗なら §4 の本文）。handler は動かない |
+| 同 key・同 input digest、Invocation が実行中（同じ gateway） | その実行の終了を待って同じ結果を返す |
+| 同 key・同 input digest、Invocation が実行中（同じ `state.db` を使う別の gateway） | 台帳を追い、terminal になるか元の Invocation の client deadline まで待って返す。deadline までに終わらなければ現在の状態を返す（`platform_error` / `Host.Incomplete`、`invocation_id` 付き）ので `GET /v1/invocations/{id}` で追う |
+| 同 key・異なる input digest（完了・実行中を問わない） | 409 `conflict`、`invocation_id` と `error_type = "Host.IdempotencyKeyReused"`（§4）。何も実行しない |
+| 保持期間を過ぎた key | 新しい key として扱う |
+| 同 key の並行 request（別プロセスを含む） | 1 つだけが受け付けられ、残りは同じ Invocation を返す（key は store の主キーで一意） |
+
+input digest は request 本文を JSON として解釈し、直列化し直した bytes の SHA-256（空白の違いは同じ digest になる）。alias / revision の違いは一致判定に含めない。
 
 ### 5.7 HTTP アダプタ
 

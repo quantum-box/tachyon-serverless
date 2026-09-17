@@ -3,6 +3,7 @@
 
 pub mod alias;
 pub mod artifact;
+pub mod dispatcher;
 pub mod function;
 pub mod history;
 pub mod invoke;
@@ -13,6 +14,7 @@ pub mod revision;
 
 pub use alias::AliasService;
 pub use artifact::ArtifactService;
+pub use dispatcher::Dispatcher;
 pub use function::FunctionService;
 pub use history::{HistoryService, InvocationDetail, LogService, UsageSummary};
 pub use invoke::{InvokeOutcome, InvokeRequest, InvokeService};
@@ -21,5 +23,5 @@ pub use pool::{
     secret_binding_generation,
 };
 pub use provider::ProviderService;
-pub use reconcile::{ReconcileReport, ReconcileService};
+pub use reconcile::{ReclaimSummary, ReconcileReport, ReconcileService};
 pub use revision::RevisionService;

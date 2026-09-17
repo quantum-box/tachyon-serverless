@@ -12,12 +12,14 @@
 //! - **Terminal is final**: a terminal invocation / attempt / environment, a
 //!   Ready / Failed revision, a released lease and a deleted function are
 //!   never rewritten. Writing the identical row again is a no-op.
-//! - **Fencing**: an environment update must carry the stored epoch.
+//! - **Fencing**: an environment update must carry the stored epoch, only a
+//!   slot acquire makes an environment `Busy` (and moves the epoch) and only
+//!   a reclaim fences it (PLT-4631).
 //! - **Bounded bodies**: inline output never exceeds the response limit.
 
 use tachyon_serverless_domain::{
-    ExecutionEnvironment, ExecutionLease, Function, FunctionAlias, FunctionRevision, Invocation,
-    InvocationAttempt, PayloadRef, TenantId,
+    EnvironmentState, ExecutionEnvironment, ExecutionLease, Function, FunctionAlias,
+    FunctionRevision, Invocation, InvocationAttempt, PayloadRef, TenantId,
 };
 
 use super::RepoError;
@@ -202,6 +204,7 @@ pub fn invocation_update(
             input_size_bytes,
             trace_id,
             accepted_at,
+            dispatcher_id,
         ]
     );
     if old == new {
@@ -302,17 +305,39 @@ pub fn environment_insert(
     Ok(())
 }
 
-pub fn environment_update(
+/// Identity of an environment: what no write may change, whatever else it
+/// does (including an acquire, which moves the epoch).
+pub fn environment_identity(
     old: &ExecutionEnvironment,
     new: &ExecutionEnvironment,
-) -> Result<Write, RepoError> {
+) -> Result<(), RepoError> {
     immutable!(
         "environment",
         old.id,
         old,
         new,
-        [id, tenant_id, revision_id, provider, reuse_key, created_at]
+        [
+            id,
+            tenant_id,
+            revision_id,
+            provider,
+            reuse_key,
+            owner,
+            created_at
+        ]
     );
+    Ok(())
+}
+
+/// A plain environment update (lifecycle before and after an attempt). It
+/// never moves the epoch, never assigns (`Busy` is only reachable through
+/// `SlotStore::acquire`, together with a lease) and never fences or unfences
+/// (only `SlotStore::reclaim_expired` fences).
+pub fn environment_update(
+    old: &ExecutionEnvironment,
+    new: &ExecutionEnvironment,
+) -> Result<Write, RepoError> {
+    environment_identity(old, new)?;
     if old == new {
         return Ok(Write::Unchanged);
     }
@@ -327,6 +352,18 @@ pub fn environment_update(
         return Err(refuse(format!(
             "environment {}: stale copy at epoch {} (stored epoch {})",
             old.id, new.epoch, old.epoch
+        )));
+    }
+    if old.fenced_at != new.fenced_at {
+        return Err(refuse(format!(
+            "environment {}: fencing only changes through a reclaim",
+            old.id
+        )));
+    }
+    if matches!(new.state, EnvironmentState::Busy) && !matches!(old.state, EnvironmentState::Busy) {
+        return Err(refuse(format!(
+            "environment {}: an environment only becomes busy by acquiring a slot",
+            old.id
         )));
     }
     Ok(Write::Apply)
@@ -354,7 +391,9 @@ pub fn lease_update(old: &ExecutionLease, new: &ExecutionLease) -> Result<Write,
             attempt_id,
             tenant_id,
             epoch,
-            acquired_at
+            acquired_at,
+            deadline,
+            owner
         ]
     );
     if old == new {

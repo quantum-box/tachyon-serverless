@@ -12,8 +12,12 @@
 //!   exist for lookups, uniqueness, CAS and retention
 //!   (`migrations/001_initial.sql`).
 //! - Opening applies pending migrations, imports a P1 `state.json` once,
-//!   settles what the previous process left in flight exactly like P1 did
-//!   ([`super::restart`]) and applies output retention.
+//!   settles the in-flight rows that have **no owner** exactly like P1 did
+//!   ([`super::restart`]) and applies output and idempotency retention. Rows
+//!   owned by a dispatcher are left to [`super::SlotStore::reclaim_expired`]
+//!   (`slot.rs`), which only touches owners whose lease expired, that stopped
+//!   or whose previous incarnation is gone (PLT-4631): a second gateway that
+//!   opens the same file never settles the first one's live work.
 //! - Logs stay in memory, bounded per invocation (decision 5). Secrets are
 //!   never written: nothing in the domain rows carries a secret value.
 
@@ -26,10 +30,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use tachyon_serverless_domain::{
-    AliasName, AttemptId, EnvironmentId, EnvironmentState, ExecutionEnvironment, ExecutionLease,
-    Function, FunctionAlias, FunctionId, FunctionName, FunctionRevision, Invocation,
-    InvocationAttempt, InvocationId, LeaseId, Limits, LogRecord, PayloadRef, ReuseKey, RevisionId,
-    Sha256Digest, TenantId, Timestamp,
+    AliasName, AttemptId, EnvironmentId, ExecutionEnvironment, ExecutionLease, Function,
+    FunctionAlias, FunctionId, FunctionName, FunctionRevision, Invocation, InvocationAttempt,
+    InvocationId, LeaseId, Limits, LogRecord, PayloadRef, ReuseKey, RevisionId, Sha256Digest,
+    TenantId, Timestamp,
 };
 
 use super::guard::{self, Write};
@@ -38,11 +42,12 @@ use super::restart;
 use super::{
     AliasRepository, AppendOutcome, ArtifactOwnerRepository, EnvironmentRepository,
     FunctionRepository, IdempotencyBinding, IdempotencyOutcome, IdempotencyRepository,
-    InvocationRepository, LogQuery, LogRepository, PoolLimits, RepoError, RevisionRepository,
-    StateStore, legacy,
+    InvocationRepository, LogQuery, LogRepository, RepoError, RevisionRepository, StateStore,
+    legacy,
 };
 
 pub mod migrations;
+mod slot;
 
 /// Fixed-width RFC 3339 UTC, so timestamps order correctly as text.
 pub(crate) fn ts(t: &Timestamp) -> String {
@@ -90,6 +95,17 @@ pub struct SqliteOptions {
     /// finished. After that the body is replaced by its digest. `None` keeps
     /// it for as long as the row exists.
     pub output_retention: Option<chrono::Duration>,
+    /// How long an idempotency key keeps answering after its invocation
+    /// finished (PLT-4631). `None` keeps it for as long as the row exists.
+    pub idempotency_retention: Option<chrono::Duration>,
+}
+
+/// Both retention periods, passed to every row writer that can make an
+/// invocation terminal.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Retention {
+    pub output: Option<chrono::Duration>,
+    pub idempotency: Option<chrono::Duration>,
 }
 
 /// What [`SqliteStore::open`] did.
@@ -111,6 +127,8 @@ pub struct Settled {
     pub environments: usize,
     pub leases: usize,
     pub idempotency_dropped: usize,
+    /// Expired idempotency bindings purged on open.
+    pub idempotency_purged: usize,
 }
 
 pub struct SqliteStore {
@@ -186,9 +204,11 @@ impl SqliteStore {
             report: OpenReport::default(),
         };
         let imported = store.import_legacy(data_dir, now)?;
-        let settled = store.reconcile_after_restart(now)?;
+        let mut settled = store.reconcile_after_restart(now)?;
         store.backfill_output_expiry()?;
+        store.backfill_idempotency_expiry()?;
         let purged = store.purge_expired_outputs(now)?;
+        settled.idempotency_purged = store.purge_expired_idempotency(now)?;
         store.report = OpenReport {
             schema_version: store.read(migrations::current_version)?,
             migrations_applied: applied.iter().map(|m| m.version).collect(),
@@ -243,8 +263,11 @@ impl SqliteStore {
         Ok(out)
     }
 
-    fn retention(&self) -> Option<chrono::Duration> {
-        self.options.output_retention
+    fn retention(&self) -> Retention {
+        Retention {
+            output: self.options.output_retention,
+            idempotency: self.options.idempotency_retention,
+        }
     }
 
     fn max_inline(&self) -> u64 {
@@ -303,8 +326,10 @@ impl SqliteStore {
         Ok(Some(target))
     }
 
-    /// The P1 restart semantics, unchanged (docs/threat-model.md §9): nothing
-    /// that was in flight survives the process that drove it.
+    /// The P1 restart semantics (docs/threat-model.md §9) for rows **without
+    /// an owner**: nothing that was in flight survives the process that drove
+    /// it. Rows owned by a dispatcher are settled only by
+    /// [`super::SlotStore::reclaim_expired`] (PLT-4631).
     fn reconcile_after_restart(&self, now: Timestamp) -> Result<Settled, RepoError> {
         let retention = self.retention();
         self.write(|tx| {
@@ -317,7 +342,7 @@ impl SqliteStore {
             };
             let invocations: Vec<Invocation> = bodies(
                 tx,
-                "SELECT body FROM invocations WHERE terminal = 0 ORDER BY id",
+                "SELECT body FROM invocations WHERE terminal = 0 AND owner_id IS NULL ORDER BY id",
                 [],
             )?;
             for mut inv in invocations {
@@ -328,7 +353,8 @@ impl SqliteStore {
             }
             let attempts: Vec<InvocationAttempt> = bodies(
                 tx,
-                "SELECT body FROM attempts WHERE terminal = 0 ORDER BY id",
+                "SELECT a.body FROM attempts a JOIN invocations v ON v.id = a.invocation_id \
+                 WHERE a.terminal = 0 AND v.owner_id IS NULL ORDER BY a.id",
                 [],
             )?;
             for mut att in attempts {
@@ -341,7 +367,7 @@ impl SqliteStore {
             }
             let envs: Vec<ExecutionEnvironment> = bodies(
                 tx,
-                "SELECT body FROM environments WHERE terminal = 0 ORDER BY id",
+                "SELECT body FROM environments WHERE terminal = 0 AND owner_id IS NULL ORDER BY id",
                 [],
             )?;
             for mut env in envs {
@@ -353,7 +379,7 @@ impl SqliteStore {
             }
             let leases: Vec<ExecutionLease> = bodies(
                 tx,
-                "SELECT body FROM leases WHERE released = 0 ORDER BY id",
+                "SELECT body FROM leases WHERE released = 0 AND owner_id IS NULL ORDER BY id",
                 [],
             )?;
             for mut lease in leases {
@@ -369,7 +395,7 @@ impl SqliteStore {
     /// Give inline outputs written before retention existed (schema 1, or a
     /// `state.json` import) their expiry.
     fn backfill_output_expiry(&self) -> Result<(), RepoError> {
-        let Some(retention) = self.retention() else {
+        let Some(retention) = self.retention().output else {
             return Ok(());
         };
         self.write(|tx| {
@@ -384,6 +410,27 @@ impl SqliteStore {
                     "UPDATE invocations SET output_expires_at = ?1 WHERE id = ?2",
                     params![output_expires_at(&inv, Some(retention)), inv.id.as_str()],
                 )?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Give bindings of invocations that finished before idempotency expiry
+    /// existed (schema 2, a `state.json` import) their expiry.
+    fn backfill_idempotency_expiry(&self) -> Result<(), RepoError> {
+        let retention = self.retention();
+        if retention.idempotency.is_none() {
+            return Ok(());
+        }
+        self.write(|tx| {
+            let rows: Vec<Invocation> = bodies(
+                tx,
+                "SELECT v.body FROM invocations v JOIN idempotency i ON i.invocation_id = v.id \
+                 WHERE v.terminal = 1 AND i.expires_at IS NULL",
+                [],
+            )?;
+            for inv in rows {
+                set_idempotency_expiry(tx, &inv, retention)?;
             }
             Ok(())
         })
@@ -425,7 +472,7 @@ fn ledger_has_rows(c: &Connection) -> Result<bool, RepoError> {
 fn insert_legacy(
     tx: &Connection,
     state: &legacy::PersistedState,
-    retention: Option<chrono::Duration>,
+    retention: Retention,
 ) -> Result<(), RepoError> {
     for f in state.functions.values() {
         insert_function_row(tx, f)?;
@@ -626,6 +673,32 @@ fn output_kind(inv: &Invocation) -> Option<&'static str> {
     })
 }
 
+/// When a binding of `inv` stops answering: `finished_at + retention` once
+/// the invocation is terminal, never while it is in flight.
+fn idempotency_expires_at(inv: &Invocation, retention: Retention) -> Option<String> {
+    let retention = retention.idempotency?;
+    if !inv.status.is_terminal() {
+        return None;
+    }
+    let finished = inv.finished_at.unwrap_or(inv.accepted_at);
+    Some(ts(&(finished + retention)))
+}
+
+fn set_idempotency_expiry(
+    c: &Connection,
+    inv: &Invocation,
+    retention: Retention,
+) -> Result<(), RepoError> {
+    if inv.idempotency_key.is_some() {
+        c.prepare_cached("UPDATE idempotency SET expires_at = ?1 WHERE invocation_id = ?2")?
+            .execute(params![
+                idempotency_expires_at(inv, retention),
+                inv.id.as_str()
+            ])?;
+    }
+    Ok(())
+}
+
 fn output_expires_at(inv: &Invocation, retention: Option<chrono::Duration>) -> Option<String> {
     let retention = retention?;
     if !inv.status.is_terminal() || !matches!(inv.output, Some(PayloadRef::Inline { .. })) {
@@ -638,12 +711,12 @@ fn output_expires_at(inv: &Invocation, retention: Option<chrono::Duration>) -> O
 fn insert_invocation_row(
     c: &Connection,
     inv: &Invocation,
-    retention: Option<chrono::Duration>,
+    retention: Retention,
 ) -> Result<(), RepoError> {
     c.prepare_cached(
         "INSERT INTO invocations (id, tenant_id, function_id, revision_id, status, terminal, \
-         accepted_at, finished_at, input_digest, output_kind, output_expires_at, body) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         accepted_at, finished_at, input_digest, output_kind, output_expires_at, body, owner_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
     )?
     .execute(params![
         inv.id.as_str(),
@@ -656,8 +729,9 @@ fn insert_invocation_row(
         inv.finished_at.as_ref().map(ts),
         inv.input_digest.as_str(),
         output_kind(inv),
-        output_expires_at(inv, retention),
-        to_json(inv)?
+        output_expires_at(inv, retention.output),
+        to_json(inv)?,
+        inv.dispatcher_id.as_ref().map(|d| d.as_str())
     ])?;
     Ok(())
 }
@@ -666,7 +740,7 @@ fn insert_invocation_row(
 fn update_invocation_row(
     c: &Connection,
     inv: &Invocation,
-    retention: Option<chrono::Duration>,
+    retention: Retention,
 ) -> Result<(), RepoError> {
     let n = c
         .prepare_cached(
@@ -679,15 +753,17 @@ fn update_invocation_row(
             flag(inv.status.is_terminal()),
             inv.finished_at.as_ref().map(ts),
             output_kind(inv),
-            output_expires_at(inv, retention),
+            output_expires_at(inv, retention.output),
             to_json(inv)?,
             inv.id.as_str()
         ])?;
-    if n == 1 {
-        Ok(())
-    } else {
-        Err(lost_race("invocation", &inv.id))
+    if n != 1 {
+        return Err(lost_race("invocation", &inv.id));
     }
+    if inv.status.is_terminal() {
+        set_idempotency_expiry(c, inv, retention)?;
+    }
+    Ok(())
 }
 
 fn insert_attempt_row(c: &Connection, a: &InvocationAttempt) -> Result<(), RepoError> {
@@ -732,8 +808,8 @@ fn insert_environment_row(c: &Connection, e: &ExecutionEnvironment) -> Result<()
     c.prepare_cached(
         "INSERT INTO environments (id, tenant_id, revision_id, provider, state, terminal, epoch, \
          execution_role_version, configuration_version, resource_profile_digest, runtime_profile, \
-         network_policy_version, secret_binding_generation, idle_since, created_at, body) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+         network_policy_version, secret_binding_generation, idle_since, created_at, body, owner_id, \
+         fenced) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
     )?
     .execute(params![
         e.id.as_str(),
@@ -751,7 +827,9 @@ fn insert_environment_row(c: &Connection, e: &ExecutionEnvironment) -> Result<()
         bits(k.secret_binding_generation),
         e.idle_since.as_ref().map(ts),
         ts(&e.created_at),
-        to_json(e)?
+        to_json(e)?,
+        e.owner.as_ref().map(|d| d.as_str()),
+        flag(e.is_fenced())
     ])?;
     Ok(())
 }
@@ -766,8 +844,8 @@ fn cas_environment_row(
 ) -> Result<bool, RepoError> {
     let n = c
         .prepare_cached(
-            "UPDATE environments SET state = ?1, terminal = ?2, epoch = ?3, idle_since = ?4, body = ?5 \
-             WHERE id = ?6 AND epoch = ?7 AND terminal = 0 AND (?8 IS NULL OR state = ?8)",
+            "UPDATE environments SET state = ?1, terminal = ?2, epoch = ?3, idle_since = ?4, body = ?5, \
+             fenced = ?9 WHERE id = ?6 AND epoch = ?7 AND terminal = 0 AND (?8 IS NULL OR state = ?8)",
         )?
         .execute(params![
             e.state.name(),
@@ -777,7 +855,8 @@ fn cas_environment_row(
             to_json(e)?,
             e.id.as_str(),
             big(expected_epoch, "environment epoch")?,
-            expected_state
+            expected_state,
+            flag(e.is_fenced())
         ])?;
     Ok(n == 1)
 }
@@ -797,8 +876,8 @@ fn update_environment_row(
 
 fn insert_lease_row(c: &Connection, l: &ExecutionLease) -> Result<(), RepoError> {
     c.prepare_cached(
-        "INSERT INTO leases (id, environment_id, attempt_id, tenant_id, epoch, deadline, released, body) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO leases (id, environment_id, attempt_id, tenant_id, epoch, deadline, released, body, \
+         owner_id, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )?
     .execute(params![
         l.id.as_str(),
@@ -808,21 +887,33 @@ fn insert_lease_row(c: &Connection, l: &ExecutionLease) -> Result<(), RepoError>
         big(l.epoch, "lease epoch")?,
         ts(&l.deadline),
         flag(l.released_at.is_some()),
-        to_json(l)?
+        to_json(l)?,
+        l.owner.as_ref().map(|d| d.as_str()),
+        l.expires_at.as_ref().map(ts)
     ])?;
     Ok(())
 }
 
+/// CAS on the released flag.
 fn update_lease_row(c: &Connection, l: &ExecutionLease) -> Result<(), RepoError> {
+    write_lease_row(c, l, false)
+}
+
+/// CAS on the released flag. `reclaimed` marks a release by another
+/// dispatcher after the lease expired.
+fn write_lease_row(c: &Connection, l: &ExecutionLease, reclaimed: bool) -> Result<(), RepoError> {
     let n = c
         .prepare_cached(
-            "UPDATE leases SET deadline = ?1, released = ?2, body = ?3 WHERE id = ?4 AND released = 0",
+            "UPDATE leases SET deadline = ?1, released = ?2, body = ?3, expires_at = ?5, \
+             reclaimed = ?6 WHERE id = ?4 AND released = 0",
         )?
         .execute(params![
             ts(&l.deadline),
             flag(l.released_at.is_some()),
             to_json(l)?,
-            l.id.as_str()
+            l.id.as_str(),
+            l.expires_at.as_ref().map(ts),
+            flag(reclaimed)
         ])?;
     if n == 1 {
         Ok(())
@@ -1150,7 +1241,7 @@ fn insert_invocation_checked(
     tx: &Connection,
     invocation: &Invocation,
     max_inline: u64,
-    retention: Option<chrono::Duration>,
+    retention: Retention,
 ) -> Result<(), RepoError> {
     if exists(tx, "invocations", invocation.id.as_str())? {
         return Err(duplicate("invocation", &invocation.id));
@@ -1278,133 +1369,6 @@ impl EnvironmentRepository for SqliteStore {
             )
         })
     }
-
-    fn list_idle(&self) -> Result<Vec<ExecutionEnvironment>, RepoError> {
-        self.read(|c| {
-            bodies(
-                c,
-                "SELECT body FROM environments WHERE state = 'idle' ORDER BY idle_since, id",
-                [],
-            )
-        })
-    }
-
-    fn claim_for_reuse(
-        &self,
-        key: &ReuseKey,
-        now: Timestamp,
-    ) -> Result<Option<ExecutionEnvironment>, RepoError> {
-        let key_params = reuse_key_params(key)?;
-        self.write(|tx| {
-            // Oldest matching idle environment by id (a ULID), like the
-            // volatile store. Served by `environments_reuse_key`.
-            let candidate: Option<ExecutionEnvironment> = body(
-                tx,
-                &format!(
-                    "SELECT body FROM environments WHERE {REUSE_KEY_MATCH} ORDER BY id LIMIT 1"
-                ),
-                rusqlite::params_from_iter(key_params.iter()),
-            )?;
-            let Some(env) = candidate else {
-                return Ok(None);
-            };
-            if &env.reuse_key != key || !matches!(env.state, EnvironmentState::Idle) {
-                return Ok(None);
-            }
-            let mut claimed = env.clone();
-            if claimed.reassign(now).is_err() {
-                return Ok(None);
-            }
-            if cas_environment_row(tx, &claimed, env.epoch, Some("idle"))? {
-                Ok(Some(claimed))
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
-    fn release_to_pool(
-        &self,
-        env: &ExecutionEnvironment,
-        limits: PoolLimits,
-        now: Timestamp,
-    ) -> Result<Option<ExecutionEnvironment>, RepoError> {
-        let key_params = reuse_key_params(&env.reuse_key)?;
-        self.write(|tx| {
-            let Some(current) = get_environment(tx, &env.id)? else {
-                return Ok(None);
-            };
-            if current.epoch != env.epoch || !matches!(current.state, EnvironmentState::Busy) {
-                return Ok(None);
-            }
-            let total: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM environments WHERE state = 'idle'",
-                [],
-                |r| r.get(0),
-            )?;
-            let per_key: i64 = tx
-                .prepare_cached(&format!(
-                    "SELECT COUNT(*) FROM environments WHERE {REUSE_KEY_MATCH}"
-                ))?
-                .query_row(rusqlite::params_from_iter(key_params.iter()), |r| r.get(0))?;
-            let (total, per_key) = (total as usize, per_key as usize);
-            if total >= limits.max_total_idle || per_key >= limits.max_idle_per_key {
-                return Ok(None);
-            }
-            let mut pooled = env.clone();
-            if pooled.mark_idle(now).is_err() {
-                return Ok(None);
-            }
-            guard::environment_update(&current, &pooled)?;
-            if cas_environment_row(tx, &pooled, current.epoch, Some("busy"))? {
-                Ok(Some(pooled))
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
-    fn take_idle_for_termination(
-        &self,
-        id: &EnvironmentId,
-        now: Timestamp,
-    ) -> Result<bool, RepoError> {
-        self.write(|tx| {
-            let Some(mut env) = get_environment(tx, id)? else {
-                return Ok(false);
-            };
-            if !matches!(env.state, EnvironmentState::Idle) || env.mark_draining(now).is_err() {
-                return Ok(false);
-            }
-            cas_environment_row(tx, &env, env.epoch, Some("idle"))
-        })
-    }
-
-    fn insert_lease(&self, lease: ExecutionLease) -> Result<(), RepoError> {
-        self.write(|tx| {
-            if exists(tx, "leases", lease.id.as_str())? {
-                return Err(duplicate("lease", &lease.id));
-            }
-            guard::lease_insert(get_environment(tx, &lease.environment_id)?.as_ref(), &lease)?;
-            insert_lease_row(tx, &lease)
-        })
-    }
-
-    fn get_lease(&self, id: &LeaseId) -> Result<Option<ExecutionLease>, RepoError> {
-        self.read(|c| get_lease(c, id))
-    }
-
-    fn update_lease(&self, lease: ExecutionLease) -> Result<(), RepoError> {
-        self.write(|tx| {
-            let Some(old) = get_lease(tx, &lease.id)? else {
-                return Err(RepoError::NotFound(format!("lease {}", lease.id)));
-            };
-            if guard::lease_update(&old, &lease)? == Write::Apply {
-                update_lease_row(tx, &lease)?;
-            }
-            Ok(())
-        })
-    }
 }
 
 impl LogRepository for SqliteStore {
@@ -1417,28 +1381,40 @@ impl LogRepository for SqliteStore {
     }
 }
 
+/// The binding of `key` whose invocation exists and that has not expired at
+/// `now`.
 fn live_binding(
     c: &Connection,
     tenant: &TenantId,
     function: &FunctionId,
     key: &str,
+    now: Timestamp,
 ) -> Result<Option<IdempotencyBinding>, RepoError> {
-    let row: Option<(String, String)> = c
+    let row: Option<(String, String, Option<String>)> = c
         .prepare_cached(
-            "SELECT i.invocation_id, i.input_digest FROM idempotency i \
+            "SELECT i.invocation_id, i.input_digest, i.expires_at FROM idempotency i \
              JOIN invocations v ON v.id = i.invocation_id \
-             WHERE i.tenant_id = ?1 AND i.function_id = ?2 AND i.idem_key = ?3",
+             WHERE i.tenant_id = ?1 AND i.function_id = ?2 AND i.idem_key = ?3 \
+             AND (i.expires_at IS NULL OR i.expires_at > ?4)",
         )?
-        .query_row([tenant.as_str(), function.as_str(), key], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            params![tenant.as_str(), function.as_str(), key, ts(&now)],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
         .optional()?;
-    row.map(|(inv, digest)| {
+    row.map(|(inv, digest, expires)| {
         Ok(IdempotencyBinding {
             invocation_id: InvocationId::parse(&inv)
                 .map_err(|e| RepoError::Serialization(e.to_string()))?,
             input_digest: Sha256Digest::parse(&digest)
                 .map_err(|e| RepoError::Serialization(e.to_string()))?,
+            expires_at: expires
+                .map(|t| {
+                    chrono::DateTime::parse_from_rfc3339(&t)
+                        .map(|t| t.with_timezone(&chrono::Utc))
+                        .map_err(|e| RepoError::Serialization(e.to_string()))
+                })
+                .transpose()?,
         })
     })
     .transpose()
@@ -1450,22 +1426,30 @@ impl IdempotencyRepository for SqliteStore {
         tenant: &TenantId,
         function: &FunctionId,
         key: &str,
+        now: Timestamp,
     ) -> Result<Option<IdempotencyBinding>, RepoError> {
-        self.read(|c| live_binding(c, tenant, function, key))
+        self.read(|c| live_binding(c, tenant, function, key, now))
     }
 
     fn insert_bound(&self, invocation: Invocation) -> Result<IdempotencyOutcome, RepoError> {
         let (max, retention) = (self.max_inline(), self.retention());
         self.write(|tx| {
             if let Some(key) = &invocation.idempotency_key
-                && let Some(existing) =
-                    live_binding(tx, &invocation.tenant_id, &invocation.function_id, key)?
+                && let Some(existing) = live_binding(
+                    tx,
+                    &invocation.tenant_id,
+                    &invocation.function_id,
+                    key,
+                    invocation.accepted_at,
+                )?
             {
                 return Ok(IdempotencyOutcome::Existing(existing));
             }
             insert_invocation_checked(tx, &invocation, max, retention)?;
             if let Some(key) = &invocation.idempotency_key {
-                // A binding left without its invocation is stale: replace it.
+                // A binding left without its invocation, or expired, is
+                // stale: replace it. The primary key keeps the binding unique
+                // across every process on this file.
                 tx.execute(
                     "DELETE FROM idempotency WHERE tenant_id = ?1 AND function_id = ?2 AND idem_key = ?3",
                     params![
@@ -1475,18 +1459,28 @@ impl IdempotencyRepository for SqliteStore {
                     ],
                 )?;
                 tx.execute(
-                    "INSERT INTO idempotency (tenant_id, function_id, idem_key, invocation_id, input_digest) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    "INSERT INTO idempotency (tenant_id, function_id, idem_key, invocation_id, input_digest, \
+                     expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         invocation.tenant_id.as_str(),
                         invocation.function_id.as_str(),
                         key,
                         invocation.id.as_str(),
-                        invocation.input_digest.as_str()
+                        invocation.input_digest.as_str(),
+                        idempotency_expires_at(&invocation, retention)
                     ],
                 )?;
             }
             Ok(IdempotencyOutcome::Inserted)
+        })
+    }
+
+    fn purge_expired_idempotency(&self, now: Timestamp) -> Result<usize, RepoError> {
+        self.write(|tx| {
+            Ok(tx.execute(
+                "DELETE FROM idempotency WHERE expires_at IS NOT NULL AND expires_at <= ?1",
+                [ts(&now)],
+            )?)
         })
     }
 }

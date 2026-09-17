@@ -56,8 +56,13 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      Revision は受付時に固定される。実行中に alias を変えても版は変わらない。
   3 payload 上限 (limits.max_payload_bytes → 413)、trace id ≤ 256 bytes、Idempotency-Key 1..=256 文字 (→ 400)。
      ここまで何も記録しない (拒否された request は key を消費しない)。Idempotency-Key が既存 Invocation に
-     結び付いていれば、容量に関係なくそれを返す (同キー・異なる input digest → 409 conflict)。
-  4 Invocation(Accepted) + deadlines を組み立てる。queue / init / execution は client_deadline を超えない。
+     結び付いていれば、容量に関係なくそれを返す (同キー・異なる input digest → 409 conflict、本文に結び付いた
+     invocation_id と error_type = Host.IdempotencyKeyReused)。その Invocation を別の gateway が実行中なら、
+     台帳を追って terminal になるか元の client_deadline まで待ってから返す (再実行しない)。key は Invocation が
+     terminal になってから [store] idempotency_retention_seconds 後に失効する (PLT-4631)。
+  4 Invocation(Accepted, dispatcher_id = この gateway の dispatcher) + deadlines を組み立てる。
+     dispatcher の lease を失っている (heartbeat が拒否された) gateway は受け付けない (503 provider_unavailable)。
+     queue / init / execution は client_deadline を超えない。
      client_deadline  = now + min(client_timeout_ms header, timeout_seconds + init + queue)
      queue_deadline   = min(now + queue_timeout (config, default 10s), client_deadline)
   5 容量: revision.max_concurrency と gateway 全体上限の semaphore。空きがなければ bounded queue
@@ -73,7 +78,11 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      InitError / 接続断 / timeout → 502 init_error、環境終了。
      client_deadline で待ちを打ち切った場合と、Ready 後 (Attempt 作成前) に client_deadline を過ぎていた場合は
      handler を起動せず 504 timeout (Host.ClientDeadline)、環境 stop + terminate(Cancelled)。
-  8 Attempt(Dispatched, epoch) + Lease を作成。Invocation(Running)。Invoke frame 送信。
+  8 SlotStore::acquire で slot を取る: 環境の (state = Ready, epoch) を CAS し、epoch を 1 進めて Busy にし、
+     Lease(owner = dispatcher, attempt, epoch, 所有期限 = now + lease_ttl, execution_deadline)、
+     Attempt(Dispatched, epoch)、Invocation(Running) を 1 トランザクションで書く。負け (環境が動いた、fenced、
+     dispatcher が reclaim 済み、Invocation が既に terminal) なら handler を起動せず Failed{platform_error,
+     Host.SlotLost}。Invoke frame 送信。
      execution_deadline = min(dispatch 時刻 + timeout_seconds, client_deadline)。guest の deadline_ms も同じ値。
      Invoke を届けられなかった場合 (handler は未開始、OutcomeUnknown にしない):
      encode 不能 → 500 platform_error (Host.InvokeTooLarge)。書き込み失敗 → guest が閉じる前に送った
@@ -88,7 +97,9 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
                            (client_deadline で打ち切った場合は error_type = Host.ClientDeadline)
      - 接続断 (Invoke 書き込み後、結果未受信) → OutcomeUnknown（自動再実行しない）
      - cancel API       → Cancel → terminate → Cancelled
- 10 Lease release、Attempt/Invocation terminal 更新、UsageEvent(host 観測)、
+ 10 SlotStore::complete (fenced callback): Lease が未 release で (attempt_id, epoch) が一致し、環境が同じ epoch の
+     ときだけ Lease release と Attempt/Invocation の terminal 更新を 1 トランザクションで書く。reclaim 済みなら
+     何も書かず (stale)、結果も返さない (台帳の OutcomeUnknown{Host.LeaseExpired} が答え)。UsageEvent(host 観測)、
      provider.terminate_environment（destroy-after-invoke、冪等）。timeout/強制終了した環境は再利用しない。
      driver が panic した場合も terminate(Crashed)、Lease 解放、Attempt / 環境 Failed、EnvironmentStopped を記録する。
  11 client 切断は完了と見なさない。invoke タスクは spawn され、切断後も deadline まで追跡し記録する。
@@ -127,6 +138,13 @@ queue_timeout_seconds = 10
 [store]
 backend = "sqlite"             # sqlite（<data_dir>/state.db、既定）| memory（再起動で消える）
 output_retention_seconds = 604800  # インライン出力の保持期限。過ぎたら digest に置き換える。0 は無期限
+idempotency_retention_seconds = 86400  # Idempotency-Key の保持期限（Invocation が terminal になってから）。0 は無期限
+
+[dispatcher]                   # PLT-4631。gateway プロセスごとの所有者 id と lease
+# instance = "gateway-a"       # 既定 "gateway@<listen>"。同じ data_dir を共有する gateway 同士で重複させない
+lease_ttl_seconds = 30         # dispatcher lease と slot lease の所有期限
+heartbeat_interval_seconds = 10  # renew と reclaim の周期（lease_ttl_seconds 未満）
+max_clock_skew_ms = 2000       # 他の dispatcher の期限を判定するときに許す時計のずれ
 
 [reconcile]
 on_startup = true              # 起動時に provider の孤児環境を回収する（既定 true）
@@ -157,11 +175,12 @@ value = "s3cr3t-a"
 
 前のプロセスが crash / kill で落ちた場合、台帳（`state.db`）も host の資源も中途半端に残る。gateway は次の順で収束させる。
 
-1. **台帳**（`crates/application/src/repository/restart.rs` の規則を `SqliteStore::open` が 1 トランザクションで適用する）。`Running` だった Invocation は `Invoke` frame を書き終えており handler が走った可能性があるため `OutcomeUnknown{Host.Restarted}`（自動再実行しない。`docs/threat-model.md` §9）。`Accepted` / `Queued` のままだったものは一度も dispatch していないので `Failed{platform_error, Host.Restarted}`。Attempt は所属する Invocation に従い、Environment は `Lost`、未 release の Lease は release、Invocation の無い Idempotency key は削除。terminal なものは触らない。
-2. **host の資源**（`crates/application/src/services/reconcile.rs::ReconcileService`、`serve()` が listener を accept させる前に呼ぶ）。`ExecutionProvider::list_environments` を呼び、この gateway が active として知らない環境を `terminate_environment(Reconcile)` で回収する（process / socket / drive / workdir。冪等）。台帳には active なのに provider が知らない環境は `Lost` にする。
-3. **観測**。結果（found / adopted / terminated / failed / lost）を構造化ログ `startup reconcile finished` に出し、`GET /readyz` の `reconcile` にも載せる。
+1. **台帳（所有者の無い行）**（`crates/application/src/repository/restart.rs` の規則を `SqliteStore::open` が 1 トランザクションで適用する）。対象は **owner を持たない行**（schema 2 以前の gateway が書いた行と `state.json` の import）だけ。`Running` だった Invocation は `Invoke` frame を書き終えており handler が走った可能性があるため `OutcomeUnknown{Host.Restarted}`（自動再実行しない。`docs/threat-model.md` §9）。`Accepted` / `Queued` のままだったものは一度も dispatch していないので `Failed{platform_error, Host.Restarted}`。Attempt は所属する Invocation に従い、Environment は `Lost`、未 release の Lease は release、Invocation の無い Idempotency key は削除。terminal なものは触らない。
+2. **台帳（dispatcher の reclaim）**（`Application::bootstrap` が新しい dispatcher を登録した直後に `Dispatcher::reclaim_ledger`）。**lease を失った dispatcher の行だけ**を回収する（次節「dispatcher・lease・fencing」）。生きている別 gateway の行には触らない。
+3. **host の資源**（`crates/application/src/services/reconcile.rs::ReconcileService`、`serve()` が listener を accept させる前に呼ぶ）。まず 2 で fence された環境を `terminate_environment(Reconcile)` し、成功を確認できたものだけ `Lost` にする。続いて `ExecutionProvider::list_environments` を呼び、この gateway が active として知らない環境を `terminate_environment(Reconcile)` で回収する（process / socket / drive / workdir。冪等）。台帳には active なのに provider が知らない環境は `Lost` にする。**生きている別 dispatcher が所有する環境と fenced の環境はこの判定から外す**（数だけ `foreign` に出す）。台帳の snapshot に無い id は terminate の前に台帳を読み直し、その間に別 gateway が記録していれば外す。
+4. **観測**。結果（found / adopted / terminated / failed / lost / foreign と reclaim の dispatchers / leases / invocations / fenced / terminated / pending）を構造化ログ `startup reconcile finished` に出し、`GET /readyz` の `reconcile` にも載せる。
 
-規則: provider の列挙や terminate が失敗しても起動は止めない（warn を出して続行し、`reconcile.error` に残す）。実行中の invocation の環境は `create_environment` より前に台帳へ記録されるため必ず「知っている」側に入り、reconcile が terminate することはない。`[reconcile] on_startup = false` で 2 と 3 だけを止められる（1 は常に走る）。
+規則: provider の列挙や terminate が失敗しても起動は止めない（warn を出して続行し、`reconcile.error` に残す）。実行中の invocation の環境は `create_environment` より前に台帳へ記録されるため必ず「知っている」側に入り、reconcile が terminate することはない。`[reconcile] on_startup = false` で 3 と 4 だけを止められる（1 と 2 は常に走り、fenced 環境の terminate は heartbeat の周期で行う）。
 
 ### 永続化（`state.db`、PLT-4618）
 
@@ -177,7 +196,24 @@ value = "s3cr3t-a"
 | 本文 | 入力は digest とサイズだけ。出力は `[invoke] inline_output_max_bytes` 以下のときだけ本文を持ち（store 側でも `limits.max_response_bytes` で拒否）、`[store] output_retention_seconds` を過ぎると digest に置き換える（起動時と 10 分ごと）。secret 値は書かない。log は memory のまま |
 | `state.json` からの移行 | `state.json` があり DB が空なら、起動時に 1 度だけ取り込み `state.json.imported-<UTC>` に rename する（削除しない）。行のある DB と `state.json` が同時にあれば両方の path を挙げて起動を拒否する。壊れた `state.json` は従来どおり拒否する。逆方向の変換は無い（戻すには rename された JSON を戻し、`state.db*` を退避する） |
 | 権限 | `state.db` は新規作成時に mode `0600`。`-wal` / `-shm` も SQLite が同じ mode で作る |
-| 対象外 | 複数 host、ネットワーク FS 上の `data_dir`、TiDB、backup / PITR、保存時暗号化。起動時の台帳 reconcile は「前のプロセスの in-flight は全部失われた」前提なので、**同じ `data_dir` を複数 gateway が同時に開く構成はまだ対象外**（PLT-4631 で lease の期限に基づく reconcile に狭める） |
+| port の分割 | control-plane の 8 trait と、cell-local の `SlotStore`（`repository/slot.rs`: dispatcher、slot の acquire / complete / release、lease の renew / reclaim、fencing、pool membership）。両方とも同じ `state.db` に載る（ADR-0003 決定 1・2） |
+| 対象外 | 複数 host、ネットワーク FS 上の `data_dir`、TiDB、backup / PITR、保存時暗号化。同じ `data_dir` を同じ host の複数 gateway が同時に開く構成は PLT-4631 で扱えるようになった（次節）。ただし `[dispatcher] instance` と `listen` は gateway ごとに変えること |
+
+### dispatcher・lease・fencing（PLT-4631）
+
+gateway プロセスは起動のたびに新しい **dispatcher**（`dsp_<ULID>`、`crates/application/src/services/dispatcher.rs`）として `state.db` の `dispatchers` に登録される（instance 名、host 名、pid、lease の期限）。受け付けた Invocation、作った ExecutionEnvironment、取った slot の Lease はすべてその dispatcher を owner として持つ。bridge session はプロセスの中にしか無いので、**環境の owner は変わらない**: 別の dispatcher は環境を fence して terminate することはできても、dispatch することはない（pool の claim / sweep も自分の環境だけ）。
+
+| 仕組み | 内容 |
+|---|---|
+| slot の取得 | `SlotStore::acquire`。環境の `(state ∈ {Ready, Idle}, epoch)` の CAS、未 release の lease が無いこと、owner が lease の owner と同じで dispatcher が live（stopped / reclaimed でない）ことを条件に、epoch + 1・`Busy`・Lease（owner、attempt、epoch、所有期限、execution deadline）・Attempt・Invocation `Running` を 1 トランザクションで書く。起動したての環境は epoch 0 で、最初の attempt が epoch 1。pool の claim は `Idle` → `Ready`（予約）で epoch を動かさず、acquire が進める |
+| heartbeat | `[dispatcher] heartbeat_interval_seconds` ごとに `Dispatcher::heartbeat`: dispatcher の lease と、まだ期限が来ていない自分の slot lease を `now + lease_ttl_seconds` に延ばす（1 トランザクション）。**期限を過ぎた lease は延ばさない**（誰かが reclaim している最中かもしれない）。拒否されたら dispatcher は fenced になり、新しい invoke を 503 で断り、`/readyz` も 503 にする |
+| reclaim | 同じ周期で `ReconcileService::reclaim`。他の dispatcher のうち、lease の期限 + `max_clock_skew_ms` を自分の時計で過ぎたもの、graceful shutdown で stopped になったもの、**同じ host・同じ instance の前の incarnation でプロセスが無いと証明できたもの**（pid が存在しない、または同じプロセス内で handle が drop 済み）を `reclaimed` にし、その Lease を release（`reclaimed = 1`）、Invocation を `OutcomeUnknown{Host.LeaseExpired}`（dispatch 前なら `Failed{platform_error}`。stopped / 前の incarnation は `Host.Restarted`）、Attempt を同じ分類、環境を **fence**（`Draining`、epoch + 1、`fenced_at`）する。各行の CAS（`reclaimed_at IS NULL`、`released = 0`）により、複数のプロセスが同時に reclaim しても成立するのは 1 回だけ |
+| fencing | 完了通知は `SlotStore::complete`（上記 §3-10）。reclaim で Lease が release され環境の epoch が進んでいるので、遅れて届いた結果は store が拒否し、台帳の `OutcomeUnknown` は上書きされない。reclaim された dispatcher は heartbeat も acquire もできない |
+| 終了確認 | **lease の失効だけでは環境を空きにしない。** fenced の環境は pool にも容量にも数えられず、`terminate_environment` が成功した後の `SlotStore::confirm_terminated`（同じ epoch の CAS）でだけ `Lost` に落ちる。terminate が失敗した環境は fenced のまま次の周期で再試行する |
+| 冪等性 | `Idempotency-Key` の結び付け `(tenant, function, key)` は `idempotency` 表の主キーで、どのプロセスからも 1 回しか書けない。入力 digest と、Invocation が terminal になった時点で `finished_at + idempotency_retention_seconds` の期限を持つ（実行中は失効しない）。失効した key は応答せず、同じ key の新しい request は新規として受け付け、期限切れの行は起動時と 10 分ごとに削除する |
+| 同期 invoke の再実行 | しない。dispatch 後の失敗は `Failed` / `OutcomeUnknown` のまま（`docs/threat-model.md` §9）。例外は従来どおり「warm への `Invoke` が届かなかった」場合の cold 1 回だけ。handler の外部副作用は at-least-once（client の再送）か不明であり、exactly-once は保証しない |
+
+時計: 期限の判定は判定する側の `Clock`（本番は wall clock）で行い、`max_clock_skew_ms` までのずれは許す。これを超えて時計がずれた、または heartbeat がプロセスの停止（GC、SIGSTOP、過負荷）で lease_ttl + skew より長く止まった場合、生きている dispatcher の仕事が reclaim されうる。そのときも fencing により結果は上書きされず、環境は terminate されてから `Lost` になる（handler の途中で止められうる）。
 
 ### 環境 pool と再利用キー（PLT-4632）
 

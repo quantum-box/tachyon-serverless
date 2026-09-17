@@ -1,6 +1,13 @@
-//! What a restart does to rows whose driver died with the previous process
-//! (docs/threat-model.md §9). Shared by the SQLite store (on every open) and
-//! the one-time `state.json` import.
+//! What happens to rows whose driver is gone (docs/threat-model.md §9).
+//!
+//! Two callers, one set of rules:
+//! - a store that opens settles the rows **without an owner** (written before
+//!   dispatchers existed, or by a P1 `state.json` import) with
+//!   [`Cause::RESTARTED`];
+//! - [`super::SlotStore::reclaim_expired`] settles the rows of a dispatcher
+//!   whose lease expired ([`Cause::LEASE_EXPIRED`]) or that stopped / whose
+//!   previous incarnation is gone ([`Cause::RESTARTED`]). Rows of a live
+//!   dispatcher are never touched (PLT-4631).
 
 use tachyon_serverless_domain::{
     ErrorClass, ExecutionEnvironment, ExecutionLease, Invocation, InvocationAttempt,
@@ -9,11 +16,35 @@ use tachyon_serverless_domain::{
 
 /// Error type carried by everything the restart reconcile settles.
 pub const HOST_RESTARTED: &str = "Host.Restarted";
+/// Error type carried by everything a lease-expiry reclaim settles.
+pub const HOST_LEASE_EXPIRED: &str = "Host.LeaseExpired";
 
-const INVOCATION_MSG: &str = "gateway restarted while the invocation was in flight";
-const UNKNOWN_MSG: &str =
-    "gateway restarted after the invocation was dispatched; the handler may have run";
-const ATTEMPT_MSG: &str = "gateway restarted while the attempt was in flight";
+/// Why rows are settled: the error type and the messages they get.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cause {
+    pub error_type: &'static str,
+    /// For an invocation that never left `Accepted` / `Queued`.
+    pub not_started: &'static str,
+    /// For an invocation (and attempt) that was dispatched.
+    pub unknown: &'static str,
+    /// For an attempt of an invocation that was not dispatched.
+    pub attempt: &'static str,
+}
+
+impl Cause {
+    pub const RESTARTED: Cause = Cause {
+        error_type: HOST_RESTARTED,
+        not_started: "gateway restarted while the invocation was in flight",
+        unknown: "gateway restarted after the invocation was dispatched; the handler may have run",
+        attempt: "gateway restarted while the attempt was in flight",
+    };
+    pub const LEASE_EXPIRED: Cause = Cause {
+        error_type: HOST_LEASE_EXPIRED,
+        not_started: "the dispatcher that accepted the invocation lost its lease before dispatching it",
+        unknown: "the dispatcher lost its lease after the invocation was dispatched; the handler may have run",
+        attempt: "the dispatcher lost its lease while the attempt was in flight",
+    };
+}
 
 /// An invocation that was already `Running` had its `Invoke` frame written,
 /// so the handler may have run: its outcome is unknown and must never be
@@ -21,20 +52,29 @@ const ATTEMPT_MSG: &str = "gateway restarted while the attempt was in flight";
 /// was never dispatched, so it provably did not start and fails with
 /// `PlatformError`. Returns whether the invocation changed.
 pub fn settle_invocation(inv: &mut Invocation, now: Timestamp) -> bool {
+    settle_invocation_with(inv, Cause::RESTARTED, now)
+}
+
+/// [`settle_invocation`] for any [`Cause`].
+pub fn settle_invocation_with(inv: &mut Invocation, cause: Cause, now: Timestamp) -> bool {
     if inv.status.is_terminal() {
         return false;
     }
     if matches!(inv.status, InvocationStatus::Running) {
-        if inv.mark_outcome_unknown(UNKNOWN_MSG, now).is_ok()
+        if inv.mark_outcome_unknown(cause.unknown, now).is_ok()
             && let InvocationStatus::OutcomeUnknown { error } = &mut inv.status
         {
-            // The domain stamps the generic `Host.OutcomeUnknown`; a
-            // restart names itself so the cause stays visible.
-            error.error_type = HOST_RESTARTED.to_string();
+            // The domain stamps the generic `Host.OutcomeUnknown`; the
+            // cause names itself so it stays visible.
+            error.error_type = cause.error_type.to_string();
         }
     } else {
         let _ = inv.mark_failed(
-            InvocationError::new(ErrorClass::PlatformError, HOST_RESTARTED, INVOCATION_MSG),
+            InvocationError::new(
+                ErrorClass::PlatformError,
+                cause.error_type,
+                cause.not_started,
+            ),
             now,
         );
     }
@@ -48,17 +88,27 @@ pub fn settle_attempt(
     invocation_outcome_unknown: bool,
     now: Timestamp,
 ) -> bool {
+    settle_attempt_with(att, invocation_outcome_unknown, Cause::RESTARTED, now)
+}
+
+/// [`settle_attempt`] for any [`Cause`].
+pub fn settle_attempt_with(
+    att: &mut InvocationAttempt,
+    invocation_outcome_unknown: bool,
+    cause: Cause,
+    now: Timestamp,
+) -> bool {
     if att.status.is_terminal() {
         return false;
     }
     if invocation_outcome_unknown {
         let _ = att.outcome_unknown(
-            InvocationError::new(ErrorClass::OutcomeUnknown, HOST_RESTARTED, UNKNOWN_MSG),
+            InvocationError::new(ErrorClass::OutcomeUnknown, cause.error_type, cause.unknown),
             now,
         );
     } else {
         let _ = att.fail(
-            InvocationError::new(ErrorClass::PlatformError, HOST_RESTARTED, ATTEMPT_MSG),
+            InvocationError::new(ErrorClass::PlatformError, cause.error_type, cause.attempt),
             now,
         );
     }

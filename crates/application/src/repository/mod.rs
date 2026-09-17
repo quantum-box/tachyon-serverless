@@ -1,4 +1,5 @@
-//! Repositories: the control-plane ports and their two implementations
+//! Repositories: the control-plane ports, the cell-local [`SlotStore`] port
+//! (slots, leases, pool, dispatchers; PLT-4631) and their two implementations
 //! (docs/adr/0003-execution-state-persistence.md).
 //!
 //! - [`SqliteStore`] is the durable store the gateway runs on:
@@ -19,9 +20,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tachyon_serverless_domain::{
-    AliasName, AttemptId, EnvironmentId, ExecutionEnvironment, ExecutionLease, Function,
-    FunctionAlias, FunctionId, FunctionName, FunctionRevision, Invocation, InvocationAttempt,
-    InvocationId, LeaseId, LogRecord, ReuseKey, RevisionId, Sha256Digest, TenantId, Timestamp,
+    AliasName, AttemptId, EnvironmentId, ExecutionEnvironment, Function, FunctionAlias, FunctionId,
+    FunctionName, FunctionRevision, Invocation, InvocationAttempt, InvocationId, LogRecord,
+    RevisionId, Sha256Digest, TenantId, Timestamp,
 };
 
 pub mod guard;
@@ -29,13 +30,18 @@ mod legacy;
 mod logs;
 mod memory;
 pub mod restart;
+pub mod slot;
 pub mod sqlite;
 
 #[cfg(test)]
 mod contract_tests;
 
 pub use memory::InMemoryStore;
-pub use restart::HOST_RESTARTED;
+pub use restart::{HOST_LEASE_EXPIRED, HOST_RESTARTED};
+pub use slot::{
+    AcquireOutcome, CompletionOutcome, DispatcherRecord, HeartbeatOutcome, ReclaimReport,
+    ReclaimRequest, SlotAcquire, SlotCompletion, SlotStore,
+};
 pub use sqlite::{SqliteOptions, SqliteStore};
 
 #[derive(Debug, thiserror::Error)]
@@ -132,61 +138,18 @@ pub struct PoolLimits {
     pub max_total_idle: usize,
 }
 
+/// Environment rows (lifecycle before and after an attempt). Assigning an
+/// environment to an attempt, leases, the pool and fencing go through
+/// [`SlotStore`].
 pub trait EnvironmentRepository: Send + Sync {
     fn insert(&self, env: ExecutionEnvironment) -> Result<(), RepoError>;
     fn get(&self, id: &EnvironmentId) -> Result<Option<ExecutionEnvironment>, RepoError>;
     /// Refused when the stored row is terminal or at another epoch than
-    /// `env` (a stale copy must never overwrite a reassigned environment).
+    /// `env` (a stale copy must never overwrite a reassigned environment),
+    /// when it would make the environment `Busy` (only an acquire does) and
+    /// when it would change the owner or the fencing.
     fn update(&self, env: ExecutionEnvironment) -> Result<(), RepoError>;
     fn list_active(&self) -> Result<Vec<ExecutionEnvironment>, RepoError>;
-
-    /// The environments currently in the pool, longest idle first.
-    fn list_idle(&self) -> Result<Vec<ExecutionEnvironment>, RepoError>;
-
-    /// Atomically hand out one **pooled** (`Idle`) environment whose reuse key
-    /// equals `key` in *every* field, moving it to `Busy` and advancing its
-    /// epoch.
-    ///
-    /// Only pool membership is handed out, i.e. only what `release_to_pool`
-    /// put there. A `Ready` environment is not in the pool: it belongs to the
-    /// cold start that created it, which is about to dispatch into it.
-    ///
-    /// Searching, the state change and the epoch bump all happen inside one
-    /// store mutation, so of two concurrent claims exactly one can win: the
-    /// loser sees the environment as `Busy` and skips it, or finds no
-    /// candidate at all. `None` means the caller must create an environment.
-    fn claim_for_reuse(
-        &self,
-        key: &ReuseKey,
-        now: Timestamp,
-    ) -> Result<Option<ExecutionEnvironment>, RepoError>;
-
-    /// Atomically put a finished environment back into the pool.
-    ///
-    /// `env` is the caller's copy of the `Busy` row, including whatever
-    /// evidence the attempt added. It is refused (`None`) when the stored row
-    /// moved on since — a different epoch, or no longer `Busy` — and when a
-    /// cap in `limits` is reached. The caller then terminates it instead.
-    fn release_to_pool(
-        &self,
-        env: &ExecutionEnvironment,
-        limits: PoolLimits,
-        now: Timestamp,
-    ) -> Result<Option<ExecutionEnvironment>, RepoError>;
-
-    /// Atomically take one idle environment out of the pool for termination
-    /// (TTL sweep or drain), moving it to `Draining`. False when it is no
-    /// longer idle, i.e. an attempt claimed it first.
-    fn take_idle_for_termination(
-        &self,
-        id: &EnvironmentId,
-        now: Timestamp,
-    ) -> Result<bool, RepoError>;
-
-    fn insert_lease(&self, lease: ExecutionLease) -> Result<(), RepoError>;
-    fn get_lease(&self, id: &LeaseId) -> Result<Option<ExecutionLease>, RepoError>;
-    /// Refused once the stored lease is released.
-    fn update_lease(&self, lease: ExecutionLease) -> Result<(), RepoError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +176,11 @@ pub trait LogRepository: Send + Sync {
 pub struct IdempotencyBinding {
     pub invocation_id: InvocationId,
     pub input_digest: Sha256Digest,
+    /// When the binding stops answering: the invocation's `finished_at` plus
+    /// the idempotency retention. `None` while the invocation is in flight
+    /// (a binding never expires under a running invocation) or when
+    /// retention is unlimited.
+    pub expires_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,26 +191,35 @@ pub enum IdempotencyOutcome {
     Existing(IdempotencyBinding),
 }
 
-/// Idempotency keys (docs/threat-model.md §10).
+/// Idempotency keys (docs/threat-model.md §10, PLT-4631).
 ///
 /// A key is only ever bound together with the ledger row of its invocation,
 /// in one store mutation, so a request that is rejected before acceptance
 /// (400 / 413 / 429) never consumes its key and a replay can never observe a
-/// key without its invocation.
+/// key without its invocation. `(tenant, function, key)` is unique in the
+/// store (a primary key in SQLite), so two processes can never bind the same
+/// key twice. A binding carries the input digest and, once its invocation is
+/// terminal, an expiry after which it no longer answers and can be purged.
 pub trait IdempotencyRepository: Send + Sync {
-    /// The invocation `key` is bound to, if that invocation exists.
+    /// The invocation `key` is bound to, if that invocation exists and the
+    /// binding has not expired at `now`.
     fn lookup(
         &self,
         tenant: &TenantId,
         function: &FunctionId,
         key: &str,
+        now: Timestamp,
     ) -> Result<Option<IdempotencyBinding>, RepoError>;
 
     /// Atomically insert `invocation` and bind its `idempotency_key`. When
-    /// the key is already bound to an existing invocation nothing is written
+    /// the key is already bound to an existing invocation (and the binding
+    /// has not expired at the invocation's `accepted_at`) nothing is written
     /// and that binding is returned instead. A binding whose invocation does
-    /// not exist is stale and is replaced.
+    /// not exist, or that expired, is replaced.
     fn insert_bound(&self, invocation: Invocation) -> Result<IdempotencyOutcome, RepoError>;
+
+    /// Delete bindings that expired at `now`. Returns how many.
+    fn purge_expired_idempotency(&self, now: Timestamp) -> Result<usize, RepoError>;
 }
 
 /// Tenant ownership of content-addressed artifacts (docs/threat-model.md
@@ -265,6 +242,7 @@ pub trait StateStore:
     + LogRepository
     + IdempotencyRepository
     + ArtifactOwnerRepository
+    + SlotStore
     + std::fmt::Debug
 {
     /// `"sqlite"` or `"memory"`.
@@ -299,6 +277,8 @@ pub struct Repositories {
     pub logs: Arc<dyn LogRepository>,
     pub idempotency: Arc<dyn IdempotencyRepository>,
     pub artifact_owners: Arc<dyn ArtifactOwnerRepository>,
+    /// Cell-local slots, leases, pool and dispatchers (PLT-4631).
+    pub slots: Arc<dyn SlotStore>,
 }
 
 impl Repositories {
@@ -311,7 +291,8 @@ impl Repositories {
             environments: store.clone(),
             logs: store.clone(),
             idempotency: store.clone(),
-            artifact_owners: store,
+            artifact_owners: store.clone(),
+            slots: store,
         }
     }
 
