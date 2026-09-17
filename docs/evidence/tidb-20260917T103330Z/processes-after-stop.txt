@@ -1,0 +1,9 @@
+checked_at: 2026-09-17T10:43:42Z
+started pids: 34205 34208 34211
+started pids still alive:
+processes whose command line names the work directory:
+(none)
+pd-server / tikv-server / tidb-server processes on this host:
+(none)
+listeners on the cluster ports:
+(end)

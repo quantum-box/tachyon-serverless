@@ -21,6 +21,11 @@ fn sqlite() -> Store {
     Arc::new(SqliteStore::open_volatile(Limits::default(), SqliteOptions::default()).unwrap())
 }
 
+fn tidb() -> Store {
+    let url = super::tidb::test_url().expect("TSLS_TIDB_URL");
+    Arc::new(super::tidb::TidbStore::open_ephemeral(&url, Limits::default()).unwrap())
+}
+
 macro_rules! contract {
     ($($test:ident),* $(,)?) => {
         mod memory {
@@ -28,6 +33,12 @@ macro_rules! contract {
         }
         mod sqlite {
             $( #[test] fn $test() { super::$test(super::sqlite) } )*
+        }
+        mod tidb {
+            $( #[test] fn $test() {
+                if super::super::contract_tests::skip_without_tidb(stringify!($test)) { return; }
+                super::$test(super::tidb)
+            } )*
         }
     };
 }

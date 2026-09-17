@@ -36,6 +36,9 @@ pub mod outbox;
 pub mod restart;
 pub mod slot;
 pub mod sqlite;
+/// Test-only TiDB adapter (docs/adr/0003 「TiDB 検証」).
+#[cfg(test)]
+pub(crate) mod tidb;
 pub mod triggers;
 
 #[cfg(test)]
