@@ -1,0 +1,61 @@
+# deploy/lab/versions.lock - every external input of the lab (scripts/lab/lab.sh, PLT-4648).
+#
+# Shell syntax (KEY=value, no spaces, no command substitution): lab.sh sources it. One file so a
+# reviewer can see at a glance what a fresh lab downloads and which toolchain builds it. A download
+# whose sha256 differs from the value here is deleted and the command fails; nothing falls back to
+# "latest". To upgrade an entry: change it here, run `scripts/lab/lab.sh preflight` (it checks that
+# the duplicated pins below agree with their original files) and the walkthrough in docs/runbook.md,
+# then commit the command log summary.
+
+LAB_LOCK_VERSION=1
+
+# --- Rust (host binaries and musl guest binaries) ------------------------------------------------
+# Must equal rust-toolchain.toml `channel` and mise.toml `rust` (preflight compares them).
+RUST_TOOLCHAIN=1.95.0
+
+# --- nats-server (durable queue, PLT-4638) ---------------------------------------------------------
+# Copied from deploy/nats/versions.env (the original pin used by scripts/queue/*); preflight fails
+# when the two files disagree. Source: https://github.com/nats-io/nats-server/releases/download/v2.14.7/SHA256SUMS
+NATS_SERVER_VERSION=v2.14.7
+NATS_SERVER_SHA256_darwin_arm64=9fc225cddebc67438345ad988c5d6bfc6daad16a7609bcceaafa88bcab9b9001
+NATS_SERVER_SHA256_darwin_amd64=c35bd7c1b84ee0b2de25f7aa0a9f1bb4834640ac8a93698a6b79f9d1de3cf5ff
+NATS_SERVER_SHA256_linux_amd64=e5c20b1cb2c0566b54c544312e91e011f9e130c5c80f16a14f4cf28ef30b8be2
+NATS_SERVER_SHA256_linux_arm64=50e0258a1b7290f3fe2e4f17506b74a90ffb1dd77867ae3a402eb0c9e2b0d40f
+
+# --- Firecracker + jailer (Linux/KVM only) ----------------------------------------------------------
+# Release tarball digests, copied from the release's <tgz>.sha256.txt (fetched 2026-09-17). The lab
+# compares against these values, not against a checksum file downloaded from the same place.
+FIRECRACKER_VERSION=v1.17.0
+FIRECRACKER_TGZ_SHA256_aarch64=e351ebe4f7a16b5873bbd51005d2e6767103cff4d5ebc829df2d3f95a93e2256
+FIRECRACKER_TGZ_SHA256_x86_64=06094a1108ae9e82aa4c23a775aa92758f53f1175d422270d9d6162cb9ade558
+
+# --- Guest kernel (Firecracker CI build, Linux/KVM only) --------------------------------------------
+# The combination verified on aarch64 (docs/kvm.md §5: CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1).
+# aarch64 digest = the one recorded in docs/evidence/kvm-20260915T080221Z; x86_64 digest computed from
+# the same S3 object on 2026-09-17 (x86_64 has never booted in this project: see docs/runbook.md §10).
+GUEST_KERNEL_BASE_URL=https://s3.amazonaws.com/spec.ccfc.min
+GUEST_KERNEL_KEY_aarch64=firecracker-ci/v1.15/aarch64/vmlinux-6.1.155
+GUEST_KERNEL_SHA256_aarch64=e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+GUEST_KERNEL_KEY_x86_64=firecracker-ci/v1.15/x86_64/vmlinux-6.1.155
+GUEST_KERNEL_SHA256_x86_64=e20e46d0c36c55c0d1014eb20576171b3f3d922260d9f792017aeff53af3d4f2
+
+# The base rootfs is BUILT, not downloaded (scripts/kvm/build-rootfs.sh from the musl bridge of this
+# checkout), so it has no pin here; its sha256 is recorded in <lab>/manifest.env at bootstrap.
+ROOTFS_SIZE=64M
+
+# --- Console (optional: `lab.sh bootstrap --console`) -----------------------------------------------
+# Same values as apps/console/mise.toml and package.json `packageManager`; dependencies are pinned by
+# apps/console/pnpm-lock.yaml (installed with --frozen-lockfile).
+CONSOLE_NODE_VERSION=22.21.1
+CONSOLE_PNPM_VERSION=10.34.5
+
+# --- Host tools (not downloaded; minimum versions checked by preflight) ------------------------------
+MIN_BASH=3.2
+MIN_JQ=1.6
+MIN_PYTHON3=3.8
+MIN_E2FSPROGS=1.43
+MIN_LINUX_KERNEL=4.14
+# Free space the lab needs in the filesystem of the lab directory (cargo target excluded).
+MIN_FREE_DISK_MIB_PROCESS=2048
+MIN_FREE_DISK_MIB_FIRECRACKER=6144
+MIN_MEMORY_MIB=4096

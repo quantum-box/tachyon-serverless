@@ -37,6 +37,10 @@ classify false false "openapi snapshot is a contract, not docs" docs/openapi.jso
 classify false false "gateway code" apps/gateway/src/handlers.rs
 classify false false "application lease code (unit / property gates only)" crates/application/src/services/invoke.rs
 classify false false "ci workflow" .github/workflows/ci.yml
+# PLT-4648: the lab entry command orchestrates existing binaries and is not run by the KVM job,
+# so requiring the KVM gate for it would claim a verification that never happens (docs/ci.md §3).
+classify false false "lab entry command and its pins (not KVM)" scripts/lab/lab.sh scripts/lab/demo.sh deploy/lab/versions.lock
+classify true false "runbook is docs" docs/runbook.md
 classify false true "firecracker provider" crates/providers/firecracker/src/egress_gate.rs
 classify false true "firecracker network policy" crates/providers/firecracker/src/network.rs
 classify false true "domain egress allowlist" crates/domain/src/egress.rs

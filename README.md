@@ -73,6 +73,18 @@ Tachyon のサーバーレス実行基盤の **動作プロトタイプ**。sing
 - crate の依存方向と実行の流れ（同期 invoke の 11 ステップ）: [docs/architecture.md](docs/architecture.md)
 - host ↔ bridge ↔ user process のプロトコル: [docs/protocol.md](docs/protocol.md)
 
+## Lab（fresh 環境から全部: 配備 → P1/P2/P3 デモ → 削除）
+
+別の開発者が手元の設定なしに再現するための入口。pin（版と sha256）は `deploy/lab/versions.lock`、手順・必要権限・復旧・注意点は [docs/runbook.md](docs/runbook.md)。
+
+```sh
+scripts/lab/lab.sh preflight && scripts/lab/lab.sh bootstrap && scripts/lab/lab.sh up
+scripts/lab/lab.sh demo all        # P1 sync/rollback, P2 burst/zero/alias/metrics, P3 async/DLQ/cron/webhook/usage/budget
+scripts/lab/lab.sh teardown        # この lab のものだけを消して孤児検査
+```
+
+既定は process provider（**microVM ではない、隔離なし**）。Linux/KVM では `--provider firecracker`（lab.sh 経由は未検証。docs/runbook.md §10）。
+
 ## Quickstart（macOS / Linux, process provider）
 
 process provider は **隔離を提供しない**（関数はあなたの子プロセスとして動く）。開発専用。
