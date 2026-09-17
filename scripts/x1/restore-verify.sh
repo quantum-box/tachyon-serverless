@@ -364,14 +364,21 @@ run_seq() { # scenario function_id n payload [drop]
   enrich "${labels[@]}"
 }
 
-snapshot_create() { # function_id label -> snapshot id (prints)
-  local t0 code
-  t0="$(now_ms)"
-  api POST "/v1/functions/$1/snapshots" '{}' >"$WORK/snap.json"
-  code="$(cat "$WORK/.code")"
-  jq -c --arg label "$2" --argjson client_ms "$(($(now_ms) - t0))" --argjson code "$code" \
-    '{label: $label, http_code: $code, client_ms: $client_ms, snapshot: .}' "$WORK/snap.json" >>"$SNAPSHOTS"
-  jq -r '.id // empty' "$WORK/snap.json"
+snapshot_create() { # function_id label -> snapshot id (prints; empty after two failed attempts)
+  # A failed creation (e.g. the source missing the checkpoint deadline on a busy host) is kept in
+  # snapshots.jsonl with its HTTP code and retried once; the report counts the failures.
+  local t0 code try id
+  for try in 1 2; do
+    t0="$(now_ms)"
+    api POST "/v1/functions/$1/snapshots" '{}' >"$WORK/snap.json"
+    code="$(cat "$WORK/.code")"
+    jq -c --arg label "$2" --argjson try "$try" --argjson client_ms "$(($(now_ms) - t0))" --argjson code "${code:-0}" \
+      '{label: $label, try: $try, http_code: $code, client_ms: $client_ms, snapshot: .}' "$WORK/snap.json" >>"$SNAPSHOTS" 2>/dev/null ||
+      jq -nc --arg label "$2" --argjson try "$try" '{label: $label, try: $try, http_code: 0, snapshot: null}' >>"$SNAPSHOTS"
+    id="$(jq -r '.id // empty' "$WORK/snap.json" 2>/dev/null || true)"
+    if [ -n "$id" ]; then echo "$id"; return 0; fi
+    log "snapshot $2 attempt $try failed: $(head -c 300 "$WORK/snap.json")"
+  done
 }
 
 snapshot_storage() { # snapshot id label -> storage row in snapshots.jsonl
@@ -387,9 +394,10 @@ snapshot_storage() { # snapshot id label -> storage row in snapshots.jsonl
       plaintext_files: $files, sealed_files: $sealed_files}}' >>"$SNAPSHOTS"
 }
 
-flip_byte() { # file offset: flip the lowest bit
+flip_byte() { # file offset: flip the lowest bit. Never aborts the run: the check that follows fails.
   perl -e 'open(my $f, "+<", $ARGV[0]) or die "$ARGV[0]: $!"; binmode $f; seek($f, $ARGV[1], 0);
-    read($f, my $b, 1) == 1 or die "short file"; seek($f, $ARGV[1], 0); print $f chr(ord($b) ^ 1); close $f' "$1" "$2"
+    read($f, my $b, 1) == 1 or die "short file"; seek($f, $ARGV[1], 0); print $f chr(ord($b) ^ 1); close $f' "$1" "$2" ||
+    log "could not flip a byte of $1"
 }
 
 last_attempt() { jq -c --arg l "$1" 'select(.label == $l)' "$ATTEMPTS" | tail -n1; }
@@ -634,7 +642,7 @@ fi
 # --- corrupt sealed store with the plaintext cache removed --------------------------------------
 SEALED_SNAP="$(snapshot_create "$REQ_FN" sealed-corrupt)"
 rm -f "$SNAP_ROOT/$SEALED_SNAP/memory"
-sealed_file="$(find "$WORK/data/snapshots/$SEALED_SNAP" -name 'memory*' -type f | head -n1)"
+sealed_file="$(find "$WORK/data/snapshots/${SEALED_SNAP:-none}" -name 'memory*' -type f 2>/dev/null | head -n1 || true)"
 flip_byte "$sealed_file" $((1024 * 1024 + 17))
 request corrupt-sealed "$REQ_FN" "$LOOKUP" corrupt-sealed
 enrich corrupt-sealed

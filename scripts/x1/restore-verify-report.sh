@@ -88,7 +88,11 @@ jq -n \
     }) | sort_by(.scenario as $s | $order | index($s))) as $scen |
   {
     scenarios: $scen,
-    snapshots: ($snapshots | map(select(.snapshot != null) | {label, http_code, client_ms, id: .snapshot.id, timings: .snapshot.timings})),
+    snapshots: ($snapshots | map(select(has("http_code")) | {label, try: (.try // 1), http_code, client_ms,
+      id: (.snapshot.id // null), timings: (.snapshot.timings // null), error: (.snapshot.error.message // null)})),
+    snapshot_create: ($snapshots | map(select(has("http_code"))) | {attempts: length,
+      failures: (map(select(.http_code != 201)) | length),
+      seal_ms: (map(.snapshot.timings.seal_ms // null) | dist), create_client_ms: (map(select(.http_code == 201) | .client_ms) | dist)}),
     storage: ($snapshots | map(select(.storage != null) | {label} + .storage)),
     calibration: $calibration,
     checks: ($checks | split("\n") | .[1:] | map(select(length > 0) | split("\t") | {check: .[0], result: .[1], detail: .[2]}))
@@ -129,9 +133,11 @@ jq -r '
   "",
   "## Snapshots and storage",
   "",
-  "| label | id | create (client ms) | pause / create / copy / seal ms |",
-  "|---|---|---|---|",
-  (.snapshots[] | "| \(.label) | \(.id | f) | \(.client_ms) | \(.timings.pause_ms | f) / \(.timings.create_ms | f) / \(.timings.copy_ms | f) / \(.timings.seal_ms | f) |"),
+  "Snapshot creation: \(.snapshot_create.attempts) attempts, \(.snapshot_create.failures) failed (kept below, retried once).",
+  "",
+  "| label | try | HTTP | id | create (client ms) | pause / create / copy / seal ms | error |",
+  "|---|---|---|---|---|---|---|",
+  (.snapshots[] | "| \(.label) | \(.try) | \(.http_code) | \(.id | f) | \(.client_ms | f) | \(.timings.pause_ms | f) / \(.timings.create_ms | f) / \(.timings.copy_ms | f) / \(.timings.seal_ms | f) | \(.error | f) |"),
   "",
   "| label | sealed bytes (encrypted + manifest) | plaintext apparent bytes | plaintext allocated bytes |",
   "|---|---|---|---|",
