@@ -1,0 +1,30 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh up
+# started:  2026-09-17T12:23:41Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:23:41Z [lab] step 1/5: throwaway secrets and config (lab lab-8c436263, provider process)
+2026-09-17T12:23:41Z [lab] config: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml (0600)
+2026-09-17T12:23:41Z [lab] WARN: process provider: functions run as plain child processes of the gateway. NOT a microVM, NO isolation (dev mode).
+2026-09-17T12:23:41Z [lab] step 2/5: nats-server v2.14.7 on 127.0.0.1:64898 (store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+2026-09-17T12:23:42Z [queue] nats-server v2.14.7 ready on 127.0.0.1:64898 (pid 37841, store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+2026-09-17T12:23:42Z [lab] step 3/5: gateway on 127.0.0.1:64897 (applies forward-only migrations to /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/state.db before listening)
+2026-09-17T12:23:42Z [lab] gateway pid 37859, log /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/gateway.log
+2026-09-17T12:23:44Z [lab] WARN: gateway exited during startup; last log lines of this start:
+2026-09-17T12:23:44Z     | 
+2026-09-17T12:23:44Z     | ===== gateway start 2026-09-17T12:23:42Z (lab lab-8c436263) =====
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.145194Z","level":"INFO","message":"configuration loaded","config":"/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml","target":"tachyon_serverless_gateway"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.147394Z","level":"INFO","message":"connected successfully","server":"64898","max_payload":"1048576","target":"async_nats::connector"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.147505Z","level":"INFO","message":"event: connected","target":"async_nats"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.162571Z","level":"INFO","message":"JetStream queue connected and stream bootstrapped","url":"nats://127.0.0.1:64898","stream":"TACHYON_EVENTS","target":"tachyon_serverless_gateway::durable"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.164284Z","level":"INFO","message":"state store opened","path":"/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/state.db","schema_version":8,"migrations_applied":"[]","imported_state_json":"None","settled_invocations":0,"settled_attempts":0,"settled_environments":0,"released_leases":0,"dropped_idempotency_keys":0,"purged_idempotency_keys":0,"outputs_purged":0,"target":"tachyon_serverless_application::app"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.164653Z","level":"INFO","message":"dispatcher registered","dispatcher_id":"dsp_01m2qn57amqmmaykg7naa9k6x5","instance":"lab-8c436263","pid":37859,"lease_ttl_seconds":30,"target":"tachyon_serverless_application::services::dispatcher"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.165040Z","level":"WARN","message":"reclaimed the work of dispatchers that lost their lease","dispatcher_id":"dsp_01m2qn57amqmmaykg7naa9k6x5","reclaimed_dispatchers":"[DispatcherId(dsp_01m2qn4qb6nk04qss049k9mc60)]","leases":0,"invocations":0,"attempts":0,"fenced":0,"target":"tachyon_serverless_application::services::dispatcher"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.166655Z","level":"INFO","message":"application bootstrapped","profile":"dev","provider":"process","dev_only":true,"environment_reuse":false,"reuse_verified":false,"reuse_reason":"[pool] enabled is false","reuse_disabled":"Some(Configuration)","idle_quiesce":"unsupported","idle_resume":"unsupported","data_dir":"/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data","store":"sqlite","dispatcher_id":"dsp_01m2qn57amqmmaykg7naa9k6x5","node":"lab-8c436263","node_region":"jp","node_memory_mib":"None","max_concurrency":8,"queue":"nats","objects":"filesystem","invoke_async":true,"triggers":true,"target":"tachyon_serverless_application::app"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.166988Z","level":"INFO","message":"startup reconcile finished","provider":"process","found":0,"adopted":0,"terminated":0,"disowned":0,"failed":0,"lost":0,"foreign":0,"reclaimed_dispatchers":0,"fenced_terminated":0,"fenced_pending":0,"target":"tachyon_serverless_application::services::reconcile"}
+2026-09-17T12:23:44Z     | {"timestamp":"2026-09-17T12:23:42.167126Z","level":"INFO","message":"event: closed","target":"async_nats"}
+2026-09-17T12:23:44Z     | Error: Address already in use (os error 48)
+2026-09-17T12:23:44Z [lab] ERROR: port 64897 is in use (docs/runbook.md §6.5)
+# finished: 2026-09-17T12:23:44Z exit=1

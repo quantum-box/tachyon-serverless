@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Clean-clone walkthrough of docs/runbook.md, run by an automated agent (not a different human).
+# Every step is a command copied from the runbook; exit codes and durations are recorded.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+cd "$HERE/tachyon-serverless" || exit 1
+SUMMARY="$HERE/walkthrough-summary.txt"
+: >"$SUMMARY"
+step() { # NAME CMD...
+  local name="$1" start rc
+  shift
+  start=$(date +%s)
+  echo "######## $name: $*"
+  "$@"
+  rc=$?
+  printf '%-44s exit=%-3s %4ss  %s\n' "$name" "$rc" "$(( $(date +%s) - start ))" "$*" | tee -a "$SUMMARY"
+  return 0
+}
+echo "clone HEAD: $(git rev-parse HEAD)" | tee -a "$SUMMARY"
+echo "host: $(uname -srm)" | tee -a "$SUMMARY"
+
+# §4.1 quickstart
+step "4.1 preflight" scripts/lab/lab.sh preflight
+step "4.1 bootstrap" scripts/lab/lab.sh bootstrap
+step "4.1 up" scripts/lab/lab.sh up
+step "4.1 demo all" scripts/lab/lab.sh demo all
+step "4.1 status" scripts/lab/lab.sh status
+step "4.1 CLI snippet" bash "$HERE/cli-snippet.sh"
+step "4.4 logs commands" scripts/lab/lab.sh logs commands
+step "4.4 demo p1 (re-run)" scripts/lab/lab.sh demo p1
+
+# §6 recovery procedures
+step "6 recovery drills" bash "$HERE/drills.sh"
+
+# §7 teardown
+step "7.1 teardown --dry-run" scripts/lab/lab.sh teardown --dry-run
+step "7.1 teardown" scripts/lab/lab.sh teardown
+step "7.1 up after teardown (expect refusal: not bootstrapped)" scripts/lab/lab.sh up
+echo "done" | tee -a "$SUMMARY"

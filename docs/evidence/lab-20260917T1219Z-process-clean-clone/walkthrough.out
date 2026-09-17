@@ -1,0 +1,948 @@
+clone HEAD: c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+host: Darwin 25.6.0 arm64
+######## 4.1 preflight: scripts/lab/lab.sh preflight
+lab preflight: provider=process lab_dir=/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab lab_id=lab-8c436263
+
+WARN  os                         macOS: process provider only (dev mode, NOT a microVM, no isolation)
+ok    arch                       aarch64
+ok    disk_lab                   315471 MiB free for /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab (need 2048)
+ok    disk_build                 315471 MiB free for target/ (cargo build needs ~8 GiB)
+ok    memory                     24576 MiB
+ok    tool:bash                  /bin/bash (GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25))
+ok    tool:curl                  /usr/bin/curl (curl 8.7.1 (x86_64-apple-darwin25.0) libcurl/8.7.1 (SecureTransport) LibreSSL/3.3.6 zlib/1.2.12 nghttp2/1.68.1)
+ok    tool:jq                    /usr/bin/jq (jq-1.7.1-apple)
+ok    tool:python3               /usr/bin/python3 (Python 3.9.6)
+ok    tool:openssl               /usr/bin/openssl (LibreSSL 3.3.6)
+ok    tool:tar                   /usr/bin/tar (bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8 )
+ok    tool:git                   /usr/bin/git (git version 2.54.0 (Apple Git-157))
+ok    tool:cargo                 /Users/takanorifukuyama/.cargo/bin/cargo (cargo 1.95.0 (f2d3ce0bd 2026-03-21))
+ok    tool:cc                    /usr/bin/cc (Apple clang version 21.0.0 (clang-2100.3.34.2))
+ok    tool:perl                  /usr/bin/perl (perl 5.034001)
+ok    tool:mise                  /Users/takanorifukuyama/.local/bin/mise (2026.9.5 macos-arm64 (2026-09-10))
+ok    tool:sha256                /sbin/sha256sum
+ok    pin:rust                   rust-toolchain.toml 1.95.0 = versions.lock
+ok    rustc                      1.95.0 (from the repository toolchain file)
+ok    pin:nats                   versions.lock = deploy/nats/versions.env (v2.14.7)
+ok    privileges                 no root needed (process provider / unprivileged firecracker)
+ok    port:GATEWAY_PORT          not assigned yet (up picks a free 127.0.0.1 port)
+ok    port:NATS_PORT             not assigned yet (up picks a free 127.0.0.1 port)
+ok    port:NATS_HTTP_PORT        not assigned yet (up picks a free 127.0.0.1 port)
+ok    network                    github.com releases reachable (nats-server)
+
+READY with warnings (read the WARN rows)
+next: scripts/lab/lab.sh bootstrap
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122050Z-preflight-31400.log (exit 0)
+4.1 preflight                                exit=0      2s  scripts/lab/lab.sh preflight
+######## 4.1 bootstrap: scripts/lab/lab.sh bootstrap
+[lab] lab lab-8c436263 provider=process arch=aarch64
+[lab] step 1/4: nats-server v2.14.7
+[queue] downloading https://github.com/nats-io/nats-server/releases/download/v2.14.7/nats-server-v2.14.7-darwin-arm64.tar.gz
+[queue] verified nats-server-v2.14.7-darwin-arm64 (sha256 9fc225cddebc67438345ad988c5d6bfc6daad16a7609bcceaafa88bcab9b9001)
+[lab] nats-server: nats-server: v2.14.7
+[lab] step 2/4: skipped (process provider: no Firecracker, no kernel)
+[lab] step 3/4: cargo build (toolchain 1.95.0 from rust-toolchain.toml)
++ cargo build -p tachyon-serverless-gateway -p tachyon-serverless-cli
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling pin-project-lite v0.2.17
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling futures-core v0.3.34
+   Compiling once_cell v1.21.4
+   Compiling zerocopy v0.8.57
+   Compiling generic-array v0.14.7
+   Compiling smallvec v1.16.1
+   Compiling futures-sink v0.3.34
+   Compiling stable_deref_trait v1.2.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling zmij v1.0.23
+   Compiling shlex v2.0.1
+   Compiling core-foundation-sys v0.8.7
+   Compiling cc v1.4.6
+   Compiling tracing-core v0.1.36
+   Compiling serde_json v1.0.151
+   Compiling log v0.4.34
+   Compiling futures-channel v0.3.34
+   Compiling zeroize v1.9.0
+   Compiling getrandom v0.3.4
+   Compiling slab v0.4.12
+   Compiling futures-io v0.3.34
+   Compiling subtle v2.6.1
+   Compiling futures-task v0.3.34
+   Compiling autocfg v1.5.1
+   Compiling thiserror v2.0.20
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.5
+   Compiling syn v2.0.119
+   Compiling getrandom v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling errno v0.3.14
+   Compiling signal-hook-registry v1.4.8
+   Compiling socket2 v0.6.5
+   Compiling crypto-common v0.1.7
+   Compiling mio v1.2.3
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling sha2 v0.10.9
+   Compiling iana-time-zone v0.1.65
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling ring v0.17.14
+   Compiling percent-encoding v2.3.2
+   Compiling bitflags v2.13.2
+   Compiling utf8_iter v1.0.4
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_properties_data v2.3.0
+   Compiling serde_derive v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling synstructure v0.13.2
+   Compiling zerovec-derive v0.11.6
+   Compiling futures-macro v0.3.34
+   Compiling displaydoc v0.2.7
+   Compiling rand_core v0.9.5
+   Compiling ppv-lite86 v0.2.21
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling tracing-attributes v0.1.31
+   Compiling futures-util v0.3.34
+   Compiling rand_chacha v0.9.0
+   Compiling thiserror-impl v2.0.20
+   Compiling rand v0.9.5
+   Compiling rustls-pki-types v1.15.1
+   Compiling getrandom v0.4.3
+   Compiling rand_core v0.10.1
+   Compiling zerofrom v0.1.8
+   Compiling tracing v0.1.44
+   Compiling hex v0.4.3
+   Compiling foldhash v0.2.0
+   Compiling hashbrown v0.17.1
+   Compiling ulid v1.2.1
+   Compiling untrusted v0.9.0
+   Compiling httparse v1.10.1
+   Compiling async-trait v0.1.92
+   Compiling form_urlencoded v1.2.2
+   Compiling tower-service v0.3.3
+   Compiling base64 v0.22.1
+   Compiling rustls v0.23.45
+   Compiling httpdate v1.0.3
+   Compiling scopeguard v1.2.0
+   Compiling semver v1.0.28
+   Compiling equivalent v1.0.2
+   Compiling mime v0.3.17
+   Compiling try-lock v0.2.5
+   Compiling base64ct v1.8.3
+   Compiling bytes v1.12.1
+   Compiling chrono v0.4.45
+   Compiling yoke v0.8.3
+   Compiling tokio v1.53.1
+   Compiling http v1.5.0
+   Compiling rustls-webpki v0.103.15
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling pem-rfc7468 v0.7.0
+   Compiling http-body v1.1.0
+   Compiling want v0.3.1
+   Compiling indexmap v2.14.2
+   Compiling rustc_version v0.4.1
+   Compiling aho-corasick v1.1.5
+   Compiling sync_wrapper v1.0.2
+   Compiling unicase v2.9.0
+   Compiling rustversion v1.0.23
+   Compiling atomic-waker v1.1.2
+   Compiling tachyon-serverless-domain v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/domain)
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling tower-layer v0.3.3
+   Compiling regex-syntax v0.8.11
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling const-oid v0.9.6
+   Compiling colorchoice v1.0.5
+   Compiling der v0.7.10
+   Compiling anstream v1.0.0
+   Compiling mime_guess v2.0.5
+   Compiling curve25519-dalek v4.1.3
+   Compiling http-body-util v0.1.5
+   Compiling signature v2.2.0
+   Compiling ipnet v2.12.2
+   Compiling clap_lex v1.1.1
+   Compiling parking_lot_core v0.9.12
+   Compiling regex-automata v0.4.18
+   Compiling strsim v0.11.1
+   Compiling heck v0.5.0
+   Compiling clap_derive v4.6.7
+   Compiling clap_builder v4.6.7
+   Compiling spki v0.7.3
+   Compiling zerovec v0.11.8
+   Compiling zerotrie v0.2.5
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling utoipa-gen v5.5.0
+   Compiling inout v0.1.4
+   Compiling toml_write v0.1.2
+   Compiling winnow v0.7.15
+   Compiling pkg-config v0.3.34
+   Compiling ryu v1.0.23
+   Compiling vcpkg v0.2.15
+   Compiling libsqlite3-sys v0.38.2
+   Compiling serde_urlencoded v0.7.1
+   Compiling cipher v0.4.4
+   Compiling encoding_rs v0.8.41
+   Compiling clap v4.6.7
+   Compiling pkcs8 v0.10.2
+   Compiling ed25519 v2.2.3
+   Compiling tokio-util v0.7.19
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/provider-port)
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling hyper v1.11.1
+   Compiling icu_locale_core v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling tokio-rustls v0.26.5
+   Compiling tower v0.5.3
+   Compiling toml_edit v0.22.27
+   Compiling icu_provider v2.3.1
+   Compiling hyper-util v0.1.20
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling uuid v1.26.1
+   Compiling futures-executor v0.3.34
+   Compiling lock_api v0.4.14
+   Compiling webpki-roots v1.0.9
+   Compiling rand_chacha v0.3.1
+   Compiling universal-hash v0.5.1
+   Compiling core-foundation v0.10.1
+   Compiling security-framework-sys v2.17.0
+   Compiling siphasher v1.0.3
+   Compiling portable-atomic v1.15.0
+   Compiling http-range-header v0.4.2
+   Compiling opaque-debug v0.3.1
+   Compiling polyval v0.6.2
+   Compiling security-framework v3.7.0
+   Compiling phf_shared v0.12.1
+   Compiling rand v0.8.8
+   Compiling parking_lot v0.12.5
+   Compiling futures v0.3.34
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling hyper-rustls v0.27.9
+   Compiling ed25519-dalek v2.2.0
+   Compiling url v2.5.8
+   Compiling utoipa v5.5.0
+   Compiling signatory v0.27.1
+   Compiling toml v0.8.23
+   Compiling chacha20 v0.10.2
+   Compiling pin-project-internal v1.1.13
+   Compiling deranged v0.5.8
+   Compiling tower-http v0.6.11
+   Compiling multer v3.1.0
+   Compiling rustix v1.1.4
+   Compiling data-encoding v2.11.1
+   Compiling multiversion_no_op v1.0.0
+   Compiling lazy_static v1.5.0
+   Compiling time-core v0.1.9
+   Compiling simdutf8 v0.1.5
+   Compiling powerfmt v0.2.0
+   Compiling chrono-tz v0.10.4
+   Compiling anyhow v1.0.104
+   Compiling num-conv v0.2.2
+   Compiling pin-project v1.1.13
+   Compiling nkeys v0.4.5
+   Compiling time v0.3.55
+   Compiling reqwest v0.12.28
+   Compiling sharded-slab v0.1.7
+   Compiling rand v0.10.2
+   Compiling rustls-native-certs v0.8.4
+   Compiling phf v0.12.1
+   Compiling ghash v0.5.1
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/protocol)
+   Compiling tachyon-serverless-durable-port v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/durable-port)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/api-types)
+   Compiling tryhard v0.5.2
+   Compiling tokio-stream v0.1.19
+   Compiling ctr v0.9.2
+   Compiling aes v0.8.4
+   Compiling regex v1.13.1
+   Compiling matchers v0.2.0
+   Compiling serde_nanos v0.1.4
+   Compiling tracing-serde v0.2.0
+   Compiling hashlink v0.12.2
+   Compiling serde_repr v0.1.21
+   Compiling aead v0.5.2
+   Compiling tracing-log v0.2.0
+   Compiling thread_local v1.1.10
+   Compiling fallible-iterator v0.3.0
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling spin v0.9.9
+   Compiling nu-ansi-term v0.50.3
+   Compiling aes-gcm v0.10.3
+   Compiling async-nats v0.50.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling axum-core v0.5.6
+   Compiling axum-macros v0.5.1
+   Compiling serde_path_to_error v0.1.20
+   Compiling matchit v0.8.4
+   Compiling fastrand v2.5.0
+   Compiling tempfile v3.27.0
+   Compiling tachyon-serverless-provider-process v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/providers/process)
+   Compiling rusqlite v0.40.2
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/providers/firecracker)
+   Compiling axum v0.8.9
+   Compiling tachyon-serverless-cli v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/apps/cli)
+   Compiling tachyon-serverless-queue-nats v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/adapters/queue-nats)
+   Compiling tachyon-serverless-application v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/application)
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/apps/gateway)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 50.98s
++ cargo build -p tachyon-serverless-runtime-bridge -p example-hello -p example-http-axum -p example-cpu-burn -p example-idempotent-async
+    Blocking waiting for file lock on package cache
+   Compiling syn v3.0.5
+   Compiling bytes v1.12.1
+   Compiling serde v1.0.229
+   Compiling syn v2.0.119
+   Compiling crypto-common v0.1.7
+   Compiling sync_wrapper v1.0.2
+   Compiling regex-syntax v0.8.11
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling http v1.5.0
+   Compiling regex-automata v0.4.18
+   Compiling http-body v1.1.0
+   Compiling http-body-util v0.1.5
+   Compiling serde_derive v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling futures-macro v0.3.34
+   Compiling thiserror-impl v2.0.20
+   Compiling clap_derive v4.6.7
+   Compiling tokio v1.53.1
+   Compiling futures-util v0.3.34
+   Compiling matchers v0.2.0
+   Compiling thiserror v2.0.20
+   Compiling tracing-attributes v0.1.31
+   Compiling axum-macros v0.5.1
+   Compiling clap v4.6.7
+   Compiling tracing v0.1.44
+   Compiling axum-core v0.5.6
+   Compiling multer v3.1.0
+   Compiling futures-executor v0.3.34
+   Compiling futures v0.3.34
+   Compiling chrono v0.4.45
+   Compiling serde_urlencoded v0.7.1
+   Compiling tracing-serde v0.2.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling hyper v1.11.1
+   Compiling tower v0.5.3
+   Compiling tokio-util v0.7.19
+   Compiling tachyon-serverless-domain v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/domain)
+   Compiling hyper-util v0.1.20
+   Compiling axum v0.8.9
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/protocol)
+   Compiling tachyon-serverless-sdk v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/sdk)
+   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/crates/runtime-bridge)
+   Compiling example-hello v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/examples/hello)
+   Compiling example-idempotent-async v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/examples/idempotent-async)
+   Compiling example-cpu-burn v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/examples/cpu-burn)
+   Compiling example-http-axum v0.1.0 (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/examples/http-axum)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 42.41s
+[lab] step 4/4: skipped (process provider: no rootfs)
+
+[lab] bootstrap complete. next: scripts/lab/lab.sh up
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122051Z-bootstrap-31596.log (exit 0)
+4.1 bootstrap                                exit=0     96s  scripts/lab/lab.sh bootstrap
+######## 4.1 up: scripts/lab/lab.sh up
+[lab] step 1/5: throwaway secrets and config (lab lab-8c436263, provider process)
+[lab] generated throwaway tokens and demo secret: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/tokens.env (0600)
+[lab] generated object store key: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/object.key (0600)
+[lab] generated trigger sealing key: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/triggers.key (0600)
+[lab] config: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml (0600)
+[lab] WARN: process provider: functions run as plain child processes of the gateway. NOT a microVM, NO isolation (dev mode).
+[lab] step 2/5: nats-server v2.14.7 on 127.0.0.1:64898 (store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+[queue] nats-server v2.14.7 ready on 127.0.0.1:64898 (pid 34731, store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+[lab] step 3/5: gateway on 127.0.0.1:64897 (applies forward-only migrations to /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/state.db before listening)
+[lab] gateway pid 34749, log /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/gateway.log
+[lab] step 4/5: health of every component
+STATUS COMPONENT              CHECK                                        DETAIL
+ok    nats-server            process                                      pid 34731
+ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+ok    gateway                process                                      pid 34749
+ok    gateway                GET /healthz                                 200
+ok    gateway                GET /readyz .ready                           true
+ok    provider               readyz .preflight                            process ok=true 
+ok    dispatcher             readyz .dispatcher.fenced                    false
+ok    config-cache           readyz .control_plane.new_invocations        accepted config=fresh
+ok    usage-journal          readyz .usage                                accepting=true journal_healthy=true collector_error=null
+ok    budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=null
+ok    ledger                 state.db schema_version = migrations         8/8
+ok    queue                  tsls_async_queue_condition{healthy}          1
+ok    trigger-scheduler      tsls_trigger_scheduler_owner                 1
+ok    async-dispatcher       tsls_async_dispatch_runs_in_flight           0
+ok    metrics                operator token 200, tenant token 401         401
+ok    object-store           root exists, key 0600, backend filesystem    /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/objects
+skip  console                GET /console/                                not enabled (up --console)
+[lab] step 5/5: ready
+
+  API:     http://127.0.0.1:64897
+  tokens:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/tokens.env (source it; values are never printed)
+  CLI:     set -a; . /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/tokens.env; set +a; TSLS_API_URL=http://127.0.0.1:64897 TSLS_TOKEN=$TOKEN_A target/debug/tsls functions list
+  next:    scripts/lab/lab.sh demo all
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122227Z-up-34581.log (exit 0)
+4.1 up                                       exit=0      5s  scripts/lab/lab.sh up
+######## 4.1 demo all: scripts/lab/lab.sh demo all
+demo all: lab lab-8c436263 provider process api http://127.0.0.1:64897 outputs /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all
+
+== P1: register -> publish -> sync invoke -> logs -> rollback (provider process) ==
+NOTE  process provider: functions run as host child processes. NOT a microVM, NO isolation.
++ tsls provider --json
+PASS  p1.provider_kind                                           kind=process isolation=process dev_only=true
++ tsls functions create --name hello --description lab demo (lab-8c436263) --json
+PASS  p1.function_registered                                     hello=fn_01m2qn34jaxr9enzkqr0j30j0p
++ tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v1 --secret DEMO_SECRET=demo-secret --description lab v1
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+revision rev_01m2qn34x0md9g3xgkb2z1vne3 (#1) created: pending
+revision rev_01m2qn34x0md9g3xgkb2z1vne3 is preparing
+revision rev_01m2qn34x0md9g3xgkb2z1vne3 is ready
+PASS  p1.publish_v1                                              revision=rev_01m2qn34x0md9g3xgkb2z1vne3 (prod -> v1)
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn355ek0fa5txsvj5qmx3p trace=inv_01m2qn355ek0fa5txsvj5qmx3p
+PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
++ tsls functions invocations hello --limit 1 --json
++ tsls functions logs --invocation inv_01m2qn355ek0fa5txsvj5qmx3p
+PASS  p1.logs                                                    invocation=inv_01m2qn355ek0fa5txsvj5qmx3p lines=7
++ tsls functions invocation inv_01m2qn355ek0fa5txsvj5qmx3p --json
+PASS  p1.boot_evidence                                           host_pid=35146 guest_boot_id=null handler_ms=1
++ tsls functions invoke hello --payload {"fail":true} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: user_error (HTTP 502): invocation inv_01m2qn36d5qrvn80dg85ae0ejn failed: Demo.Failure: fail requested [type=Demo.Failure] [invocation=inv_01m2qn36d5qrvn80dg85ae0ejn] [request=01m2qn36d59mmfe8vzqymr2h7v]
+PASS  p1.user_error                                              exit=3 code=user_error
++ tsls functions create --name http-axum --description lab demo (lab-8c436263) --json
++ tsls functions deploy --function http-axum --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-http-axum --arch aarch64 --json --description lab http
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-http-axum (5521248 bytes, arch aarch64)
+artifact sha256:88be5ec73360536d4b553c69d92b9898834001506f98ba7470bb88ab268a9133
+revision rev_01m2qn36zw5rwt67xzht7bveqa (#1) created: pending
+revision rev_01m2qn36zw5rwt67xzht7bveqa is preparing
+revision rev_01m2qn36zw5rwt67xzht7bveqa is ready
++ tsls functions http http-axum --method GET --path / --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+PASS  p1.http_adapter                                            status=200 body=ok
++ tsls functions create --name cpu-burn --description lab demo (lab-8c436263) --json
++ tsls functions deploy --function cpu-burn --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn --arch aarch64 --json --timeout-seconds 2 --no-publish --description lab timeout 2s
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn (3557120 bytes, arch aarch64)
+artifact sha256:c15e0e4cd503c77a580e5df6799aaf4f1c988ca265979cab68863c4c24949b38
+revision rev_01m2qn386zt2fh4wqczdvx99jg (#1) created: pending
+revision rev_01m2qn386zt2fh4wqczdvx99jg is preparing
+revision rev_01m2qn386zt2fh4wqczdvx99jg is ready
++ tsls functions invoke cpu-burn --payload {"seconds":30,"ignore_sigterm":true} --revision-id rev_01m2qn386zt2fh4wqczdvx99jg --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: timeout (HTTP 504): invocation inv_01m2qn38fgnd44dfemke6tgnrq failed: Host.Timeout: handler did not finish within 2 s [type=Host.Timeout] [invocation=inv_01m2qn38fgnd44dfemke6tgnrq] [request=01m2qn38fedan0a2egn86yfz5d]
+PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
++ tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v2 --secret DEMO_SECRET=demo-secret --description lab v2
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+revision rev_01m2qn3cdm40mv0zzfzsqe2444 (#2) created: pending
+revision rev_01m2qn3cdm40mv0zzfzsqe2444 is preparing
+revision rev_01m2qn3cdm40mv0zzfzsqe2444 is ready
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn3cp3evgdky3k600z6eev trace=inv_01m2qn3cp3evgdky3k600z6eev
+PASS  p1.publish_v2                                              revision=rev_01m2qn3cdm40mv0zzfzsqe2444 greeting=v2
++ tsls functions rollback hello
+alias       prod
+function    fn_01m2qn34jaxr9enzkqr0j30j0p
+from        rev_01m2qn3cdm40mv0zzfzsqe2444
+to          rev_01m2qn34x0md9g3xgkb2z1vne3
+generation  2 -> 3
++ tsls functions aliases hello
+ALIAS  REVISION                        GENERATION  PREVIOUS                        UPDATED
+prod   rev_01m2qn34x0md9g3xgkb2z1vne3  3           rev_01m2qn3cdm40mv0zzfzsqe2444  2026-09-17T12:22:42.395Z
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn3czkp2j75tz0sz9vspye trace=inv_01m2qn3czkp2j75tz0sz9vspye
+PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
++ tsls (tenant B) functions get fn_01m2qn34jaxr9enzkqr0j30j0p --json
+error: not_found (HTTP 404): not found: function not found [request=01m2qn3d9r320r1pexf6bsd9aa]
+PASS  p1.other_tenant_404                                        tenant B get fn_01m2qn34jaxr9enzkqr0j30j0p: exit=2 code=not_found
++ tsls (tenant B) functions invoke fn_01m2qn34jaxr9enzkqr0j30j0p --payload {} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: not_found (HTTP 404): not found: function not found [request=01m2qn3dcbhm8s3ejvbve57813]
+PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
++ tsls capacity --json
+PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+
+== P2: burst -> scale to zero -> alias switch -> placement label -> metrics (provider process) ==
++ tsls functions deploy --function cpu-burn --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn --arch aarch64 --json --max-concurrency 3 --description lab burst
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn (3557120 bytes, arch aarch64)
+artifact sha256:c15e0e4cd503c77a580e5df6799aaf4f1c988ca265979cab68863c4c24949b38
+revision rev_01m2qn3fh0fvs18bpvzvagb7sb (#2) created: pending
+revision rev_01m2qn3fh0fvs18bpvzvagb7sb is preparing
+revision rev_01m2qn3fh0fvs18bpvzvagb7sb is ready
+PASS  p2.revision_max_concurrency                                revision=rev_01m2qn3fh0fvs18bpvzvagb7sb max_concurrency=3
++ 7 concurrent: tsls functions invoke cpu-burn --payload {"seconds":1} (revision max_concurrency 3)
+PASS  p2.burst_all_served                                        7/7 invocations exit 0 (the rest waited in the queue)
+PASS  p2.burst_bounded                                           max environments of the revision observed=3 (limit 3; samples in p2-capacity-samples.ndjson)
++ tsls capacity --json
+PASS  p2.scale_to_zero                                           environments of rev_01m2qn3fh0fvs18bpvzvagb7sb=0; zero environments is not zero host cost: the gateway, its store and the node keep running
++ tsls functions invoke cpu-burn --payload {"seconds":0} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn3n5vkvep1f12qt2ay0m7 trace=inv_01m2qn3n5vkvep1f12qt2ay0m7
+PASS  p2.cold_reaccess                                           exit=0 (a new environment is started for the request)
++ tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v3 --secret DEMO_SECRET=demo-secret --no-publish --description lab v3 (not published)
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+revision rev_01m2qn3q0j1hwbtskxeybt8qsm (#3) created: pending
+revision rev_01m2qn3q0j1hwbtskxeybt8qsm is preparing
+revision rev_01m2qn3q0j1hwbtskxeybt8qsm is ready
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn3qk5px85hc1nn8170qgr trace=inv_01m2qn3qk5px85hc1nn8170qgr
++ tsls functions aliases hello --json
++ tsls functions alias-set hello --alias prod --revision-id rev_01m2qn3q0j1hwbtskxeybt8qsm --expected-generation 3
+alias       prod
+function    fn_01m2qn34jaxr9enzkqr0j30j0p
+revision    rev_01m2qn3q0j1hwbtskxeybt8qsm
+generation  4
+previous    rev_01m2qn34x0md9g3xgkb2z1vne3
+updated_at  2026-09-17T12:22:53.913Z
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn3r7w395k8yyagh1evr9g trace=inv_01m2qn3r7w395k8yyagh1evr9g
+PASS  p2.alias_switch                                            prod generation 3 -> v3: greeting before=v1 after=v3
++ tsls functions rollback hello
+alias       prod
+function    fn_01m2qn34jaxr9enzkqr0j30j0p
+from        rev_01m2qn3q0j1hwbtskxeybt8qsm
+to          rev_01m2qn34x0md9g3xgkb2z1vne3
+generation  4 -> 5
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn3rs94bcxrywfjwwkxnmq trace=inv_01m2qn3rs94bcxrywfjwwkxnmq
+PASS  p2.alias_rollback                                          greeting=v1 (back to v1)
++ tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --region jp --no-publish --description lab region jp
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+revision rev_01m2qn3t0v5ade1pxc9bendxv1 (#4) created: pending
+revision rev_01m2qn3t0v5ade1pxc9bendxv1 is preparing
+revision rev_01m2qn3t0v5ade1pxc9bendxv1 is ready
++ tsls functions invoke hello --payload {"name":"jp"} --revision-id rev_01m2qn3t0v5ade1pxc9bendxv1 --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn3tj9z84ykm37jf5ww5sb trace=inv_01m2qn3tj9z84ykm37jf5ww5sb
+PASS  p2.placement_jp_label_admitted                             node label region=jp, revision requires jp: exit=0
++ tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --region us --no-publish --description lab region us
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+revision rev_01m2qn3vpr4dk5dp9tyffd5fjh (#5) created: pending
+revision rev_01m2qn3vpr4dk5dp9tyffd5fjh is preparing
+revision rev_01m2qn3vpr4dk5dp9tyffd5fjh is ready
++ tsls functions invoke hello --payload {"name":"us"} --revision-id rev_01m2qn3vpr4dk5dp9tyffd5fjh --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: provider_unavailable (HTTP 503): placement: placement requires region `us` but node `lab-8c436263` is in region `jp`; the constraint is never relaxed [request=01m2qn3w7cjq03m1jnagwb48q5]
+PASS  p2.placement_us_refused                                    exit=6 reason=placement (never relaxed)
+NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
++ curl -X GET http://127.0.0.1:64897/metrics
+PASS  p2.metrics_snapshot                                        HTTP 200, 333 samples -> p2-metrics.prom
+tsls_node_in_flight 0
+tsls_environments{state="promised"} 0
+tsls_environments{state="starting"} 0
+tsls_environments{state="busy"} 0
+tsls_environments{state="parking"} 0
+tsls_environments{state="idle"} 0
+tsls_environments{state="draining"} 0
+tsls_admission_grants_total{kind="cold"} 18
+tsls_admission_grants_total{kind="warm"} 0
+tsls_environment_starts_total{result="success"} 18
+tsls_environment_starts_total{result="failure"} 0
+tsls_scale_events_total{kind="activation",reason="backlog"} 12
+tsls_scale_events_total{kind="scale_up",reason="backlog"} 6
+tsls_scale_events_total{kind="prestart",reason="none"} 0
+tsls_scale_events_total{kind="scale_down",reason="none"} 0
+tsls_scale_events_total{kind="scale_to_zero",reason="none"} 0
+tsls_scale_events_total{kind="drain",reason="alias_switch"} 4
++ curl -X GET http://127.0.0.1:64897/metrics
+PASS  p2.metrics_operator_only                                   tenant token -> HTTP 401
+
+== P3: invokeAsync -> retries -> dead letter -> redrive -> cron -> webhook -> usage -> budget (provider process) ==
++ tsls functions create --name idempotent-async --description lab demo (lab-8c436263) --json
++ tsls functions deploy --function idempotent-async --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-idempotent-async --arch aarch64 --json --env IDEMPOTENT_ASYNC_DIR=/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/effects --max-concurrency 4 --description lab async
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-idempotent-async (3650120 bytes, arch aarch64)
+artifact sha256:fdaa03959e9ed6672bc7c3ae1954bc4dcf57ac84c8fa3df29d2376e584d8068e
+revision rev_01m2qn3x5ma2m4hxpncwzw8qbc (#1) created: pending
+revision rev_01m2qn3x5ma2m4hxpncwzw8qbc is preparing
+revision rev_01m2qn3x5ma2m4hxpncwzw8qbc is ready
++ curl -X POST http://127.0.0.1:64897/v1/functions/fn_01m2qn3wdcgvntamx11ze44hmh:invokeAsync --data-binary @/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/p3-async.json
+PASS  p3.async_accepted_202                                      HTTP 202 invocation=inv_01m2qn3xpjs39v1dn4vzecxjz8 (committed before the 202)
+PASS  p3.async_succeeded                                         status=succeeded (published to NATS JetStream, run by the dispatcher)
++ curl -X POST http://127.0.0.1:64897/v1/functions/fn_01m2qn3wdcgvntamx11ze44hmh:invokeAsync --data-binary @/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/p3-async-large.json
+PASS  p3.async_large_input_object_store                          HTTP 202 status=succeeded objects under data/objects: 0 -> 2 (AES-256-GCM, lab key)
+PASS  p3.object_store_ciphertext                                 the 100 KiB plaintext pad is not readable in data/objects
++ curl -X POST http://127.0.0.1:64897/v1/functions/fn_01m2qn3wdcgvntamx11ze44hmh:invokeAsync --data-binary @/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/p3-async.json
++ curl -X GET http://127.0.0.1:64897/v1/invocations/inv_01m2qn3zjvee3e2yt8kg1hdnfw
+PASS  p3.retries_then_dead_letter                                status=failed attempts=3 (max_attempts 3) dead_letter=dlq_01m2qn41c0p378tdqhzmnwztg0
++ tsls dead-letters list idempotent-async --json
+PASS  p3.dead_letter_listed                                      reason=attempts_exhausted
++ tsls dead-letters redrive dlq_01m2qn41c0p378tdqhzmnwztg0 --reason lab demo without the role --json
+error: forbidden (HTTP 403): forbidden: role `redrive` is required [request=01m2qn41y8gycsw61jdz19tjs1]
+PASS  p3.redrive_needs_role                                      deploy+invoke token: exit=2 code=forbidden
++ tsls (tenant A on-call: invoke+redrive) dead-letters redrive dlq_01m2qn41c0p378tdqhzmnwztg0 --reason lab demo: downstream fixed --json
+PASS  p3.redrive_accepted                                        exit=0 new invocation=inv_01m2qn4200zf3vg8zeb7f3cfep requested_by=lab-a-oncall
+PASS  p3.redrive_succeeded                                       status=succeeded (4th execution passes fail_first=3; side effect applied once)
++ tsls triggers create hello --name lab-cron-122258e678 --kind cron --schedule */2 * * * * * --timezone Asia/Tokyo --payload {"name":"cron"} --missed-run skip --json
+PASS  p3.cron_created                                            trigger=trg_01m2qn42kz3a3cfey7rbeet8mg schedule='*/2 * * * * *' (6 fields: every 2 s)
++ tsls triggers update hello trg_01m2qn42kz3a3cfey7rbeet8mg --disable
+id                 trg_01m2qn42kz3a3cfey7rbeet8mg
+function_id        fn_01m2qn34jaxr9enzkqr0j30j0p
+name               lab-cron-122258e678
+kind               cron
+status             disabled
+status_reason      -
+generation         2
+alias              -
+revision_id        -
+expression         */2 * * * * *
+timezone           Asia/Tokyo
+missed_run_policy  {"kind":"skip"}
+next_fire_at       -
+last_scheduled_at  2026-09-17T12:23:10.000Z
+updated_at         2026-09-17T12:23:11.627Z
++ tsls triggers fires hello trg_01m2qn42kz3a3cfey7rbeet8mg --limit 20 --json
+PASS  p3.cron_fired                                              accepted fires in ~7 s: 3 (then disabled)
+PASS  p3.cron_fire_ran                                           first fire invocation=inv_01m2qn47xk1rc043dwv5gt91h6 status=succeeded
++ tsls triggers delete hello trg_01m2qn42kz3a3cfey7rbeet8mg
+deleted trg_01m2qn42kz3a3cfey7rbeet8mg
++ tsls triggers create hello --name lab-hook-122258e678 --kind webhook --max-body-bytes 4096 --json
+PASS  p3.webhook_created                                         trigger=trg_01m2qn49jagk4n7p3kpy8segcy secret shown once (kept in memory only, never written)
++ tsls triggers webhook-sign --secret-env LAB_WEBHOOK_SECRET --timestamp 1789647791 --body-file p3-webhook-body.json
++ curl -X POST http://127.0.0.1:64897/v1/hooks/trg_01m2qn49jagk4n7p3kpy8segcy (x-tachyon-webhook-timestamp, x-tachyon-webhook-signature, x-tachyon-webhook-id)
+PASS  p3.webhook_signed_202                                      HTTP 202
+PASS  p3.webhook_bad_signature_401                               HTTP 401 (no invocation)
++ tsls triggers fires hello trg_01m2qn49jagk4n7p3kpy8segcy --json
+PASS  p3.webhook_fire_ran                                        invocation=inv_01m2qn49k1mzw9qjsq5jsrfpya status=succeeded
++ tsls triggers delete hello trg_01m2qn49jagk4n7p3kpy8segcy
+deleted trg_01m2qn49jagk4n7p3kpy8segcy
++ tsls usage --group-by function --json
+PASS  p3.usage_report                                            lines=4 attempts=28 retries=2 provisional=true billing_enabled=false
++ tsls usage --group-by function
+PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+tenant              tn_01hzzzzzzzzzzzzzzzzzzzzzza
+range               2026-09-01T00:00:00+00:00 .. 2026-09-17T12:23:14.842943+00:00
+price table         provisional-dev-2026-09-v1 (effective 2026-09-01T00:00:00+00:00, JPY; billable: user_init_ms, handler_ms)
+collected through   2026-09-17T12:23:14.612125+00:00
+unjournaled events  0
+FUNCTION                       DAY  INVOCATIONS  ATTEMPTS  RETRIES  TIMEOUTS  HANDLER MS  BILLABLE MS  UNMETERED  CHARGE (PROVISIONAL)
+fn_01m2qn34jaxr9enzkqr0j30j0p  -    12           12        0        0         20          579          0          0.001169 JPY
+fn_01m2qn36jdtnd7b9cgaxbr3c9c  -    1            1         0        0         3           437          0          0.000624 JPY
+fn_01m2qn37y6m1q7qpkqafymykdf  -    9            9         0        1         9054        9661         0          0.013322 JPY
+fn_01m2qn3wdcgvntamx11ze44hmh  -    4            6         2        0         30          641          0          0.002528 JPY
+TOTAL                          -    26           28        2        1         9107        11318        0          0.017643 JPY
++ wrote /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/budgets.toml (cpu-burn hard_limit_micros = 1)
++ tsls functions invoke cpu-burn --payload {"seconds":0} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: budget_exhausted (HTTP 429): budget: the function budget's hard limit (1 micro-units) does not admit this invocation's maximum charge of 183840 (13323 already committed in 2026-09) [type=Host.BudgetExhausted] [request=01m2qn4cnfejd0mbbjj5sgf3hq]
+PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
++ tsls budget --json
++ tsls budget
+PROVISIONAL - provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype
+tenant         tn_01hzzzzzzzzzzzzzzzzzzzzzza
+enforced       true
+period         2026-09 (2026-09-01T00:00:00+00:00 .. 2026-10-01T00:00:00+00:00, calendar_month_utc)
+price table    provisional-dev-2026-09-v1 (JPY)
+configuration  valid (generation 36)
+admitting      true
+SCOPE                          HARD LIMIT      RESERVED  SETTLED   UNMETERED HOLD  REMAINING      ACTIVE  REFUSALS  ALERTS
+tenant                         1000000.000000  0.000000  0.017647  0.000000        999999.982353  0       1         -
+fn_01m2qn34jaxr9enzkqr0j30j0p  -               0.000000  0.001168  0.000000        -              0       0         -
+fn_01m2qn36jdtnd7b9cgaxbr3c9c  -               0.000000  0.000624  0.000000        -              0       0         -
+fn_01m2qn37y6m1q7qpkqafymykdf  0.000001        0.000000  0.013323  0.000000        0.000000       0       1         -
+fn_01m2qn3wdcgvntamx11ze44hmh  -               0.000000  0.002532  0.000000        -              0       0         -
++ tsls functions invoke hello --payload {"name":"other"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn4cpf24yakqfx9b2d7c4r trace=inv_01m2qn4cpf24yakqfx9b2d7c4r
+PASS  p3.budget_is_per_function                                  hello still admitted: exit=0
++ restored /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/budgets.toml (default only)
++ tsls functions invoke cpu-burn --payload {"seconds":0} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn4cvn6afggq9kxjb9bkyy trace=inv_01m2qn4cvn6afggq9kxjb9bkyy
+PASS  p3.budget_released                                         exit=0 after the limit was removed
+NOTE  budgets and usage are provisional (dev price table); billing is disabled and nothing is charged. Local only: no cloud spend.
+
+== secret values absent from logs, demo outputs and the ledger ==
+PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+
+results (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/results.txt):
+NOTE  process provider: functions run as host child processes. NOT a microVM, NO isolation.
+PASS  p1.provider_kind                                           kind=process isolation=process dev_only=true
+PASS  p1.function_registered                                     hello=fn_01m2qn34jaxr9enzkqr0j30j0p
+PASS  p1.publish_v1                                              revision=rev_01m2qn34x0md9g3xgkb2z1vne3 (prod -> v1)
+PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
+PASS  p1.logs                                                    invocation=inv_01m2qn355ek0fa5txsvj5qmx3p lines=7
+PASS  p1.boot_evidence                                           host_pid=35146 guest_boot_id=null handler_ms=1
+PASS  p1.user_error                                              exit=3 code=user_error
+PASS  p1.http_adapter                                            status=200 body=ok
+PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
+PASS  p1.publish_v2                                              revision=rev_01m2qn3cdm40mv0zzfzsqe2444 greeting=v2
+PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
+PASS  p1.other_tenant_404                                        tenant B get fn_01m2qn34jaxr9enzkqr0j30j0p: exit=2 code=not_found
+PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
+PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+PASS  p2.revision_max_concurrency                                revision=rev_01m2qn3fh0fvs18bpvzvagb7sb max_concurrency=3
+PASS  p2.burst_all_served                                        7/7 invocations exit 0 (the rest waited in the queue)
+PASS  p2.burst_bounded                                           max environments of the revision observed=3 (limit 3; samples in p2-capacity-samples.ndjson)
+PASS  p2.scale_to_zero                                           environments of rev_01m2qn3fh0fvs18bpvzvagb7sb=0; zero environments is not zero host cost: the gateway, its store and the node keep running
+PASS  p2.cold_reaccess                                           exit=0 (a new environment is started for the request)
+PASS  p2.alias_switch                                            prod generation 3 -> v3: greeting before=v1 after=v3
+PASS  p2.alias_rollback                                          greeting=v1 (back to v1)
+PASS  p2.placement_jp_label_admitted                             node label region=jp, revision requires jp: exit=0
+PASS  p2.placement_us_refused                                    exit=6 reason=placement (never relaxed)
+NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
+PASS  p2.metrics_snapshot                                        HTTP 200, 333 samples -> p2-metrics.prom
+PASS  p2.metrics_operator_only                                   tenant token -> HTTP 401
+PASS  p3.async_accepted_202                                      HTTP 202 invocation=inv_01m2qn3xpjs39v1dn4vzecxjz8 (committed before the 202)
+PASS  p3.async_succeeded                                         status=succeeded (published to NATS JetStream, run by the dispatcher)
+PASS  p3.async_large_input_object_store                          HTTP 202 status=succeeded objects under data/objects: 0 -> 2 (AES-256-GCM, lab key)
+PASS  p3.object_store_ciphertext                                 the 100 KiB plaintext pad is not readable in data/objects
+PASS  p3.retries_then_dead_letter                                status=failed attempts=3 (max_attempts 3) dead_letter=dlq_01m2qn41c0p378tdqhzmnwztg0
+PASS  p3.dead_letter_listed                                      reason=attempts_exhausted
+PASS  p3.redrive_needs_role                                      deploy+invoke token: exit=2 code=forbidden
+PASS  p3.redrive_accepted                                        exit=0 new invocation=inv_01m2qn4200zf3vg8zeb7f3cfep requested_by=lab-a-oncall
+PASS  p3.redrive_succeeded                                       status=succeeded (4th execution passes fail_first=3; side effect applied once)
+PASS  p3.cron_created                                            trigger=trg_01m2qn42kz3a3cfey7rbeet8mg schedule='*/2 * * * * *' (6 fields: every 2 s)
+PASS  p3.cron_fired                                              accepted fires in ~7 s: 3 (then disabled)
+PASS  p3.cron_fire_ran                                           first fire invocation=inv_01m2qn47xk1rc043dwv5gt91h6 status=succeeded
+PASS  p3.webhook_created                                         trigger=trg_01m2qn49jagk4n7p3kpy8segcy secret shown once (kept in memory only, never written)
+PASS  p3.webhook_signed_202                                      HTTP 202
+PASS  p3.webhook_bad_signature_401                               HTTP 401 (no invocation)
+PASS  p3.webhook_fire_ran                                        invocation=inv_01m2qn49k1mzw9qjsq5jsrfpya status=succeeded
+PASS  p3.usage_report                                            lines=4 attempts=28 retries=2 provisional=true billing_enabled=false
+PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
+PASS  p3.budget_is_per_function                                  hello still admitted: exit=0
+PASS  p3.budget_released                                         exit=0 after the limit was removed
+NOTE  budgets and usage are provisional (dev price table); billing is disabled and nothing is charged. Local only: no cloud spend.
+PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+
+47 checks passed, 0 failed
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122232Z-demo-34987.log (exit 0)
+4.1 demo all                                 exit=0     43s  scripts/lab/lab.sh demo all
+######## 4.1 status: scripts/lab/lab.sh status
+lab lab-8c436263  provider=process  state=up  dir=/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+(process provider: dev mode, NOT a microVM, no isolation)
+
+STATUS COMPONENT              CHECK                                        DETAIL
+ok    nats-server            process                                      pid 34731
+ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+ok    gateway                process                                      pid 34749
+ok    gateway                GET /healthz                                 200
+ok    gateway                GET /readyz .ready                           true
+ok    provider               readyz .preflight                            process ok=true 
+ok    dispatcher             readyz .dispatcher.fenced                    false
+ok    config-cache           readyz .control_plane.new_invocations        accepted config=fresh
+ok    usage-journal          readyz .usage                                accepting=true journal_healthy=true collector_error=null
+ok    budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=null
+ok    ledger                 state.db schema_version = migrations         8/8
+ok    queue                  tsls_async_queue_condition{healthy}          1
+ok    trigger-scheduler      tsls_trigger_scheduler_owner                 1
+ok    async-dispatcher       tsls_async_dispatch_runs_in_flight           0
+ok    metrics                operator token 200, tenant token 401         401
+ok    object-store           root exists, key 0600, backend filesystem    /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/objects
+skip  console                GET /console/                                not enabled (up --console)
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122315Z-status-36243.log (exit 0)
+4.1 status                                   exit=0      0s  scripts/lab/lab.sh status
+######## 4.1 CLI snippet: bash /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/cli-snippet.sh
+ID                             NAME              DESCRIPTION              CREATED                   DELETED
+fn_01m2qn34jaxr9enzkqr0j30j0p  hello             lab demo (lab-8c436263)  2026-09-17T12:22:33.802Z  -
+fn_01m2qn36jdtnd7b9cgaxbr3c9c  http-axum         lab demo (lab-8c436263)  2026-09-17T12:22:35.853Z  -
+fn_01m2qn37y6m1q7qpkqafymykdf  cpu-burn          lab demo (lab-8c436263)  2026-09-17T12:22:37.254Z  -
+fn_01m2qn3wdcgvntamx11ze44hmh  idempotent-async  lab demo (lab-8c436263)  2026-09-17T12:22:58.220Z  -
+4.1 CLI snippet                              exit=0      0s  bash /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/cli-snippet.sh
+######## 4.4 logs commands: scripts/lab/lab.sh logs commands
+20260917T122050Z-preflight-31400.log
+20260917T122051Z-bootstrap-31596.log
+20260917T122227Z-up-34581.log
+20260917T122232Z-demo-34987.log
+20260917T122315Z-status-36243.log
+4.4 logs commands                            exit=0      0s  scripts/lab/lab.sh logs commands
+######## 4.4 demo p1 (re-run): scripts/lab/lab.sh demo p1
+demo p1: lab lab-8c436263 provider process api http://127.0.0.1:64897 outputs /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122316Z-p1
+
+== P1: register -> publish -> sync invoke -> logs -> rollback (provider process) ==
+NOTE  process provider: functions run as host child processes. NOT a microVM, NO isolation.
++ tsls provider --json
+PASS  p1.provider_kind                                           kind=process isolation=process dev_only=true
+PASS  p1.function_registered                                     hello=fn_01m2qn34jaxr9enzkqr0j30j0p
++ tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v1 --secret DEMO_SECRET=demo-secret --description lab v1
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+revision rev_01m2qn4e87218zzb29v9nhdseg (#6) created: pending
+revision rev_01m2qn4e87218zzb29v9nhdseg is preparing
+revision rev_01m2qn4e87218zzb29v9nhdseg is ready
+PASS  p1.publish_v1                                              revision=rev_01m2qn4e87218zzb29v9nhdseg (prod -> v1)
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn4egjbfd8p8143xv66me1 trace=inv_01m2qn4egjbfd8p8143xv66me1
+PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
++ tsls functions invocations hello --limit 1 --json
++ tsls functions logs --invocation inv_01m2qn4egjbfd8p8143xv66me1
+PASS  p1.logs                                                    invocation=inv_01m2qn4egjbfd8p8143xv66me1 lines=7
++ tsls functions invocation inv_01m2qn4egjbfd8p8143xv66me1 --json
+PASS  p1.boot_evidence                                           host_pid=36535 guest_boot_id=null handler_ms=0
++ tsls functions invoke hello --payload {"fail":true} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: user_error (HTTP 502): invocation inv_01m2qn4eqt2m0z1ak7ehwgvg46 failed: Demo.Failure: fail requested [type=Demo.Failure] [invocation=inv_01m2qn4eqt2m0z1ak7ehwgvg46] [request=01m2qn4eqt4mfs400qvbk6rk83]
+PASS  p1.user_error                                              exit=3 code=user_error
++ tsls functions deploy --function http-axum --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-http-axum --arch aarch64 --json --description lab http
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-http-axum (5521248 bytes, arch aarch64)
+artifact sha256:88be5ec73360536d4b553c69d92b9898834001506f98ba7470bb88ab268a9133
+revision rev_01m2qn4fcbdjbd07ya38fssmay (#2) created: pending
+revision rev_01m2qn4fcbdjbd07ya38fssmay is preparing
+revision rev_01m2qn4fcbdjbd07ya38fssmay is ready
++ tsls functions http http-axum --method GET --path / --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+PASS  p1.http_adapter                                            status=200 body=ok
++ tsls functions deploy --function cpu-burn --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn --arch aarch64 --json --timeout-seconds 2 --no-publish --description lab timeout 2s
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn (3557120 bytes, arch aarch64)
+artifact sha256:c15e0e4cd503c77a580e5df6799aaf4f1c988ca265979cab68863c4c24949b38
+revision rev_01m2qn4g6p052g27htg5rjypmk (#3) created: pending
+revision rev_01m2qn4g6p052g27htg5rjypmk is preparing
+revision rev_01m2qn4g6p052g27htg5rjypmk is ready
++ tsls functions invoke cpu-burn --payload {"seconds":30,"ignore_sigterm":true} --revision-id rev_01m2qn4g6p052g27htg5rjypmk --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: timeout (HTTP 504): invocation inv_01m2qn4gf3m2dpsdjhrxpak1z3 failed: Host.Timeout: handler did not finish within 2 s [type=Host.Timeout] [invocation=inv_01m2qn4gf3m2dpsdjhrxpak1z3] [request=01m2qn4gf03686xvxxgbb7xp76]
+PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
++ tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v2 --secret DEMO_SECRET=demo-secret --description lab v2
+uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+revision rev_01m2qn4kymv9j9cw0jx27ca4dp (#7) created: pending
+revision rev_01m2qn4kymv9j9cw0jx27ca4dp is preparing
+revision rev_01m2qn4kymv9j9cw0jx27ca4dp is ready
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn4m75ttwwz9cghyx0k86c trace=inv_01m2qn4m75ttwwz9cghyx0k86c
+PASS  p1.publish_v2                                              revision=rev_01m2qn4kymv9j9cw0jx27ca4dp greeting=v2
++ tsls functions rollback hello
+alias       prod
+function    fn_01m2qn34jaxr9enzkqr0j30j0p
+from        rev_01m2qn4kymv9j9cw0jx27ca4dp
+to          rev_01m2qn4e87218zzb29v9nhdseg
+generation  7 -> 8
++ tsls functions aliases hello
+ALIAS  REVISION                        GENERATION  PREVIOUS                        UPDATED
+prod   rev_01m2qn4e87218zzb29v9nhdseg  8           rev_01m2qn4kymv9j9cw0jx27ca4dp  2026-09-17T12:23:22.810Z
++ tsls functions invoke hello --payload {"name":"lab"} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+invocation inv_01m2qn4mecp4pha723ay3mgatb trace=inv_01m2qn4mecp4pha723ay3mgatb
+PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
++ tsls (tenant B) functions get fn_01m2qn34jaxr9enzkqr0j30j0p --json
+error: not_found (HTTP 404): not found: function not found [request=01m2qn4mmyz9r5rwez8zxhe6d1]
+PASS  p1.other_tenant_404                                        tenant B get fn_01m2qn34jaxr9enzkqr0j30j0p: exit=2 code=not_found
++ tsls (tenant B) functions invoke fn_01m2qn34jaxr9enzkqr0j30j0p --payload {} --json
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: not_found (HTTP 404): not found: function not found [request=01m2qn4mnfqgz8k6ha31fvg1hs]
+PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
++ tsls capacity --json
+PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+
+== secret values absent from logs, demo outputs and the ledger ==
+PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+
+results (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122316Z-p1/results.txt):
+NOTE  process provider: functions run as host child processes. NOT a microVM, NO isolation.
+PASS  p1.provider_kind                                           kind=process isolation=process dev_only=true
+PASS  p1.function_registered                                     hello=fn_01m2qn34jaxr9enzkqr0j30j0p
+PASS  p1.publish_v1                                              revision=rev_01m2qn4e87218zzb29v9nhdseg (prod -> v1)
+PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
+PASS  p1.logs                                                    invocation=inv_01m2qn4egjbfd8p8143xv66me1 lines=7
+PASS  p1.boot_evidence                                           host_pid=36535 guest_boot_id=null handler_ms=0
+PASS  p1.user_error                                              exit=3 code=user_error
+PASS  p1.http_adapter                                            status=200 body=ok
+PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
+PASS  p1.publish_v2                                              revision=rev_01m2qn4kymv9j9cw0jx27ca4dp greeting=v2
+PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
+PASS  p1.other_tenant_404                                        tenant B get fn_01m2qn34jaxr9enzkqr0j30j0p: exit=2 code=not_found
+PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
+PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+
+16 checks passed, 0 failed
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122315Z-demo-36383.log (exit 0)
+4.4 demo p1 (re-run)                         exit=0      9s  scripts/lab/lab.sh demo p1
+######## 6 recovery drills: bash /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/drills.sh
+DRILL PASS  6.9 SIGKILL: status fails (1), up recovers (0)
+FAIL  budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=budget file: TOML parse error at line 6, column 10
+DRILL PASS  6.7 budget file: FAIL with accepting=true (1), fixed -> status ok (0)
+FAIL  port:GATEWAY_PORT          127.0.0.1:64897 is used by another process (lab.sh teardown, or edit GATEWAY_PORT in /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/manifest.env)
+[lab] ERROR: port 64897 is in use (docs/runbook.md §6.5)
+DRILL PASS  6.5 port 64897: diagnosed (1), new port 65369 up (0)
+[38341] 2026/09/17 21:23:47.157819 [FTL] Error listening on port: 127.0.0.1:64898, "listen tcp 127.0.0.1:64898: bind: address already in use"
+[queue] ERROR: nats-server did not become ready (log: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.log)
+[38341] 2026/09/17 21:23:47.157819 [FTL] Error listening on port: 127.0.0.1:64898, "listen tcp 127.0.0.1:64898: bind: address already in use"
+[lab] ERROR: nats-server did not start (docs/runbook.md §6.6)
+DRILL PASS  6.6 nats port 64898: diagnosed (1), freed -> up (0)
+    | Error: conflict: state.db is at schema version 99, newer than this binary supports (8). Migrations are forward-only: run a newer gateway, or restore the database from before the upgrade
+[lab] ERROR: state.db has a newer schema than this gateway (docs/runbook.md §6.4)
+4. orphan check
+orphan check: clean (lab lab-8c436263)
+DRILL PASS  6.4 newer schema: diagnosed (1), teardown --keep-cache + up (0)
+6 recovery drills                            exit=0     61s  bash /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/drills.sh
+######## 7.1 teardown --dry-run: scripts/lab/lab.sh teardown --dry-run
+teardown of lab lab-8c436263 (provider process, dir /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab) [dry-run: nothing is changed]
+ledger environments recorded by this lab: 0
+1. processes
+  [dry-run] would stop gateway (39563) and nats-server (39542)
+  [dry-run] would SIGKILL leftover: 39542 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache/nats/nats-server-v2.14.7-darwin-arm64/nats-server -c /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.conf
+  [dry-run] would SIGKILL leftover: 39563 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/tachyon-serverless-gateway --config /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml
+2. Linux host resources named after this lab (jails, cgroups, taps, nft chains)
+  skip: not Linux (no jails, cgroups, taps or nft on this host)
+3. files owned by this lab
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats (40K)
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/objects (0B)
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data (756K)
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo (0B)
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/run (4.0K)
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config (8.0K)
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets (12K)
+  [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache (23M)
+4. orphan check
+  LEFTOVER processes naming /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab: 39542 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache/nats/nats-server-v2.14.7-darwin-arm64/nats-server -c /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.conf;39563 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/tachyon-serverless-gateway --config /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml
+  LEFTOVER gateway pid file with a live process
+  (dry-run: the paths listed in step 3 still exist by design)
+orphan check: leftovers found (docs/runbook.md §7.2)
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122425Z-teardown-39733.log (exit 1)
+7.1 teardown --dry-run                       exit=1      1s  scripts/lab/lab.sh teardown --dry-run
+######## 7.1 teardown: scripts/lab/lab.sh teardown
+teardown of lab lab-8c436263 (provider process, dir /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab)
+ledger environments recorded by this lab: 0
+1. processes
+[lab] stopping gateway pid 39563 (SIGTERM: in-flight invocations are cancelled and environments destroyed)
+[queue] nats-server (pid 39542) stopped with SIGTERM
+2. Linux host resources named after this lab (jails, cgroups, taps, nft chains)
+  skip: not Linux (no jails, cgroups, taps or nft on this host)
+3. files owned by this lab
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/objects
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/run
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets
+  remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache
+4. orphan check
+orphan check: clean (lab lab-8c436263)
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122426Z-teardown-39912.log (exit 0)
+7.1 teardown                                 exit=0      1s  scripts/lab/lab.sh teardown
+######## 7.1 up after teardown (expect refusal: not bootstrapped): scripts/lab/lab.sh up
+[lab] ERROR: lab not bootstrapped (run: scripts/lab/lab.sh bootstrap)
+[lab] transcript: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/commands/20260917T122427Z-up-40113.log (exit 1)
+7.1 up after teardown (expect refusal: not bootstrapped) exit=1      0s  scripts/lab/lab.sh up
+done

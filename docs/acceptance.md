@@ -868,15 +868,35 @@ CLI 以外から状態と失敗原因を確認する最小画面を `apps/consol
 
 clean clone からの追試（macOS arm64、process provider、**自動化 agent が実行**）:
 
-| 手順 | 結果 | 備考 |
+2 回行った。1 回目（commit `027774f`、`git clone --branch docs/plt-4648-runbook` した `scratchpad/cc/`）で文書と script の不足を見つけて直し、直した後の最終 commit `c37ec08`（origin/main `71a3827` に rebase 済み）を別の directory に clone し直して、runbook のコマンドを `walkthrough.sh` から順に実行した。記録は `docs/evidence/lab-20260917T1219Z-process-clean-clone/`（`walkthrough-summary.txt`、全出力 `walkthrough.out`、lab の command log `commands/*.log`、`gateway.log`、`manifest.env`、駆動 script `walkthrough.sh.txt`・`drills.sh.txt`・`cli-snippet.sh.txt`。実行したものと同じ内容を、CI の shellcheck 対象から外すため `.txt` で保存）。token / secret の値が証跡に無いことを pattern で確認した。main に入る前なので clone は branch 指定で行った（runbook §4.1 は merge 後の `main` を想定）。
+
+| 手順（runbook の節） | 結果 | 時間 |
 |---|---|---|
-| clone | PENDING | |
+| §4.1 `preflight` | exit 0（READY with warnings: macOS の os 行） | 2 s |
+| §4.1 `bootstrap`（nats-server の取得と sha256 照合、cold な `target/` からの cargo build） | exit 0 | 96 s |
+| §4.1 `up`（生成、nats、gateway、migration 8/8、health 17 行） | exit 0、全行 ok（console は skip） | 5 s |
+| §4.1 `demo all`（P1 15・P2 11・P3 20・secret scan 1） | exit 0、**47 checks passed, 0 failed** | 43 s |
+| §4.1 `status`、自分で CLI を叩く snippet、§4.4 `logs commands` | すべて exit 0 | — |
+| §4.4 `demo p1` の再実行（同じ lab で関数は再利用） | exit 0、16 checks passed | 9 s |
+| §6.9 gateway の SIGKILL → `status` が失敗 → `up` で回復 | PASS | 61 s（§6 の 5 drill 合計） |
+| §6.7 budget file の構文エラー → FAIL と `accepting=true` → 修正で ok | PASS | |
+| §6.5 gateway port を別 process が使用 → `port ... is in use` → manifest の `GATEWAY_PORT=` を空にして `up` | PASS | |
+| §6.6 nats port を別 process が使用 → `nats-server did not start` → 解放して `up` | PASS | |
+| §6.4 schema version 99 → `newer schema` → `teardown --keep-cache` → `up` | PASS | |
+| §7.1 `teardown --dry-run` | exit 1（下の不足 3。修正後は exit 0） | 1 s |
+| §7.1 `teardown` | exit 0、`orphan check: clean` | 1 s |
+| §7.1 cache を消した後の `up` | 期待どおり `lab not bootstrapped` で拒否 | 0 s |
+| Firecracker（§4.2） | **未検証**（KVM host を使っていない） | — |
 
 追試で見つかった文書・script の不足と修正:
 
 | 見つかったこと | 修正 |
 |---|---|
-| preflight が host の C toolchain（`cc`）を firecracker のときだけ検査していた。process でも cargo build は `cc`（ring、libsqlite3-sys）を使う | 常に必須に変更（`lab.sh`、`docs/runbook.md` §2.2） |
+| 1. preflight が host の C toolchain（`cc`）を firecracker のときだけ検査していた。process でも cargo build は `cc`（ring、libsqlite3-sys）を使う | 常に必須に変更（`lab.sh`、`docs/runbook.md` §2.2） |
+| 2. §6.5 の drill の後に §6.4 を起こすと、lab.sh が「新しい schema」を「port 使用中」と誤診断した。gateway.log 全体を grep していたので前回の起動の `Address already in use` を拾った | 今回の起動で追記された行だけで判定（`run/gateway-start.log`） |
+| 3. runbook §6.4 / §6.6 の復旧が `teardown` → `up` だったが、`teardown` は cache も消すので `up` は `lab not bootstrapped` で止まる | `teardown --keep-cache` → `up`（または `teardown` → `bootstrap` → `up`）に修正、§7.1 に再利用の注意を追加 |
+| 4. `teardown --dry-run` が、動いている lab 自身の process を LEFTOVER として exit 1 にした（何も変えない確認なのに失敗に見える） | dry-run は「現在の状態」として表示し exit 0 |
+| 5. 稼働中の障害（controller / DB / queue）の挙動が runbook から辿れなかった | §6 冒頭から docs/failure-matrix.md（PLT-4646）へ参照 |
 
 開発中に見つけて直したもの（追試の前）: `cd && cmd &` で起動した gateway の pid が subshell のもので transcript の pipe を開いたままにし `up` が終わらない、teardown の process 検索が自分の awk を孤児として検出する、command log の file 名が同じ秒の実行で衝突する。
 

@@ -1,0 +1,30 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh teardown --dry-run
+# started:  2026-09-17T12:24:25Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:24:25Z teardown of lab lab-8c436263 (provider process, dir /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab) [dry-run: nothing is changed]
+2026-09-17T12:24:25Z ledger environments recorded by this lab: 0
+2026-09-17T12:24:25Z 1. processes
+2026-09-17T12:24:25Z   [dry-run] would stop gateway (39563) and nats-server (39542)
+2026-09-17T12:24:25Z   [dry-run] would SIGKILL leftover: 39542 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache/nats/nats-server-v2.14.7-darwin-arm64/nats-server -c /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.conf
+2026-09-17T12:24:25Z   [dry-run] would SIGKILL leftover: 39563 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/tachyon-serverless-gateway --config /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml
+2026-09-17T12:24:25Z 2. Linux host resources named after this lab (jails, cgroups, taps, nft chains)
+2026-09-17T12:24:25Z   skip: not Linux (no jails, cgroups, taps or nft on this host)
+2026-09-17T12:24:25Z 3. files owned by this lab
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats (40K)
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/objects (0B)
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data (756K)
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo (0B)
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/run (4.0K)
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config (8.0K)
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets (12K)
+2026-09-17T12:24:25Z   [dry-run] would remove /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache (23M)
+2026-09-17T12:24:25Z 4. orphan check
+2026-09-17T12:24:25Z   LEFTOVER processes naming /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab: 39542 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache/nats/nats-server-v2.14.7-darwin-arm64/nats-server -c /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.conf;39563 /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/tachyon-serverless-gateway --config /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml
+2026-09-17T12:24:26Z   LEFTOVER gateway pid file with a live process
+2026-09-17T12:24:26Z   (dry-run: the paths listed in step 3 still exist by design)
+2026-09-17T12:24:26Z orphan check: leftovers found (docs/runbook.md §7.2)
+# finished: 2026-09-17T12:24:26Z exit=1

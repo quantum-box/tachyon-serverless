@@ -345,7 +345,7 @@ PASS  secrets.not_leaked                                         20 locations x 
 ### 7.1 手順
 
 ```sh
-scripts/lab/lab.sh teardown --dry-run     # 何を消すかだけ表示（何も変えない）
+scripts/lab/lab.sh teardown --dry-run     # 何を消すか・今動いているものを表示（何も変えない、exit 0）
 scripts/lab/lab.sh teardown               # 実行。orphan check が clean なら exit 0
 scripts/lab/lab.sh teardown --keep-cache  # pin 済みの download（<lab>/cache）は残す
 scripts/lab/lab.sh teardown --purge       # clean のときだけ lab directory ごと消す（command log は $TMPDIR に残す）
@@ -413,7 +413,7 @@ command log の形式: 先頭に `# command:`、`# started:`、`# lab_dir:`、`#
 
 | 日付 | 誰が | 環境 | 範囲 | 結果 |
 |---|---|---|---|---|
-| 2026-09-17 | **自動化された agent**（実装した agent 自身が、作業ツリーではなく GitHub から fresh clone した別 directory で、この文書の §4.1 のコマンドだけを順に実行。**別の人間による追試ではない**） | macOS 26（Darwin 25.6.0）arm64、process provider | preflight → bootstrap → up → demo all → status → teardown、失敗の再現（§6.4 新しい schema、§6.5 gateway port、§6.6 nats port、§6.7 budget file、gateway の SIGKILL → up） | docs/acceptance.md「PLT-4648」に結果と、追試で見つかった文書の不足と修正 |
+| 2026-09-17 | **自動化された agent**（実装した agent 自身が、作業ツリーではなく GitHub から fresh clone した別 directory で、この文書の §4.1 のコマンドだけを順に実行。**別の人間による追試ではない**） | Darwin 25.6.0 arm64、process provider | preflight → bootstrap → up → demo all → status → CLI → teardown、§6.4 / §6.5 / §6.6 / §6.7 / §6.9 の失敗を起こして記載の手順で復旧 | すべて通過（demo 47/47）。1 回目の追試で見つけた不足 5 件を直してから最終 commit で再実行。記録 `docs/evidence/lab-20260917T1219Z-process-clean-clone/`、詳細と不足の一覧は docs/acceptance.md「PLT-4648」 |
 | — | — | Linux/KVM、firecracker provider | §4.2 | **未検証**（§10） |
 
 ## 10. まだ再現できないこと

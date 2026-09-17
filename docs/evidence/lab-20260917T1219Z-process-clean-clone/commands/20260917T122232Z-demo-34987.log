@@ -1,0 +1,342 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh demo all
+# started:  2026-09-17T12:22:32Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:22:33Z demo all: lab lab-8c436263 provider process api http://127.0.0.1:64897 outputs /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all
+2026-09-17T12:22:33Z 
+2026-09-17T12:22:33Z == P1: register -> publish -> sync invoke -> logs -> rollback (provider process) ==
+2026-09-17T12:22:33Z NOTE  process provider: functions run as host child processes. NOT a microVM, NO isolation.
+2026-09-17T12:22:33Z + tsls provider --json
+2026-09-17T12:22:33Z PASS  p1.provider_kind                                           kind=process isolation=process dev_only=true
+2026-09-17T12:22:33Z + tsls functions create --name hello --description lab demo (lab-8c436263) --json
+2026-09-17T12:22:33Z PASS  p1.function_registered                                     hello=fn_01m2qn34jaxr9enzkqr0j30j0p
+2026-09-17T12:22:33Z + tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v1 --secret DEMO_SECRET=demo-secret --description lab v1
+2026-09-17T12:22:33Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+2026-09-17T12:22:33Z artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+2026-09-17T12:22:34Z revision rev_01m2qn34x0md9g3xgkb2z1vne3 (#1) created: pending
+2026-09-17T12:22:34Z revision rev_01m2qn34x0md9g3xgkb2z1vne3 is preparing
+2026-09-17T12:22:34Z revision rev_01m2qn34x0md9g3xgkb2z1vne3 is ready
+2026-09-17T12:22:34Z PASS  p1.publish_v1                                              revision=rev_01m2qn34x0md9g3xgkb2z1vne3 (prod -> v1)
+2026-09-17T12:22:34Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T12:22:35Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:35Z invocation inv_01m2qn355ek0fa5txsvj5qmx3p trace=inv_01m2qn355ek0fa5txsvj5qmx3p
+2026-09-17T12:22:35Z PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+2026-09-17T12:22:35Z PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
+2026-09-17T12:22:35Z + tsls functions invocations hello --limit 1 --json
+2026-09-17T12:22:35Z + tsls functions logs --invocation inv_01m2qn355ek0fa5txsvj5qmx3p
+2026-09-17T12:22:35Z PASS  p1.logs                                                    invocation=inv_01m2qn355ek0fa5txsvj5qmx3p lines=7
+2026-09-17T12:22:35Z + tsls functions invocation inv_01m2qn355ek0fa5txsvj5qmx3p --json
+2026-09-17T12:22:35Z PASS  p1.boot_evidence                                           host_pid=35146 guest_boot_id=null handler_ms=1
+2026-09-17T12:22:35Z + tsls functions invoke hello --payload {"fail":true} --json
+2026-09-17T12:22:35Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:35Z error: user_error (HTTP 502): invocation inv_01m2qn36d5qrvn80dg85ae0ejn failed: Demo.Failure: fail requested [type=Demo.Failure] [invocation=inv_01m2qn36d5qrvn80dg85ae0ejn] [request=01m2qn36d59mmfe8vzqymr2h7v]
+2026-09-17T12:22:35Z PASS  p1.user_error                                              exit=3 code=user_error
+2026-09-17T12:22:35Z + tsls functions create --name http-axum --description lab demo (lab-8c436263) --json
+2026-09-17T12:22:35Z + tsls functions deploy --function http-axum --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-http-axum --arch aarch64 --json --description lab http
+2026-09-17T12:22:35Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-http-axum (5521248 bytes, arch aarch64)
+2026-09-17T12:22:36Z artifact sha256:88be5ec73360536d4b553c69d92b9898834001506f98ba7470bb88ab268a9133
+2026-09-17T12:22:36Z revision rev_01m2qn36zw5rwt67xzht7bveqa (#1) created: pending
+2026-09-17T12:22:36Z revision rev_01m2qn36zw5rwt67xzht7bveqa is preparing
+2026-09-17T12:22:36Z revision rev_01m2qn36zw5rwt67xzht7bveqa is ready
+2026-09-17T12:22:36Z + tsls functions http http-axum --method GET --path / --json
+2026-09-17T12:22:37Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:37Z PASS  p1.http_adapter                                            status=200 body=ok
+2026-09-17T12:22:37Z + tsls functions create --name cpu-burn --description lab demo (lab-8c436263) --json
+2026-09-17T12:22:37Z + tsls functions deploy --function cpu-burn --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn --arch aarch64 --json --timeout-seconds 2 --no-publish --description lab timeout 2s
+2026-09-17T12:22:37Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn (3557120 bytes, arch aarch64)
+2026-09-17T12:22:37Z artifact sha256:c15e0e4cd503c77a580e5df6799aaf4f1c988ca265979cab68863c4c24949b38
+2026-09-17T12:22:37Z revision rev_01m2qn386zt2fh4wqczdvx99jg (#1) created: pending
+2026-09-17T12:22:37Z revision rev_01m2qn386zt2fh4wqczdvx99jg is preparing
+2026-09-17T12:22:37Z revision rev_01m2qn386zt2fh4wqczdvx99jg is ready
+2026-09-17T12:22:37Z + tsls functions invoke cpu-burn --payload {"seconds":30,"ignore_sigterm":true} --revision-id rev_01m2qn386zt2fh4wqczdvx99jg --json
+2026-09-17T12:22:41Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:41Z error: timeout (HTTP 504): invocation inv_01m2qn38fgnd44dfemke6tgnrq failed: Host.Timeout: handler did not finish within 2 s [type=Host.Timeout] [invocation=inv_01m2qn38fgnd44dfemke6tgnrq] [request=01m2qn38fedan0a2egn86yfz5d]
+2026-09-17T12:22:41Z PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
+2026-09-17T12:22:41Z + tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v2 --secret DEMO_SECRET=demo-secret --description lab v2
+2026-09-17T12:22:41Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+2026-09-17T12:22:41Z artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+2026-09-17T12:22:41Z revision rev_01m2qn3cdm40mv0zzfzsqe2444 (#2) created: pending
+2026-09-17T12:22:41Z revision rev_01m2qn3cdm40mv0zzfzsqe2444 is preparing
+2026-09-17T12:22:42Z revision rev_01m2qn3cdm40mv0zzfzsqe2444 is ready
+2026-09-17T12:22:42Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T12:22:42Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:42Z invocation inv_01m2qn3cp3evgdky3k600z6eev trace=inv_01m2qn3cp3evgdky3k600z6eev
+2026-09-17T12:22:42Z PASS  p1.publish_v2                                              revision=rev_01m2qn3cdm40mv0zzfzsqe2444 greeting=v2
+2026-09-17T12:22:42Z + tsls functions rollback hello
+2026-09-17T12:22:42Z alias       prod
+2026-09-17T12:22:42Z function    fn_01m2qn34jaxr9enzkqr0j30j0p
+2026-09-17T12:22:42Z from        rev_01m2qn3cdm40mv0zzfzsqe2444
+2026-09-17T12:22:42Z to          rev_01m2qn34x0md9g3xgkb2z1vne3
+2026-09-17T12:22:42Z generation  2 -> 3
+2026-09-17T12:22:42Z + tsls functions aliases hello
+2026-09-17T12:22:42Z ALIAS  REVISION                        GENERATION  PREVIOUS                        UPDATED
+2026-09-17T12:22:42Z prod   rev_01m2qn34x0md9g3xgkb2z1vne3  3           rev_01m2qn3cdm40mv0zzfzsqe2444  2026-09-17T12:22:42.395Z
+2026-09-17T12:22:42Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T12:22:42Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:42Z invocation inv_01m2qn3czkp2j75tz0sz9vspye trace=inv_01m2qn3czkp2j75tz0sz9vspye
+2026-09-17T12:22:42Z PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
+2026-09-17T12:22:42Z + tsls (tenant B) functions get fn_01m2qn34jaxr9enzkqr0j30j0p --json
+2026-09-17T12:22:42Z error: not_found (HTTP 404): not found: function not found [request=01m2qn3d9r320r1pexf6bsd9aa]
+2026-09-17T12:22:42Z PASS  p1.other_tenant_404                                        tenant B get fn_01m2qn34jaxr9enzkqr0j30j0p: exit=2 code=not_found
+2026-09-17T12:22:42Z + tsls (tenant B) functions invoke fn_01m2qn34jaxr9enzkqr0j30j0p --payload {} --json
+2026-09-17T12:22:42Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:42Z error: not_found (HTTP 404): not found: function not found [request=01m2qn3dcbhm8s3ejvbve57813]
+2026-09-17T12:22:42Z PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
+2026-09-17T12:22:43Z + tsls capacity --json
+2026-09-17T12:22:43Z PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+2026-09-17T12:22:43Z 
+2026-09-17T12:22:43Z == P2: burst -> scale to zero -> alias switch -> placement label -> metrics (provider process) ==
+2026-09-17T12:22:44Z + tsls functions deploy --function cpu-burn --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn --arch aarch64 --json --max-concurrency 3 --description lab burst
+2026-09-17T12:22:44Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-cpu-burn (3557120 bytes, arch aarch64)
+2026-09-17T12:22:44Z artifact sha256:c15e0e4cd503c77a580e5df6799aaf4f1c988ca265979cab68863c4c24949b38
+2026-09-17T12:22:45Z revision rev_01m2qn3fh0fvs18bpvzvagb7sb (#2) created: pending
+2026-09-17T12:22:45Z revision rev_01m2qn3fh0fvs18bpvzvagb7sb is preparing
+2026-09-17T12:22:45Z revision rev_01m2qn3fh0fvs18bpvzvagb7sb is ready
+2026-09-17T12:22:45Z PASS  p2.revision_max_concurrency                                revision=rev_01m2qn3fh0fvs18bpvzvagb7sb max_concurrency=3
+2026-09-17T12:22:45Z + 7 concurrent: tsls functions invoke cpu-burn --payload {"seconds":1} (revision max_concurrency 3)
+2026-09-17T12:22:50Z PASS  p2.burst_all_served                                        7/7 invocations exit 0 (the rest waited in the queue)
+2026-09-17T12:22:50Z PASS  p2.burst_bounded                                           max environments of the revision observed=3 (limit 3; samples in p2-capacity-samples.ndjson)
+2026-09-17T12:22:50Z + tsls capacity --json
+2026-09-17T12:22:50Z PASS  p2.scale_to_zero                                           environments of rev_01m2qn3fh0fvs18bpvzvagb7sb=0; zero environments is not zero host cost: the gateway, its store and the node keep running
+2026-09-17T12:22:50Z + tsls functions invoke cpu-burn --payload {"seconds":0} --json
+2026-09-17T12:22:51Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:51Z invocation inv_01m2qn3n5vkvep1f12qt2ay0m7 trace=inv_01m2qn3n5vkvep1f12qt2ay0m7
+2026-09-17T12:22:51Z PASS  p2.cold_reaccess                                           exit=0 (a new environment is started for the request)
+2026-09-17T12:22:51Z + tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --env GREETING=v3 --secret DEMO_SECRET=demo-secret --no-publish --description lab v3 (not published)
+2026-09-17T12:22:51Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+2026-09-17T12:22:52Z artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+2026-09-17T12:22:52Z revision rev_01m2qn3q0j1hwbtskxeybt8qsm (#3) created: pending
+2026-09-17T12:22:52Z revision rev_01m2qn3q0j1hwbtskxeybt8qsm is preparing
+2026-09-17T12:22:53Z revision rev_01m2qn3q0j1hwbtskxeybt8qsm is ready
+2026-09-17T12:22:53Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T12:22:53Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:53Z invocation inv_01m2qn3qk5px85hc1nn8170qgr trace=inv_01m2qn3qk5px85hc1nn8170qgr
+2026-09-17T12:22:53Z + tsls functions aliases hello --json
+2026-09-17T12:22:53Z + tsls functions alias-set hello --alias prod --revision-id rev_01m2qn3q0j1hwbtskxeybt8qsm --expected-generation 3
+2026-09-17T12:22:53Z alias       prod
+2026-09-17T12:22:53Z function    fn_01m2qn34jaxr9enzkqr0j30j0p
+2026-09-17T12:22:53Z revision    rev_01m2qn3q0j1hwbtskxeybt8qsm
+2026-09-17T12:22:53Z generation  4
+2026-09-17T12:22:53Z previous    rev_01m2qn34x0md9g3xgkb2z1vne3
+2026-09-17T12:22:53Z updated_at  2026-09-17T12:22:53.913Z
+2026-09-17T12:22:53Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T12:22:54Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:54Z invocation inv_01m2qn3r7w395k8yyagh1evr9g trace=inv_01m2qn3r7w395k8yyagh1evr9g
+2026-09-17T12:22:54Z PASS  p2.alias_switch                                            prod generation 3 -> v3: greeting before=v1 after=v3
+2026-09-17T12:22:54Z + tsls functions rollback hello
+2026-09-17T12:22:54Z alias       prod
+2026-09-17T12:22:54Z function    fn_01m2qn34jaxr9enzkqr0j30j0p
+2026-09-17T12:22:54Z from        rev_01m2qn3q0j1hwbtskxeybt8qsm
+2026-09-17T12:22:54Z to          rev_01m2qn34x0md9g3xgkb2z1vne3
+2026-09-17T12:22:54Z generation  4 -> 5
+2026-09-17T12:22:54Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T12:22:54Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:54Z invocation inv_01m2qn3rs94bcxrywfjwwkxnmq trace=inv_01m2qn3rs94bcxrywfjwwkxnmq
+2026-09-17T12:22:54Z PASS  p2.alias_rollback                                          greeting=v1 (back to v1)
+2026-09-17T12:22:55Z + tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --region jp --no-publish --description lab region jp
+2026-09-17T12:22:55Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+2026-09-17T12:22:55Z artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+2026-09-17T12:22:55Z revision rev_01m2qn3t0v5ade1pxc9bendxv1 (#4) created: pending
+2026-09-17T12:22:55Z revision rev_01m2qn3t0v5ade1pxc9bendxv1 is preparing
+2026-09-17T12:22:56Z revision rev_01m2qn3t0v5ade1pxc9bendxv1 is ready
+2026-09-17T12:22:56Z + tsls functions invoke hello --payload {"name":"jp"} --revision-id rev_01m2qn3t0v5ade1pxc9bendxv1 --json
+2026-09-17T12:22:56Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:56Z invocation inv_01m2qn3tj9z84ykm37jf5ww5sb trace=inv_01m2qn3tj9z84ykm37jf5ww5sb
+2026-09-17T12:22:56Z PASS  p2.placement_jp_label_admitted                             node label region=jp, revision requires jp: exit=0
+2026-09-17T12:22:56Z + tsls functions deploy --function hello --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello --arch aarch64 --json --region us --no-publish --description lab region us
+2026-09-17T12:22:56Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-hello (3545872 bytes, arch aarch64)
+2026-09-17T12:22:57Z artifact sha256:76d55ecc3009ba91c2459630a4473d3cd34b6973212e2fb8977789649982ae2b
+2026-09-17T12:22:57Z revision rev_01m2qn3vpr4dk5dp9tyffd5fjh (#5) created: pending
+2026-09-17T12:22:57Z revision rev_01m2qn3vpr4dk5dp9tyffd5fjh is preparing
+2026-09-17T12:22:58Z revision rev_01m2qn3vpr4dk5dp9tyffd5fjh is ready
+2026-09-17T12:22:58Z + tsls functions invoke hello --payload {"name":"us"} --revision-id rev_01m2qn3vpr4dk5dp9tyffd5fjh --json
+2026-09-17T12:22:58Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:22:58Z error: provider_unavailable (HTTP 503): placement: placement requires region `us` but node `lab-8c436263` is in region `jp`; the constraint is never relaxed [request=01m2qn3w7cjq03m1jnagwb48q5]
+2026-09-17T12:22:58Z PASS  p2.placement_us_refused                                    exit=6 reason=placement (never relaxed)
+2026-09-17T12:22:58Z NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
+2026-09-17T12:22:58Z + curl -X GET http://127.0.0.1:64897/metrics
+2026-09-17T12:22:58Z PASS  p2.metrics_snapshot                                        HTTP 200, 333 samples -> p2-metrics.prom
+2026-09-17T12:22:58Z tsls_node_in_flight 0
+2026-09-17T12:22:58Z tsls_environments{state="promised"} 0
+2026-09-17T12:22:58Z tsls_environments{state="starting"} 0
+2026-09-17T12:22:58Z tsls_environments{state="busy"} 0
+2026-09-17T12:22:58Z tsls_environments{state="parking"} 0
+2026-09-17T12:22:58Z tsls_environments{state="idle"} 0
+2026-09-17T12:22:58Z tsls_environments{state="draining"} 0
+2026-09-17T12:22:58Z tsls_admission_grants_total{kind="cold"} 18
+2026-09-17T12:22:58Z tsls_admission_grants_total{kind="warm"} 0
+2026-09-17T12:22:58Z tsls_environment_starts_total{result="success"} 18
+2026-09-17T12:22:58Z tsls_environment_starts_total{result="failure"} 0
+2026-09-17T12:22:58Z tsls_scale_events_total{kind="activation",reason="backlog"} 12
+2026-09-17T12:22:58Z tsls_scale_events_total{kind="scale_up",reason="backlog"} 6
+2026-09-17T12:22:58Z tsls_scale_events_total{kind="prestart",reason="none"} 0
+2026-09-17T12:22:58Z tsls_scale_events_total{kind="scale_down",reason="none"} 0
+2026-09-17T12:22:58Z tsls_scale_events_total{kind="scale_to_zero",reason="none"} 0
+2026-09-17T12:22:58Z tsls_scale_events_total{kind="drain",reason="alias_switch"} 4
+2026-09-17T12:22:58Z + curl -X GET http://127.0.0.1:64897/metrics
+2026-09-17T12:22:58Z PASS  p2.metrics_operator_only                                   tenant token -> HTTP 401
+2026-09-17T12:22:58Z 
+2026-09-17T12:22:58Z == P3: invokeAsync -> retries -> dead letter -> redrive -> cron -> webhook -> usage -> budget (provider process) ==
+2026-09-17T12:22:58Z + tsls functions create --name idempotent-async --description lab demo (lab-8c436263) --json
+2026-09-17T12:22:58Z + tsls functions deploy --function idempotent-async --binary /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-idempotent-async --arch aarch64 --json --env IDEMPOTENT_ASYNC_DIR=/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/effects --max-concurrency 4 --description lab async
+2026-09-17T12:22:58Z uploading /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/target/debug/example-idempotent-async (3650120 bytes, arch aarch64)
+2026-09-17T12:22:58Z artifact sha256:fdaa03959e9ed6672bc7c3ae1954bc4dcf57ac84c8fa3df29d2376e584d8068e
+2026-09-17T12:22:58Z revision rev_01m2qn3x5ma2m4hxpncwzw8qbc (#1) created: pending
+2026-09-17T12:22:58Z revision rev_01m2qn3x5ma2m4hxpncwzw8qbc is preparing
+2026-09-17T12:22:59Z revision rev_01m2qn3x5ma2m4hxpncwzw8qbc is ready
+2026-09-17T12:22:59Z + curl -X POST http://127.0.0.1:64897/v1/functions/fn_01m2qn3wdcgvntamx11ze44hmh:invokeAsync --data-binary @/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/p3-async.json
+2026-09-17T12:22:59Z PASS  p3.async_accepted_202                                      HTTP 202 invocation=inv_01m2qn3xpjs39v1dn4vzecxjz8 (committed before the 202)
+2026-09-17T12:23:00Z PASS  p3.async_succeeded                                         status=succeeded (published to NATS JetStream, run by the dispatcher)
+2026-09-17T12:23:00Z + curl -X POST http://127.0.0.1:64897/v1/functions/fn_01m2qn3wdcgvntamx11ze44hmh:invokeAsync --data-binary @/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/p3-async-large.json
+2026-09-17T12:23:01Z PASS  p3.async_large_input_object_store                          HTTP 202 status=succeeded objects under data/objects: 0 -> 2 (AES-256-GCM, lab key)
+2026-09-17T12:23:01Z PASS  p3.object_store_ciphertext                                 the 100 KiB plaintext pad is not readable in data/objects
+2026-09-17T12:23:01Z + curl -X POST http://127.0.0.1:64897/v1/functions/fn_01m2qn3wdcgvntamx11ze44hmh:invokeAsync --data-binary @/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/p3-async.json
+2026-09-17T12:23:03Z + curl -X GET http://127.0.0.1:64897/v1/invocations/inv_01m2qn3zjvee3e2yt8kg1hdnfw
+2026-09-17T12:23:03Z PASS  p3.retries_then_dead_letter                                status=failed attempts=3 (max_attempts 3) dead_letter=dlq_01m2qn41c0p378tdqhzmnwztg0
+2026-09-17T12:23:03Z + tsls dead-letters list idempotent-async --json
+2026-09-17T12:23:03Z PASS  p3.dead_letter_listed                                      reason=attempts_exhausted
+2026-09-17T12:23:03Z + tsls dead-letters redrive dlq_01m2qn41c0p378tdqhzmnwztg0 --reason lab demo without the role --json
+2026-09-17T12:23:03Z error: forbidden (HTTP 403): forbidden: role `redrive` is required [request=01m2qn41y8gycsw61jdz19tjs1]
+2026-09-17T12:23:03Z PASS  p3.redrive_needs_role                                      deploy+invoke token: exit=2 code=forbidden
+2026-09-17T12:23:03Z + tsls (tenant A on-call: invoke+redrive) dead-letters redrive dlq_01m2qn41c0p378tdqhzmnwztg0 --reason lab demo: downstream fixed --json
+2026-09-17T12:23:03Z PASS  p3.redrive_accepted                                        exit=0 new invocation=inv_01m2qn4200zf3vg8zeb7f3cfep requested_by=lab-a-oncall
+2026-09-17T12:23:04Z PASS  p3.redrive_succeeded                                       status=succeeded (4th execution passes fail_first=3; side effect applied once)
+2026-09-17T12:23:04Z + tsls triggers create hello --name lab-cron-122258e678 --kind cron --schedule */2 * * * * * --timezone Asia/Tokyo --payload {"name":"cron"} --missed-run skip --json
+2026-09-17T12:23:04Z PASS  p3.cron_created                                            trigger=trg_01m2qn42kz3a3cfey7rbeet8mg schedule='*/2 * * * * *' (6 fields: every 2 s)
+2026-09-17T12:23:11Z + tsls triggers update hello trg_01m2qn42kz3a3cfey7rbeet8mg --disable
+2026-09-17T12:23:11Z id                 trg_01m2qn42kz3a3cfey7rbeet8mg
+2026-09-17T12:23:11Z function_id        fn_01m2qn34jaxr9enzkqr0j30j0p
+2026-09-17T12:23:11Z name               lab-cron-122258e678
+2026-09-17T12:23:11Z kind               cron
+2026-09-17T12:23:11Z status             disabled
+2026-09-17T12:23:11Z status_reason      -
+2026-09-17T12:23:11Z generation         2
+2026-09-17T12:23:11Z alias              -
+2026-09-17T12:23:11Z revision_id        -
+2026-09-17T12:23:11Z expression         */2 * * * * *
+2026-09-17T12:23:11Z timezone           Asia/Tokyo
+2026-09-17T12:23:11Z missed_run_policy  {"kind":"skip"}
+2026-09-17T12:23:11Z next_fire_at       -
+2026-09-17T12:23:11Z last_scheduled_at  2026-09-17T12:23:10.000Z
+2026-09-17T12:23:11Z updated_at         2026-09-17T12:23:11.627Z
+2026-09-17T12:23:11Z + tsls triggers fires hello trg_01m2qn42kz3a3cfey7rbeet8mg --limit 20 --json
+2026-09-17T12:23:11Z PASS  p3.cron_fired                                              accepted fires in ~7 s: 3 (then disabled)
+2026-09-17T12:23:11Z PASS  p3.cron_fire_ran                                           first fire invocation=inv_01m2qn47xk1rc043dwv5gt91h6 status=succeeded
+2026-09-17T12:23:11Z + tsls triggers delete hello trg_01m2qn42kz3a3cfey7rbeet8mg
+2026-09-17T12:23:11Z deleted trg_01m2qn42kz3a3cfey7rbeet8mg
+2026-09-17T12:23:11Z + tsls triggers create hello --name lab-hook-122258e678 --kind webhook --max-body-bytes 4096 --json
+2026-09-17T12:23:11Z PASS  p3.webhook_created                                         trigger=trg_01m2qn49jagk4n7p3kpy8segcy secret shown once (kept in memory only, never written)
+2026-09-17T12:23:11Z + tsls triggers webhook-sign --secret-env LAB_WEBHOOK_SECRET --timestamp 1789647791 --body-file p3-webhook-body.json
+2026-09-17T12:23:11Z + curl -X POST http://127.0.0.1:64897/v1/hooks/trg_01m2qn49jagk4n7p3kpy8segcy (x-tachyon-webhook-timestamp, x-tachyon-webhook-signature, x-tachyon-webhook-id)
+2026-09-17T12:23:11Z PASS  p3.webhook_signed_202                                      HTTP 202
+2026-09-17T12:23:11Z PASS  p3.webhook_bad_signature_401                               HTTP 401 (no invocation)
+2026-09-17T12:23:12Z + tsls triggers fires hello trg_01m2qn49jagk4n7p3kpy8segcy --json
+2026-09-17T12:23:12Z PASS  p3.webhook_fire_ran                                        invocation=inv_01m2qn49k1mzw9qjsq5jsrfpya status=succeeded
+2026-09-17T12:23:12Z + tsls triggers delete hello trg_01m2qn49jagk4n7p3kpy8segcy
+2026-09-17T12:23:12Z deleted trg_01m2qn49jagk4n7p3kpy8segcy
+2026-09-17T12:23:14Z + tsls usage --group-by function --json
+2026-09-17T12:23:14Z PASS  p3.usage_report                                            lines=4 attempts=28 retries=2 provisional=true billing_enabled=false
+2026-09-17T12:23:14Z + tsls usage --group-by function
+2026-09-17T12:23:14Z PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+2026-09-17T12:23:14Z tenant              tn_01hzzzzzzzzzzzzzzzzzzzzzza
+2026-09-17T12:23:14Z range               2026-09-01T00:00:00+00:00 .. 2026-09-17T12:23:14.842943+00:00
+2026-09-17T12:23:14Z price table         provisional-dev-2026-09-v1 (effective 2026-09-01T00:00:00+00:00, JPY; billable: user_init_ms, handler_ms)
+2026-09-17T12:23:14Z collected through   2026-09-17T12:23:14.612125+00:00
+2026-09-17T12:23:14Z unjournaled events  0
+2026-09-17T12:23:14Z FUNCTION                       DAY  INVOCATIONS  ATTEMPTS  RETRIES  TIMEOUTS  HANDLER MS  BILLABLE MS  UNMETERED  CHARGE (PROVISIONAL)
+2026-09-17T12:23:14Z fn_01m2qn34jaxr9enzkqr0j30j0p  -    12           12        0        0         20          579          0          0.001169 JPY
+2026-09-17T12:23:14Z fn_01m2qn36jdtnd7b9cgaxbr3c9c  -    1            1         0        0         3           437          0          0.000624 JPY
+2026-09-17T12:23:14Z fn_01m2qn37y6m1q7qpkqafymykdf  -    9            9         0        1         9054        9661         0          0.013322 JPY
+2026-09-17T12:23:14Z fn_01m2qn3wdcgvntamx11ze44hmh  -    4            6         2        0         30          641          0          0.002528 JPY
+2026-09-17T12:23:14Z TOTAL                          -    26           28        2        1         9107        11318        0          0.017643 JPY
+2026-09-17T12:23:14Z + wrote /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/budgets.toml (cpu-burn hard_limit_micros = 1)
+2026-09-17T12:23:14Z + tsls functions invoke cpu-burn --payload {"seconds":0} --json
+2026-09-17T12:23:14Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:23:14Z error: budget_exhausted (HTTP 429): budget: the function budget's hard limit (1 micro-units) does not admit this invocation's maximum charge of 183840 (13323 already committed in 2026-09) [type=Host.BudgetExhausted] [request=01m2qn4cnfejd0mbbjj5sgf3hq]
+2026-09-17T12:23:14Z PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
+2026-09-17T12:23:14Z + tsls budget --json
+2026-09-17T12:23:14Z + tsls budget
+2026-09-17T12:23:14Z PROVISIONAL - provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype
+2026-09-17T12:23:14Z tenant         tn_01hzzzzzzzzzzzzzzzzzzzzzza
+2026-09-17T12:23:14Z enforced       true
+2026-09-17T12:23:14Z period         2026-09 (2026-09-01T00:00:00+00:00 .. 2026-10-01T00:00:00+00:00, calendar_month_utc)
+2026-09-17T12:23:14Z price table    provisional-dev-2026-09-v1 (JPY)
+2026-09-17T12:23:14Z configuration  valid (generation 36)
+2026-09-17T12:23:14Z admitting      true
+2026-09-17T12:23:14Z SCOPE                          HARD LIMIT      RESERVED  SETTLED   UNMETERED HOLD  REMAINING      ACTIVE  REFUSALS  ALERTS
+2026-09-17T12:23:14Z tenant                         1000000.000000  0.000000  0.017647  0.000000        999999.982353  0       1         -
+2026-09-17T12:23:14Z fn_01m2qn34jaxr9enzkqr0j30j0p  -               0.000000  0.001168  0.000000        -              0       0         -
+2026-09-17T12:23:14Z fn_01m2qn36jdtnd7b9cgaxbr3c9c  -               0.000000  0.000624  0.000000        -              0       0         -
+2026-09-17T12:23:14Z fn_01m2qn37y6m1q7qpkqafymykdf  0.000001        0.000000  0.013323  0.000000        0.000000       0       1         -
+2026-09-17T12:23:14Z fn_01m2qn3wdcgvntamx11ze44hmh  -               0.000000  0.002532  0.000000        -              0       0         -
+2026-09-17T12:23:14Z + tsls functions invoke hello --payload {"name":"other"} --json
+2026-09-17T12:23:15Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:23:15Z invocation inv_01m2qn4cpf24yakqfx9b2d7c4r trace=inv_01m2qn4cpf24yakqfx9b2d7c4r
+2026-09-17T12:23:15Z PASS  p3.budget_is_per_function                                  hello still admitted: exit=0
+2026-09-17T12:23:15Z + restored /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/budgets.toml (default only)
+2026-09-17T12:23:15Z + tsls functions invoke cpu-burn --payload {"seconds":0} --json
+2026-09-17T12:23:15Z !! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+2026-09-17T12:23:15Z invocation inv_01m2qn4cvn6afggq9kxjb9bkyy trace=inv_01m2qn4cvn6afggq9kxjb9bkyy
+2026-09-17T12:23:15Z PASS  p3.budget_released                                         exit=0 after the limit was removed
+2026-09-17T12:23:15Z NOTE  budgets and usage are provisional (dev price table); billing is disabled and nothing is charged. Local only: no cloud spend.
+2026-09-17T12:23:15Z 
+2026-09-17T12:23:15Z == secret values absent from logs, demo outputs and the ledger ==
+2026-09-17T12:23:15Z PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+2026-09-17T12:23:15Z 
+2026-09-17T12:23:15Z results (/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/demo/20260917T122233Z-all/results.txt):
+2026-09-17T12:23:15Z NOTE  process provider: functions run as host child processes. NOT a microVM, NO isolation.
+2026-09-17T12:23:15Z PASS  p1.provider_kind                                           kind=process isolation=process dev_only=true
+2026-09-17T12:23:15Z PASS  p1.function_registered                                     hello=fn_01m2qn34jaxr9enzkqr0j30j0p
+2026-09-17T12:23:15Z PASS  p1.publish_v1                                              revision=rev_01m2qn34x0md9g3xgkb2z1vne3 (prod -> v1)
+2026-09-17T12:23:15Z PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+2026-09-17T12:23:15Z PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
+2026-09-17T12:23:15Z PASS  p1.logs                                                    invocation=inv_01m2qn355ek0fa5txsvj5qmx3p lines=7
+2026-09-17T12:23:15Z PASS  p1.boot_evidence                                           host_pid=35146 guest_boot_id=null handler_ms=1
+2026-09-17T12:23:15Z PASS  p1.user_error                                              exit=3 code=user_error
+2026-09-17T12:23:15Z PASS  p1.http_adapter                                            status=200 body=ok
+2026-09-17T12:23:15Z PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
+2026-09-17T12:23:15Z PASS  p1.publish_v2                                              revision=rev_01m2qn3cdm40mv0zzfzsqe2444 greeting=v2
+2026-09-17T12:23:15Z PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
+2026-09-17T12:23:15Z PASS  p1.other_tenant_404                                        tenant B get fn_01m2qn34jaxr9enzkqr0j30j0p: exit=2 code=not_found
+2026-09-17T12:23:15Z PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
+2026-09-17T12:23:15Z PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+2026-09-17T12:23:15Z PASS  p2.revision_max_concurrency                                revision=rev_01m2qn3fh0fvs18bpvzvagb7sb max_concurrency=3
+2026-09-17T12:23:15Z PASS  p2.burst_all_served                                        7/7 invocations exit 0 (the rest waited in the queue)
+2026-09-17T12:23:15Z PASS  p2.burst_bounded                                           max environments of the revision observed=3 (limit 3; samples in p2-capacity-samples.ndjson)
+2026-09-17T12:23:15Z PASS  p2.scale_to_zero                                           environments of rev_01m2qn3fh0fvs18bpvzvagb7sb=0; zero environments is not zero host cost: the gateway, its store and the node keep running
+2026-09-17T12:23:15Z PASS  p2.cold_reaccess                                           exit=0 (a new environment is started for the request)
+2026-09-17T12:23:15Z PASS  p2.alias_switch                                            prod generation 3 -> v3: greeting before=v1 after=v3
+2026-09-17T12:23:15Z PASS  p2.alias_rollback                                          greeting=v1 (back to v1)
+2026-09-17T12:23:15Z PASS  p2.placement_jp_label_admitted                             node label region=jp, revision requires jp: exit=0
+2026-09-17T12:23:15Z PASS  p2.placement_us_refused                                    exit=6 reason=placement (never relaxed)
+2026-09-17T12:23:15Z NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
+2026-09-17T12:23:15Z PASS  p2.metrics_snapshot                                        HTTP 200, 333 samples -> p2-metrics.prom
+2026-09-17T12:23:15Z PASS  p2.metrics_operator_only                                   tenant token -> HTTP 401
+2026-09-17T12:23:15Z PASS  p3.async_accepted_202                                      HTTP 202 invocation=inv_01m2qn3xpjs39v1dn4vzecxjz8 (committed before the 202)
+2026-09-17T12:23:15Z PASS  p3.async_succeeded                                         status=succeeded (published to NATS JetStream, run by the dispatcher)
+2026-09-17T12:23:15Z PASS  p3.async_large_input_object_store                          HTTP 202 status=succeeded objects under data/objects: 0 -> 2 (AES-256-GCM, lab key)
+2026-09-17T12:23:15Z PASS  p3.object_store_ciphertext                                 the 100 KiB plaintext pad is not readable in data/objects
+2026-09-17T12:23:15Z PASS  p3.retries_then_dead_letter                                status=failed attempts=3 (max_attempts 3) dead_letter=dlq_01m2qn41c0p378tdqhzmnwztg0
+2026-09-17T12:23:15Z PASS  p3.dead_letter_listed                                      reason=attempts_exhausted
+2026-09-17T12:23:15Z PASS  p3.redrive_needs_role                                      deploy+invoke token: exit=2 code=forbidden
+2026-09-17T12:23:15Z PASS  p3.redrive_accepted                                        exit=0 new invocation=inv_01m2qn4200zf3vg8zeb7f3cfep requested_by=lab-a-oncall
+2026-09-17T12:23:15Z PASS  p3.redrive_succeeded                                       status=succeeded (4th execution passes fail_first=3; side effect applied once)
+2026-09-17T12:23:15Z PASS  p3.cron_created                                            trigger=trg_01m2qn42kz3a3cfey7rbeet8mg schedule='*/2 * * * * *' (6 fields: every 2 s)
+2026-09-17T12:23:15Z PASS  p3.cron_fired                                              accepted fires in ~7 s: 3 (then disabled)
+2026-09-17T12:23:15Z PASS  p3.cron_fire_ran                                           first fire invocation=inv_01m2qn47xk1rc043dwv5gt91h6 status=succeeded
+2026-09-17T12:23:15Z PASS  p3.webhook_created                                         trigger=trg_01m2qn49jagk4n7p3kpy8segcy secret shown once (kept in memory only, never written)
+2026-09-17T12:23:15Z PASS  p3.webhook_signed_202                                      HTTP 202
+2026-09-17T12:23:15Z PASS  p3.webhook_bad_signature_401                               HTTP 401 (no invocation)
+2026-09-17T12:23:15Z PASS  p3.webhook_fire_ran                                        invocation=inv_01m2qn49k1mzw9qjsq5jsrfpya status=succeeded
+2026-09-17T12:23:15Z PASS  p3.usage_report                                            lines=4 attempts=28 retries=2 provisional=true billing_enabled=false
+2026-09-17T12:23:15Z PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
+2026-09-17T12:23:15Z PASS  p3.budget_is_per_function                                  hello still admitted: exit=0
+2026-09-17T12:23:15Z PASS  p3.budget_released                                         exit=0 after the limit was removed
+2026-09-17T12:23:15Z NOTE  budgets and usage are provisional (dev price table); billing is disabled and nothing is charged. Local only: no cloud spend.
+2026-09-17T12:23:15Z PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+2026-09-17T12:23:15Z 
+2026-09-17T12:23:15Z 47 checks passed, 0 failed
+# finished: 2026-09-17T12:23:15Z exit=0

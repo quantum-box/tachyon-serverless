@@ -59,6 +59,7 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 | [evidence/20260915T171415Z-process/](evidence/20260915T171415Z-process/) | E2E デモ、process provider、レビュー指摘修正の統合後（secret 値の検査ステップを含む） | 28/28 PASS |
 | [evidence/20260915T171631Z-firecracker/](evidence/20260915T171631Z-firecracker/) | E2E デモ、Firecracker provider、レビュー指摘修正の統合後 | 28/28 PASS |
 | [evidence/20260917T045324Z-process/](evidence/20260917T045324Z-process/) | E2E デモ、process provider、PLT-4636（invoke が設定 cache を読む）の後 | 28/28 PASS |
+| [evidence/lab-20260917T1219Z-process-clean-clone/](evidence/lab-20260917T1219Z-process-clean-clone/) | `scripts/lab/lab.sh` を GitHub から fresh clone した directory で runbook どおりに実行（**自動化 agent による追試、別の人間ではない**）。process provider、macOS arm64。command log、§6 の復旧 drill、teardown の孤児検査（PLT-4648） | demo 47/47、drill 5/5、orphan check clean |
 | [evidence/20260917T045347Z-split-process/](evidence/20260917T045347Z-split-process/) | `scripts/control-plane/outage-e2e.sh`: 管理 gateway と data plane gateway の 2 プロセス、管理停止中の継続・TTL / auth lease での拒否・再起動後の収束と revoke（PLT-4636） | 19/19 PASS |
 
 記録の時間は nested virtualization 上の参考値で、SLA ではない。process provider の記録は microVM の証跡として使わない。

@@ -1,0 +1,9 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh up
+# started:  2026-09-17T12:24:27Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:24:27Z [lab] ERROR: lab not bootstrapped (run: scripts/lab/lab.sh bootstrap)
+# finished: 2026-09-17T12:24:27Z exit=1

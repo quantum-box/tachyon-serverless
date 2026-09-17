@@ -1,0 +1,37 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh preflight
+# started:  2026-09-17T12:23:41Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:23:41Z lab preflight: provider=process lab_dir=/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab lab_id=lab-8c436263
+2026-09-17T12:23:41Z 
+2026-09-17T12:23:41Z WARN  os                         macOS: process provider only (dev mode, NOT a microVM, no isolation)
+2026-09-17T12:23:41Z ok    arch                       aarch64
+2026-09-17T12:23:41Z ok    disk_lab                   311877 MiB free for /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab (need 2048)
+2026-09-17T12:23:41Z ok    disk_build                 311877 MiB free for target/ (cargo build needs ~8 GiB)
+2026-09-17T12:23:41Z ok    memory                     24576 MiB
+2026-09-17T12:23:41Z ok    tool:bash                  /bin/bash (GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25))
+2026-09-17T12:23:41Z ok    tool:curl                  /usr/bin/curl (curl 8.7.1 (x86_64-apple-darwin25.0) libcurl/8.7.1 (SecureTransport) LibreSSL/3.3.6 zlib/1.2.12 nghttp2/1.68.1)
+2026-09-17T12:23:41Z ok    tool:jq                    /usr/bin/jq (jq-1.7.1-apple)
+2026-09-17T12:23:41Z ok    tool:python3               /usr/bin/python3 (Python 3.9.6)
+2026-09-17T12:23:41Z ok    tool:openssl               /usr/bin/openssl (LibreSSL 3.3.6)
+2026-09-17T12:23:41Z ok    tool:tar                   /usr/bin/tar (bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8 )
+2026-09-17T12:23:41Z ok    tool:git                   /usr/bin/git (git version 2.54.0 (Apple Git-157))
+2026-09-17T12:23:41Z ok    tool:cargo                 /Users/takanorifukuyama/.cargo/bin/cargo (cargo 1.95.0 (f2d3ce0bd 2026-03-21))
+2026-09-17T12:23:41Z ok    tool:cc                    /usr/bin/cc (Apple clang version 21.0.0 (clang-2100.3.34.2))
+2026-09-17T12:23:41Z ok    tool:perl                  /usr/bin/perl (perl 5.034001)
+2026-09-17T12:23:41Z ok    tool:mise                  /Users/takanorifukuyama/.local/bin/mise (2026.9.5 macos-arm64 (2026-09-10))
+2026-09-17T12:23:41Z ok    tool:sha256                /sbin/sha256sum
+2026-09-17T12:23:41Z ok    pin:rust                   rust-toolchain.toml 1.95.0 = versions.lock
+2026-09-17T12:23:41Z ok    rustc                      1.95.0 (from the repository toolchain file)
+2026-09-17T12:23:41Z ok    pin:nats                   versions.lock = deploy/nats/versions.env (v2.14.7)
+2026-09-17T12:23:41Z ok    privileges                 no root needed (process provider / unprivileged firecracker)
+2026-09-17T12:23:41Z FAIL  port:GATEWAY_PORT          127.0.0.1:64897 is used by another process (lab.sh teardown, or edit GATEWAY_PORT in /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/manifest.env)
+2026-09-17T12:23:41Z ok    port:NATS_PORT             127.0.0.1:64898 free
+2026-09-17T12:23:41Z ok    port:NATS_HTTP_PORT        127.0.0.1:64899 free
+2026-09-17T12:23:41Z ok    network                    pinned downloads already cached in /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/cache
+2026-09-17T12:23:41Z 
+2026-09-17T12:23:41Z NOT READY: fix the FAIL rows (docs/runbook.md §6)
+# finished: 2026-09-17T12:23:41Z exit=1

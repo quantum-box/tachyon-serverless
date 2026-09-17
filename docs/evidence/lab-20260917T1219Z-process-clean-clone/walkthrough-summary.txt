@@ -1,0 +1,15 @@
+clone HEAD: c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+host: Darwin 25.6.0 arm64
+4.1 preflight                                exit=0      2s  scripts/lab/lab.sh preflight
+4.1 bootstrap                                exit=0     96s  scripts/lab/lab.sh bootstrap
+4.1 up                                       exit=0      5s  scripts/lab/lab.sh up
+4.1 demo all                                 exit=0     43s  scripts/lab/lab.sh demo all
+4.1 status                                   exit=0      0s  scripts/lab/lab.sh status
+4.1 CLI snippet                              exit=0      0s  bash /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/cli-snippet.sh
+4.4 logs commands                            exit=0      0s  scripts/lab/lab.sh logs commands
+4.4 demo p1 (re-run)                         exit=0      9s  scripts/lab/lab.sh demo p1
+6 recovery drills                            exit=0     61s  bash /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/drills.sh
+7.1 teardown --dry-run                       exit=1      1s  scripts/lab/lab.sh teardown --dry-run
+7.1 teardown                                 exit=0      1s  scripts/lab/lab.sh teardown
+7.1 up after teardown (expect refusal: not bootstrapped) exit=1      0s  scripts/lab/lab.sh up
+done

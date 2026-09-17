@@ -1035,9 +1035,17 @@ cmd_teardown() {
     [ "$keep_cache" = true ] || manifest_set BOOTSTRAPPED_AT ""
   fi
 
+  local orc=0
+  if [ "$DRY_RUN" = true ]; then
+    # Before a teardown the lab's own processes and files are expected, not orphans: show them,
+    # but do not fail the dry run.
+    echo "4. current state (dry-run: LEFTOVER lines below are what teardown would handle now)"
+    orphan_check "$envs" "$keep_cache" || true
+    echo "dry-run: nothing was changed"
+    return 0
+  fi
   echo "4. orphan check"
-  orphan_check "$envs" "$keep_cache"
-  local orc=$?
+  orphan_check "$envs" "$keep_cache" || orc=$?
   if [ "$purge" = true ] && [ "$DRY_RUN" = false ]; then
     if [ "$orc" = 0 ]; then
       echo "5. --purge: removing $LAB_DIR (manifest and command logs included)"

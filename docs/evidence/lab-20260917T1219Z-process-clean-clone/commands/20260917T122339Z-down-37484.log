@@ -1,0 +1,11 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh down
+# started:  2026-09-17T12:23:39Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:23:39Z [lab] stopping gateway pid 36939 (SIGTERM: in-flight invocations are cancelled and environments destroyed)
+2026-09-17T12:23:40Z [queue] nats-server (pid 34731) stopped with SIGTERM
+2026-09-17T12:23:40Z [lab] down: processes stopped; data kept in /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab (up again, or teardown)
+# finished: 2026-09-17T12:23:40Z exit=0
