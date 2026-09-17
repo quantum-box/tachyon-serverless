@@ -1,0 +1,128 @@
+[
+  {
+    "scenario": "cold-1",
+    "result": "PASS",
+    "metric_ms": 3092,
+    "detail": "InstanceStart request -> Ready (cold boot incl. bootstrap)"
+  },
+  {
+    "scenario": "cold-2",
+    "result": "PASS",
+    "metric_ms": 2713,
+    "detail": "InstanceStart request -> Ready (cold boot incl. bootstrap)"
+  },
+  {
+    "scenario": "cold-3",
+    "result": "PASS",
+    "metric_ms": 2858,
+    "detail": "InstanceStart request -> Ready (cold boot incl. bootstrap)"
+  },
+  {
+    "scenario": "source-boot-to-checkpoint",
+    "result": "INFO",
+    "metric_ms": 2759,
+    "detail": "InstanceStart request -> x1_waiting"
+  },
+  {
+    "scenario": "snapshot-create",
+    "result": "PASS",
+    "metric_ms": 296,
+    "detail": "PUT /snapshot/create Full (paused, 256 MiB)"
+  },
+  {
+    "scenario": "snapshot-disk-copy",
+    "result": "INFO",
+    "metric_ms": 2,
+    "detail": "scratch drive copied while paused (64 MiB sparse)"
+  },
+  {
+    "scenario": "source-resume-vsock-reset",
+    "result": "FAIL",
+    "metric_ms": null,
+    "detail": "no x1_reconnect from the resumed source"
+  },
+  {
+    "scenario": "clone-a-load-call",
+    "result": "INFO",
+    "metric_ms": 16,
+    "detail": "PUT /snapshot/load HTTP 204"
+  },
+  {
+    "scenario": "clone-b-load-call",
+    "result": "INFO",
+    "metric_ms": 17,
+    "detail": "PUT /snapshot/load HTTP 204"
+  },
+  {
+    "scenario": "clone-a",
+    "result": "PASS",
+    "metric_ms": 4084,
+    "detail": "load request -> Ready; boot_id same as source; restored=true; own scratch marker"
+  },
+  {
+    "scenario": "clone-b",
+    "result": "PASS",
+    "metric_ms": 4061,
+    "detail": "load request -> Ready; boot_id same as source; restored=true; own scratch marker"
+  },
+  {
+    "scenario": "clones-disk-isolation",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "each clone wrote only its own scratch copy; snapshot files unchanged"
+  },
+  {
+    "scenario": "restore-1-load-call",
+    "result": "INFO",
+    "metric_ms": 19,
+    "detail": "PUT /snapshot/load HTTP 204"
+  },
+  {
+    "scenario": "restore-1",
+    "result": "PASS",
+    "metric_ms": 4256,
+    "detail": "load request -> Ready; boot_id same as source; restored=true; own scratch marker"
+  },
+  {
+    "scenario": "restore-2-load-call",
+    "result": "INFO",
+    "metric_ms": 27,
+    "detail": "PUT /snapshot/load HTTP 204"
+  },
+  {
+    "scenario": "restore-2",
+    "result": "PASS",
+    "metric_ms": 4013,
+    "detail": "load request -> Ready; boot_id same as source; restored=true; own scratch marker"
+  },
+  {
+    "scenario": "restore-3-load-call",
+    "result": "INFO",
+    "metric_ms": 10,
+    "detail": "PUT /snapshot/load HTTP 204 (vsock_override)"
+  },
+  {
+    "scenario": "restore-3",
+    "result": "PASS",
+    "metric_ms": 4050,
+    "detail": "load request -> Ready; boot_id same as source; restored=true; own scratch marker"
+  },
+  {
+    "scenario": "neg-missing-drive",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "HTTP 400: {\"fault_message\":\"Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: Failed to restore devices: Error restoring MMIO devices: Block: Virtio backend error: Error manipulating the backing file: No such file or directory (os error 2) scratch.ext4\"}"
+  },
+  {
+    "scenario": "bridge-snapshot-create",
+    "result": "INFO",
+    "metric_ms": 336,
+    "detail": "product bridge after Ready: HTTP 204"
+  },
+  {
+    "scenario": "bridge-restore",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "load HTTP 204; host connections after restore: 0; firecracker exited after 4989 ms (rc 0); console: \u001b[2m2026-09-17T08:11:20.311310Z\u001b[0m \u001b[31mERROR\u001b[0m host connection lost; killing user process \u001b[3mreason\u001b[0m\u001b[2m=\u001b[0mframe writer stopped"
+  }
+]

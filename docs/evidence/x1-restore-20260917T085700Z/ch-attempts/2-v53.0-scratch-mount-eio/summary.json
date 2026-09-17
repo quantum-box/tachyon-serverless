@@ -1,0 +1,14 @@
+[
+  {
+    "scenario": "cold-1",
+    "result": "FAIL",
+    "metric_ms": null,
+    "detail": "no Ready within 60 s (cloud-hypervisor exited; host code 1); console: cloud-hypervisor:   0.271964s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = deleted  cloud-hypervisor:   0.271977s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vmm event = shutdown  cloud-hypervisor:   0.272298s: <main> INFO:cloud-hypervisor/src/main.rs:962 -- Cloud Hypervisor exited successfully "
+  },
+  {
+    "scenario": "snapshot",
+    "result": "UNSUPPORTED",
+    "metric_ms": null,
+    "detail": "not attempted: the guest does not boot on this host with v53.0"
+  }
+]

@@ -1,0 +1,8 @@
+total 262200
+262144 -rw-rw-r-- 1 takanorifukuyama takanorifukuyama 268435456 Sep 17 17:10 mem
+    48 -rw-rw-r-- 1 takanorifukuyama takanorifukuyama  67108864 Sep 17 17:10 scratch.ext4
+     8 -rw-rw-r-- 1 takanorifukuyama takanorifukuyama      6602 Sep 17 17:10 vmstate
+c5aacdae5bddc4eedfd6b9ef89dd85ae0f4a76cd471f4c9922f23d01c786870d  /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/snap/vmstate
+8fc59284f05379e4610c33b8107f3bb75a98e0e7cc1cf53247b325c3cb569438  /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/snap/mem
+fe430f9dceb3cdce62e903861f2fcc6e670ecce0602c80a39b889713892de123  /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/snap/scratch.ext4
+262144	/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/snap/mem

@@ -1,0 +1,77 @@
+X1 (PLT-4652) Kata Containers source research - read-only, nothing installed or run.
+Collected 2026-09-17 with `gh api` / raw.githubusercontent.com.
+
+Pinned: kata-containers/kata-containers tag 3.32.0 (commit 337b6002681479fb6a605ca8a7a1138e81b6098c,
+released 2026-06-22, newest 3.x). 4.2.0 (c7351e797efff8bfc6bd73da0eb1909be12e2cfe, 2026-09-15) is the
+"Latest" release; key facts were compared with main (68b56713d9fa), not with 4.2.0 itself.
+Prefix kc@3.32.0: = https://github.com/kata-containers/kata-containers/blob/3.32.0/
+
+VMM versions pinned by Kata
+  kc@3.32.0:versions.yaml#L73-L86   cloud_hypervisor version "v51.1", firecracker version "v1.12.1"
+  kc@3.32.0:versions.yaml#L91       qemu v11.0.1 (main pins the same CH / FC)
+
+1. VM templating (factory)
+  docs/how-to/what-is-vm-templating-and-how-do-I-use-it.md#L5-L9
+      "new VMs are created by cloning from a pre-created template VM, and they will share the same
+       initramfs, kernel and agent memory in readonly mode"
+  same file #L36-L43   cross-VM side channel (CVE-2015-2877): "do not use VM templating or KSM"
+  same file #L50-L54   qemu >= v4.1.0, enable_template = true, initrd =, shared_fs not virtio-fs
+  src/runtime/pkg/katautils/config.go#L78-L81   template_path, vm_cache_endpoint, vm_cache_number, enable_template
+  src/runtime/pkg/katautils/config.go#L2088-L2091   "VM cache just support qemu"
+  src/runtime/config/configuration-qemu.toml.in#L508-L513   template_path = "/run/vc/vm/template"
+  Cloud Hypervisor template support: commit c0f9744225 "runtime: Implement support for VM Template
+      factory in clh" (2026-06-19, first in 3.32.0)
+  src/runtime/virtcontainers/clh.go#L118-L123   VmSnapshotPut / VmRestorePut used
+  src/runtime/virtcontainers/clh.go#L1518-L1536 SaveVM -> VmSnapshotPut file://<template dir>
+  src/runtime/virtcontainers/clh.go#L606-L631   template memory zone shared=true, restored VMs shared=false (CoW)
+  src/runtime/virtcontainers/clh.go#L591-L596   "VM templating has been enabled with virtio-fs and this configuration will not work"
+  src/runtime/virtcontainers/clh.go#L613-L623   no memory hotplug for template VMs
+  tests/integration/kubernetes/k8s-vm-templating.bats#L14-L19,L34   non-confidential clh/qemu only,
+      block-device snapshotter (blockfile / erofs); "QEMU VM templating requires an initrd, CLH does not."
+  configuration-clh.toml.in has no [factory] section (3.32.0 and main); enabled via drop-in (bats #L49-L50)
+  Firecracker: configuration-fc.toml.in#L221-L233 exposes enable_template = false, but
+      src/runtime/virtcontainers/fc.go#L946-L956 PauseVM / SaveVM / ResumeVM return nil (no-op)
+  runtime-rs: src/runtime-rs/crates/runtimes/virt_container/src/factory/vm.rs#L193-L200 QEMU only
+      ("Unsupported hypervisor"); docs/how-to/how-to-use-template-in-runtime-rs.md#L47-L51 blockfile snapshotter;
+      hypervisor/src/ch/inner_hypervisor.rs#L695-L697 save_vm Ok(()), firecracker/inner_hypervisor.rs#L133-L135 "Not implemented"
+  What a template holds: src/runtime/virtcontainers/factory/template/template_linux.go#L131-L166
+      NewVM -> Disconnect -> sleep for agent grpc cleanup -> Pause -> Save; memory file under template_path (#L100-L122)
+  Clone identity: src/runtime/virtcontainers/factory/factory_linux.go#L142-L154 Resume -> reseed RNG -> SyncTime;
+      sandbox.go#L1582-L1592 factory.GetVM -> vm.assignSandbox; vm.go#L330-L368 symlink /run/vc/vm/<sbid> and reuseAgent
+
+2. Checkpoint / restore of a running sandbox
+  src/runtime/pkg/containerd-shim-v2/service.go#L921-L934
+      return nil, errdefs.ToGRPCf(errdefs.ErrNotImplemented, "service Checkpoint")   (main: #L953)
+  src/runtime-rs/crates/service/src/task_service.rs#L66-L83  no checkpoint handler -> ttrpc default
+      (ttrpc-compiler 0.8.0 codegen.rs#L381: Code::NOT_FOUND "... is not supported"; checked in the generator)
+  docs/Limitations.md#L78-L88  "The runtime does not provide `checkpoint` and `restore` commands."
+  No CRIU use (only empty CriuPath samples in docs/how-to/containerd-kata.md#L186-L187)
+  clh.go#L2051-L2055 restoreVM "restores a VM from a template snapshot" (template path only)
+  runtime-rs ch/inner.rs#L169-L182 restore() rebuilds driver struct from persisted fields, not VM memory
+  fc.go: no snapshot API use
+  Persist is metadata: fc.go#L1301-L1309 (Pid, Type), clh.go#L1638-L1650 (PID, VirtiofsDaemonPid, APISocket),
+      persist/fs/fs.go#L24,L39,L67 -> /run/vc/sbs/<id>/persist.json
+
+3. Sandbox state a clone would have to reconcile
+  shim: service.go#L124-L152 (sandbox, containers, id, namespace, hpid)
+  persisted: persist/api/sandbox.go#L24-L57 (CgroupPaths, Devices, SandboxCgroupPath, OverheadCgroupPath,
+      HypervisorState, AgentState URL, Network, Config); network.go#L103-L107 NetworkInfo
+  network: src/runtime/Makefile#L554,L610 DEFNETWORKMODEL_CLH := tcfilter; network_linux.go#L1084-L1099 tap in pod
+      netns mirrored to the CNI interface; #L198 guest MAC from the CNI interface; #L1359 doNetNS
+  vsock: clh.go#L88-L89,L1784-L1793 hybrid vsock clh.sock + clh-api.sock under VMStorePath/<id>;
+      #L1687 fixed CID; fc.go#L76,L247-L249 kata.hvsock under the jailer root;
+      utils/utils_linux.go#L58-L70 FindContextID only for vhost-vsock (QEMU, hypervisor_linux.go#L16)
+  shared fs: kata_agent.go#L106,L216-L218 /run/kata-containers/shared/sandboxes/$sbx_id/{mounts,shared,private};
+      clh.go#L369-L397 one virtiofsd per sandbox; FC needs devmapper block devices
+      (docs/how-to/how-to-use-kata-containers-with-firecracker.md#L45)
+  cgroups: configuration-clh.toml.in#L430 sandbox_cgroup_only; sandbox.go#L80-L82 /kata_overhead/, #L1023
+  agent: src/agent/src/sandbox.rs#L115-L138 id, hostname, containers, network, mounts, shared_utsns/ipcns,
+      sandbox_pidns, storages, pcimap, devcg_info
+  pod identity: factory_linux.go#L83-L84 SandboxName / SandboxNamespace; OCI annotations in persisted Config
+      (Pod UID handling not traced further)
+
+4. Out-of-band VMM API use: no documented or supported path (docs/ has no clh-api.sock / ch-remote /
+   vm.snapshot usage). Kata persists HypervisorState.APISocket and uses it for its own hotplug / pause /
+   shutdown; clh.go#L1939 isClhRunning checks the recorded PID.
+
+Not verified: any runtime behaviour on a real host; how FC fails with enable_template = true; 4.2.0 vs main.

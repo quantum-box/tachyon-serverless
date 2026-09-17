@@ -1,0 +1,14 @@
+08:10:11.663804233 PUT /machine-config -> 204 (5 ms)
+  request: {"vcpu_count":1,"mem_size_mib":256}
+08:10:11.672911086 PUT /boot-source -> 204 (6 ms)
+  request: {"kernel_image_path":"/home/takanorifukuyama.guest/tsls/.kvm/vmlinux","boot_args":"console=ttyS0 reboot=k panic=1 pci=off keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc"}
+08:10:11.683264839 PUT /drives/rootfs -> 204 (5 ms)
+  request: {"drive_id":"rootfs","path_on_host":"rootfs.ext4","is_root_device":true,"is_read_only":true}
+08:10:11.692353650 PUT /drives/function -> 204 (5 ms)
+  request: {"drive_id":"function","path_on_host":"function.ext4","is_root_device":false,"is_read_only":true}
+08:10:11.700984114 PUT /drives/scratch -> 204 (5 ms)
+  request: {"drive_id":"scratch","path_on_host":"scratch.ext4","is_root_device":false,"is_read_only":false}
+08:10:11.710170631 PUT /vsock -> 204 (5 ms)
+  request: {"guest_cid":3,"uds_path":"v.sock"}
+08:10:11.726229034 PUT /actions -> 204 (12 ms)
+  request: {"action_type":"InstanceStart"}

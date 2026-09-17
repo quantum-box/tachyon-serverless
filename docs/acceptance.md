@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4647、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4647、PLT-4651 X1、PLT-4652 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -53,6 +53,7 @@
 | `docs/evidence/kvm-verify-plt4635-20260917T064940Z/` | PLT-4635 の KVM 検証: `scripts/e2e/zero-scale.sh`（pool 有効の firecracker 設定） | 同上 | 18/18 PASS |
 | `docs/evidence/kvm-verify-plt4631-fencing-20260917T070522Z/` | PLT-4631 の KVM 検証: 同じ `data_dir` の 2 gateway、SIGSTOP による lease 失効、fence → terminate → settle、復帰した側の自己 fence | 同上 | 11/11 PASS |
 | `docs/evidence/kvm-verify-plt4651-restore-aware-20260917T065206Z/` | PLT-4651 の KVM 検証: `examples/restore-aware` の cold 経路と失敗 2 種 | 同上 | 成功 2、失敗 2 種の error_type が一致 |
+| `docs/evidence/x1-restore-20260917T085700Z/` | PLT-4652（X1、実験）: `scripts/x1/fc-restore.sh`（cold 3、checkpoint 待ちの Full snapshot、2 VMM 同時 clone、逐次 restore 3、drive 欠落、product bridge の restore）、`scripts/x1/ch-restore.sh`（v53.0 / v51.1 と途中の試行）、Kata 3.32.0 の source 調査 `kata-sources.txt`。読み方は `README.txt` | Lima VM（nested virtualization）、Firecracker v1.17.0、Cloud Hypervisor v53.0 / v51.1、guest kernel 6.1.155 | Firecracker: 期待した結果をすべて観測（FAIL 0）。Cloud Hypervisor: guest が handshake に届かず失敗 |
 
 本文の「E2E step NN」は各 E2E ディレクトリの `steps/NN-*.log`（例: step 23 = `steps/23-cross-tenant_get_invoke_-__404.log`）。特に断らない限り process と firecracker の両方で PASS している。
 
@@ -658,6 +659,24 @@ cron trigger と検証用 source（`generic-hmac`）の webhook trigger を、fi
 
 未解決・範囲外: source 別の webhook 検証（GitHub / Stripe 等）と汎用 SaaS connector、concurrency policy（前の実行中は skip 等）、秒単位 cron の最小間隔、webhook secret の rotate 猶予期間、data plane での trigger、tenant ごとの trigger 受付の持ち分（§14-17）。
 
+## PLT-4652 (X1) Cloud Hypervisor / Firecracker の保存復元と Kata / containerd 統合の成立条件
+
+実験・非ブロック。判断と設計は `docs/adr/0015-snapshot-restore-feasibility.md`、証跡は `docs/evidence/x1-restore-20260917T085700Z/`（`README.txt`）。**provider の挙動は変えていない**（`snapshot_create` / `snapshot_clone` は `Unsupported` のまま。本番の経路は PLT-4653）。実験用の guest init と host は `experiments/x1-restore/` にあり、gateway / provider は使わない。記録はすべて aarch64 の nested virtualization・同一 host・同一 CPU で、時間は参考値。合成データ（素数表）だけを使う。
+
+| # | 受入条件 / 経路 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | VMM 単体: Firecracker（checkpoint 待ちの Full snapshot → 別 VMM で load → 再開 → restored identity → invoke） | **成功**・KVM実測あり（実験 harness `x1-guest-init` 付き） | `fc/summary.tsv`（FAIL 0）: snapshot create 232 ms（256 MiB）、load API 8〜10 ms、load → `Ready` 334 / 303 / 259 / 255 ms（doorbell あり）・3952 ms（なし）、同じ guest の cold boot 2623 / 2763 / 2979 ms。restore の判定は restore 先での最初の frame が `x1_reconnect` かつ `guest_boot_id` が source と同一であること（`hello` なら `x1-host` が exit 3 で cold boot と報告する）。5 copy とも `restored=true`・別々の `instance_id`（`fc/responses.tsv`）。単体テスト `experiments/x1-restore/src/pump.rs::{survives_a_reset_and_answers_continue_from_the_host, a_reset_signal_forces_a_reconnect, gives_up_when_the_host_never_comes_back}`、`control.rs::control_frames_are_tagged_and_disjoint_from_the_protocol`、`uevent.rs::recognises_the_vmgenid_uevent_only` |
+| 1b | VMM 単体: Firecracker で **product bridge**（現行 `/sbin/tachyon-init`）を restore | **失敗**・KVM実測あり | `fc/bridge-restore/`: load 204 の後、bridge が vsock reset で `host connection lost; killing user process reason=frame writer stopped`、4966 ms で guest power off、host への再接続 0。現行 bridge のままでは restore できない（ADR-0015 決定 4 の patch が要る） |
+| 1c | VMM 単体: Cloud Hypervisor v53.0 / v51.1 | **失敗**・KVM実測あり | `ch-v53.0/`、`ch-v51.1/`、`ch-attempts/`: Firecracker CI kernel を direct boot（arm64 Image、firmware なし）すると、`root=` 明示・`console=hvc0 loglevel=1`・`image_type=raw` まで直しても vsock 接続の後に `Hello` が届かない（または接続自体が来ない）。稼働中 guest の save / restore は測れていない。止まった guest に対する pause / snapshot / `--restore` / resume は受理された（guest の生存は未検証、成功に数えない）。再評価の条件は ADR-0015 決定 5 |
+| 2 | Kata 経由: VM template（factory） | **未対応** | `kata-sources.txt` §1（Kata 3.32.0）: template は sandbox 作成前の idle VM で関数の状態を含まない。QEMU と Go runtime の CLH だけ、runtime-rs は QEMU のみ、FC は no-op、virtio-fs 不可 |
+| 2b | Kata 経由: 稼働中 sandbox の checkpoint / clone（containerd shim v2） | **未対応** | `kata-sources.txt` §2: Go shim の `Checkpoint` は `ErrNotImplemented`、runtime-rs 未実装、`docs/Limitations.md` が checkpoint / restore を提供しないと明記、CRIU 無し |
+| 3 | メモリと disk / 差分領域を整合させ、clone 間で書込み領域を共有しない設計 | 実装済み（設計）・KVM実測あり（Firecracker、egress `none`） | ADR-0015 決定 2・3。実測: paused のまま scratch を copy（`fc/snapshot-files.txt`）、2 VMM が同じ `snap/mem` を MAP_PRIVATE で共有（`Shared_Clean` 26.7 MiB / `Private_Dirty` 2.2 MiB、`fc/clones-concurrent.txt`）、各 clone の scratch に自分の marker だけ・snapshot の 3 file は clone 後も同じ sha256（`fc/clones-disk.txt`）、drive が記録 path に無いと 400（`fc/neg-missing-drive/`）、`vsock_override` で clone ごとの UDS（`fc/restore-3/`）。network の clone ごとの付け直し（新しい tap・IP・MAC）は**未検証**（設計のみ） |
+| 4 | 既存 Kata 所有 VM を別管理者が直接操作する回避策を採用しない | 実装済み（文書） | ADR-0015 決定 1・「却下した案」、`kata-sources.txt` §3〜4（Kata の persist・shim・agent session・netns・cgroup・containerd と不整合） |
+| 5 | current main の仕様を稼働版の能力と混同せず、必要 patch / 制約を ADR に残す | 実装済み（文書） | ADR-0015「upstream の主張と稼働版の区別」（Firecracker v1.17.0 と Kata が pin する v1.12.1 の差、CH v53.0 と v51.1 の文書の差、Kata 3.32.0 と main）、決定 4（protocol frame と version、bridge の reconnect・doorbell・時計合わせ、host の init deadline・cold boot 判定・boot identity・cleanup、同一 host / CPU / version の制約、snapshot file の扱い） |
+| 6 | 通常起動を復元成功として報告しない | 実装済み・KVM実測あり | `x1-host --mode clone` は restore 先で `hello` を受けたら `cold_boot_detected` で exit 3、`scripts/x1/fc-restore.sh` はそれを FAIL にする。boot_id が source と違っても FAIL。cold boot の時間は `cold-N` として別に記録 |
+| 7 | 再現手順・固定 version・状態検査・ログ | 実装済み・KVM実測あり | `scripts/x1/fc-restore.sh`、`scripts/x1/ch-restore.sh`（CH の binary は release asset の sha256 を照合）、各 `versions.txt`、`api.log` / `fc.log` / `console.log` / `host.jsonl`、`leftovers.txt`（firecracker / cloud-hypervisor / x1-host の残留なし） |
+| 8 | 時計・乱数・identity・secret の restore 後の挙動 | KVM実測あり（Firecracker） | `fc/restore-clocks.jsonl`: guest の wall clock は host より 9〜15 s 遅れ（snapshot 時点から継続。aarch64 に `clock_realtime` は無い）、monotonic も snapshot 時点から継続。`/dev/urandom` は clone ごとに異なる（kernel が VMGenID で reseed）。`guest_boot_id` は全 clone で同一（ADR-0011 の boot identity では区別できない）。`secret_present` は false（restore 後に secret を渡す経路が無い）。VMGenID の uevent は観測されなかった |
+
 ## ADR-0001 残る測定の状況
 
 測定の定義は `docs/adr/0001-execution-provider-firecracker-first.md` §「残る測定」。値はすべて aarch64 の nested virtualization 上の参考値（§「証跡」の制約を参照）。
@@ -689,7 +708,7 @@ cron trigger と検証用 source（`generic-hmac`）の webhook trigger を、fi
 | self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未検証 | workflow・gate（`kvm-gate`）・runner 登録手順は PLT-4645 で用意（`docs/ci.md` §5）。runner が未登録のため `kvm` job は一度も実行されていない |
 | TiDB 永続化（PLT-4618） | 未着手 | ADR-0003 で単一 host は埋め込み SQLite（`state.db`、migration 実装済み）と決定。TiDB は将来の adapter |
 | network と drive の帯域上限、IO の cgroup 上限 | 未着手 | VMM への host 側 cgroup（CPU / memory / pids）と 2 tenant 同居の計測は PLT-4622 で実装・実測済み（上の PLT-4622 5e・8、`docs/evidence/isolation-20260917T041930Z/`）。`io.max`、drive と NIC の `rate_limiter` は無い。実測は aarch64 nested 1 host だけ |
-| Kata / Cloud Hypervisor adapter | 未着手 | ADR-0001 で後続 adapter と決めた |
+| Kata / Cloud Hypervisor adapter | 未着手 | ADR-0001 で後続 adapter と決めた。snapshot / clone について Kata 経由は未対応、Cloud Hypervisor は検証 host で guest が handshake に届かない（PLT-4652、ADR-0015） |
 | OCI image の pull・実行 | 未着手 | P1 非対象（参照の受理と理由付き `Failed` だけ） |
 | jailer の残り（環境ごとの uid、network namespace） | 未着手 | jailer 自体は PLT-4622 で導入・実測（上の PLT-4622 7）。`docs/threat-model.md` §14-2 |
 

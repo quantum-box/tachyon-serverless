@@ -1,0 +1,55 @@
+cloud-hypervisor:   0.000035s: <main> INFO:event_monitor/src/lib.rs:113 -- Event: source = vmm event = starting 
+cloud-hypervisor:   0.002542s: <vmm> INFO:vmm/src/api/mod.rs:1236 -- API request event: VmRestore RestoreConfig { source_url: "file:///home/takanorifukuyama.guest/tsls/.kvm/x1/ch-20260917T085211Z/msnap", prefault: false, net_fds: None }
+cloud-hypervisor:   0.002894s: <vmm> INFO:vmm/src/memory_manager.rs:1491 -- RAM region mapping at 0xeee7eea00000 (size = 0x10000000)
+cloud-hypervisor:   0.175863s: <vmm> INFO:vmm/src/vm.rs:557 -- Booting VM from config: Mutex { data: VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures, nested: true }, memory: MemoryConfig { size: 268435456, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("/home/takanorifukuyama.guest/tsls/.kvm/vmlinux"), cmdline: Some("console=hvc0 loglevel=1 root=/dev/vda ro reboot=k panic=1 keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc"), initramfs: None }), rate_limit_groups: None, disks: Some([DiskConfig { path: Some("rootfs.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk0"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }, DiskConfig { path: Some("function.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk1"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }, DiskConfig { path: Some("scratch.ext4"), readonly: false, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk2"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }]), net: None, rng: RngConfig { src: "/dev/urandom", iommu: false }, balloon: None, fs: None, pmem: None, serial: ConsoleConfig { file: None, mode: Off, iommu: false, socket: None }, console: ConsoleConfig { file: None, mode: Tty, iommu: false, socket: None }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { cid: 3, socket: "v.sock", iommu: false, id: Some("_vsock3"), pci_segment: 0 }), pvpanic: false, iommu: false, numa: None, watchdog: false, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }, poisoned: false, .. }
+cloud-hypervisor:   0.176202s: <vmm> INFO:vmm/src/pci_segment.rs:107 -- Adding PCI segment: id=0, PCI MMIO config address: 0x30000000, mem32 area [0x10000000-0x2fffffff, mem64 area [0x100000000-0xfeffffffff
+cloud-hypervisor:   0.176240s: <vmm> INFO:vmm/src/memory_manager.rs:1772 -- Creating userspace mapping: 40000000 -> eee7eea00000 10000000, slot 2
+cloud-hypervisor:   0.176306s: <vmm> INFO:vmm/src/memory_manager.rs:1830 -- Created userspace mapping: 40000000 -> eee7eea00000 10000000
+cloud-hypervisor:   0.176347s: <vmm> INFO:vmm/src/cpu.rs:992 -- Request to create new vCPUs: desired = 1, max = 1, allocated = 0, present = 0
+cloud-hypervisor:   0.176357s: <vmm> INFO:vmm/src/cpu.rs:886 -- Creating vCPU: cpu_id = 0
+cloud-hypervisor:   0.177272s: <vmm> INFO:virtio-devices/src/console.rs:601 -- Restoring virtio-console __console
+cloud-hypervisor:   0.177293s: <vmm> INFO:vmm/src/device_manager.rs:2625 -- Creating virtio-block device: DiskConfig { path: Some("rootfs.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk0"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }
+cloud-hypervisor:   0.177483s: <vmm> INFO:vmm/src/device_manager.rs:2757 -- Using asynchronous RAW disk file (io_uring)
+cloud-hypervisor:   0.177507s: <vmm> INFO:virtio-devices/src/block.rs:698 -- Restoring virtio-block _disk0
+cloud-hypervisor:   0.177525s: <vmm> INFO:vmm/src/device_manager.rs:2625 -- Creating virtio-block device: DiskConfig { path: Some("function.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk1"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }
+cloud-hypervisor:   0.177581s: <vmm> INFO:vmm/src/device_manager.rs:2757 -- Using asynchronous RAW disk file (io_uring)
+cloud-hypervisor:   0.177591s: <vmm> INFO:virtio-devices/src/block.rs:698 -- Restoring virtio-block _disk1
+cloud-hypervisor:   0.177601s: <vmm> INFO:vmm/src/device_manager.rs:2625 -- Creating virtio-block device: DiskConfig { path: Some("scratch.ext4"), readonly: false, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk2"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }
+cloud-hypervisor:   0.177658s: <vmm> INFO:vmm/src/device_manager.rs:2757 -- Using asynchronous RAW disk file (io_uring)
+cloud-hypervisor:   0.177667s: <vmm> INFO:virtio-devices/src/block.rs:698 -- Restoring virtio-block _disk2
+cloud-hypervisor:   0.177678s: <vmm> INFO:vmm/src/device_manager.rs:3087 -- Creating virtio-rng device: RngConfig { src: "/dev/urandom", iommu: false }
+cloud-hypervisor:   0.177696s: <vmm> INFO:virtio-devices/src/rng.rs:177 -- Restoring virtio-rng __rng
+cloud-hypervisor:   0.177708s: <vmm> INFO:vmm/src/device_manager.rs:3390 -- Creating virtio-vsock device: VsockConfig { cid: 3, socket: "v.sock", iommu: false, id: Some("_vsock3"), pci_segment: 0 }
+cloud-hypervisor:   0.177854s: <vmm> INFO:/project/virtio-devices/src/vsock/device.rs:346 -- Restoring virtio-vsock _vsock3
+cloud-hypervisor:   0.177867s: <vmm> INFO:vmm/src/device_manager.rs:4354 -- Restoring virtio-pci _virtio-pci-__console resources
+cloud-hypervisor:   0.178137s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = __console
+cloud-hypervisor:   0.178164s: <vmm> INFO:vmm/src/device_manager.rs:4354 -- Restoring virtio-pci _virtio-pci-_disk0 resources
+cloud-hypervisor:   0.178350s: <vmm> INFO:virtio-devices/src/block.rs:907 -- Changing cache mode to writeback
+cloud-hypervisor:   0.178498s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _disk0
+cloud-hypervisor:   0.178532s: <vmm> INFO:vmm/src/device_manager.rs:4354 -- Restoring virtio-pci _virtio-pci-_disk1 resources
+cloud-hypervisor:   0.178668s: <vmm> INFO:virtio-devices/src/block.rs:907 -- Changing cache mode to writeback
+cloud-hypervisor:   0.178768s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _disk1
+cloud-hypervisor:   0.178793s: <vmm> INFO:vmm/src/device_manager.rs:4354 -- Restoring virtio-pci _virtio-pci-_disk2 resources
+cloud-hypervisor:   0.178938s: <vmm> INFO:virtio-devices/src/block.rs:907 -- Changing cache mode to writeback
+cloud-hypervisor:   0.179030s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _disk2
+cloud-hypervisor:   0.179053s: <vmm> INFO:vmm/src/device_manager.rs:4354 -- Restoring virtio-pci _virtio-pci-__rng resources
+cloud-hypervisor:   0.179234s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = __rng
+cloud-hypervisor:   0.179252s: <vmm> INFO:vmm/src/device_manager.rs:4354 -- Restoring virtio-pci _virtio-pci-_vsock3 resources
+cloud-hypervisor:   0.180661s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _vsock3
+cloud-hypervisor:   0.180700s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = restoring 
+cloud-hypervisor:   0.180720s: <vmm> INFO:virtio-devices/src/block.rs:865 -- Acquired Read lock for disk image id=_disk0,path=rootfs.ext4
+cloud-hypervisor:   0.180732s: <vmm> INFO:virtio-devices/src/block.rs:865 -- Acquired Read lock for disk image id=_disk1,path=function.ext4
+cloud-hypervisor:   0.180743s: <vmm> INFO:virtio-devices/src/block.rs:865 -- Acquired Write lock for disk image id=_disk2,path=scratch.ext4
+cloud-hypervisor:   0.180774s: <vmm> INFO:vmm/src/cpu.rs:1313 -- Starting vCPUs: desired = 1, allocated = 1, present = 0, paused = true
+cloud-hypervisor:   0.180819s: <vmm> INFO:vmm/src/cpu.rs:1093 -- Starting vCPU: cpu_id = 0
+cloud-hypervisor:   0.180970s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = restored 
+cloud-hypervisor:   0.181021s: <vmm> INFO:vmm/src/api/mod.rs:1269 -- API request event: VmResume
+cloud-hypervisor:   0.181030s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = resuming 
+cloud-hypervisor:   0.182131s: <vmm> INFO:virtio-devices/src/device.rs:327 -- Resuming virtio-rng
+cloud-hypervisor:   0.182147s: <vmm> INFO:virtio-devices/src/device.rs:327 -- Resuming virtio-block
+cloud-hypervisor:   0.182160s: <vmm> INFO:virtio-devices/src/device.rs:327 -- Resuming virtio-block
+cloud-hypervisor:   0.182172s: <vmm> INFO:virtio-devices/src/device.rs:327 -- Resuming virtio-block
+cloud-hypervisor:   0.182191s: <vmm> INFO:virtio-devices/src/device.rs:327 -- Resuming virtio-console
+cloud-hypervisor:   0.182216s: <vmm> INFO:virtio-devices/src/device.rs:327 -- Resuming virtio-vsock
+cloud-hypervisor:   0.182228s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = resumed 
+cloud-hypervisor:   3.192953s: <vmm> INFO:vmm/src/api/mod.rs:912 -- API request event: VmInfo

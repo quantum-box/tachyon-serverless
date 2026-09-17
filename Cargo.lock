@@ -2509,6 +2509,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "tachyon-serverless-x1-restore"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "futures",
+ "libc",
+ "serde",
+ "serde_json",
+ "tachyon-serverless-protocol",
+ "tachyon-serverless-runtime-bridge",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tokio-vsock",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

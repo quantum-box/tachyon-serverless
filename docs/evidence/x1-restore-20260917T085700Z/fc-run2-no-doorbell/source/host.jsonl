@@ -1,0 +1,12 @@
+{"event":"listening","host_wall_ms":1789632617581,"mode":"source","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/source/v.sock_5000","t_ms":0}
+{"event":"accepted","host_wall_ms":1789632620118,"t_ms":2536}
+{"architecture":"aarch64","bridge_version":"0.1.0","environment_id":"env_x1restore","event":"guest_frame","guest_boot_id":"c4286106-e6bf-4491-9754-14bd4db612c4","host_wall_ms":1789632620166,"protocol_version":2,"t_ms":2584,"type":"hello"}
+{"env_vars":0,"event":"hello_ack_sent","host_wall_ms":1789632620166,"t_ms":2584}
+{"event":"guest_log","host_wall_ms":1789632620248,"line":"user process started (pid 105)","phase":"init","t_ms":2666}
+{"event":"guest_log","host_wall_ms":1789632620333,"line":"restore-aware: bootstrap: building the lookup table (no runtime, no secrets)","phase":"init","t_ms":2751}
+{"clocks":{"boottime_ms":1921,"monotonic_ms":1921,"wall_ms":1789632620331},"event":"guest_control","host_wall_ms":1789632620343,"t_ms":2761,"type":"x1_waiting"}
+{"event":"checkpoint_wait","host_wall_ms":1789632620343,"t_ms":2761}
+{"event":"connection_closed","host_wall_ms":1789632643418,"t_ms":25978}
+{"event":"accepted","host_wall_ms":1789632643418,"t_ms":25978}
+{"clocks":{"boottime_ms":6872,"monotonic_ms":6872,"wall_ms":1789632625282},"connection":1,"event":"guest_control","guest_boot_id":"c4286106-e6bf-4491-9754-14bd4db612c4","host_wall_ms":1789632643419,"lost":"write: io: Socket not connected (os error 107)","t_ms":25978,"type":"x1_reconnect","urandom_hex":"dff9357355abcc725a61f094982253cb"}
+{"event":"connection_closed","host_wall_ms":1789632643419,"t_ms":25978}

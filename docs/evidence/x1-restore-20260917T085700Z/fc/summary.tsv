@@ -1,0 +1,22 @@
+scenario	result	metric_ms	detail
+cold-1	PASS	2623	InstanceStart request -> Ready (cold boot incl. bootstrap)
+cold-2	PASS	2763	InstanceStart request -> Ready (cold boot incl. bootstrap)
+cold-3	PASS	2979	InstanceStart request -> Ready (cold boot incl. bootstrap)
+source-boot-to-checkpoint	INFO	2782	InstanceStart request -> x1_waiting
+snapshot-create	PASS	232	PUT /snapshot/create Full (paused, 256 MiB)
+snapshot-disk-copy	INFO	3	scratch drive copied while paused (64 MiB sparse)
+source-resume-vsock-reset	PASS		resumed source lost its vsock connection and reconnected (x1_reconnect)
+clone-a-load-call	INFO	10	PUT /snapshot/load HTTP 204
+clone-b-load-call	INFO	8	PUT /snapshot/load HTTP 204
+clone-a	PASS	334	load request -> Ready (load -> x1_reconnect 125 ms, detected by: vsock doorbell); boot_id same as source; restored=true; own scratch marker
+clone-b	PASS	303	load request -> Ready (load -> x1_reconnect 114 ms, detected by: vsock doorbell); boot_id same as source; restored=true; own scratch marker
+clones-disk-isolation	PASS		each clone wrote only its own scratch copy; snapshot files unchanged
+restore-1-load-call	INFO	10	PUT /snapshot/load HTTP 204
+restore-1	PASS	3952	load request -> Ready (load -> x1_reconnect 3830 ms, detected by: write: io: Socket not connected (os error 107)); boot_id same as source; restored=true; own scratch marker
+restore-2-load-call	INFO	10	PUT /snapshot/load HTTP 204 (doorbell)
+restore-2	PASS	259	load request -> Ready (load -> x1_reconnect 108 ms, detected by: vsock doorbell); boot_id same as source; restored=true; own scratch marker
+restore-3-load-call	INFO	8	PUT /snapshot/load HTTP 204 (vsock_override) (doorbell)
+restore-3	PASS	255	load request -> Ready (load -> x1_reconnect 112 ms, detected by: vsock doorbell); boot_id same as source; restored=true; own scratch marker
+neg-missing-drive	PASS		HTTP 400: {"fault_message":"Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: Failed to restore devices: Error restoring MMIO devices: Block: Virtio backend error: Error manipulating the backing file: No such file or directory (os error 2) scratch.ext4"}
+bridge-snapshot-create	INFO	277	product bridge after Ready: HTTP 204
+bridge-restore	PASS		load HTTP 204; host connections after restore: 0; firecracker exited after 4966 ms (rc 0); console: [2m2026-09-17T08:16:22.250922Z[0m [31mERROR[0m host connection lost; killing user process [3mreason[0m[2m=[0mframe writer stopped

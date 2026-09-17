@@ -1,0 +1,14 @@
+{"event":"listening","host_wall_ms":1789632974190,"mode":"clone","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T081534Z/restore-3/override.sock_5000","t_ms":0}
+{"attempts":3,"event":"doorbell_ok","host_wall_ms":1789632974236,"reply":"OK 1073741824","t_ms":46}
+{"event":"accepted","host_wall_ms":1789632974286,"t_ms":95}
+{"clocks":{"boottime_ms":3089,"monotonic_ms":3089,"wall_ms":1789632954503},"connection":1,"event":"guest_control","guest_boot_id":"61064d5b-e079-4be8-b284-9776ff664f82","host_wall_ms":1789632974306,"lost":"vsock doorbell","t_ms":115,"type":"x1_reconnect","urandom_hex":"699c2665e35b5d2b0d759c4438635573"}
+{"event":"restore_identified","host_wall_ms":1789632974306,"t_ms":115}
+{"event":"host_control","generation":1,"host_wall_ms":1789632974306,"instance_id":"restore-3","restored":true,"t_ms":115,"type":"x1_continue"}
+{"bytes":10,"error":null,"event":"guest_control","host_wall_ms":1789632974354,"path":"/tmp/x1-instance","t_ms":163,"type":"x1_scratch_written"}
+{"event":"guest_log","host_wall_ms":1789632974405,"line":"lifecycle continue answered (restored)","phase":"init","t_ms":214}
+{"event":"guest_log","host_wall_ms":1789632974422,"line":"restore-aware: after_restore: restored=true generation=1 instance=restore-3-bc6550aab34f42fb","phase":"init","t_ms":232}
+{"event":"guest_frame","host_wall_ms":1789632974449,"init_ms":1434,"t_ms":258,"type":"ready"}
+{"attempt_id":"att_x1_0","event":"invoke_sent","host_wall_ms":1789632974449,"t_ms":258}
+{"attempt_id":"att_x1_0","epoch":1,"event":"guest_frame","handler_ms":12,"host_wall_ms":1789632974506,"payload":{"connection_id":"conn-4b5e64bbb9d3ff80","connection_opened_at_ms":1789632954621,"connection_queries":1,"generation":1,"instance_id":"restore-3-bc6550aab34f42fb","is_prime":true,"n":97,"random":1797322285529217525,"restored":true,"secret_present":false,"started_at_ms":1789632954596,"table_primes":9592},"t_ms":315,"type":"response"}
+{"event":"connection_closed","host_wall_ms":1789632974537,"t_ms":346}
+{"code":0,"event":"exit","host_wall_ms":1789632974537,"t_ms":346}

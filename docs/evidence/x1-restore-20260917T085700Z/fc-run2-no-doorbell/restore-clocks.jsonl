@@ -1,0 +1,5 @@
+{"scenario":"clone-a","host_wall_ms":1789632652397,"clocks":{"boottime_ms":6915,"monotonic_ms":6915,"wall_ms":1789632625325},"urandom_hex":"789916a5165ca6523d5724d22aca2160","lost":"write: io: Socket not connected (os error 107)"}
+{"scenario":"clone-b","host_wall_ms":1789632652403,"clocks":{"boottime_ms":6895,"monotonic_ms":6895,"wall_ms":1789632625305},"urandom_hex":"6d2e0355e5602c55f586943561701e37","lost":"write: io: Socket not connected (os error 107)"}
+{"scenario":"restore-1","host_wall_ms":1789632663172,"clocks":{"boottime_ms":6912,"monotonic_ms":6912,"wall_ms":1789632625322},"urandom_hex":"67784e2ef6ecc71cab0fafbefd55db2b","lost":"write: io: Socket not connected (os error 107)"}
+{"scenario":"restore-2","host_wall_ms":1789632667867,"clocks":{"boottime_ms":6878,"monotonic_ms":6878,"wall_ms":1789632625288},"urandom_hex":"2160ec87445c7f8fccbf06e6befcb5a8","lost":"write: io: Socket not connected (os error 107)"}
+{"scenario":"restore-3","host_wall_ms":1789632672062,"clocks":{"boottime_ms":6928,"monotonic_ms":6928,"wall_ms":1789632625338},"urandom_hex":"894324ca6ec6ad9c7511db3d0a2e62f5","lost":"write: io: Socket not connected (os error 107)"}

@@ -21,6 +21,7 @@ members = [
   "examples/cpu-burn",
   "examples/isolation-probe",
   "examples/restore-aware",
+  "experiments/x1-restore",
 ]
 
 [workspace.package]

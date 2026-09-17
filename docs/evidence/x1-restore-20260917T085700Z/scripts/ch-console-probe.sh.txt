@@ -1,0 +1,18 @@
+set -u
+K=~/tsls/.kvm/vmlinux
+CH=~/tsls/.kvm/ch/v53.0/cloud-hypervisor
+D=/tmp/chprobe
+rm -rf $D; mkdir -p $D; cd $D
+cp --sparse=always ~/tsls/.kvm/rootfs.ext4 rootfs.ext4
+run() { # name console-arg extra-cmdline
+  local name="$1" con="$2" extra="$3"
+  local t0; t0=$(date +%s%N)
+  timeout 15 "$CH" --kernel "$K" --cmdline "console=hvc0 root=/dev/vda ro reboot=k panic=5 init=/sbin/tachyon-init tachyon.env_id=env_probe $extra" \
+    --cpus boot=1 --memory size=256M --disk path=rootfs.ext4,readonly=on --serial off --console "$con" > "$name.vmm.log" 2>&1
+  echo "== $name rc=$? after $(( ($(date +%s%N) - t0) / 1000000 )) ms"
+  if [ -f console.txt ]; then echo "-- console.txt"; tail -15 console.txt | cut -c1-200; rm -f console.txt; fi
+  grep -v "cloud-hypervisor: " "$name.vmm.log" | tail -15 | cut -c1-200
+}
+run file-console "file=$D/console.txt" ""
+run tty-quiet tty "loglevel=1"
+rm -rf $D

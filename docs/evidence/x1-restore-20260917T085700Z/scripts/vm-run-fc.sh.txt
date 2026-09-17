@@ -1,0 +1,13 @@
+set -uo pipefail
+sudo chmod 666 /dev/kvm
+cd ~/tsls
+if [ -d ~/x1-out/fc ] && [ ! -d ~/x1-out/fc-run2 ]; then mv ~/x1-out/fc ~/x1-out/fc-run2; fi
+rm -rf ~/x1-out/fc
+cargo clippy -p tachyon-serverless-x1-restore --all-targets -- -D warnings 2>&1 | tail -3
+KEEP_WORK=0 scripts/x1/fc-restore.sh ~/x1-out/fc > ~/x1-out/fc-run.log 2>&1
+echo "rc=$?"
+grep '^\[x1-fc\]' ~/x1-out/fc-run.log
+grep -v guest_log ~/x1-out/fc/source/host.jsonl | cut -c1-200 | tail -5
+grep -h "doorbell\|vmgenid\|reset signal" ~/x1-out/fc/*/console.log | cut -c1-200
+ls ~/tsls/.kvm/x1/ 2>&1; pgrep -a firecracker; pgrep -a x1-host
+df -h / | tail -1

@@ -1,0 +1,15 @@
+[    3.228868] random: crng reseeded due to virtual machine fork
+[    3.228868] random: crng reseeded due to virtual machine fork
+[2m2026-09-17T08:15:54.457065Z[0m [32m INFO[0m x1: doorbell rang [3mpeer_cid[0m[2m=[0m2
+[2m2026-09-17T08:15:54.484718Z[0m [33m WARN[0m x1: host connection lost; reconnecting [3mlost[0m[2m=[0mvsock doorbell [3mconnection[0m[2m=[0m0
+[2m2026-09-17T08:15:54.501854Z[0m [32m INFO[0m x1: reconnected [3mconnection[0m[2m=[0m1 [3mafter_ms[0m[2m=[0m3
+[2m2026-09-17T08:15:54.566628Z[0m [32m INFO[0m x1: continue answered restored [3minstance_id[0m[2m=[0mclone-a [3mgeneration[0m[2m=[0m1
+[2m2026-09-17T08:15:54.584306Z[0m [32m INFO[0m experimental lifecycle: continue answered [3mrestored[0m[2m=[0mtrue
+[2m2026-09-17T08:15:54.688639Z[0m [32m INFO[0m user process ready [3minit_ms[0m[2m=[0m1485
+[2m2026-09-17T08:15:54.731178Z[0m [32m INFO[0m invoke received [3mattempt_id[0m[2m=[0matt_x1_0 [3mepoch[0m[2m=[0m1 [3mhost_deadline_ms[0m[2m=[0m1789632993689 [3mremaining_ms[0m[2m=[0m30000 [3mdeadline_ms[0m[2m=[0m1789632984731
+[2m2026-09-17T08:15:54.771889Z[0m [32m INFO[0m response received [3mattempt_id[0m[2m=[0matt_x1_0 [3mhandler_ms[0m[2m=[0mSome(15)
+[2m2026-09-17T08:15:54.792710Z[0m [32m INFO[0m invoke received [3mattempt_id[0m[2m=[0matt_x1_1 [3mepoch[0m[2m=[0m1 [3mhost_deadline_ms[0m[2m=[0m1789632993752 [3mremaining_ms[0m[2m=[0m30000 [3mdeadline_ms[0m[2m=[0m1789632984792
+[2m2026-09-17T08:15:54.814825Z[0m [32m INFO[0m response received [3mattempt_id[0m[2m=[0matt_x1_1 [3mhandler_ms[0m[2m=[0mSome(0)
+[2m2026-09-17T08:15:57.823566Z[0m [32m INFO[0m shutdown received [3mreason[0m[2m=[0mx1 done
+[    6.732527] reboot: Power down
+[    6.732527] reboot: Power down

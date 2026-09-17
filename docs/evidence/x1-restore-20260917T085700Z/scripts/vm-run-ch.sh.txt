@@ -1,0 +1,11 @@
+set -uo pipefail
+sudo chmod 666 /dev/kvm
+cd ~/tsls
+if [ -d ~/x1-out/ch ]; then mv ~/x1-out/ch ~/x1-out/ch-v51.1; fi
+CH_CONSOLE=tty KEEP_WORK=0 COLD_RUNS=2 scripts/x1/ch-restore.sh ~/x1-out/ch > ~/x1-out/ch-run.log 2>&1
+echo "rc=$?"
+grep '^\[x1-ch\]' ~/x1-out/ch-run.log | cut -c1-700
+cat ~/x1-out/ch/mechanics-config.json 2>/dev/null
+tail -5 ~/x1-out/ch/mechanics-restore/chr.log 2>/dev/null
+ls ~/x1-out; ls ~/tsls/.kvm/x1/ 2>&1; pgrep -a cloud-hyper; pgrep -a x1-host
+df -h / | tail -1

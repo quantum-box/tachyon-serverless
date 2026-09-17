@@ -1,0 +1,16 @@
+{"event":"listening","host_wall_ms":1789632963345,"mode":"clone","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T081534Z/clone-a/v.sock_5000","t_ms":0}
+{"attempts":4,"event":"doorbell_ok","host_wall_ms":1789632963414,"reply":"OK 1073741824","t_ms":68}
+{"event":"accepted","host_wall_ms":1789632963460,"t_ms":114}
+{"clocks":{"boottime_ms":3099,"monotonic_ms":3099,"wall_ms":1789632954512},"connection":1,"event":"guest_control","guest_boot_id":"61064d5b-e079-4be8-b284-9776ff664f82","host_wall_ms":1789632963479,"lost":"vsock doorbell","t_ms":133,"type":"x1_reconnect","urandom_hex":"c280721a575275115e0a7d3b49b43873"}
+{"event":"restore_identified","host_wall_ms":1789632963479,"t_ms":133}
+{"event":"host_control","generation":1,"host_wall_ms":1789632963479,"instance_id":"clone-a","restored":true,"t_ms":133,"type":"x1_continue"}
+{"bytes":8,"error":null,"event":"guest_control","host_wall_ms":1789632963539,"path":"/tmp/x1-instance","t_ms":193,"type":"x1_scratch_written"}
+{"event":"guest_log","host_wall_ms":1789632963602,"line":"lifecycle continue answered (restored)","phase":"init","t_ms":256}
+{"event":"guest_log","host_wall_ms":1789632963626,"line":"restore-aware: after_restore: restored=true generation=1 instance=clone-a-84af28749e20452d","phase":"init","t_ms":280}
+{"event":"guest_frame","host_wall_ms":1789632963688,"init_ms":1485,"t_ms":343,"type":"ready"}
+{"attempt_id":"att_x1_0","event":"invoke_sent","host_wall_ms":1789632963689,"t_ms":343}
+{"attempt_id":"att_x1_0","epoch":1,"event":"guest_frame","handler_ms":15,"host_wall_ms":1789632963752,"payload":{"connection_id":"conn-9774c3116b0dd488","connection_opened_at_ms":1789632954662,"connection_queries":1,"generation":1,"instance_id":"clone-a-84af28749e20452d","is_prime":true,"n":97,"random":4976051674953465226,"restored":true,"secret_present":false,"started_at_ms":1789632954626,"table_primes":9592},"t_ms":407,"type":"response"}
+{"attempt_id":"att_x1_1","event":"invoke_sent","host_wall_ms":1789632963752,"t_ms":407}
+{"attempt_id":"att_x1_1","epoch":1,"event":"guest_frame","handler_ms":0,"host_wall_ms":1789632963787,"payload":{"connection_id":"conn-9774c3116b0dd488","connection_opened_at_ms":1789632954662,"connection_queries":2,"generation":1,"instance_id":"clone-a-84af28749e20452d","is_prime":true,"n":97,"random":10337525018220671601,"restored":true,"secret_present":false,"started_at_ms":1789632954626,"table_primes":9592},"t_ms":441,"type":"response"}
+{"event":"connection_closed","host_wall_ms":1789632966843,"t_ms":3497}
+{"code":0,"event":"exit","host_wall_ms":1789632966843,"t_ms":3497}

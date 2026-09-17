@@ -1,0 +1,6 @@
+[    2.265946] random: crng reseeded due to virtual machine fork
+[    2.265946] random: crng reseeded due to virtual machine fork
+[2m2026-09-17T08:16:22.250922Z[0m [31mERROR[0m host connection lost; killing user process [3mreason[0m[2m=[0mframe writer stopped
+[2m2026-09-17T08:16:22.320592Z[0m [33m WARN[0m writer finished with error: io: Socket not connected (os error 107)
+[    7.138536] reboot: Power down
+[    7.138536] reboot: Power down

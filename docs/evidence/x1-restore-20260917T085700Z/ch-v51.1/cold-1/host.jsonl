@@ -1,0 +1,3 @@
+{"event":"listening","host_wall_ms":1789635133843,"mode":"cold","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/ch-20260917T085211Z/cold-1/v.sock_5000","t_ms":0}
+{"event":"accepted","host_wall_ms":1789635134205,"t_ms":362}
+{"event":"error","host_wall_ms":1789635193563,"message":"deadline waiting for a frame","t_ms":60001}

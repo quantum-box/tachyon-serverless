@@ -1,0 +1,13 @@
+{"event":"listening","host_wall_ms":1789632663960,"mode":"clone","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/restore-2/v.sock_5000","t_ms":0}
+{"event":"accepted","host_wall_ms":1789632667848,"t_ms":3888}
+{"clocks":{"boottime_ms":6878,"monotonic_ms":6878,"wall_ms":1789632625288},"connection":1,"event":"guest_control","guest_boot_id":"c4286106-e6bf-4491-9754-14bd4db612c4","host_wall_ms":1789632667867,"lost":"write: io: Socket not connected (os error 107)","t_ms":3907,"type":"x1_reconnect","urandom_hex":"2160ec87445c7f8fccbf06e6befcb5a8"}
+{"event":"restore_identified","host_wall_ms":1789632667867,"t_ms":3907}
+{"event":"host_control","generation":1,"host_wall_ms":1789632667867,"instance_id":"restore-2","restored":true,"t_ms":3907,"type":"x1_continue"}
+{"bytes":10,"error":null,"event":"guest_control","host_wall_ms":1789632667894,"path":"/tmp/x1-instance","t_ms":3934,"type":"x1_scratch_written"}
+{"event":"guest_log","host_wall_ms":1789632667937,"line":"lifecycle continue answered (restored)","phase":"init","t_ms":3976}
+{"event":"guest_log","host_wall_ms":1789632667957,"line":"restore-aware: after_restore: restored=true generation=1 instance=restore-2-bc8285485f4408df","phase":"init","t_ms":3996}
+{"event":"guest_frame","host_wall_ms":1789632667986,"init_ms":5208,"t_ms":4025,"type":"ready"}
+{"attempt_id":"att_x1_0","event":"invoke_sent","host_wall_ms":1789632667986,"t_ms":4025}
+{"attempt_id":"att_x1_0","epoch":1,"event":"guest_frame","handler_ms":6,"host_wall_ms":1789632668031,"payload":{"connection_id":"conn-e71a5e70287e6a90","connection_opened_at_ms":1789632625380,"connection_queries":1,"generation":1,"instance_id":"restore-2-bc8285485f4408df","is_prime":true,"n":97,"random":5192883123471437320,"restored":true,"secret_present":false,"started_at_ms":1789632625348,"table_primes":9592},"t_ms":4071,"type":"response"}
+{"event":"connection_closed","host_wall_ms":1789632668062,"t_ms":4101}
+{"code":0,"event":"exit","host_wall_ms":1789632668062,"t_ms":4101}

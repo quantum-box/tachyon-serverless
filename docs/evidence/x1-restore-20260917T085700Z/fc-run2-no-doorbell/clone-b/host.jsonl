@@ -1,0 +1,15 @@
+{"event":"listening","host_wall_ms":1789632648472,"mode":"clone","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/clone-b/v.sock_5000","t_ms":0}
+{"event":"accepted","host_wall_ms":1789632652379,"t_ms":3907}
+{"clocks":{"boottime_ms":6895,"monotonic_ms":6895,"wall_ms":1789632625305},"connection":1,"event":"guest_control","guest_boot_id":"c4286106-e6bf-4491-9754-14bd4db612c4","host_wall_ms":1789632652403,"lost":"write: io: Socket not connected (os error 107)","t_ms":3930,"type":"x1_reconnect","urandom_hex":"6d2e0355e5602c55f586943561701e37"}
+{"event":"restore_identified","host_wall_ms":1789632652403,"t_ms":3930}
+{"event":"host_control","generation":1,"host_wall_ms":1789632652403,"instance_id":"clone-b","restored":true,"t_ms":3930,"type":"x1_continue"}
+{"bytes":8,"error":null,"event":"guest_control","host_wall_ms":1789632652436,"path":"/tmp/x1-instance","t_ms":3964,"type":"x1_scratch_written"}
+{"event":"guest_log","host_wall_ms":1789632652482,"line":"lifecycle continue answered (restored)","phase":"init","t_ms":4010}
+{"event":"guest_log","host_wall_ms":1789632652516,"line":"restore-aware: after_restore: restored=true generation=1 instance=clone-b-ab9fd60376219e2e","phase":"init","t_ms":4043}
+{"event":"guest_frame","host_wall_ms":1789632652563,"init_ms":5256,"t_ms":4090,"type":"ready"}
+{"attempt_id":"att_x1_0","event":"invoke_sent","host_wall_ms":1789632652563,"t_ms":4090}
+{"attempt_id":"att_x1_0","epoch":1,"event":"guest_frame","handler_ms":10,"host_wall_ms":1789632652626,"payload":{"connection_id":"conn-a0903d86852ada3a","connection_opened_at_ms":1789632625421,"connection_queries":1,"generation":1,"instance_id":"clone-b-ab9fd60376219e2e","is_prime":true,"n":97,"random":14049771006141062300,"restored":true,"secret_present":false,"started_at_ms":1789632625394,"table_primes":9592},"t_ms":4154,"type":"response"}
+{"attempt_id":"att_x1_1","event":"invoke_sent","host_wall_ms":1789632652626,"t_ms":4154}
+{"attempt_id":"att_x1_1","epoch":1,"event":"guest_frame","handler_ms":0,"host_wall_ms":1789632652654,"payload":{"connection_id":"conn-a0903d86852ada3a","connection_opened_at_ms":1789632625421,"connection_queries":2,"generation":1,"instance_id":"clone-b-ab9fd60376219e2e","is_prime":true,"n":97,"random":6086524308717913637,"restored":true,"secret_present":false,"started_at_ms":1789632625394,"table_primes":9592},"t_ms":4181,"type":"response"}
+{"event":"connection_closed","host_wall_ms":1789632655703,"t_ms":7231}
+{"code":0,"event":"exit","host_wall_ms":1789632655704,"t_ms":7231}

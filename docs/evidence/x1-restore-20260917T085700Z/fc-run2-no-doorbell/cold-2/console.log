@@ -1,0 +1,266 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x610f0000]
+[    0.000000] Linux version 6.1.155+ (root@098075610d5f) (gcc (Ubuntu 11.4.0-1ubuntu1~22.04.2) 11.4.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #1 SMP Thu Dec 18 15:12:13 UTC 2025
+[    0.000000] random: crng init done
+[    0.000000] Machine model: linux,dummy-virt
+[    0.000000] PCI: Unknown option `off'
+[    0.000000] printk: debug: skip boot console de-registration.
+[    0.000000] PCI: Unknown option `off'
+[    0.000000] earlycon: uart0 at MMIO 0x0000000040002000 (options '')
+[    0.000000] printk: bootconsole [uart0] enabled
+[    0.000000] efi: UEFI not found.
+[    0.000000] NUMA: No NUMA configuration found
+[    0.000000] NUMA: Faking a node at [mem 0x0000000080200000-0x000000008fffffff]
+[    0.000000] NUMA: NODE_DATA [mem 0x8fe4af40-0x8fe74fff]
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000080200000-0x000000008fffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   empty
+[    0.000000]   Device   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080200000-0x000000008fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080200000-0x000000008fffffff]
+[    0.000000] On node 0, zone DMA: 512 pages in unavailable ranges
+[    0.000000] psci: probing for conduit method from DT.
+[    0.000000] psci: PSCIv1.3 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.1
+[    0.000000] smccc: KVM: hypervisor services detected (0x00000000 0x00000000 0x00000000 0x00000003)
+[    0.000000] percpu: Embedded 17 pages/cpu s39976 r0 d29656 u69632
+[    0.000000] Detected PIPT I-cache on CPU0
+[    0.000000] CPU features: detected: GIC system register CPU interface
+[    0.000000] CPU features: detected: Spectre-v4
+[    0.000000] CPU features: detected: Spectre-BHB
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Fallback order for Node 0: 0 
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 64008
+[    0.000000] Policy zone: DMA
+[    0.000000] Kernel command line: console=ttyS0 reboot=k panic=1 pci=off keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc pci=off root=/dev/vda ro earlycon=uart,mmio,0x40002000
+[    0.000000] Dentry cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+[    0.000000] mem auto-init: stack:off, heap alloc:off, heap free:off
+[    0.000000] Memory: 236000K/260096K available (11200K kernel code, 1030K rwdata, 2136K rodata, 2240K init, 1043K bss, 24096K reserved, 0K cma-reserved)
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=64 to nr_cpu_ids=1.
+[    0.000000] 	Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 10 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] GICv3: 96 SPIs implemented
+[    0.000000] GICv3: 0 Extended SPIs implemented
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] GICv3: GICv3 features: 16 PPIs, DirectLPI
+[    0.000000] GICv3: CPU0: found redistributor 0 region 0:0x000000003ffd0000
+[    0.000000] ITS [mem 0x3ffb0000-0x3ffcffff]
+[    0.000000] ITS@0x000000003ffb0000: allocated 8192 Devices @81430000 (indirect, esz 8, psz 64K, shr 1)
+[    0.000000] ITS@0x000000003ffb0000: allocated 8192 Interrupt Collections @81440000 (flat, esz 8, psz 64K, shr 1)
+[    0.000000] GICv3: using LPI property table @0x0000000081450000
+[    0.000000] GICv3: CPU0: using allocated LPI pending table @0x0000000081460000
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer(s) running at 24.00MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+[    0.000000] sched_clock: 56 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+[    0.009175] arm-pv: using stolen time PV
+[    0.018343] Console: colour dummy device 80x25
+[    0.023572] Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=240000)
+[    0.034796] pid_max: default: 32768 minimum: 301
+[    0.040108] LSM: Security Framework initializing
+[    0.045060] SELinux:  Initializing.
+[    0.048724] SELinux: CONFIG_SECURITY_SELINUX_CHECKREQPROT_VALUE is non-zero.  This is deprecated and will be rejected in a future kernel release.
+[    0.063434] SELinux: https://github.com/SELinuxProject/selinux-kernel/wiki/DEPRECATE-checkreqprot
+[    0.074158] Mount-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    0.082213] Mountpoint-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    0.106923] cblist_init_generic: Setting adjustable number of callback queues.
+[    0.115118] cblist_init_generic: Setting shift to 0 and lim to 1.
+[    0.122335] rcu: Hierarchical SRCU implementation.
+[    0.127619] rcu: 	Max phase no-delay instances is 1000.
+[    0.133842] Platform MSI: msic domain created
+[    0.138621] PCI/MSI: /intc/msic domain created
+[    0.143456] EFI services will not be available.
+[    0.149195] smp: Bringing up secondary CPUs ...
+[    0.154003] smp: Brought up 1 node, 1 CPU
+[    0.158384] SMP: Total of 1 processors activated.
+[    0.163773] CPU features: detected: Branch Target Identification
+[    0.170280] CPU features: detected: ARMv8.4 Translation Table Level
+[    0.177038] CPU features: detected: Data cache clean to the PoU not required for I/D coherence
+[    0.186157] CPU features: detected: Common not Private translations
+[    0.193035] CPU features: detected: CRC32 instructions
+[    0.198368] CPU features: detected: Data cache clean to Point of Deep Persistence
+[    0.206297] CPU features: detected: Data cache clean to Point of Persistence
+[    0.213625] CPU features: detected: E0PD
+[    0.217927] CPU features: detected: Enhanced Privileged Access Never
+[    0.224594] CPU features: detected: RCpc load-acquire (LDAPR)
+[    0.230718] CPU features: detected: LSE atomic instructions
+[    0.236563] CPU features: detected: Privileged Access Never
+[    0.242583] CPU features: detected: RAS Extension Support
+[    0.248183] CPU features: detected: Speculation barrier (SB)
+[    0.254049] CPU features: detected: TLB range maintenance instructions
+[    0.260967] CPU: All CPU(s) started at EL1
+[    0.265087] alternatives: applying system-wide alternatives
+[    0.371845] devtmpfs: initialized
+[    0.389203] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+[    0.399390] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.411635] DMI not present or invalid.
+[    0.422111] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.434252] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    0.443372] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.452446] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.461367] audit: initializing netlink subsys (disabled)
+[    0.473592] thermal_sys: Registered thermal governor 'fair_share'
+[    0.473644] thermal_sys: Registered thermal governor 'step_wise'
+[    0.480242] thermal_sys: Registered thermal governor 'user_space'
+[    0.487660] audit: type=2000 audit(0.310:1): state=initialized audit_enabled=0 res=1
+[    0.503374] cpuidle: using governor menu
+[    0.508784] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    0.517169] ASID allocator initialised with 65536 entries
+[    0.543276] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.551300] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.557869] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    0.565218] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    0.571792] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.578992] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.585462] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    0.592790] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[    0.614136] ACPI: Interpreter disabled.
+[    0.619622] iommu: Default domain type: Translated 
+[    0.625198] iommu: DMA domain TLB invalidation policy: strict mode 
+[    0.637902] SCSI subsystem initialized
+[    0.642218] pps_core: LinuxPPS API ver. 1 registered
+[    0.647746] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.657242] PTP clock support registered
+[    0.674598] NetLabel: Initializing
+[    0.678270] NetLabel:  domain hash size = 128
+[    0.683421] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.690394] NetLabel:  unlabeled traffic allowed by default
+[    0.700424] vgaarb: loaded
+[    0.706443] clocksource: Switched to clocksource arch_sys_counter
+[    0.718706] VFS: Disk quotas dquot_6.6.0
+[    0.723290] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.733344] pnp: PnP ACPI: disabled
+[    0.752907] NET: Registered PF_INET protocol family
+[    0.760668] IP idents hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.779567] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.789025] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.797423] TCP established hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.806216] TCP bind hash table entries: 2048 (order: 4, 65536 bytes, linear)
+[    0.814990] TCP: Hash tables configured (established 2048 bind 2048)
+[    0.825145] MPTCP token hash table entries: 256 (order: 0, 6144 bytes, linear)
+[    0.834250] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.842109] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+[    0.853805] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.869368] RPC: Registered named UNIX socket transport module.
+[    0.875872] RPC: Registered udp transport module.
+[    0.881368] RPC: Registered tcp transport module.
+[    0.886176] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    0.893781] NET: Registered PF_XDP protocol family
+[    0.899775] PCI: CLS 0 bytes, default 64
+[    0.913628] Initialise system trusted keyrings
+[    0.921513] workingset: timestamp_bits=36 max_order=16 bucket_order=0
+[    0.933188] zbud: loaded
+[    0.944219] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.955651] NFS: Registering the id_resolver key type
+[    0.961671] Key type id_resolver registered
+[    0.965931] Key type id_legacy registered
+[    0.971541] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[    0.981260] SGI XFS with ACLs, security attributes, quota, no debug enabled
+[    1.015893] Key type asymmetric registered
+[    1.021143] Asymmetric key parser 'x509' registered
+[    1.027361] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 247)
+[    1.036971] io scheduler mq-deadline registered
+[    1.041769] io scheduler kyber registered
+[    1.047223] io scheduler bfq registered
+[    1.061644] Serial: 8250/16550 driver, 1 ports, IRQ sharing disabled
+[    1.077383] printk: console [ttyS0] disabled
+[    1.083232] 40002000.uart: ttyS0 at MMIO 0x40002000 (irq = 13, base_baud = 1500000) is a 16550A
+[    1.094435] printk: console [ttyS0] enabled
+[    1.094435] printk: console [ttyS0] enabled
+[    1.129972] loop: module loaded
+[    1.129972] loop: module loaded
+[    1.139083] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[    1.139083] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[    1.157192] virtio_blk virtio0: [vda] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)
+[    1.157192] virtio_blk virtio0: [vda] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)
+[    1.190784] virtio_blk virtio1: 1/0/0 default/read/poll queues
+[    1.190784] virtio_blk virtio1: 1/0/0 default/read/poll queues
+[    1.206919] virtio_blk virtio1: [vdb] 65536 512-byte logical blocks (33.6 MB/32.0 MiB)
+[    1.206919] virtio_blk virtio1: [vdb] 65536 512-byte logical blocks (33.6 MB/32.0 MiB)
+[    1.228803] virtio_blk virtio2: 1/0/0 default/read/poll queues
+[    1.228803] virtio_blk virtio2: 1/0/0 default/read/poll queues
+[    1.243340] virtio_blk virtio2: [vdc] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)
+[    1.243340] virtio_blk virtio2: [vdc] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)
+[    1.269793] Loading iSCSI transport class v2.0-870.
+[    1.269793] Loading iSCSI transport class v2.0-870.
+[    1.283927] iscsi: registered transport (tcp)
+[    1.283927] iscsi: registered transport (tcp)
+[    1.300985] rtc-pl031 40001000.rtc: registered as rtc0
+[    1.300985] rtc-pl031 40001000.rtc: registered as rtc0
+[    1.313020] rtc-pl031 40001000.rtc: setting system clock to 2026-09-17T08:10:13 UTC (1789632613)
+[    1.313020] rtc-pl031 40001000.rtc: setting system clock to 2026-09-17T08:10:13 UTC (1789632613)
+[    1.339062] vmclock 801fe000.ptp: vmclock0: registered miscdev
+[    1.339062] vmclock 801fe000.ptp: vmclock0: registered miscdev
+[    1.355459] hid: raw HID events driver (C) Jiri Kosina
+[    1.355459] hid: raw HID events driver (C) Jiri Kosina
+[    1.377778] Initializing XFRM netlink socket
+[    1.377778] Initializing XFRM netlink socket
+[    1.389584] NET: Registered PF_INET6 protocol family
+[    1.389584] NET: Registered PF_INET6 protocol family
+[    1.420415] Segment Routing with IPv6
+[    1.420415] Segment Routing with IPv6
+[    1.428667] In-situ OAM (IOAM) with IPv6
+[    1.428667] In-situ OAM (IOAM) with IPv6
+[    1.471285] bpfilter: Loaded bpfilter_umh pid 46
+[    1.471285] bpfilter: Loaded bpfilter_umh pid 46
+[    1.504255] NET: Registered PF_PACKET protocol family
+[    1.504255] NET: Registered PF_PACKET protocol family
+[    1.517493] Bridge firewalling registered
+[    1.517493] Bridge firewalling registered
+[    1.528989] Key type dns_resolver registered
+[    1.528989] Key type dns_resolver registered
+[    1.539558] NET: Registered PF_VSOCK protocol family
+[    1.539558] NET: Registered PF_VSOCK protocol family
+[    1.566015] registered taskstats version 1
+[    1.566015] registered taskstats version 1
+[    1.582298] Loading compiled-in X.509 certificates
+[    1.582298] Loading compiled-in X.509 certificates
+[    1.594639] zswap: loaded using pool lzo/zbud
+[    1.594639] zswap: loaded using pool lzo/zbud
+[    1.605338] Key type .fscrypt registered
+[    1.605338] Key type .fscrypt registered
+[    1.613396] Key type fscrypt-provisioning registered
+[    1.613396] Key type fscrypt-provisioning registered
+[    1.627288] Key type encrypted registered
+[    1.627288] Key type encrypted registered
+[    1.640575] clk: Disabling unused clocks
+[    1.640575] clk: Disabling unused clocks
+[    1.689688] EXT4-fs (vda): write access unavailable, skipping orphan cleanup
+[    1.689688] EXT4-fs (vda): write access unavailable, skipping orphan cleanup
+[    1.701354] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.
+[    1.701354] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.
+[    1.714916] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[    1.714916] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.
+[    1.730241] devtmpfs: mounted
+[    1.730241] devtmpfs: mounted
+[    1.739742] Freeing unused kernel memory: 2240K
+[    1.739742] Freeing unused kernel memory: 2240K
+[    1.747227] Run /sbin/tachyon-init as init process
+[    1.747227] Run /sbin/tachyon-init as init process
+[    1.853636] EXT4-fs (vdb): write access unavailable, skipping orphan cleanup
+[    1.853636] EXT4-fs (vdb): write access unavailable, skipping orphan cleanup
+[    1.865324] EXT4-fs (vdb): mounted filesystem with ordered data mode. Quota mode: none.
+[    1.865324] EXT4-fs (vdb): mounted filesystem with ordered data mode. Quota mode: none.
+[    1.880694] EXT4-fs (vdc): mounted filesystem without journal. Quota mode: none.
+[    1.880694] EXT4-fs (vdc): mounted filesystem without journal. Quota mode: none.
+[2m2026-09-17T08:10:14.145522Z[0m [32m INFO[0m x1: session starting behind the pump [3menvironment_id[0m[2m=[0menv_x1restore [3mport[0m[2m=[0m5000
+[2m2026-09-17T08:10:14.170077Z[0m [32m INFO[0m handshake complete [3menvironment_id[0m[2m=[0menv_x1restore [3mepoch[0m[2m=[0m1 [3mentrypoint[0m[2m=[0m/function/app [3margs[0m[2m=[0m0 [3menv_vars[0m[2m=[0m0 [3mworking_dir[0m[2m=[0m/function [3minit_timeout_ms[0m[2m=[0m600000 [3mmax_response_bytes[0m[2m=[0m1048576
+[2m2026-09-17T08:10:14.211242Z[0m [32m INFO[0m runtime api listening [3mruntime_api[0m[2m=[0mhttp://127.0.0.1:9001
+[2m2026-09-17T08:10:14.228877Z[0m [32m INFO[0m user process started [3mpid[0m[2m=[0m105
+[2m2026-09-17T08:10:14.355220Z[0m [32m INFO[0m x1: continue answered cold
+[2m2026-09-17T08:10:14.362221Z[0m [32m INFO[0m experimental lifecycle: continue answered [3mrestored[0m[2m=[0mfalse
+[2m2026-09-17T08:10:14.413387Z[0m [32m INFO[0m user process ready [3minit_ms[0m[2m=[0m217
+[2m2026-09-17T08:10:14.431769Z[0m [32m INFO[0m invoke received [3mattempt_id[0m[2m=[0matt_x1_0 [3mepoch[0m[2m=[0m1 [3mhost_deadline_ms[0m[2m=[0m1789632644367 [3mremaining_ms[0m[2m=[0m30000 [3mdeadline_ms[0m[2m=[0m1789632644431
+[2m2026-09-17T08:10:14.474571Z[0m [32m INFO[0m response received [3mattempt_id[0m[2m=[0matt_x1_0 [3mhandler_ms[0m[2m=[0mSome(13)
+[2m2026-09-17T08:10:14.492957Z[0m [32m INFO[0m shutdown received [3mreason[0m[2m=[0mx1 done
+[    2.347354] reboot: Power down
+[    2.347354] reboot: Power down

@@ -1,0 +1,3 @@
+08:11:12.339307487 PUT /snapshot/load -> 400 (12 ms)
+  request: {"snapshot_path":"../snap/vmstate","mem_backend":{"backend_type":"File","backend_path":"../snap/mem"},"resume_vm":true}
+  response: {"fault_message":"Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: Failed to restore devices: Error restoring MMIO devices: Block: Virtio backend error: Error manipulating the backing file: No such file or directory (os error 2) scratch.ext4"}

@@ -1,0 +1,134 @@
+cloud-hypervisor:   0.000075s: <main> INFO:event_monitor/src/lib.rs:113 -- Event: source = vmm event = starting 
+cloud-hypervisor:   0.001866s: <vmm> INFO:vmm/src/api/mod.rs:844 -- API request event: VmCreate VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures, nested: true }, memory: MemoryConfig { size: 268435456, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("/home/takanorifukuyama.guest/tsls/.kvm/vmlinux"), cmdline: Some("console=hvc0 loglevel=1 root=/dev/vda ro reboot=k panic=1 keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc"), initramfs: None }), rate_limit_groups: None, disks: Some([DiskConfig { path: Some("rootfs.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: None, disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }, DiskConfig { path: Some("function.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: None, disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }, DiskConfig { path: Some("scratch.ext4"), readonly: false, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: None, disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }]), net: None, rng: RngConfig { src: "/dev/urandom", iommu: false }, balloon: None, fs: None, pmem: None, serial: ConsoleConfig { file: None, mode: Off, iommu: false, socket: None }, console: ConsoleConfig { file: None, mode: Tty, iommu: false, socket: None }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { cid: 3, socket: "v.sock", iommu: false, id: None, pci_segment: 0 }), pvpanic: false, iommu: false, numa: None, watchdog: false, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }
+cloud-hypervisor:   0.003680s: <vmm> INFO:vmm/src/api/mod.rs:735 -- API request event: VmBoot
+cloud-hypervisor:   0.003694s: <vmm> INFO:vmm/src/lib.rs:1641 -- Booting VM
+cloud-hypervisor:   0.003704s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = booting 
+cloud-hypervisor:   0.004069s: <vmm> INFO:vmm/src/memory_manager.rs:592 -- create ram region for zone mem0, region_start: 0x40000000, region_size: 0x10000000
+cloud-hypervisor:   0.004096s: <vmm> INFO:vmm/src/memory_manager.rs:1491 -- RAM region mapping at 0xe8bfc2200000 (size = 0x10000000)
+cloud-hypervisor:   0.004115s: <vmm> INFO:vmm/src/vm.rs:557 -- Booting VM from config: Mutex { data: VmConfig { cpus: CpusConfig { boot_vcpus: 1, max_vcpus: 1, topology: None, kvm_hyperv: false, max_phys_bits: 46, affinity: None, features: CpuFeatures, nested: true }, memory: MemoryConfig { size: 268435456, mergeable: false, hotplug_method: Acpi, hotplug_size: None, hotplugged_size: None, shared: false, hugepages: false, hugepage_size: None, prefault: false, zones: None, thp: true }, payload: Some(PayloadConfig { firmware: None, kernel: Some("/home/takanorifukuyama.guest/tsls/.kvm/vmlinux"), cmdline: Some("console=hvc0 loglevel=1 root=/dev/vda ro reboot=k panic=1 keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc"), initramfs: None }), rate_limit_groups: None, disks: Some([DiskConfig { path: Some("rootfs.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: None, disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }, DiskConfig { path: Some("function.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: None, disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }, DiskConfig { path: Some("scratch.ext4"), readonly: false, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: None, disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }]), net: None, rng: RngConfig { src: "/dev/urandom", iommu: false }, balloon: None, fs: None, pmem: None, serial: ConsoleConfig { file: None, mode: Off, iommu: false, socket: None }, console: ConsoleConfig { file: None, mode: Tty, iommu: false, socket: None }, devices: None, user_devices: None, vdpa: None, vsock: Some(VsockConfig { cid: 3, socket: "v.sock", iommu: false, id: None, pci_segment: 0 }), pvpanic: false, iommu: false, numa: None, watchdog: false, pci_segments: None, platform: None, tpm: None, preserved_fds: None, landlock_enable: false, landlock_rules: None }, poisoned: false, .. }
+cloud-hypervisor:   0.004410s: <vmm> INFO:vmm/src/pci_segment.rs:107 -- Adding PCI segment: id=0, PCI MMIO config address: 0x30000000, mem32 area [0x10000000-0x2fffffff, mem64 area [0x100000000-0xfeffffffff
+cloud-hypervisor:   0.004430s: <vmm> INFO:vmm/src/memory_manager.rs:1772 -- Creating userspace mapping: 40000000 -> e8bfc2200000 10000000, slot 0
+cloud-hypervisor:   0.007984s: <vmm> INFO:vmm/src/memory_manager.rs:1830 -- Created userspace mapping: 40000000 -> e8bfc2200000 10000000
+cloud-hypervisor:   0.008143s: <vmm> INFO:vmm/src/cpu.rs:992 -- Request to create new vCPUs: desired = 1, max = 1, allocated = 0, present = 0
+cloud-hypervisor:   0.008158s: <vmm> INFO:vmm/src/cpu.rs:886 -- Creating vCPU: cpu_id = 0
+cloud-hypervisor:   0.012591s: <vmm> INFO:vmm/src/device_manager.rs:2625 -- Creating virtio-block device: DiskConfig { path: Some("rootfs.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk0"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }
+cloud-hypervisor:   0.012778s: <vmm> INFO:vmm/src/device_manager.rs:2757 -- Using asynchronous RAW disk file (io_uring)
+cloud-hypervisor:   0.012794s: <vmm> INFO:block/src/lib.rs:843 -- Probed file sparse support: punch_hole=false, zero_range=false => false
+cloud-hypervisor:   0.012812s: <vmm> WARN:virtio-devices/src/block.rs:736 -- sparse=on requested but backend does not support sparse operations
+cloud-hypervisor:   0.012823s: <vmm> INFO:virtio-devices/src/block.rs:748 -- Disk topology: DiskTopology { logical_block_size: 512, physical_block_size: 512, minimum_io_size: 512, optimal_io_size: 0 }
+cloud-hypervisor:   0.012860s: <vmm> INFO:vmm/src/device_manager.rs:2625 -- Creating virtio-block device: DiskConfig { path: Some("function.ext4"), readonly: true, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk1"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }
+cloud-hypervisor:   0.012931s: <vmm> INFO:vmm/src/device_manager.rs:2757 -- Using asynchronous RAW disk file (io_uring)
+cloud-hypervisor:   0.012951s: <vmm> INFO:block/src/lib.rs:843 -- Probed file sparse support: punch_hole=false, zero_range=false => false
+cloud-hypervisor:   0.012963s: <vmm> WARN:virtio-devices/src/block.rs:736 -- sparse=on requested but backend does not support sparse operations
+cloud-hypervisor:   0.012972s: <vmm> INFO:virtio-devices/src/block.rs:748 -- Disk topology: DiskTopology { logical_block_size: 512, physical_block_size: 512, minimum_io_size: 512, optimal_io_size: 0 }
+cloud-hypervisor:   0.012993s: <vmm> INFO:vmm/src/device_manager.rs:2625 -- Creating virtio-block device: DiskConfig { path: Some("scratch.ext4"), readonly: false, direct: false, iommu: false, num_queues: 1, queue_size: 128, vhost_user: false, vhost_socket: None, rate_limit_group: None, rate_limiter_config: None, id: Some("_disk2"), disable_io_uring: false, disable_aio: false, pci_segment: 0, serial: None, queue_affinity: None, backing_files: false, sparse: true, image_type: Raw }
+cloud-hypervisor:   0.013064s: <vmm> INFO:vmm/src/device_manager.rs:2757 -- Using asynchronous RAW disk file (io_uring)
+cloud-hypervisor:   0.013102s: <vmm> INFO:block/src/lib.rs:843 -- Probed file sparse support: punch_hole=true, zero_range=true => true
+cloud-hypervisor:   0.013115s: <vmm> INFO:virtio-devices/src/block.rs:748 -- Disk topology: DiskTopology { logical_block_size: 512, physical_block_size: 512, minimum_io_size: 512, optimal_io_size: 0 }
+cloud-hypervisor:   0.013135s: <vmm> INFO:vmm/src/device_manager.rs:3087 -- Creating virtio-rng device: RngConfig { src: "/dev/urandom", iommu: false }
+cloud-hypervisor:   0.013161s: <vmm> INFO:vmm/src/device_manager.rs:3390 -- Creating virtio-vsock device: VsockConfig { cid: 3, socket: "v.sock", iommu: false, id: Some("_vsock3"), pci_segment: 0 }
+cloud-hypervisor:   0.013455s: <vmm> INFO:virtio-devices/src/block.rs:865 -- Acquired Read lock for disk image id=_disk0,path=rootfs.ext4
+cloud-hypervisor:   0.013509s: <vmm> INFO:virtio-devices/src/block.rs:865 -- Acquired Read lock for disk image id=_disk1,path=function.ext4
+cloud-hypervisor:   0.013524s: <vmm> INFO:virtio-devices/src/block.rs:865 -- Acquired Write lock for disk image id=_disk2,path=scratch.ext4
+cloud-hypervisor:   0.013570s: <vmm> INFO:vmm/src/cpu.rs:473 -- Configuring vCPU: cpu_id = 0
+cloud-hypervisor:   0.013826s: <vmm> INFO:vmm/src/acpi.rs:1131 -- Generated ACPI tables: took 241µs size = 5437
+cloud-hypervisor:   0.013847s: <vmm> INFO:vmm/src/vm.rs:2557 -- Created ACPI tables: rsdp_addr = 0x40200000
+cloud-hypervisor:   0.014026s: <vmm> INFO:vmm/src/cpu.rs:1313 -- Starting vCPUs: desired = 1, allocated = 1, present = 0, paused = false
+cloud-hypervisor:   0.014076s: <vmm> INFO:vmm/src/cpu.rs:1093 -- Starting vCPU: cpu_id = 0
+cloud-hypervisor:   0.014356s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = booted 
+cloud-hypervisor:   0.149516s: <vcpu0> INFO:pci/src/configuration.rs:1026 -- Detected BAR reprogramming: (BAR 1) 0xfe->0x2
+cloud-hypervisor:   0.149551s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff80000, new_base: 200000000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.149725s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff80000, new_base: 200000000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.149824s: <vcpu0> INFO:pci/src/configuration.rs:1000 -- Detected BAR reprogramming: (BAR 0) 0x2ff80000->0x10000000
+cloud-hypervisor:   0.149854s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2ff80000, new_base: 10000000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.150023s: <vcpu0> INFO:pci/src/configuration.rs:1000 -- Detected BAR reprogramming: (BAR 0) 0x2ff00000->0x10080000
+cloud-hypervisor:   0.150045s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2ff00000, new_base: 10080000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.150213s: <vcpu0> INFO:pci/src/configuration.rs:1000 -- Detected BAR reprogramming: (BAR 0) 0x2fe80000->0x10100000
+cloud-hypervisor:   0.150227s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2fe80000, new_base: 10100000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.150731s: <vcpu0> INFO:pci/src/configuration.rs:1026 -- Detected BAR reprogramming: (BAR 1) 0xfe->0x2
+cloud-hypervisor:   0.150748s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff00000, new_base: 200080000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.150915s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff00000, new_base: 200080000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.151311s: <vcpu0> INFO:pci/src/configuration.rs:1026 -- Detected BAR reprogramming: (BAR 1) 0xfe->0x2
+cloud-hypervisor:   0.151326s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: feffe80000, new_base: 200100000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.151561s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: feffe80000, new_base: 200100000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.151807s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff80000, new_base: 200000000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.151984s: <vcpu0> INFO:pci/src/configuration.rs:946 -- BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff80000, new_base: 200000000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.157938s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2ff80000, new_base: 10000000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.158114s: <vcpu0> INFO:pci/src/configuration.rs:946 -- BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2ff80000, new_base: 10000000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.163693s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2ff00000, new_base: 10080000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.163875s: <vcpu0> INFO:pci/src/configuration.rs:946 -- BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2ff00000, new_base: 10080000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.169246s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2fe80000, new_base: 10100000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.169412s: <vcpu0> INFO:pci/src/configuration.rs:946 -- BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: 2fe80000, new_base: 10100000, len: 80000, region_type: Memory32BitRegion }]
+cloud-hypervisor:   0.175010s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff00000, new_base: 200080000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.175188s: <vcpu0> INFO:pci/src/configuration.rs:946 -- BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: fefff00000, new_base: 200080000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.180898s: <vcpu0> INFO:pci/src/configuration.rs:952 -- MSE bit is disabled. No BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: feffe80000, new_base: 200100000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.181080s: <vcpu0> INFO:pci/src/configuration.rs:946 -- BAR reprogramming parameter is returned: [BarReprogrammingParams { old_base: feffe80000, new_base: 200100000, len: 80000, region_type: Memory64BitRegion }]
+cloud-hypervisor:   0.195976s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1199 -- _virtio-pci-__console: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.195999s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1204 -- _virtio-pci-__console: Needs activation; returning barrier
+cloud-hypervisor:   0.196009s: <vcpu0> INFO:vmm/src/vm.rs:464 -- Waiting for barrier
+cloud-hypervisor:   0.196039s: <vmm> INFO:vmm/src/lib.rs:1555 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.196190s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = __console
+cloud-hypervisor:   0.196204s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:303 -- _virtio-pci-__console: Waiting for barrier
+cloud-hypervisor:   0.196220s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:305 -- _virtio-pci-__console: Barrier released
+cloud-hypervisor:   0.196248s: <vcpu0> INFO:vmm/src/vm.rs:466 -- Barrier released
+cloud-hypervisor:   0.219356s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1199 -- _virtio-pci-__rng: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.219382s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1204 -- _virtio-pci-__rng: Needs activation; returning barrier
+cloud-hypervisor:   0.219392s: <vcpu0> INFO:vmm/src/vm.rs:464 -- Waiting for barrier
+cloud-hypervisor:   0.219432s: <vmm> INFO:vmm/src/lib.rs:1555 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.219595s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = __rng
+cloud-hypervisor:   0.219611s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:303 -- _virtio-pci-__rng: Waiting for barrier
+cloud-hypervisor:   0.219628s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:305 -- _virtio-pci-__rng: Barrier released
+cloud-hypervisor:   0.219695s: <vcpu0> INFO:vmm/src/vm.rs:466 -- Barrier released
+cloud-hypervisor:   0.229195s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1199 -- _virtio-pci-_disk0: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.229228s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1204 -- _virtio-pci-_disk0: Needs activation; returning barrier
+cloud-hypervisor:   0.229238s: <vcpu0> INFO:vmm/src/vm.rs:464 -- Waiting for barrier
+cloud-hypervisor:   0.229275s: <vmm> INFO:vmm/src/lib.rs:1555 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.229296s: <vmm> INFO:virtio-devices/src/block.rs:907 -- Changing cache mode to writeback
+cloud-hypervisor:   0.229521s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _disk0
+cloud-hypervisor:   0.229539s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:303 -- _virtio-pci-_disk0: Waiting for barrier
+cloud-hypervisor:   0.229554s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:305 -- _virtio-pci-_disk0: Barrier released
+cloud-hypervisor:   0.229589s: <vcpu0> INFO:vmm/src/vm.rs:466 -- Barrier released
+cloud-hypervisor:   0.237300s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1199 -- _virtio-pci-_disk1: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.237323s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1204 -- _virtio-pci-_disk1: Needs activation; returning barrier
+cloud-hypervisor:   0.237341s: <vcpu0> INFO:vmm/src/vm.rs:464 -- Waiting for barrier
+cloud-hypervisor:   0.237372s: <vmm> INFO:vmm/src/lib.rs:1555 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.237392s: <vmm> INFO:virtio-devices/src/block.rs:907 -- Changing cache mode to writeback
+cloud-hypervisor:   0.237558s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _disk1
+cloud-hypervisor:   0.237576s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:303 -- _virtio-pci-_disk1: Waiting for barrier
+cloud-hypervisor:   0.237592s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:305 -- _virtio-pci-_disk1: Barrier released
+cloud-hypervisor:   0.237617s: <vcpu0> INFO:vmm/src/vm.rs:466 -- Barrier released
+cloud-hypervisor:   0.245481s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1199 -- _virtio-pci-_disk2: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.245501s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1204 -- _virtio-pci-_disk2: Needs activation; returning barrier
+cloud-hypervisor:   0.245510s: <vcpu0> INFO:vmm/src/vm.rs:464 -- Waiting for barrier
+cloud-hypervisor:   0.245544s: <vmm> INFO:vmm/src/lib.rs:1555 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.245564s: <vmm> INFO:virtio-devices/src/block.rs:907 -- Changing cache mode to writeback
+cloud-hypervisor:   0.245683s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _disk2
+cloud-hypervisor:   0.245709s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:303 -- _virtio-pci-_disk2: Waiting for barrier
+cloud-hypervisor:   0.245725s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:305 -- _virtio-pci-_disk2: Barrier released
+cloud-hypervisor:   0.245753s: <vcpu0> INFO:vmm/src/vm.rs:466 -- Barrier released
+cloud-hypervisor:   0.271647s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1199 -- _virtio-pci-_vsock3: Needs activation; writing to activate event fd
+cloud-hypervisor:   0.271668s: <vcpu0> INFO:virtio-devices/src/transport/pci_device.rs:1204 -- _virtio-pci-_vsock3: Needs activation; returning barrier
+cloud-hypervisor:   0.271677s: <vcpu0> INFO:vmm/src/vm.rs:464 -- Waiting for barrier
+cloud-hypervisor:   0.271719s: <vmm> INFO:vmm/src/lib.rs:1555 -- Trying to activate pending virtio devices: count = 1
+cloud-hypervisor:   0.271812s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = virtio-device event = activated id = _vsock3
+cloud-hypervisor:   0.271826s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:303 -- _virtio-pci-_vsock3: Waiting for barrier
+cloud-hypervisor:   0.271841s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:305 -- _virtio-pci-_vsock3: Barrier released
+cloud-hypervisor:   0.271865s: <vcpu0> INFO:vmm/src/vm.rs:466 -- Barrier released
+cloud-hypervisor:   3.006629s: <vmm> INFO:vmm/src/api/mod.rs:950 -- API request event: VmPause
+cloud-hypervisor:   3.006651s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = pausing 
+cloud-hypervisor:   3.007755s: <vmm> INFO:virtio-devices/src/device.rs:305 -- Pausing virtio-block
+cloud-hypervisor:   3.007832s: <_disk1_q0> INFO:virtio-devices/src/epoll_helper.rs:222 -- PAUSE_EVENT received, pausing epoll loop
+cloud-hypervisor:   3.007862s: <vmm> INFO:virtio-devices/src/device.rs:305 -- Pausing virtio-rng
+cloud-hypervisor:   3.007958s: <__rng> INFO:virtio-devices/src/epoll_helper.rs:222 -- PAUSE_EVENT received, pausing epoll loop
+cloud-hypervisor:   3.007993s: <vmm> INFO:virtio-devices/src/device.rs:305 -- Pausing virtio-vsock
+cloud-hypervisor:   3.008034s: <_vsock3> INFO:virtio-devices/src/epoll_helper.rs:222 -- PAUSE_EVENT received, pausing epoll loop
+cloud-hypervisor:   3.008063s: <vmm> INFO:virtio-devices/src/device.rs:305 -- Pausing virtio-block
+cloud-hypervisor:   3.008104s: <_disk2_q0> INFO:virtio-devices/src/epoll_helper.rs:222 -- PAUSE_EVENT received, pausing epoll loop
+cloud-hypervisor:   3.008137s: <vmm> INFO:virtio-devices/src/device.rs:305 -- Pausing virtio-block
+cloud-hypervisor:   3.008180s: <_disk0_q0> INFO:virtio-devices/src/epoll_helper.rs:222 -- PAUSE_EVENT received, pausing epoll loop
+cloud-hypervisor:   3.008222s: <vmm> INFO:virtio-devices/src/device.rs:305 -- Pausing virtio-console
+cloud-hypervisor:   3.008267s: <__console> INFO:virtio-devices/src/epoll_helper.rs:222 -- PAUSE_EVENT received, pausing epoll loop
+cloud-hypervisor:   3.008303s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = paused 
+cloud-hypervisor:   3.017523s: <vmm> INFO:vmm/src/api/mod.rs:1376 -- API request event: VmSnapshot VmSnapshotConfig { destination_url: "file:///home/takanorifukuyama.guest/tsls/.kvm/x1/ch-20260917T085211Z/msnap" }
+cloud-hypervisor:   3.017539s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = snapshotting 
+cloud-hypervisor:   3.018242s: <vmm> INFO:event_monitor/src/lib.rs:113 -- Event: source = vm event = snapshotted 
