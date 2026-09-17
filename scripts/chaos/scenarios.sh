@@ -295,6 +295,8 @@ scenario_async_kill_after_commit_before_ack() { async_failpoint async_kill_after
 # ---------------------------------------------------------------------------
 
 scenario_stale_owner_sync_lease() {
+  # Firecracker: environments ended first by another path report `unknown` host usage (lib.sh cv_usage).
+  CH_CGROUP_UNKNOWN_OK=1
   sc_begin stale_owner_sync_lease "$(scenario_fault stale_owner_sync_lease)"
   common_start
   gw_config b "$(free_port)" chaos-b
@@ -940,6 +942,8 @@ scenario_control_plane_outage() {
 # ---------------------------------------------------------------------------
 
 scenario_orphan_recovery_after_crash() {
+  # Firecracker: environments ended first by another path report `unknown` host usage (lib.sh cv_usage).
+  CH_CGROUP_UNKNOWN_OK=1
   CH_MAX_PENDING=100
   # The orphan object must still be there at the crash.
   CH_ORPHAN_GRACE=45

@@ -684,16 +684,34 @@ cv_usage() {
   ck cv.usage_counted_once "$([ "$pending" = 0 ] && [ "$events" = "$distinct" ] && [ "$dup_attempts" = 0 ] && echo 0 || echo 1)" \
     "journal_pending=$pending ledger_events=$events distinct=$distinct attempts_settled_twice=$dup_attempts duplicates_ignored=$(curl -s --max-time 2 "$(gw_url "$gw")/readyz" | jq -r .usage.ledger.duplicates_ignored)"
   if provider_is_fc; then
-    # Host cost from cgroup accounting: every environment that stopped so far reported its VMM
-    # cgroup's usage_usec and memory.peak (provider_reported). Environments still pooled report when
-    # they stop (after this check), so only the ones already stopped are counted.
-    local stopped reported
+    # Host cost from cgroup accounting. Every EnvironmentStopped either carries the VMM cgroup's
+    # usage_usec and memory.peak as provider_reported (> 0) or says `unknown`: a value is never
+    # invented. Environments still pooled report when they stop (after this check).
+    # Known gaps, recorded as observations and in docs/failure-matrix.md §8 (KVM final batch):
+    #   - an environment ended by another path first (a fenced environment the reclaim terminated,
+    #     then settled late by its old owner; one abandoned while booting during a shutdown) is
+    #     reported with `unknown` host usage (CH_CGROUP_UNKNOWN_OK=1 in those scenarios);
+    #   - an environment terminated by the reclaim / startup reconcile of a dead owner gets no
+    #     EnvironmentStopped at all: its host cost is not metered (environments_without_stop_event).
+    local stopped reported unknown invented terminal_envs envs_with_stop
     stopped="$(sqldb "$ledger" "SELECT COUNT(*) FROM function_usage_events WHERE event_type = 'environment_stopped'")"
     reported="$(sqldb "$ledger" "SELECT COUNT(*) FROM function_usage_events WHERE event_type = 'environment_stopped' AND json_extract(body, '\$.resources.cgroup_cpu_usec.measurement') = 'provider_reported' AND json_extract(body, '\$.resources.cgroup_cpu_usec.value') > 0 AND json_extract(body, '\$.resources.cgroup_memory_peak_bytes.measurement') = 'provider_reported' AND json_extract(body, '\$.resources.cgroup_memory_peak_bytes.value') > 0")"
+    unknown="$(sqldb "$ledger" "SELECT COUNT(*) FROM function_usage_events WHERE event_type = 'environment_stopped' AND json_extract(body, '\$.resources.cgroup_cpu_usec.measurement') = 'unknown' AND json_extract(body, '\$.resources.cgroup_cpu_usec.value') IS NULL AND json_extract(body, '\$.resources.cgroup_memory_peak_bytes.measurement') = 'unknown'")"
+    invented=$((stopped - reported - unknown))
+    terminal_envs="$(sql "SELECT COUNT(*) FROM environments WHERE terminal = 1")"
+    envs_with_stop="$(sqldb "$ledger" "SELECT COUNT(DISTINCT json_extract(body, '\$.environment_id')) FROM function_usage_events WHERE event_type = 'environment_stopped'")"
     obs usage.environment_stopped_events "$stopped"
     obs usage.environment_stopped_with_cgroup_usage "$reported"
-    ck cv.usage_from_cgroup_accounting "$([ "$stopped" -ge 1 ] && [ "$reported" = "$stopped" ] && echo 0 || echo 1)" \
-      "environment_stopped=$stopped with provider_reported cgroup cpu usec and memory.peak=$reported"
+    obs usage.environment_stopped_with_unknown_host_usage "$unknown"
+    obs usage.terminal_environments "$terminal_envs"
+    obs usage.environments_without_stop_event "$((terminal_envs - envs_with_stop))"
+    if [ "${CH_CGROUP_UNKNOWN_OK:-0}" = 1 ]; then
+      ck cv.usage_from_cgroup_accounting_or_unknown "$([ "$reported" -ge 1 ] && [ "$invented" = 0 ] && echo 0 || echo 1)" \
+        "environment_stopped=$stopped provider_reported=$reported unknown=$unknown other=$invented; terminal environments=$terminal_envs, without a stop event=$((terminal_envs - envs_with_stop)) (known gaps, docs/failure-matrix.md §8)"
+    else
+      ck cv.usage_from_cgroup_accounting "$([ "$stopped" -ge 1 ] && [ "$reported" = "$stopped" ] && echo 0 || echo 1)" \
+        "environment_stopped=$stopped with provider_reported cgroup cpu usec and memory.peak=$reported unknown=$unknown; terminal environments=$terminal_envs, without a stop event=$((terminal_envs - envs_with_stop))"
+    fi
   fi
 }
 
