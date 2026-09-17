@@ -73,6 +73,15 @@ Accepted（2026-09-17、PLT-4653、X1 実験・非ブロック）。前提は AD
 - 2 clone 同時の時は verify・scratch copy・load が並ぶので逐次より遅い。
 - 同じ Issue の作業中、rebase 前の commit で 2 回走らせた。1 回目は debug build の gateway で封印 262 s・verify 18〜23 s となり、client 側で時計を比べた harness の誤りで 1 check が FAIL した（製品の check は全 PASS）。release build に変え、時計の比較を attempt の dispatch 時刻にした 2 回目は 18/18 PASS。証跡は最終 commit の上の run だけを残した。
 
+## 追補: 復元後の整合性と first response の検証（PLT-4654、2026-09-17）
+
+詳細は `docs/x1-results.md`、証跡は `docs/evidence/x1-restore-verify-20260917T131439Z/`（`scripts/x1/restore-verify.sh`、20 検査 FAIL 0、commit `dd45f2e`、同じ nested aarch64 の 1 host）。P0〜P4 とは別に判定する。
+
+- **正しさ（`examples/restore-verify`、64 MiB の合成表）**: 59 clone で固定データの checksum が cold と一致し bootstrap は再実行されない。instance id・token・RNG・loopback DB session・restore 後に生成した TLS 証明書と exporter はすべて clone ごとに別、scratch は source の書込み + 自分の書込みだけ、per-clone の 354 値は snapshot の平文・封印 file に 0 件（bootstrap の marker は平文 memory に有り = 陽性対照）。restore 後の wall clock は client の要求時間窓内、Tokio timer は 50〜57 ms。失効・1 bit 破損（平文 / 封印）・revision 更新は拒否、prefer は cold に落ちて restored に数えない。外部 DB / TLS の再接続と secret の受け渡しは egress none と経路の欠如で**未成立**。
+- **性能**: client p50 / p95 は cold 5969 / 9572 ms、warm 119 / 141 ms、restored（逐次）1555 / 1674 ms（うち verify 702 ms）。cold に対して改善、warm に対して悪化。page cache miss は p50 +104 ms、平文 cache なし（封印から復号）は 3853 ms、4 同時は 7.5 s 以上（verify が clone ごとに並ぶ）。生きている環境の Private_Dirty は cold 103 MiB に対し restored 6 MiB だが、snapshot の page cache（最大 256 MiB）は clone の cgroup に課金されず、snapshot 1 つで disk 約 596 MiB（封印 332 + 平文 264）。
+- **修正**: 平文 cache の無い snapshot（決定 2 の「sealed から復号」）の clone は、復号した file が root 0600 のため jail が function drive を拒否し、必ず失敗していた。clone が link の前に 4 file の owner / mode を snapshot 作成時と同じ値に揃える（`provider/restore.rs::snapshot_file_access`）。
+- **決定への追加（X1 の範囲）**: restore は warm pool の代替ではなく「warm が無いときの cold の置き換え」として扱う。`Unverified` のまま据え置く（verify の費用、page cache の課金、snapshot 作成が host 負荷で 30 s を超えて失敗した 1 件、別 host 未検証）。次に要る設計は `docs/x1-results.md` §8（verify の page 単位化 / 1 回化、snapshot 単位の memory 課金、egress 付き clone と secret、作成の再試行と admission、同時 restore の single-flight）。
+
 ## 却下した案
 
 | 案 | 理由 |

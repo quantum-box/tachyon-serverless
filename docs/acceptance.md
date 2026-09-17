@@ -931,6 +931,28 @@ gate: `shellcheck 0.10.0 -x -P scripts/e2e`（全 tracked `.sh`）、`scripts/ci
 | 文書内リンクが実在する file / directory を指す | 実装済み（ローカルの link 検査） | commit 時に markdown の相対リンクを検査（全件解決） |
 | knowledge PR | draft で作成、merge していない（owner のレビュー待ち） | https://github.com/quantum-box/knowledge/pull/287 |
 
+## PLT-4654 (X1) Rust 復元後の identity・接続・整合性と first response
+
+実験・非ブロック。**P0〜P4 の受入とは別に合否を判定する**（本節の状態は P0〜P4 の達成に数えない）。結果と読み方は `docs/x1-results.md`、設計への追補は ADR-0017「追補」。KVM の証跡は `docs/evidence/x1-restore-verify-20260917T131439Z/`（`scripts/x1/restore-verify.sh`、20 検査 FAIL 0、commit `dd45f2e`）と、途中で止まった 1 回目 `docs/evidence/x1-restore-verify-20260917T130328Z-aborted/`。検証 host は Apple M4 上の Lima VM（nested virtualization、aarch64）1 台だけで、値は参考値。sample は合成データの `examples/restore-verify` だけで、一般の Rust アプリへの対応は保証しない。
+
+**総合判定**: 正しさ（この sample）は**成立**。性能は **cold に対して改善**（client p50 5969 → 1555 ms、p95 9572 → 1674 ms）、**warm に対して悪化**（119 → 1555 ms）、同時 restore と平文 cache なしは悪化。外部 DB / TLS の再接続・secret・別 host は**未成立**。
+
+| # | 受入条件 / 検証 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 初期化済み固定データが復元され、instance 固有状態は別々に更新される | 達成・KVM実測あり | `checks.tsv` の `fixed-data`（59 clone の checksum `e5aa88d0…` が cold と一致、lookup・64 spot check・8 clone で全体再計算）、`bootstrap-not-rerun`（bootstrap_env = source、process 内 1 回、`rv-bootstrap.log` 1 行、bootstrap 時刻 < snapshot 作成）、`identity-diverges`（環境 id・instance id・token・RNG 初値・DB session / nonce・TLS 証明書 / exporter が 59 種類、generation 重複なし）、`clock-timer`（wall clock が要求時間窓内、50 ms timer 50〜57 ms、wall と monotonic の差 ≤ 1 ms）。unit test: `examples/restore-verify` の `copies_diverge_and_share_the_fixed_data`、`table_is_deterministic_with_a_known_checksum` |
+| 2 | clone 間の書込み・認証状態が混ざらない | 達成・KVM実測あり（loopback のみ） | `scratch-isolation`（各 clone は source の `rv-bootstrap.log` と自分の `rv-instance-<id>` だけ、書込み前後とも他 clone の file 無し）、`connections`（loopback DB は自分の token で認証、TLS exporter 両側一致）、`auth-not-in-snapshot`（per-clone 354 値が snapshot の平文 4 file・封印 file・manifest・record に 0 件、陽性対照の bootstrap marker は平文 memory に 1 件・`memory.sealed` に 0 件、平文 sha256 は clone 前後で不変） |
+| 3 | 壊れた / 失効 snapshot を拒否する | 達成・KVM実測あり | `corrupt-require`（平文 memory 1 bit → `artifact_corrupted`、quarantined）、`corrupt-sealed`（平文を消し `memory.sealed` 1 bit → AES-GCM 失敗で拒否、quarantined）、`corrupt-prefer`（cold に fallback、`restored = false`、`restore_fallback = artifact_corrupted`）、`revoked`（API で revoke → `revoked` で拒否）、`revision-stale`（`revision_mismatch`）、`require-no-snapshot`。期限切れは KVM で作っていない（PLT-4653 の統合テスト `revoked_and_expired_snapshots_are_refused`） |
+| 4 | VMM API 完了だけでなく handler が正しい結果を返すまでを測る | 達成・KVM実測あり | client = gateway 経由の curl `time_total`、handler の lookup / spot check / checksum を検査し、誤りは失敗に数える（`scripts/x1/restore-verify-report.sh`）。内訳は verify・load・doorbell・再接続・guest after_restore・handler（`summary.md`） |
+| 5 | cold / warm / restored と cache hit / miss で最初の HTTP 応答・memory・保存容量を比較する | 達成・KVM実測あり（1 host） | `summary.md`: client p50 / p95 / p99 は cold 5969 / 9572 / 10546（n=20）、cold cache miss 7474 / 15820 / 15820（n=10）、warm 119 / 141 / 142（n=20）、restored 1555 / 1674 / 1861（n=30、verify p50 702）、restored cache miss 1659 / 7766 / 21095（n=20、tail は物理 host 負荷 17〜43 の時刻と一致）、平文 cache なし 3853 / 4297（n=5）、作成直後 1 回目 1722 / 2573（n=6）と 2 回目 1554 / 4643（n=5）、4 同時 7552 / 26936（n=8、verify=true）。失敗 0。VMM Private_Dirty p50 cold 103 / warm 105 / restored 6 MiB、cgroup memory.peak cold 107 / restored 10 MiB（restored は共有 page cache が clone の cgroup に課金されない）。snapshot 1 つで封印 332 MiB + 平文 264 MiB（実割当）、作成 7.6〜17.5 s、封印 2.9〜5.3 s |
+| 6 | vsock / agent の再接続 | 達成・KVM実測あり | `reconnect-series`: 逐次 30 restore で再接続 1 回・doorbell 1 回・130〜161 ms・失敗 0。全 59 restore で `restore_reconnects = 1` |
+| 7 | 実測の改善 / 悪化 / 未成立を報告し、復元不可なら成功とせず追加設計を示す | 達成 | `docs/x1-results.md` §7（判定）・§8（追加設計: verify の費用、page cache の課金、egress 付き clone と secret、snapshot 作成の頑健性、同時 restore）。検証中に見つけた不具合（平文 cache の無い snapshot の clone が jail の mode 検査で必ず失敗）は修正して KVM で再確認（`plaintext-cache-miss` 5/5、`crates/providers/firecracker/src/provider/restore.rs::tests::snapshot_files_are_readable_by_the_jail_but_never_writable_or_public`）。1 回目の run の snapshot 作成失敗（host 負荷で source の handshake が 30 s 超過）も記録 |
+| 8 | 手順・profile・ログを残し、P0〜P4 と別に判定する | 達成 | `scripts/x1/restore-verify.sh`（手順と exit code は先頭のコメント、`docs/x1-results.md` §9）、evidence の `versions.txt` / `profile/`（host・version・commit・kernel / rootfs / binary / config の sha256）、`gateway-{a,b}.log`、`attempts.jsonl`、`physical-host-load.tsv`。本節 |
+| 9 | DB / TLS の再接続 | **未成立** | clone は egress none だけ（PLT-4653）で外部に出られない。loopback の DB / TLS を restore 後に作ることだけ確認した。「snapshot 前に張った外部接続の restore 後の扱い」「restore 後の secret の受け渡し」は経路が無い |
+| 10 | 検証: 対応 profile の同一 host | 達成・KVM実測あり | Firecracker v1.17.0 + jailer + cgroup required、nested aarch64 の同一 host |
+| 11 | 検証: 同一 CPU 条件の別検証 host | **未成立** | 2 台目の KVM host が無い。x86_64・bare metal も未測定 |
+
+未達・残り: 別 host / x86_64 / bare metal での再現、egress 付き clone と secret、verify の page 単位化または 1 回化、snapshot の page cache の課金、snapshot 作成の再試行と admission、同時 restore の single-flight、期限切れ snapshot の KVM での確認。
+
 ## ADR-0001 残る測定の状況
 
 測定の定義は `docs/adr/0001-execution-provider-firecracker-first.md` §「残る測定」。値はすべて aarch64 の nested virtualization 上の参考値（§「証跡」の制約を参照）。

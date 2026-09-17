@@ -1,0 +1,21 @@
+check	result	detail
+provider	PASS	snapshot_create=unverified snapshot_clone=unverified
+require-no-snapshot	PASS	Host.RestoreRequiredUnavailable (no_snapshot), nothing booted
+snapshot-S1	PASS	snap_01m2qr9wtwagejjj8kn3tj2y50 {"copy_ms":33,"create_ms":242,"pause_ms":0,"seal_ms":3011}
+restored-all	PASS	59/59 attempts HTTP 200, start_kind=restored, guest restored=true
+fixed-data	PASS	checksum e5aa88d035ed23006cb25d35e12e4cd66d794bbcdc9bde45c5af33c548b11c94 in all 59 clones = cold (e5aa88d035ed23006cb25d35e12e4cd66d794bbcdc9bde45c5af33c548b11c94 ); lookup + 64 spot checks ok; full recompute ok in 8 clones
+bootstrap-not-rerun	PASS	every clone: bootstrap_env = source env_01m2qr9wvprs5acacbafn76w89, 1 bootstrap run in the process, bootstrap.log has only the source line; cold starts ran their own bootstrap (3401 ms p50)
+identity-diverges	PASS	59 clones, distinct: .environment_id=59 instance_id=59 ctx_instance_id=59 token=59 rng.first=59 db.session_id=59 db.server_nonce=59 tls.cert_sha256=59 tls.client_exporter=59; generations unique; guest boot id shared by all = source (b8c41936-cd00-4609-aac2-3a1df3f9f32d , manifest b8c41936-cd00-4609-aac2-3a1df3f9f32d)
+clock-timer	PASS	{"wall_vs_client_window_ms_max":0,"timer50_mono_ms":[50,57],"timer_wall_minus_mono_ms_max":1,"wall_minus_mono_since_after_restore_ms":[0,1],"guest_uptime_at_after_restore_ms":[11840,27920]}
+connections	PASS	loopback DB: session authenticated with the clone's own token in every clone (1 handshake, no reconnect needed); TLS: cert generated after restore, client/server exporters match, PING/PONG ok; {  "db_connect_ms": [    13,    448  ],  "tls_handshake_ms": [    92,    2501  ],  "tls": [    "TLSv1_3 TLS13_AES_256_GCM_SHA384"  ]}
+scratch-isolation	PASS	each of 59 clones sees exactly rv-bootstrap.log (source) + its own rv-instance-<id>; no other clone's file before or after its write
+auth-not-in-snapshot	PASS	0 of 354 per-clone values in S1's plaintext or sealed files; positive control: bootstrap marker found in plaintext memory (1) and not in memory.sealed; S1 plaintext sha256 unchanged by 59 clones
+reconnect-series	PASS	{"n":30,"reconnects":[1],"doorbell_attempts":[1],"reconnect_ms_min_max":[130,161],"failures":0}
+plaintext-cache-miss	PASS	restore with S1's plaintext removed: decrypted from the sealed store and restored ([3084,2927,3536,2868,2982] ms verify+decrypt)
+revoked	PASS	POST .../revoke -> state revoked; require refused (invocation inv_01m2qrg3xrbtkp8j0q7w1y2gr7 failed: Host.RestoreRequiredUnavailable: restore required but unavailable: revoked: no usable snapshot: snap_01m2qr9wtwagejjj8kn3tj2y50: incompatible: revoked)
+corrupt-require	PASS	flipped bit in plaintext memory: refused artifact_corrupted, snap_01m2qrhw99rm96acw8kjw00y0q quarantined
+corrupt-sealed	PASS	flipped bit in memory.sealed with plaintext removed: refused artifact_corrupted (AES-GCM), quarantined
+corrupt-prefer	PASS	intact prefer restored; after a flipped bit: HTTP 200 start_kind=cold, guest restored=false, restore_fallback=artifact_corrupted
+revision-stale	PASS	active snapshot snap_01m2qrk8dqv7906aaw5t3pztn2 of the previous revision refused after deploy (revision_mismatch)
+warm	PASS	{"n":20,"start_kinds":{"warm":20}}
+cleanup	PASS	no gateway, firecracker, jailer, jail, cgroup, env dir or snapshot left

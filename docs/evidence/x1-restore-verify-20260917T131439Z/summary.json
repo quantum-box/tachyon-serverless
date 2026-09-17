@@ -1,0 +1,2092 @@
+{
+  "scenarios": [
+    {
+      "scenario": "cold-hit",
+      "n": 20,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "cold": 20
+      },
+      "client_ms": {
+        "n": 20,
+        "p50": 5969,
+        "p95": 9572,
+        "p99": 10546,
+        "max": 10546
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 5880,
+        "p95": 9451,
+        "p99": 10482,
+        "max": 10482
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 20,
+          "p50": 2547,
+          "p95": 3531,
+          "p99": 3683,
+          "max": 3683
+        },
+        "runtime_init_ms": {
+          "n": 20,
+          "p50": 3223,
+          "p95": 5586,
+          "p99": 7202,
+          "max": 7202
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 20,
+          "p50": 130,
+          "p95": 144,
+          "p99": 162,
+          "max": 162
+        },
+        "response_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_load_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_doorbell_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_reconnect_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_ready_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "scratch_drive_copy_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_bootstrap_ms": {
+          "n": 20,
+          "p50": 2748,
+          "p95": 4969,
+          "p99": 6503,
+          "max": 6503
+        },
+        "guest_after_restore_ms": {
+          "n": 20,
+          "p50": 167,
+          "p95": 208,
+          "p99": 210,
+          "max": 210
+        },
+        "guest_handler_ms": {
+          "n": 20,
+          "p50": 65,
+          "p95": 67,
+          "p99": 68,
+          "max": 68
+        },
+        "client_minus_total_ms": {
+          "n": 20,
+          "p50": 87,
+          "p95": 97,
+          "p99": 121,
+          "max": 121
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 20,
+          "p50": 107.2,
+          "p95": 107.5,
+          "p99": 107.7,
+          "max": 107.7
+        },
+        "sampled_rss_mib": {
+          "n": 20,
+          "p50": 104,
+          "p95": 105,
+          "p99": 105,
+          "max": 105
+        },
+        "sampled_pss_mib": {
+          "n": 20,
+          "p50": 104,
+          "p95": 105,
+          "p99": 105,
+          "max": 105
+        },
+        "sampled_shared_clean_mib": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 20,
+          "p50": 103,
+          "p95": 103,
+          "p99": 103,
+          "max": 103
+        },
+        "maps_snapshot_mem": 0
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 20,
+          "p50": 4740,
+          "p95": 7680,
+          "p99": 9320,
+          "max": 9320
+        }
+      }
+    },
+    {
+      "scenario": "cold-miss",
+      "n": 10,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "cold": 10
+      },
+      "client_ms": {
+        "n": 10,
+        "p50": 7474,
+        "p95": 15820,
+        "p99": 15820,
+        "max": 15820
+      },
+      "total_ms": {
+        "n": 10,
+        "p50": 7395,
+        "p95": 15605,
+        "p99": 15605,
+        "max": 15605
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 10,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 10,
+          "p50": 2617,
+          "p95": 5229,
+          "p99": 5229,
+          "max": 5229
+        },
+        "runtime_init_ms": {
+          "n": 10,
+          "p50": 4633,
+          "p95": 10029,
+          "p99": 10029,
+          "max": 10029
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 10,
+          "p50": 128,
+          "p95": 307,
+          "p99": 307,
+          "max": 307
+        },
+        "response_ms": {
+          "n": 10,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_load_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_doorbell_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_reconnect_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_ready_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "scratch_drive_copy_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_bootstrap_ms": {
+          "n": 10,
+          "p50": 4118,
+          "p95": 8951,
+          "p99": 8951,
+          "max": 8951
+        },
+        "guest_after_restore_ms": {
+          "n": 10,
+          "p50": 175,
+          "p95": 441,
+          "p99": 441,
+          "max": 441
+        },
+        "guest_handler_ms": {
+          "n": 10,
+          "p50": 65,
+          "p95": 102,
+          "p99": 102,
+          "max": 102
+        },
+        "client_minus_total_ms": {
+          "n": 10,
+          "p50": 83,
+          "p95": 215,
+          "p99": 215,
+          "max": 215
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 10,
+          "p50": 136.9,
+          "p95": 137.1,
+          "p99": 137.1,
+          "max": 137.1
+        },
+        "sampled_rss_mib": {
+          "n": 10,
+          "p50": 105,
+          "p95": 105,
+          "p99": 105,
+          "max": 105
+        },
+        "sampled_pss_mib": {
+          "n": 10,
+          "p50": 105,
+          "p95": 105,
+          "p99": 105,
+          "max": 105
+        },
+        "sampled_shared_clean_mib": {
+          "n": 10,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 10,
+          "p50": 103,
+          "p95": 103,
+          "p99": 103,
+          "max": 103
+        },
+        "maps_snapshot_mem": 0
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 10,
+          "p50": 6220,
+          "p95": 12430,
+          "p99": 12430,
+          "max": 12430
+        }
+      }
+    },
+    {
+      "scenario": "warm",
+      "n": 20,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "warm": 20
+      },
+      "client_ms": {
+        "n": 20,
+        "p50": 119,
+        "p95": 141,
+        "p99": 142,
+        "max": 142
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 108,
+        "p95": 132,
+        "p99": 133,
+        "max": 133
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "runtime_init_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "resume_ms": {
+          "n": 20,
+          "p50": 1,
+          "p95": 2,
+          "p99": 2,
+          "max": 2
+        },
+        "readiness_ms": {
+          "n": 20,
+          "p50": 3,
+          "p95": 19,
+          "p99": 21,
+          "max": 21
+        },
+        "handler_ms": {
+          "n": 20,
+          "p50": 99,
+          "p95": 110,
+          "p99": 125,
+          "max": 125
+        },
+        "response_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_load_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_doorbell_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_reconnect_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "restore_ready_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "scratch_drive_copy_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_bootstrap_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_after_restore_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_handler_ms": {
+          "n": 20,
+          "p50": 53,
+          "p95": 56,
+          "p99": 58,
+          "max": 58
+        },
+        "client_minus_total_ms": {
+          "n": 20,
+          "p50": 9,
+          "p95": 13,
+          "p99": 15,
+          "max": 15
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 20,
+          "p50": 107.7,
+          "p95": 107.7,
+          "p99": 107.7,
+          "max": 107.7
+        },
+        "sampled_rss_mib": {
+          "n": 20,
+          "p50": 105,
+          "p95": 105,
+          "p99": 105,
+          "max": 105
+        },
+        "sampled_pss_mib": {
+          "n": 20,
+          "p50": 105,
+          "p95": 105,
+          "p99": 105,
+          "max": 105
+        },
+        "sampled_shared_clean_mib": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 20,
+          "p50": 105,
+          "p95": 105,
+          "p99": 105,
+          "max": 105
+        },
+        "maps_snapshot_mem": 0
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 20,
+          "p50": 2910,
+          "p95": 2910,
+          "p99": 2910,
+          "max": 2910
+        }
+      }
+    },
+    {
+      "scenario": "restored-first",
+      "n": 6,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "restored": 6
+      },
+      "client_ms": {
+        "n": 6,
+        "p50": 1722,
+        "p95": 2573,
+        "p99": 2573,
+        "max": 2573
+      },
+      "total_ms": {
+        "n": 6,
+        "p50": 1458,
+        "p95": 1925,
+        "p99": 1925,
+        "max": 1925
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 6,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 6,
+          "p50": 141,
+          "p95": 168,
+          "p99": 168,
+          "max": 168
+        },
+        "runtime_init_ms": {
+          "n": 6,
+          "p50": 360,
+          "p95": 498,
+          "p99": 498,
+          "max": 498
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 6,
+          "p50": 133,
+          "p95": 266,
+          "p99": 266,
+          "max": 266
+        },
+        "response_ms": {
+          "n": 6,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 6,
+          "p50": 790,
+          "p95": 963,
+          "p99": 963,
+          "max": 963
+        },
+        "restore_load_ms": {
+          "n": 6,
+          "p50": 24,
+          "p95": 28,
+          "p99": 28,
+          "max": 28
+        },
+        "restore_doorbell_ms": {
+          "n": 6,
+          "p50": 75,
+          "p95": 95,
+          "p99": 95,
+          "max": 95
+        },
+        "restore_reconnect_ms": {
+          "n": 6,
+          "p50": 141,
+          "p95": 168,
+          "p99": 168,
+          "max": 168
+        },
+        "restore_ready_ms": {
+          "n": 6,
+          "p50": 507,
+          "p95": 666,
+          "p99": 666,
+          "max": 666
+        },
+        "scratch_drive_copy_ms": {
+          "n": 6,
+          "p50": 0,
+          "p95": 1,
+          "p99": 1,
+          "max": 1
+        },
+        "guest_bootstrap_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_after_restore_ms": {
+          "n": 6,
+          "p50": 212,
+          "p95": 306,
+          "p99": 306,
+          "max": 306
+        },
+        "guest_handler_ms": {
+          "n": 6,
+          "p50": 73,
+          "p95": 97,
+          "p99": 97,
+          "max": 97
+        },
+        "client_minus_total_ms": {
+          "n": 6,
+          "p50": 214,
+          "p95": 648,
+          "p99": 648,
+          "max": 648
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 6,
+          "p50": 10,
+          "p95": 10.2,
+          "p99": 10.2,
+          "max": 10.2
+        },
+        "sampled_rss_mib": {
+          "n": 6,
+          "p50": 37,
+          "p95": 52,
+          "p99": 52,
+          "max": 52
+        },
+        "sampled_pss_mib": {
+          "n": 6,
+          "p50": 37,
+          "p95": 52,
+          "p99": 52,
+          "max": 52
+        },
+        "sampled_shared_clean_mib": {
+          "n": 6,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 6,
+          "p50": 6,
+          "p95": 7,
+          "p99": 7,
+          "max": 7
+        },
+        "maps_snapshot_mem": 6
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 6,
+          "p50": 5030,
+          "p95": 11860,
+          "p99": 11860,
+          "max": 11860
+        }
+      }
+    },
+    {
+      "scenario": "restored-second",
+      "n": 5,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "restored": 5
+      },
+      "client_ms": {
+        "n": 5,
+        "p50": 1554,
+        "p95": 4643,
+        "p99": 4643,
+        "max": 4643
+      },
+      "total_ms": {
+        "n": 5,
+        "p50": 1337,
+        "p95": 3965,
+        "p99": 3965,
+        "max": 3965
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 5,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 5,
+          "p50": 138,
+          "p95": 394,
+          "p99": 394,
+          "max": 394
+        },
+        "runtime_init_ms": {
+          "n": 5,
+          "p50": 350,
+          "p95": 1290,
+          "p99": 1290,
+          "max": 1290
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 5,
+          "p50": 130,
+          "p95": 1761,
+          "p99": 1761,
+          "max": 1761
+        },
+        "response_ms": {
+          "n": 5,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 5,
+          "p50": 701,
+          "p95": 2104,
+          "p99": 2104,
+          "max": 2104
+        },
+        "restore_load_ms": {
+          "n": 5,
+          "p50": 24,
+          "p95": 43,
+          "p99": 43,
+          "max": 43
+        },
+        "restore_doorbell_ms": {
+          "n": 5,
+          "p50": 76,
+          "p95": 181,
+          "p99": 181,
+          "max": 181
+        },
+        "restore_reconnect_ms": {
+          "n": 5,
+          "p50": 138,
+          "p95": 394,
+          "p99": 394,
+          "max": 394
+        },
+        "restore_ready_ms": {
+          "n": 5,
+          "p50": 487,
+          "p95": 1483,
+          "p99": 1483,
+          "max": 1483
+        },
+        "scratch_drive_copy_ms": {
+          "n": 5,
+          "p50": 0,
+          "p95": 3,
+          "p99": 3,
+          "max": 3
+        },
+        "guest_bootstrap_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_after_restore_ms": {
+          "n": 5,
+          "p50": 209,
+          "p95": 744,
+          "p99": 744,
+          "max": 744
+        },
+        "guest_handler_ms": {
+          "n": 5,
+          "p50": 72,
+          "p95": 1036,
+          "p99": 1036,
+          "max": 1036
+        },
+        "client_minus_total_ms": {
+          "n": 5,
+          "p50": 217,
+          "p95": 681,
+          "p99": 681,
+          "max": 681
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 5,
+          "p50": 10,
+          "p95": 10.5,
+          "p99": 10.5,
+          "max": 10.5
+        },
+        "sampled_rss_mib": {
+          "n": 5,
+          "p50": 39,
+          "p95": 50,
+          "p99": 50,
+          "max": 50
+        },
+        "sampled_pss_mib": {
+          "n": 5,
+          "p50": 39,
+          "p95": 50,
+          "p99": 50,
+          "max": 50
+        },
+        "sampled_shared_clean_mib": {
+          "n": 5,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 5,
+          "p50": 6,
+          "p95": 7,
+          "p99": 7,
+          "max": 7
+        },
+        "maps_snapshot_mem": 5
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 5,
+          "p50": 5010,
+          "p95": 6060,
+          "p99": 6060,
+          "max": 6060
+        }
+      }
+    },
+    {
+      "scenario": "restored-hit",
+      "n": 30,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "restored": 30
+      },
+      "client_ms": {
+        "n": 30,
+        "p50": 1555,
+        "p95": 1674,
+        "p99": 1861,
+        "max": 1861
+      },
+      "total_ms": {
+        "n": 30,
+        "p50": 1333,
+        "p95": 1380,
+        "p99": 1598,
+        "max": 1598
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 30,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 30,
+          "p50": 131,
+          "p95": 135,
+          "p99": 161,
+          "max": 161
+        },
+        "runtime_init_ms": {
+          "n": 30,
+          "p50": 346,
+          "p95": 359,
+          "p99": 399,
+          "max": 399
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 30,
+          "p50": 137,
+          "p95": 146,
+          "p99": 163,
+          "max": 163
+        },
+        "response_ms": {
+          "n": 30,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 30,
+          "p50": 702,
+          "p95": 740,
+          "p99": 871,
+          "max": 871
+        },
+        "restore_load_ms": {
+          "n": 30,
+          "p50": 22,
+          "p95": 25,
+          "p99": 26,
+          "max": 26
+        },
+        "restore_doorbell_ms": {
+          "n": 30,
+          "p50": 63,
+          "p95": 65,
+          "p99": 73,
+          "max": 73
+        },
+        "restore_reconnect_ms": {
+          "n": 30,
+          "p50": 131,
+          "p95": 135,
+          "p99": 161,
+          "max": 161
+        },
+        "restore_ready_ms": {
+          "n": 30,
+          "p50": 477,
+          "p95": 490,
+          "p99": 561,
+          "max": 561
+        },
+        "scratch_drive_copy_ms": {
+          "n": 30,
+          "p50": 0,
+          "p95": 1,
+          "p99": 1,
+          "max": 1
+        },
+        "guest_bootstrap_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_after_restore_ms": {
+          "n": 30,
+          "p50": 203,
+          "p95": 212,
+          "p99": 228,
+          "max": 228
+        },
+        "guest_handler_ms": {
+          "n": 30,
+          "p50": 71,
+          "p95": 77,
+          "p99": 79,
+          "max": 79
+        },
+        "client_minus_total_ms": {
+          "n": 30,
+          "p50": 210,
+          "p95": 267,
+          "p99": 320,
+          "max": 320
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 30,
+          "p50": 10.2,
+          "p95": 10.4,
+          "p99": 10.5,
+          "max": 10.5
+        },
+        "sampled_rss_mib": {
+          "n": 30,
+          "p50": 38,
+          "p95": 41,
+          "p99": 42,
+          "max": 42
+        },
+        "sampled_pss_mib": {
+          "n": 30,
+          "p50": 38,
+          "p95": 41,
+          "p99": 42,
+          "max": 42
+        },
+        "sampled_shared_clean_mib": {
+          "n": 30,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 30,
+          "p50": 6,
+          "p95": 8,
+          "p99": 8,
+          "max": 8
+        },
+        "maps_snapshot_mem": 30
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 30,
+          "p50": 11840,
+          "p95": 11850,
+          "p99": 11890,
+          "max": 11890
+        }
+      }
+    },
+    {
+      "scenario": "restored-miss",
+      "n": 20,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "restored": 20
+      },
+      "client_ms": {
+        "n": 20,
+        "p50": 1659,
+        "p95": 7766,
+        "p99": 21095,
+        "max": 21095
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 1393,
+        "p95": 7081,
+        "p99": 18144,
+        "max": 18144
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 20,
+          "p50": 135,
+          "p95": 1174,
+          "p99": 4270,
+          "max": 4270
+        },
+        "runtime_init_ms": {
+          "n": 20,
+          "p50": 355,
+          "p95": 1805,
+          "p99": 2996,
+          "max": 2996
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 20,
+          "p50": 138,
+          "p95": 806,
+          "p99": 1021,
+          "max": 1021
+        },
+        "response_ms": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 20,
+          "p50": 747,
+          "p95": 3589,
+          "p99": 9352,
+          "max": 9352
+        },
+        "restore_load_ms": {
+          "n": 20,
+          "p50": 24,
+          "p95": 184,
+          "p99": 296,
+          "max": 296
+        },
+        "restore_doorbell_ms": {
+          "n": 20,
+          "p50": 66,
+          "p95": 422,
+          "p99": 2342,
+          "max": 2342
+        },
+        "restore_reconnect_ms": {
+          "n": 20,
+          "p50": 135,
+          "p95": 1174,
+          "p99": 4270,
+          "max": 4270
+        },
+        "restore_ready_ms": {
+          "n": 20,
+          "p50": 489,
+          "p95": 2979,
+          "p99": 7266,
+          "max": 7266
+        },
+        "scratch_drive_copy_ms": {
+          "n": 20,
+          "p50": 1,
+          "p95": 20,
+          "p99": 43,
+          "max": 43
+        },
+        "guest_bootstrap_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_after_restore_ms": {
+          "n": 20,
+          "p50": 206,
+          "p95": 1032,
+          "p99": 1846,
+          "max": 1846
+        },
+        "guest_handler_ms": {
+          "n": 20,
+          "p50": 71,
+          "p95": 527,
+          "p99": 539,
+          "max": 539
+        },
+        "client_minus_total_ms": {
+          "n": 20,
+          "p50": 268,
+          "p95": 1071,
+          "p99": 2951,
+          "max": 2951
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 20,
+          "p50": 15,
+          "p95": 15.2,
+          "p99": 15.4,
+          "max": 15.4
+        },
+        "sampled_rss_mib": {
+          "n": 20,
+          "p50": 87,
+          "p95": 95,
+          "p99": 95,
+          "max": 95
+        },
+        "sampled_pss_mib": {
+          "n": 20,
+          "p50": 87,
+          "p95": 95,
+          "p99": 95,
+          "max": 95
+        },
+        "sampled_shared_clean_mib": {
+          "n": 20,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 20,
+          "p50": 6,
+          "p95": 8,
+          "p99": 8,
+          "max": 8
+        },
+        "maps_snapshot_mem": 20
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 20,
+          "p50": 11850,
+          "p95": 13310,
+          "p99": 16550,
+          "max": 16550
+        }
+      }
+    },
+    {
+      "scenario": "restored-plain-miss",
+      "n": 5,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "restored": 5
+      },
+      "client_ms": {
+        "n": 5,
+        "p50": 3853,
+        "p95": 4297,
+        "p99": 4297,
+        "max": 4297
+      },
+      "total_ms": {
+        "n": 5,
+        "p50": 3650,
+        "p95": 4089,
+        "p99": 4089,
+        "max": 4089
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 5,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 5,
+          "p50": 127,
+          "p95": 138,
+          "p99": 138,
+          "max": 138
+        },
+        "runtime_init_ms": {
+          "n": 5,
+          "p50": 294,
+          "p95": 493,
+          "p99": 493,
+          "max": 493
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 5,
+          "p50": 118,
+          "p95": 210,
+          "p99": 210,
+          "max": 210
+        },
+        "response_ms": {
+          "n": 5,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 5,
+          "p50": 2982,
+          "p95": 3536,
+          "p99": 3536,
+          "max": 3536
+        },
+        "restore_load_ms": {
+          "n": 5,
+          "p50": 29,
+          "p95": 32,
+          "p99": 32,
+          "max": 32
+        },
+        "restore_doorbell_ms": {
+          "n": 5,
+          "p50": 67,
+          "p95": 69,
+          "p99": 69,
+          "max": 69
+        },
+        "restore_reconnect_ms": {
+          "n": 5,
+          "p50": 127,
+          "p95": 138,
+          "p99": 138,
+          "max": 138
+        },
+        "restore_ready_ms": {
+          "n": 5,
+          "p50": 422,
+          "p95": 622,
+          "p99": 622,
+          "max": 622
+        },
+        "scratch_drive_copy_ms": {
+          "n": 5,
+          "p50": 5,
+          "p95": 6,
+          "p99": 6,
+          "max": 6
+        },
+        "guest_bootstrap_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_after_restore_ms": {
+          "n": 5,
+          "p50": 174,
+          "p95": 260,
+          "p99": 260,
+          "max": 260
+        },
+        "guest_handler_ms": {
+          "n": 5,
+          "p50": 65,
+          "p95": 87,
+          "p99": 87,
+          "max": 87
+        },
+        "client_minus_total_ms": {
+          "n": 5,
+          "p50": 205,
+          "p95": 418,
+          "p99": 418,
+          "max": 418
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 5,
+          "p50": 15.2,
+          "p95": 15.2,
+          "p99": 15.2,
+          "max": 15.2
+        },
+        "sampled_rss_mib": {
+          "n": 5,
+          "p50": 44,
+          "p95": 100,
+          "p99": 100,
+          "max": 100
+        },
+        "sampled_pss_mib": {
+          "n": 5,
+          "p50": 44,
+          "p95": 100,
+          "p99": 100,
+          "max": 100
+        },
+        "sampled_shared_clean_mib": {
+          "n": 5,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "sampled_private_dirty_mib": {
+          "n": 5,
+          "p50": 6,
+          "p95": 8,
+          "p99": 8,
+          "max": 8
+        },
+        "maps_snapshot_mem": 5
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 5,
+          "p50": 11810,
+          "p95": 11830,
+          "p99": 11830,
+          "max": 11830
+        }
+      }
+    },
+    {
+      "scenario": "restored-concurrent",
+      "n": 8,
+      "failures": 0,
+      "failure_rate": 0,
+      "start_kinds": {
+        "restored": 8
+      },
+      "client_ms": {
+        "n": 8,
+        "p50": 7552,
+        "p95": 26936,
+        "p99": 26936,
+        "max": 26936
+      },
+      "total_ms": {
+        "n": 8,
+        "p50": 6435,
+        "p95": 25081,
+        "p99": 25081,
+        "max": 25081
+      },
+      "breakdown": {
+        "queue_wait_ms": {
+          "n": 8,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "environment_boot_ms": {
+          "n": 8,
+          "p50": 857,
+          "p95": 14721,
+          "p99": 14721,
+          "max": 14721
+        },
+        "runtime_init_ms": {
+          "n": 8,
+          "p50": 2432,
+          "p95": 5539,
+          "p99": 5539,
+          "max": 5539
+        },
+        "resume_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "readiness_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "handler_ms": {
+          "n": 8,
+          "p50": 781,
+          "p95": 1578,
+          "p99": 1578,
+          "max": 1578
+        },
+        "response_ms": {
+          "n": 8,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "restore_verify_ms": {
+          "n": 8,
+          "p50": 2375,
+          "p95": 3350,
+          "p99": 3350,
+          "max": 3350
+        },
+        "restore_load_ms": {
+          "n": 8,
+          "p50": 95,
+          "p95": 878,
+          "p99": 878,
+          "max": 878
+        },
+        "restore_doorbell_ms": {
+          "n": 4,
+          "p50": 369,
+          "p95": 415,
+          "p99": 415,
+          "max": 415
+        },
+        "restore_reconnect_ms": {
+          "n": 8,
+          "p50": 857,
+          "p95": 14721,
+          "p99": 14721,
+          "max": 14721
+        },
+        "restore_ready_ms": {
+          "n": 8,
+          "p50": 3223,
+          "p95": 19917,
+          "p99": 19917,
+          "max": 19917
+        },
+        "scratch_drive_copy_ms": {
+          "n": 8,
+          "p50": 5,
+          "p95": 10,
+          "p99": 10,
+          "max": 10
+        },
+        "guest_bootstrap_ms": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "guest_after_restore_ms": {
+          "n": 8,
+          "p50": 1470,
+          "p95": 3175,
+          "p99": 3175,
+          "max": 3175
+        },
+        "guest_handler_ms": {
+          "n": 8,
+          "p50": 555,
+          "p95": 1090,
+          "p99": 1090,
+          "max": 1090
+        },
+        "client_minus_total_ms": {
+          "n": 8,
+          "p50": 1136,
+          "p95": 1921,
+          "p99": 1921,
+          "max": 1921
+        }
+      },
+      "memory": {
+        "teardown_memory_peak_mib": {
+          "n": 8,
+          "p50": 9.9,
+          "p95": 10,
+          "p99": 10,
+          "max": 10
+        },
+        "sampled_rss_mib": {
+          "n": 8,
+          "p50": 99,
+          "p95": 100,
+          "p99": 100,
+          "max": 100
+        },
+        "sampled_pss_mib": {
+          "n": 8,
+          "p50": 30,
+          "p95": 30,
+          "p99": 30,
+          "max": 30
+        },
+        "sampled_shared_clean_mib": {
+          "n": 8,
+          "p50": 93,
+          "p95": 93,
+          "p99": 93,
+          "max": 93
+        },
+        "sampled_private_dirty_mib": {
+          "n": 8,
+          "p50": 7,
+          "p95": 7,
+          "p99": 7,
+          "max": 7
+        },
+        "maps_snapshot_mem": 8
+      },
+      "guest": {
+        "dataset_mib": [
+          64
+        ],
+        "uptime_at_after_restore_ms": {
+          "n": 8,
+          "p50": 13220,
+          "p95": 27920,
+          "p99": 27920,
+          "max": 27920
+        }
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "label": "S1",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 17453,
+      "id": "snap_01m2qr9wtwagejjj8kn3tj2y50",
+      "timings": {
+        "copy_ms": 33,
+        "create_ms": 242,
+        "pause_ms": 0,
+        "seal_ms": 3011
+      },
+      "error": null
+    },
+    {
+      "label": "C1",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 11443,
+      "id": "snap_01m2qrg3yy891k1hyhmsrnsy8x",
+      "timings": {
+        "copy_ms": 9,
+        "create_ms": 2297,
+        "pause_ms": 0,
+        "seal_ms": 3019
+      },
+      "error": null
+    },
+    {
+      "label": "C2",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 10208,
+      "id": "snap_01m2qrgp529h7xrm7wz311yy98",
+      "timings": {
+        "copy_ms": 26,
+        "create_ms": 377,
+        "pause_ms": 0,
+        "seal_ms": 2856
+      },
+      "error": null
+    },
+    {
+      "label": "C3",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 10265,
+      "id": "snap_01m2qrh36r37wgvmpxxvxb3yme",
+      "timings": {
+        "copy_ms": 44,
+        "create_ms": 401,
+        "pause_ms": 0,
+        "seal_ms": 3981
+      },
+      "error": null
+    },
+    {
+      "label": "C4",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 8934,
+      "id": "snap_01m2qrhggz4yrh84x5z1fnkqgz",
+      "timings": {
+        "copy_ms": 33,
+        "create_ms": 770,
+        "pause_ms": 0,
+        "seal_ms": 3131
+      },
+      "error": null
+    },
+    {
+      "label": "C5",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 7638,
+      "id": "snap_01m2qrhw99rm96acw8kjw00y0q",
+      "timings": {
+        "copy_ms": 96,
+        "create_ms": 553,
+        "pause_ms": 0,
+        "seal_ms": 3131
+      },
+      "error": null
+    },
+    {
+      "label": "sealed-corrupt",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 12842,
+      "id": "snap_01m2qrjaz5k2az4nm8a0a4n7pk",
+      "timings": {
+        "copy_ms": 150,
+        "create_ms": 858,
+        "pause_ms": 0,
+        "seal_ms": 5322
+      },
+      "error": null
+    },
+    {
+      "label": "prefer",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 8473,
+      "id": "snap_01m2qrjqy5zp347r7h8vfb0h2b",
+      "timings": {
+        "copy_ms": 97,
+        "create_ms": 609,
+        "pause_ms": 0,
+        "seal_ms": 3079
+      },
+      "error": null
+    },
+    {
+      "label": "pre-revision",
+      "try": 1,
+      "http_code": 201,
+      "client_ms": 11291,
+      "id": "snap_01m2qrk8dqv7906aaw5t3pztn2",
+      "timings": {
+        "copy_ms": 84,
+        "create_ms": 1268,
+        "pause_ms": 0,
+        "seal_ms": 4537
+      },
+      "error": null
+    }
+  ],
+  "snapshot_create": {
+    "attempts": 9,
+    "failures": 0,
+    "seal_ms": {
+      "n": 9,
+      "p50": 3131,
+      "p95": 5322,
+      "p99": 5322,
+      "max": 5322
+    },
+    "create_client_ms": {
+      "n": 9,
+      "p50": 10265,
+      "p95": 17453,
+      "p99": 17453,
+      "max": 17453
+    }
+  },
+  "storage": [
+    {
+      "label": "S1",
+      "snapshot_id": "snap_01m2qr9wtwagejjj8kn3tj2y50",
+      "sealed_bytes": 348140096,
+      "plaintext_apparent_bytes": 348133817,
+      "plaintext_allocated_bytes": 276877312,
+      "plaintext_files": "function.ext4 12582912 16376 512;memory 268435456 524288 512;scratch.ext4 67108864 88 512;vmstate 6585 16 512;",
+      "sealed_files": "function.ext4.sealed 12583035;manifest.json 2713;memory.sealed 268437836;record.json 410;scratch.ext4.sealed 67109468;vmstate.sealed 6634;"
+    },
+    {
+      "label": "C1",
+      "snapshot_id": "snap_01m2qrg3yy891k1hyhmsrnsy8x",
+      "sealed_bytes": 348140096,
+      "plaintext_apparent_bytes": 348133817,
+      "plaintext_allocated_bytes": 276877312,
+      "plaintext_files": "function.ext4 12582912 16376 512;memory 268435456 524288 512;scratch.ext4 67108864 88 512;vmstate 6585 16 512;",
+      "sealed_files": "function.ext4.sealed 12583035;manifest.json 2713;memory.sealed 268437836;record.json 410;scratch.ext4.sealed 67109468;vmstate.sealed 6634;"
+    },
+    {
+      "label": "C2",
+      "snapshot_id": "snap_01m2qrgp529h7xrm7wz311yy98",
+      "sealed_bytes": 348140096,
+      "plaintext_apparent_bytes": 348133817,
+      "plaintext_allocated_bytes": 276881408,
+      "plaintext_files": "function.ext4 12582912 16376 512;memory 268435456 524296 512;scratch.ext4 67108864 88 512;vmstate 6585 16 512;",
+      "sealed_files": "function.ext4.sealed 12583035;manifest.json 2713;memory.sealed 268437836;record.json 410;scratch.ext4.sealed 67109468;vmstate.sealed 6634;"
+    },
+    {
+      "label": "C3",
+      "snapshot_id": "snap_01m2qrh36r37wgvmpxxvxb3yme",
+      "sealed_bytes": 348140096,
+      "plaintext_apparent_bytes": 348133817,
+      "plaintext_allocated_bytes": 276881408,
+      "plaintext_files": "function.ext4 12582912 16376 512;memory 268435456 524296 512;scratch.ext4 67108864 88 512;vmstate 6585 16 512;",
+      "sealed_files": "function.ext4.sealed 12583035;manifest.json 2713;memory.sealed 268437836;record.json 410;scratch.ext4.sealed 67109468;vmstate.sealed 6634;"
+    },
+    {
+      "label": "C4",
+      "snapshot_id": "snap_01m2qrhggz4yrh84x5z1fnkqgz",
+      "sealed_bytes": 348140096,
+      "plaintext_apparent_bytes": 348133817,
+      "plaintext_allocated_bytes": 276877312,
+      "plaintext_files": "function.ext4 12582912 16376 512;memory 268435456 524288 512;scratch.ext4 67108864 88 512;vmstate 6585 16 512;",
+      "sealed_files": "function.ext4.sealed 12583035;manifest.json 2713;memory.sealed 268437836;record.json 410;scratch.ext4.sealed 67109468;vmstate.sealed 6634;"
+    },
+    {
+      "label": "C5",
+      "snapshot_id": "snap_01m2qrhw99rm96acw8kjw00y0q",
+      "sealed_bytes": 348140096,
+      "plaintext_apparent_bytes": 348133817,
+      "plaintext_allocated_bytes": 276881408,
+      "plaintext_files": "function.ext4 12582912 16376 512;memory 268435456 524296 512;scratch.ext4 67108864 88 512;vmstate 6585 16 512;",
+      "sealed_files": "function.ext4.sealed 12583035;manifest.json 2713;memory.sealed 268437836;record.json 410;scratch.ext4.sealed 67109468;vmstate.sealed 6634;"
+    }
+  ],
+  "calibration": [
+    {
+      "phase": "start",
+      "awk_loop_ms": [
+        148,
+        149,
+        163
+      ],
+      "vm_loadavg": "0.14 0.61 0.63"
+    },
+    {
+      "phase": "after-cold-hit",
+      "awk_loop_ms": [
+        80,
+        80,
+        82
+      ],
+      "vm_loadavg": "1.00 0.81 0.71"
+    },
+    {
+      "phase": "after-restored-hit",
+      "awk_loop_ms": [
+        85,
+        85,
+        88
+      ],
+      "vm_loadavg": "1.26 1.05 0.82"
+    },
+    {
+      "phase": "end",
+      "awk_loop_ms": [
+        102,
+        86,
+        83
+      ],
+      "vm_loadavg": "1.07 1.34 1.02"
+    }
+  ],
+  "checks": [
+    {
+      "check": "provider",
+      "result": "PASS",
+      "detail": "snapshot_create=unverified snapshot_clone=unverified"
+    },
+    {
+      "check": "require-no-snapshot",
+      "result": "PASS",
+      "detail": "Host.RestoreRequiredUnavailable (no_snapshot), nothing booted"
+    },
+    {
+      "check": "snapshot-S1",
+      "result": "PASS",
+      "detail": "snap_01m2qr9wtwagejjj8kn3tj2y50 {\"copy_ms\":33,\"create_ms\":242,\"pause_ms\":0,\"seal_ms\":3011}"
+    },
+    {
+      "check": "restored-all",
+      "result": "PASS",
+      "detail": "59/59 attempts HTTP 200, start_kind=restored, guest restored=true"
+    },
+    {
+      "check": "fixed-data",
+      "result": "PASS",
+      "detail": "checksum e5aa88d035ed23006cb25d35e12e4cd66d794bbcdc9bde45c5af33c548b11c94 in all 59 clones = cold (e5aa88d035ed23006cb25d35e12e4cd66d794bbcdc9bde45c5af33c548b11c94 ); lookup + 64 spot checks ok; full recompute ok in 8 clones"
+    },
+    {
+      "check": "bootstrap-not-rerun",
+      "result": "PASS",
+      "detail": "every clone: bootstrap_env = source env_01m2qr9wvprs5acacbafn76w89, 1 bootstrap run in the process, bootstrap.log has only the source line; cold starts ran their own bootstrap (3401 ms p50)"
+    },
+    {
+      "check": "identity-diverges",
+      "result": "PASS",
+      "detail": "59 clones, distinct: .environment_id=59 instance_id=59 ctx_instance_id=59 token=59 rng.first=59 db.session_id=59 db.server_nonce=59 tls.cert_sha256=59 tls.client_exporter=59; generations unique; guest boot id shared by all = source (b8c41936-cd00-4609-aac2-3a1df3f9f32d , manifest b8c41936-cd00-4609-aac2-3a1df3f9f32d)"
+    },
+    {
+      "check": "clock-timer",
+      "result": "PASS",
+      "detail": "{\"wall_vs_client_window_ms_max\":0,\"timer50_mono_ms\":[50,57],\"timer_wall_minus_mono_ms_max\":1,\"wall_minus_mono_since_after_restore_ms\":[0,1],\"guest_uptime_at_after_restore_ms\":[11840,27920]}"
+    },
+    {
+      "check": "connections",
+      "result": "PASS",
+      "detail": "loopback DB: session authenticated with the clone's own token in every clone (1 handshake, no reconnect needed); TLS: cert generated after restore, client/server exporters match, PING/PONG ok; {  \"db_connect_ms\": [    13,    448  ],  \"tls_handshake_ms\": [    92,    2501  ],  \"tls\": [    \"TLSv1_3 TLS13_AES_256_GCM_SHA384\"  ]}"
+    },
+    {
+      "check": "scratch-isolation",
+      "result": "PASS",
+      "detail": "each of 59 clones sees exactly rv-bootstrap.log (source) + its own rv-instance-<id>; no other clone's file before or after its write"
+    },
+    {
+      "check": "auth-not-in-snapshot",
+      "result": "PASS",
+      "detail": "0 of 354 per-clone values in S1's plaintext or sealed files; positive control: bootstrap marker found in plaintext memory (1) and not in memory.sealed; S1 plaintext sha256 unchanged by 59 clones"
+    },
+    {
+      "check": "reconnect-series",
+      "result": "PASS",
+      "detail": "{\"n\":30,\"reconnects\":[1],\"doorbell_attempts\":[1],\"reconnect_ms_min_max\":[130,161],\"failures\":0}"
+    },
+    {
+      "check": "plaintext-cache-miss",
+      "result": "PASS",
+      "detail": "restore with S1's plaintext removed: decrypted from the sealed store and restored ([3084,2927,3536,2868,2982] ms verify+decrypt)"
+    },
+    {
+      "check": "revoked",
+      "result": "PASS",
+      "detail": "POST .../revoke -> state revoked; require refused (invocation inv_01m2qrg3xrbtkp8j0q7w1y2gr7 failed: Host.RestoreRequiredUnavailable: restore required but unavailable: revoked: no usable snapshot: snap_01m2qr9wtwagejjj8kn3tj2y50: incompatible: revoked)"
+    },
+    {
+      "check": "corrupt-require",
+      "result": "PASS",
+      "detail": "flipped bit in plaintext memory: refused artifact_corrupted, snap_01m2qrhw99rm96acw8kjw00y0q quarantined"
+    },
+    {
+      "check": "corrupt-sealed",
+      "result": "PASS",
+      "detail": "flipped bit in memory.sealed with plaintext removed: refused artifact_corrupted (AES-GCM), quarantined"
+    },
+    {
+      "check": "corrupt-prefer",
+      "result": "PASS",
+      "detail": "intact prefer restored; after a flipped bit: HTTP 200 start_kind=cold, guest restored=false, restore_fallback=artifact_corrupted"
+    },
+    {
+      "check": "revision-stale",
+      "result": "PASS",
+      "detail": "active snapshot snap_01m2qrk8dqv7906aaw5t3pztn2 of the previous revision refused after deploy (revision_mismatch)"
+    },
+    {
+      "check": "warm",
+      "result": "PASS",
+      "detail": "{\"n\":20,\"start_kinds\":{\"warm\":20}}"
+    },
+    {
+      "check": "cleanup",
+      "result": "PASS",
+      "detail": "no gateway, firecracker, jailer, jail, cgroup, env dir or snapshot left"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# S1 = snap_01m2qr9wtwagejjj8kn3tj2y50; per-clone values searched: 354 (instance ids, tokens, DB session ids, server nonces, TLS exporters)
+/home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/function.ext4 per_clone_hits=0 bootstrap_marker_lines=0
+/home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/memory per_clone_hits=0 bootstrap_marker_lines=1
+/home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/scratch.ext4 per_clone_hits=0 bootstrap_marker_lines=0
+/home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/vmstate per_clone_hits=0 bootstrap_marker_lines=0
+data/snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/function.ext4.sealed per_clone_hits=0 bootstrap_marker_lines=0
+data/snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/manifest.json per_clone_hits=0 bootstrap_marker_lines=0
+data/snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/memory.sealed per_clone_hits=0 bootstrap_marker_lines=0
+data/snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/record.json per_clone_hits=0 bootstrap_marker_lines=0
+data/snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/scratch.ext4.sealed per_clone_hits=0 bootstrap_marker_lines=0
+data/snapshots/snap_01m2qr9wtwagejjj8kn3tj2y50/vmstate.sealed per_clone_hits=0 bootstrap_marker_lines=0
+# plaintext sha256 before the first restore
+8ffb3ccace6b9d72a01b0361354122e5dd82ec7e7129713fd070a8b9cf522f49  function.ext4
+c0b2cd05bc27f5e25197e3a4eeae085f5eaedf96785999435b0380f81c80b3d6  memory
+ecfe6a107fa4b286b0c62979445c318f2470d54d6b96a995833fc3c41449c884  scratch.ext4
+bba4e43701bbe7f993b0d06afeceba510cd4f74bcf9f6946c29b87f4870e93af  vmstate
+# plaintext sha256 after all clones of S1
+8ffb3ccace6b9d72a01b0361354122e5dd82ec7e7129713fd070a8b9cf522f49  function.ext4
+c0b2cd05bc27f5e25197e3a4eeae085f5eaedf96785999435b0380f81c80b3d6  memory
+ecfe6a107fa4b286b0c62979445c318f2470d54d6b96a995833fc3c41449c884  scratch.ext4
+bba4e43701bbe7f993b0d06afeceba510cd4f74bcf9f6946c29b87f4870e93af  vmstate
