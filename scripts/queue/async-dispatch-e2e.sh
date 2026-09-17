@@ -67,7 +67,11 @@ TOKEN_REDRIVE="dispatch-e2e-token-a-redrive"
 TENANT="tn_01hzzzzzzzzzzzzzzzzzzzzzza"
 TOKEN_B="dispatch-e2e-token-b"
 TENANT_B="tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
-ACK_WAIT=4
+# JetStream ack wait (TSLS_ACK_WAIT_SECONDS). It must be longer than one run: a delivery redelivered
+# while its run still holds the claim is acknowledged as `Skipped("claimed")` (the ledger's claim
+# and reaper own the retry), so step 3 would then see no redelivery after the restart. A microVM
+# cold start takes several seconds on a nested host, hence 30 s with firecracker.
+if provider_is_fc; then ACK_WAIT="${TSLS_ACK_WAIT_SECONDS:-30}"; else ACK_WAIT="${TSLS_ACK_WAIT_SECONDS:-4}"; fi
 GATEWAY_BIN="$REPO_ROOT/target/debug/tachyon-serverless-gateway"
 PROBE="$REPO_ROOT/target/debug/tachyon-queue-probe"
 BRIDGE_BIN="$REPO_ROOT/target/debug/tachyon-serverless-runtime-bridge"
@@ -539,6 +543,7 @@ check converge.each_side_effect_exactly_once "effects=$effects_count applied_exe
   echo "nats_server_version=$NATS_SERVER_VERSION"
   echo "platform=$(queue_platform)"
   echo "provider=$PROVIDER"
+  echo "ack_wait_seconds=$ACK_WAIT"
   echo "stamp=$STAMP"
   echo "host=$(uname -srm)"
   echo "git_commit=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "${TSLS_COMMIT:-unknown}")"
