@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# docs/runbook.md §6 drills: cause the failure, then apply the documented recovery; each prints PASS/FAIL.
+cd "$(dirname "$0")/tachyon-serverless" || exit 1
+lab() { scripts/lab/lab.sh "$@"; }
+port() { sed -n "s/^$1=//p" .lab/manifest.env | tail -n1; }
+res() { if [ "$2" = 0 ]; then echo "DRILL PASS  $1"; else echo "DRILL FAIL  $1"; FAILED=1; fi; }
+FAILED=0
+
+# §6.9 gateway killed -> status FAIL -> up
+kill -9 "$(cat .lab/run/gateway.pid)"; sleep 1
+lab status >/dev/null; s1=$?
+lab up >/dev/null; lab status >/dev/null; s2=$?
+res "6.9 SIGKILL: status fails ($s1), up recovers ($s2)" "$([ "$s1" != 0 ] && [ "$s2" = 0 ]; echo $?)"
+
+# §6.7 broken budget file keeps the last valid budgets; fixing it clears file_error
+cp .lab/config/budgets.toml .lab/run/budgets.bak
+echo 'broken = = toml' >> .lab/config/budgets.toml
+sleep 6
+out="$(lab status)"; printf '%s\n' "$out" | grep ' budget '
+bad=$(printf '%s\n' "$out" | grep -c 'FAIL  budget .*accepting=true.*TOML parse error')
+cp .lab/run/budgets.bak .lab/config/budgets.toml; rm -f .lab/run/budgets.bak
+sleep 6
+lab status >/dev/null; s=$?
+res "6.7 budget file: FAIL with accepting=true ($bad), fixed -> status ok ($s)" "$([ "$bad" = 1 ] && [ "$s" = 0 ]; echo $?)"
+
+# §6.5 port used by an unrelated process -> empty GATEWAY_PORT= in manifest -> up
+lab down >/dev/null
+P="$(port GATEWAY_PORT)"
+python3 -c "import socket,time; s=socket.socket(); s.bind(('127.0.0.1', $P)); s.listen(); time.sleep(90)" &
+HOLD=$!; sleep 1
+lab preflight | grep 'port:GATEWAY_PORT'
+out="$(lab up)"; printf '%s\n' "$out" | grep 'ERROR'
+e1=$(printf '%s\n' "$out" | grep -c "port $P is in use (docs/runbook.md §6.5)")
+sed -i.bak 's/^GATEWAY_PORT=.*/GATEWAY_PORT=/' .lab/manifest.env && rm -f .lab/manifest.env.bak
+lab up >/dev/null; s=$?
+kill $HOLD; wait $HOLD 2>/dev/null
+res "6.5 port $P: diagnosed ($e1), new port $(port GATEWAY_PORT) up ($s)" "$([ "$e1" = 1 ] && [ "$s" = 0 ]; echo $?)"
+
+# §6.6 nats port used -> diagnosed; freed -> up
+lab down >/dev/null
+N="$(port NATS_PORT)"
+python3 -c "import socket,time; s=socket.socket(); s.bind(('127.0.0.1', $N)); s.listen(); time.sleep(120)" &
+HOLD=$!; sleep 1
+out="$(lab up)"; printf '%s\n' "$out" | grep -E 'FTL|ERROR'
+e1=$(printf '%s\n' "$out" | grep -c 'nats-server did not start (docs/runbook.md §6.6)')
+kill $HOLD; wait $HOLD 2>/dev/null
+lab up >/dev/null; s=$?
+res "6.6 nats port $N: diagnosed ($e1), freed -> up ($s)" "$([ "$e1" = 1 ] && [ "$s" = 0 ]; echo $?)"
+
+# §6.4 newer schema -> diagnosed -> teardown --keep-cache -> up
+lab down >/dev/null
+python3 - .lab/data/state.db <<'PY'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1]); c.execute("INSERT INTO schema_version (version, name, applied_at) VALUES (99, 'future', '2026-09-17T00:00:00Z')"); c.commit()
+PY
+out="$(lab up)"; printf '%s\n' "$out" | grep -E 'Error:|ERROR'
+e1=$(printf '%s\n' "$out" | grep -c 'state.db has a newer schema than this gateway (docs/runbook.md §6.4)')
+lab teardown --keep-cache | grep 'orphan check'
+lab up >/dev/null; s=$?
+res "6.4 newer schema: diagnosed ($e1), teardown --keep-cache + up ($s)" "$([ "$e1" = 1 ] && [ "$s" = 0 ]; echo $?)"
+
+exit "$FAILED"

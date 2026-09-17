@@ -1,0 +1,24 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh up
+# started:  2026-09-17T12:24:19Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:24:20Z [lab] step 1/5: throwaway secrets and config (lab lab-8c436263, provider process)
+2026-09-17T12:24:20Z [lab] config: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml (0600)
+2026-09-17T12:24:20Z [lab] WARN: process provider: functions run as plain child processes of the gateway. NOT a microVM, NO isolation (dev mode).
+2026-09-17T12:24:20Z [lab] step 2/5: nats-server v2.14.7 on 127.0.0.1:64898 (store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+2026-09-17T12:24:20Z [queue] nats-server v2.14.7 ready on 127.0.0.1:64898 (pid 39161, store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+2026-09-17T12:24:20Z [lab] step 3/5: gateway on 127.0.0.1:65369 (applies forward-only migrations to /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/state.db before listening)
+2026-09-17T12:24:20Z [lab] gateway pid 39180, log /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/gateway.log
+2026-09-17T12:24:20Z [lab] WARN: gateway exited during startup; last log lines of this start:
+2026-09-17T12:24:20Z     | 
+2026-09-17T12:24:20Z     | ===== gateway start 2026-09-17T12:24:20Z (lab lab-8c436263) =====
+2026-09-17T12:24:20Z     | {"timestamp":"2026-09-17T12:24:20.473135Z","level":"INFO","message":"configuration loaded","config":"/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml","target":"tachyon_serverless_gateway"}
+2026-09-17T12:24:20Z     | {"timestamp":"2026-09-17T12:24:20.475748Z","level":"INFO","message":"connected successfully","server":"64898","max_payload":"1048576","target":"async_nats::connector"}
+2026-09-17T12:24:20Z     | {"timestamp":"2026-09-17T12:24:20.475942Z","level":"INFO","message":"event: connected","target":"async_nats"}
+2026-09-17T12:24:20Z     | {"timestamp":"2026-09-17T12:24:20.488698Z","level":"INFO","message":"JetStream queue connected and stream bootstrapped","url":"nats://127.0.0.1:64898","stream":"TACHYON_EVENTS","target":"tachyon_serverless_gateway::durable"}
+2026-09-17T12:24:20Z     | Error: conflict: state.db is at schema version 99, newer than this binary supports (8). Migrations are forward-only: run a newer gateway, or restore the database from before the upgrade
+2026-09-17T12:24:20Z [lab] ERROR: state.db has a newer schema than this gateway (docs/runbook.md §6.4)
+# finished: 2026-09-17T12:24:20Z exit=1

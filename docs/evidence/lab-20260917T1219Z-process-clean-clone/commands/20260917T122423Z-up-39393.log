@@ -1,0 +1,43 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh up
+# started:  2026-09-17T12:24:23Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:24:23Z [lab] step 1/5: throwaway secrets and config (lab lab-8c436263, provider process)
+2026-09-17T12:24:23Z [lab] generated throwaway tokens and demo secret: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/tokens.env (0600)
+2026-09-17T12:24:23Z [lab] generated object store key: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/object.key (0600)
+2026-09-17T12:24:23Z [lab] generated trigger sealing key: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/triggers.key (0600)
+2026-09-17T12:24:24Z [lab] config: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml (0600)
+2026-09-17T12:24:24Z [lab] WARN: process provider: functions run as plain child processes of the gateway. NOT a microVM, NO isolation (dev mode).
+2026-09-17T12:24:24Z [lab] step 2/5: nats-server v2.14.7 on 127.0.0.1:49186 (store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+2026-09-17T12:24:24Z [queue] nats-server v2.14.7 ready on 127.0.0.1:49186 (pid 39542, store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+2026-09-17T12:24:24Z [lab] step 3/5: gateway on 127.0.0.1:49185 (applies forward-only migrations to /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/state.db before listening)
+2026-09-17T12:24:24Z [lab] gateway pid 39563, log /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/logs/gateway.log
+2026-09-17T12:24:24Z [lab] step 4/5: health of every component
+2026-09-17T12:24:25Z STATUS COMPONENT              CHECK                                        DETAIL
+2026-09-17T12:24:25Z ok    nats-server            process                                      pid 39542
+2026-09-17T12:24:25Z ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+2026-09-17T12:24:25Z ok    gateway                process                                      pid 39563
+2026-09-17T12:24:25Z ok    gateway                GET /healthz                                 200
+2026-09-17T12:24:25Z ok    gateway                GET /readyz .ready                           true
+2026-09-17T12:24:25Z ok    provider               readyz .preflight                            process ok=true 
+2026-09-17T12:24:25Z ok    dispatcher             readyz .dispatcher.fenced                    false
+2026-09-17T12:24:25Z ok    config-cache           readyz .control_plane.new_invocations        accepted config=fresh
+2026-09-17T12:24:25Z ok    usage-journal          readyz .usage                                accepting=true journal_healthy=true collector_error=null
+2026-09-17T12:24:25Z ok    budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=null
+2026-09-17T12:24:25Z ok    ledger                 state.db schema_version = migrations         8/8
+2026-09-17T12:24:25Z ok    queue                  tsls_async_queue_condition{healthy}          1
+2026-09-17T12:24:25Z ok    trigger-scheduler      tsls_trigger_scheduler_owner                 1
+2026-09-17T12:24:25Z ok    async-dispatcher       tsls_async_dispatch_runs_in_flight           0
+2026-09-17T12:24:25Z ok    metrics                operator token 200, tenant token 401         401
+2026-09-17T12:24:25Z ok    object-store           root exists, key 0600, backend filesystem    /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/objects
+2026-09-17T12:24:25Z skip  console                GET /console/                                not enabled (up --console)
+2026-09-17T12:24:25Z [lab] step 5/5: ready
+2026-09-17T12:24:25Z 
+2026-09-17T12:24:25Z   API:     http://127.0.0.1:49185
+2026-09-17T12:24:25Z   tokens:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/tokens.env (source it; values are never printed)
+2026-09-17T12:24:25Z   CLI:     set -a; . /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/secrets/tokens.env; set +a; TSLS_API_URL=http://127.0.0.1:49185 TSLS_TOKEN=$TOKEN_A target/debug/tsls functions list
+2026-09-17T12:24:25Z   next:    scripts/lab/lab.sh demo all
+# finished: 2026-09-17T12:24:25Z exit=0

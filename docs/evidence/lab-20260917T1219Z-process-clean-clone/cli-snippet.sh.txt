@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# runbook §4.1 "自分で CLI を叩くとき", copied verbatim
+cd "$(dirname "$0")/tachyon-serverless" || exit 1
+set -a; . .lab/secrets/tokens.env; set +a
+export TSLS_API_URL=http://127.0.0.1:$(sed -n 's/^GATEWAY_PORT=//p' .lab/manifest.env) TSLS_TOKEN=$TOKEN_A
+target/debug/tsls functions list

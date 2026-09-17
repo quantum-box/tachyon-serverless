@@ -1,0 +1,84 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh up
+# started:  2026-09-17T12:23:46Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:23:47Z [lab] step 1/5: throwaway secrets and config (lab lab-8c436263, provider process)
+2026-09-17T12:23:47Z [lab] config: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/config/gateway.toml (0600)
+2026-09-17T12:23:47Z [lab] WARN: process provider: functions run as plain child processes of the gateway. NOT a microVM, NO isolation (dev mode).
+2026-09-17T12:23:47Z [lab] step 2/5: nats-server v2.14.7 on 127.0.0.1:64898 (store /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream)
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:41.880329 [INF]   Starting restore for stream 'TACHYON > TACHYON_EVENTS'
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:41.880780 [INF]   Restored 0 messages for stream 'TACHYON > TACHYON_EVENTS' in 0s
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:41.880824 [INF]   Recovering 1 consumers for stream - 'TACHYON > TACHYON_EVENTS'
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:41.881023 [INF] Took 1.197541ms to start JetStream
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:41.881042 [INF] Listening for client connections on 127.0.0.1:64898
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:41.881047 [INF] Server is ready
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:45.712422 [INF] Trapped "terminated" signal
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:45.764727 [INF] Initiating Shutdown...
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:45.764837 [INF] Initiating JetStream Shutdown...
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:45.764960 [INF] JetStream Shutdown
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:45.765065 [INF] Server Exiting..
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156415 [INF] Starting nats-server
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156472 [INF]   Version:  2.14.7
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156476 [INF]   Git:      [8d8b69a]
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156479 [INF]   Name:     tachyon-queue-local
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156483 [INF]   Node:     OBUMwGpe
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156486 [INF]   ID:       NCYL3QXBKLAYAJJTYQJNRBBA4OVVWKGF7Y75V72HAOEC7OW5BAKU6XOJ
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156491 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156501 [INF] Using configuration file: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.conf (sha256:c378037f4393fd087ba2fc1f50d7650501cb65b35f14185477d4b36dc890ddd3)
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156680 [INF] Starting http monitor on 127.0.0.1:64899
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156726 [INF] Starting JetStream
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156864 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156868 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156871 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156873 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156875 [INF] 
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156877 [INF]          https://docs.nats.io/jetstream
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156880 [INF] 
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156882 [INF] ---------------- JETSTREAM ----------------
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156884 [INF]   Strict:          true
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156890 [INF]   Max Memory:      64.00 MB
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156892 [INF]   Max Storage:     2.00 GB
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156895 [INF]   Store Directory: "/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream/jetstream"
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156897 [INF]   API Level:       4
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156899 [INF] -------------------------------------------
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157278 [INF]   Starting restore for stream 'TACHYON > TACHYON_EVENTS'
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157528 [INF]   Restored 0 messages for stream 'TACHYON > TACHYON_EVENTS' in 0s
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157578 [INF]   Recovering 1 consumers for stream - 'TACHYON > TACHYON_EVENTS'
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157790 [INF] Took 1.059ms to start JetStream
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157819 [FTL] Error listening on port: 127.0.0.1:64898, "listen tcp 127.0.0.1:64898: bind: address already in use"
+2026-09-17T12:24:17Z [queue] ERROR: nats-server did not become ready (log: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.log)
+2026-09-17T12:24:17Z [37841] 2026/09/17 21:23:45.765065 [INF] Server Exiting..
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156415 [INF] Starting nats-server
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156472 [INF]   Version:  2.14.7
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156476 [INF]   Git:      [8d8b69a]
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156479 [INF]   Name:     tachyon-queue-local
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156483 [INF]   Node:     OBUMwGpe
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156486 [INF]   ID:       NCYL3QXBKLAYAJJTYQJNRBBA4OVVWKGF7Y75V72HAOEC7OW5BAKU6XOJ
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156491 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156501 [INF] Using configuration file: /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/nats-server.conf (sha256:c378037f4393fd087ba2fc1f50d7650501cb65b35f14185477d4b36dc890ddd3)
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156680 [INF] Starting http monitor on 127.0.0.1:64899
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156726 [INF] Starting JetStream
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156864 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156868 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156871 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156873 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156875 [INF] 
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156877 [INF]          https://docs.nats.io/jetstream
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156880 [INF] 
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156882 [INF] ---------------- JETSTREAM ----------------
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156884 [INF]   Strict:          true
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156890 [INF]   Max Memory:      64.00 MB
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156892 [INF]   Max Storage:     2.00 GB
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156895 [INF]   Store Directory: "/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/nats/jetstream/jetstream"
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156897 [INF]   API Level:       4
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.156899 [INF] -------------------------------------------
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157278 [INF]   Starting restore for stream 'TACHYON > TACHYON_EVENTS'
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157528 [INF]   Restored 0 messages for stream 'TACHYON > TACHYON_EVENTS' in 0s
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157578 [INF]   Recovering 1 consumers for stream - 'TACHYON > TACHYON_EVENTS'
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157790 [INF] Took 1.059ms to start JetStream
+2026-09-17T12:24:17Z [38341] 2026/09/17 21:23:47.157819 [FTL] Error listening on port: 127.0.0.1:64898, "listen tcp 127.0.0.1:64898: bind: address already in use"
+2026-09-17T12:24:17Z [lab] ERROR: nats-server did not start (docs/runbook.md §6.6)
+# finished: 2026-09-17T12:24:17Z exit=1

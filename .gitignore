@@ -46,3 +46,6 @@ Cargo.lock.bak
 
 # Claude Code worktrees
 /.claude/
+
+# scripts/lab/lab.sh default lab directory (throwaway secrets, data, downloads, command logs)
+/.lab

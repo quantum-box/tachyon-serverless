@@ -1,0 +1,29 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh status
+# started:  2026-09-17T12:23:25Z
+# lab_dir:  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+# lab_id:   lab-8c436263
+# host:     Darwin 25.6.0 arm64 user=takanorifukuyama
+# git:      c37ec0867e2a88d65a98bd04bad2c9d983279aa0
+2026-09-17T12:23:25Z lab lab-8c436263  provider=process  state=up  dir=/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab
+2026-09-17T12:23:25Z (process provider: dev mode, NOT a microVM, no isolation)
+2026-09-17T12:23:25Z 
+2026-09-17T12:23:25Z STATUS COMPONENT              CHECK                                        DETAIL
+2026-09-17T12:23:25Z ok    nats-server            process                                      pid 34731
+2026-09-17T12:23:25Z ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+2026-09-17T12:23:25Z FAIL  gateway                process                                      not running (lab.sh up)
+2026-09-17T12:23:25Z FAIL  gateway                GET /healthz                                 000
+2026-09-17T12:23:25Z FAIL  gateway                GET /readyz .ready                           no answer
+2026-09-17T12:23:25Z FAIL  provider               readyz .preflight (failing checks listed)    no answer
+2026-09-17T12:23:25Z FAIL  dispatcher             readyz .dispatcher.fenced                    ?
+2026-09-17T12:23:25Z FAIL  config-cache           readyz .control_plane.new_invocations        ?
+2026-09-17T12:23:25Z FAIL  usage-journal          readyz .usage                                ?
+2026-09-17T12:23:25Z FAIL  budget                 readyz .budget                               ?
+2026-09-17T12:23:25Z ok    ledger                 state.db schema_version = migrations         8/8
+2026-09-17T12:23:25Z FAIL  queue                  tsls_async_queue_condition{healthy}          missing
+2026-09-17T12:23:25Z FAIL  trigger-scheduler      tsls_trigger_scheduler_owner                 missing
+2026-09-17T12:23:25Z FAIL  async-dispatcher       tsls_async_dispatch_runs_in_flight           missing
+2026-09-17T12:23:25Z FAIL  metrics                operator token 200, tenant token 401         tenant=000
+2026-09-17T12:23:25Z ok    object-store           root exists, key 0600, backend filesystem    /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/cc2/tachyon-serverless/.lab/data/objects
+2026-09-17T12:23:25Z skip  console                GET /console/                                not enabled (up --console)
+# finished: 2026-09-17T12:23:25Z exit=1
