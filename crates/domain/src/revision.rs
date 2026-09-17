@@ -207,6 +207,44 @@ pub struct RevisionSpec {
     pub secrets: Vec<SecretBinding>,
     /// Optional human description of the revision (e.g. git sha).
     pub description: String,
+    /// Where this revision may run (PLT-4634). Omitted from the serialized
+    /// form when unconstrained, so the digest of older revisions is unchanged.
+    #[serde(default, skip_serializing_if = "Placement::is_unconstrained")]
+    pub placement: Placement,
+}
+
+/// Placement constraint of a revision (docs/adr/0006-autoscaling-and-admission.md).
+///
+/// `region = "jp"` means *jp only*: admission rejects the invocation on a node
+/// whose region label is anything else, or missing. It is never relaxed to
+/// "anywhere" under load.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Placement {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+}
+
+impl Placement {
+    pub fn is_unconstrained(&self) -> bool {
+        self.region.is_none()
+    }
+
+    pub fn validate(&self) -> Result<(), DomainError> {
+        if let Some(region) = &self.region {
+            let ok = !region.is_empty()
+                && region.len() <= 64
+                && region
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if !ok {
+                return Err(DomainError::validation(
+                    "placement.region",
+                    "must be 1..=64 bytes of [a-z0-9-]",
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl RevisionSpec {
@@ -343,6 +381,7 @@ impl RevisionSpec {
                 max: 1024,
             });
         }
+        self.placement.validate()?;
         Ok(())
     }
 
@@ -499,7 +538,21 @@ mod tests {
                 binding_ref: "billing-db".into(),
             }],
             description: String::new(),
+            placement: Placement::default(),
         }
+    }
+
+    #[test]
+    fn placement_is_validated_and_absent_from_the_digest_when_unconstrained() {
+        let plain = spec();
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(!json.contains("placement"), "{json}");
+        let mut jp = spec();
+        jp.placement.region = Some("jp".into());
+        assert!(jp.validate(&Limits::default()).is_ok());
+        assert_ne!(jp.digest(), plain.digest());
+        jp.placement.region = Some("JP only".into());
+        assert!(jp.validate(&Limits::default()).is_err());
     }
 
     fn now() -> Timestamp {

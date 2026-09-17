@@ -104,6 +104,10 @@ pub async fn dispatch(cli: Cli, p: &mut Printer<'_>) -> Result<(), CliError> {
             let client = ApiClient::new(cfg)?;
             provider::provider(&client, p).await
         }
+        Command::Capacity => {
+            let client = ApiClient::new(cfg)?;
+            provider::capacity(&client, p).await
+        }
         Command::Health => {
             let client = ApiClient::new(cfg)?;
             provider::health(&client, p).await

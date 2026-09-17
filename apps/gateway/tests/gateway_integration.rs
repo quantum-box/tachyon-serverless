@@ -1517,3 +1517,61 @@ async fn the_internal_config_endpoint_is_absent_without_an_internal_credential()
     assert_eq!(ready.json()["control_plane"]["role"], "combined");
     assert_eq!(ready.json()["control_plane"]["new_invocations"], "accepted");
 }
+
+/// PLT-4634: `GET /v1/capacity` needs a token, reports the host separately
+/// from its environments, and shows a tenant only its own revisions. A burst
+/// of concurrent invokes through the HTTP API is served and fully released.
+#[tokio::test]
+async fn capacity_is_reported_per_tenant_and_a_burst_is_released() {
+    let api = api(Vec::new());
+    let r = &api.router;
+    let anonymous = call(
+        r,
+        req(Method::GET, "/v1/capacity", None)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+
+    let (function_id, revision_id) = deploy(r, "capacity").await;
+    let calls: Vec<_> = (0..6)
+        .map(|i| {
+            let router = r.clone();
+            let path = format!("/v1/functions/{function_id}/invoke");
+            tokio::spawn(async move {
+                post_json(&router, &path, TOKEN_A, serde_json::json!({ "i": i })).await
+            })
+        })
+        .collect();
+    for c in calls {
+        let reply = c.await.unwrap();
+        assert_eq!(
+            reply.status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+    }
+    assert_eq!(api.fake.created().len(), 6);
+
+    let a = get(r, "/v1/capacity", TOKEN_A).await;
+    assert_eq!(a.status, StatusCode::OK);
+    let a = a.json();
+    assert_eq!(a["node"]["hosts"], 1);
+    assert_eq!(a["node"]["host_scale_out"], "not_supported");
+    assert_eq!(a["node"]["max_concurrency"], 8);
+    assert_eq!(a["node"]["per_environment_overhead"]["memory_mib"], 24);
+    assert_eq!(a["in_flight"], 0);
+    assert_eq!(a["reserved"]["memory_mib"], 0);
+    assert_eq!(a["queue"]["length"], 0);
+    assert_eq!(a["tenant"]["tenant_id"], TENANT_A);
+    let revisions = a["revisions"].as_array().unwrap();
+    assert_eq!(revisions.len(), 1);
+    assert_eq!(revisions[0]["revision_id"], revision_id.as_str());
+
+    let b = get(r, "/v1/capacity", TOKEN_B).await.json();
+    assert_eq!(b["tenant"]["tenant_id"], TENANT_B);
+    assert!(b["revisions"].as_array().unwrap().is_empty());
+    assert!(!b.to_string().contains(&revision_id));
+}

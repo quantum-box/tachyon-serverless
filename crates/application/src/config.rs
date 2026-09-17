@@ -13,6 +13,11 @@ use tachyon_serverless_domain::{Limits, TenantId};
 use tachyon_serverless_protocol::MAX_FRAME_BYTES;
 use tachyon_serverless_provider_port::Role;
 
+pub use crate::services::admission::config::{
+    AutoscalerConfig, CircuitBreakerConfig, NodeConfig, StartRateConfig, TenantQuotaConfig,
+    TenantQuotaEntry,
+};
+
 /// Frame bytes reserved for the `Invoke` / `Response` envelope (ids, event
 /// type, deadline, trace id) on top of the payload. `limits.max_payload_bytes`
 /// and `limits.max_response_bytes` plus this reserve must fit
@@ -214,9 +219,11 @@ impl ProviderConfig {
     }
 }
 
+/// `[capacity]`: admission, quotas and autoscaling (PLT-4634,
+/// docs/adr/0006-autoscaling-and-admission.md).
 #[derive(Debug, Clone, Deserialize)]
 pub struct CapacityConfig {
-    /// Gateway-wide upper bound of simultaneously running environments.
+    /// Node-wide upper bound of environments starting or busy at once.
     #[serde(default = "default_max_concurrency")]
     pub max_concurrency: usize,
     /// Invocations allowed to wait for capacity; beyond this -> 429.
@@ -224,6 +231,21 @@ pub struct CapacityConfig {
     pub max_queue: usize,
     #[serde(default = "default_queue_timeout")]
     pub queue_timeout_seconds: u64,
+    /// Payload bytes the wait queue may hold in total; beyond this -> 429.
+    #[serde(default = "default_max_queue_bytes")]
+    pub max_queue_bytes: u64,
+    #[serde(default)]
+    pub node: NodeConfig,
+    #[serde(default)]
+    pub tenant_defaults: TenantQuotaConfig,
+    #[serde(default)]
+    pub tenants: Vec<TenantQuotaEntry>,
+    #[serde(default)]
+    pub start_rate: StartRateConfig,
+    #[serde(default)]
+    pub circuit_breaker: CircuitBreakerConfig,
+    #[serde(default)]
+    pub autoscaler: AutoscalerConfig,
 }
 
 fn default_max_concurrency() -> usize {
@@ -235,6 +257,9 @@ fn default_max_queue() -> usize {
 fn default_queue_timeout() -> u64 {
     10
 }
+fn default_max_queue_bytes() -> u64 {
+    32 * 1024 * 1024
+}
 
 impl Default for CapacityConfig {
     fn default() -> Self {
@@ -242,6 +267,13 @@ impl Default for CapacityConfig {
             max_concurrency: default_max_concurrency(),
             max_queue: default_max_queue(),
             queue_timeout_seconds: default_queue_timeout(),
+            max_queue_bytes: default_max_queue_bytes(),
+            node: NodeConfig::default(),
+            tenant_defaults: TenantQuotaConfig::default(),
+            tenants: Vec::new(),
+            start_rate: StartRateConfig::default(),
+            circuit_breaker: CircuitBreakerConfig::default(),
+            autoscaler: AutoscalerConfig::default(),
         }
     }
 }
@@ -1003,6 +1035,17 @@ impl GatewayConfig {
                 "capacity.queue_timeout_seconds must be >= 1".into(),
             ));
         }
+        let c = &self.capacity;
+        crate::services::admission::config::validate_admission(
+            &c.node,
+            &c.tenant_defaults,
+            &c.tenants,
+            &c.start_rate,
+            &c.circuit_breaker,
+            &c.autoscaler,
+            c.max_queue_bytes,
+        )
+        .map_err(ConfigError::Invalid)?;
         let mut seen = HashSet::new();
         for t in &self.identity.tokens {
             if t.token.expose().is_empty() {
@@ -1261,6 +1304,50 @@ value = "demo-secret-value-a"
         // And it is accepted under dev, which is where measurements are taken.
         let dev = format!("{DEV}\n[pool]\nenabled = true\nallow_unverified_idle = true\n");
         assert!(GatewayConfig::from_toml(&dev).is_ok());
+    }
+
+    /// PLT-4634: the admission sections default to the old behaviour, parse,
+    /// and refuse values that would disable a limit by accident.
+    #[test]
+    fn capacity_sections_default_parse_and_validate() {
+        let cfg = GatewayConfig::from_toml(DEV).unwrap().capacity;
+        assert_eq!(
+            cfg.node.memory_mib, None,
+            "no resource bound unless configured"
+        );
+        assert_eq!(cfg.node.overhead().memory_mib, 24);
+        assert!(cfg.tenants.is_empty() && cfg.tenant_defaults.max_concurrency.is_none());
+
+        let text = format!(
+            "{DEV}\n[capacity.node]\nname = \"n1\"\nregion = \"jp\"\nmemory_mib = 4096\n\
+             vmm_overhead_memory_mib = 30\n\
+             [capacity.tenant_defaults]\nmax_concurrency = 4\n\
+             [[capacity.tenants]]\ntenant_id = \"tn_01hzzzzzzzzzzzzzzzzzzzzzza\"\nrequired_region = \"jp\"\n\
+             [capacity.start_rate]\nper_second = 3\nburst = 5\n\
+             [capacity.circuit_breaker]\nfailure_threshold = 2\ncooldown_seconds = 9\n"
+        );
+        let cfg = GatewayConfig::from_toml(&text).unwrap().capacity;
+        assert_eq!(cfg.node.region.as_deref(), Some("jp"));
+        assert_eq!(cfg.node.overhead().memory_mib, 38);
+        assert_eq!(cfg.tenants[0].required_region.as_deref(), Some("jp"));
+        assert_eq!(cfg.start_rate.burst, 5);
+        assert_eq!(cfg.circuit_breaker.cooldown_seconds, 9);
+
+        for bad in [
+            "[capacity.node]\nmemory_mib = 0\n",
+            "[capacity.node]\nregion = \"JP only\"\n",
+            "[capacity.node]\nbogus = 1\n",
+            "[capacity.start_rate]\nper_second = 0\n",
+            "[capacity.circuit_breaker]\nfailure_threshold = 0\n",
+            "[capacity.tenant_defaults]\nmax_concurrency = 0\n",
+            "[[capacity.tenants]]\ntenant_id = \"tn_01hzzzzzzzzzzzzzzzzzzzzzza\"\n\
+             [[capacity.tenants]]\ntenant_id = \"tn_01hzzzzzzzzzzzzzzzzzzzzzza\"\n",
+        ] {
+            assert!(
+                GatewayConfig::from_toml(&format!("{DEV}\n{bad}")).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

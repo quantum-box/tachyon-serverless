@@ -72,6 +72,7 @@ use tachyon_serverless_provider_port::{
 use crate::bridge_session::BridgeSession;
 use crate::config::PoolConfig;
 use crate::repository::{PoolLimits, Repositories};
+use crate::services::admission::Grant;
 
 // ---------------------------------------------------------------------------
 // policy
@@ -447,6 +448,9 @@ pub struct WarmEnvironment {
     pub session: BridgeSession,
     pub sequence: u64,
     pub timings: WarmStartTimings,
+    /// The environment's admission reservation, which the claimer takes over
+    /// (PLT-4634). `None` for a pool built without admission.
+    pub reservation: Option<Grant>,
 }
 
 /// What the pool holds for one idle environment: the live guest connection,
@@ -520,6 +524,10 @@ pub struct EnvironmentPool {
     /// Their rows stay `Draining`, so no attempt can take them, and the next
     /// sweep tries again.
     pending_termination: Mutex<Vec<Termination>>,
+    /// Admission reservations of the environments this pool owns, from the
+    /// moment [`Self::release_with`] takes one over until it is claimed or
+    /// really terminated (PLT-4634). Dropping one releases it.
+    reservations: Mutex<HashMap<EnvironmentId, Grant>>,
     /// How many environments [`EnvironmentPool::release`] has taken over whose
     /// quiesce has not finished yet.
     ///
@@ -558,6 +566,7 @@ impl EnvironmentPool {
             owner: None,
             sessions: Mutex::new(HashMap::new()),
             pending_termination: Mutex::new(Vec::new()),
+            reservations: Mutex::new(HashMap::new()),
             quiescing: tokio::sync::watch::Sender::new(0),
         }
     }
@@ -690,10 +699,12 @@ impl EnvironmentPool {
                             readiness_ms,
                             "reusing a pooled environment"
                         );
+                        let reservation = self.reservations.lock().remove(&environment.id);
                         return Some(WarmEnvironment {
                             environment,
                             session,
                             sequence,
+                            reservation,
                             timings: WarmStartTimings {
                                 resume_ms,
                                 readiness_ms,
@@ -767,8 +778,27 @@ impl EnvironmentPool {
         session: BridgeSession,
         sequence: u64,
     ) -> Result<(), Box<BridgeSession>> {
+        self.release_with(env, session, sequence, &mut None)
+    }
+
+    /// [`Self::release`] that also takes over the environment's admission
+    /// reservation on `Ok` (it stays with the caller on `Err`). The pool keeps
+    /// it — `Parking`, then `Idle`, then `Draining` — until the environment is
+    /// claimed (the claimer takes it) or really terminated (it is dropped), so
+    /// node capacity counts a pooled environment exactly once.
+    pub fn release_with(
+        self: Arc<Self>,
+        env: &ExecutionEnvironment,
+        session: BridgeSession,
+        sequence: u64,
+        reservation: &mut Option<Grant>,
+    ) -> Result<(), Box<BridgeSession>> {
         if !self.policy.reuse_enabled() || !session.is_usable() {
             return Err(Box::new(session));
+        }
+        if let Some(grant) = reservation.take() {
+            grant.park();
+            self.reservations.lock().insert(env.id.clone(), grant);
         }
         self.quiescing.send_modify(|n| *n += 1);
         let env = env.clone();
@@ -846,6 +876,9 @@ impl EnvironmentPool {
             }
         };
         let Some(session) = refused else {
+            if let Some(grant) = self.reservations.lock().get(&env.id) {
+                grant.parked();
+            }
             return;
         };
         // Quiesced, and then refused by the ledger (a cap, or a row that moved
@@ -880,6 +913,7 @@ impl EnvironmentPool {
         }
         drop(session);
         let now = self.clock.now();
+        self.draining(&env.id);
         if env.mark_draining(now).is_ok()
             && let Err(e) = self.repos.environments.update(env.clone())
         {
@@ -949,7 +983,7 @@ impl EnvironmentPool {
             // Take it out of the pool before terminating anything: an
             // environment the sweeper owns must never reach an attempt.
             match self.repos.slots.take_idle_for_termination(&env.id, now) {
-                Ok(true) => {}
+                Ok(true) => self.draining(&env.id),
                 Ok(false) => {
                     report.raced += 1;
                     continue;
@@ -988,6 +1022,56 @@ impl EnvironmentPool {
             );
         }
         report
+    }
+
+    /// Mark the admission reservation of an environment the pool is about to
+    /// terminate as draining: no longer claimable, still on the node.
+    fn draining(&self, id: &EnvironmentId) {
+        if let Some(grant) = self.reservations.lock().get(id) {
+            grant.drain();
+        }
+    }
+
+    /// Terminate up to `count` idle environments, oldest idle first, whatever
+    /// their TTL: admission asks for this when a cold start is blocked on node
+    /// resources that pooled environments hold (PLT-4634). Returns how many
+    /// were terminated.
+    pub async fn evict_idle(&self, count: usize) -> usize {
+        let mut idle = match self.repos.slots.list_idle(self.owner.as_ref()) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot list idle environments for eviction");
+                return 0;
+            }
+        };
+        idle.sort_by_key(|env| env.idle_since);
+        let mut evicted = 0;
+        for env in idle {
+            if evicted >= count {
+                break;
+            }
+            let now = self.clock.now();
+            if !matches!(
+                self.repos.slots.take_idle_for_termination(&env.id, now),
+                Ok(true)
+            ) {
+                continue;
+            }
+            self.draining(&env.id);
+            let termination = Termination {
+                id: env.id.clone(),
+                terminate: TerminateReason::Quiesced,
+                why: "evicted for capacity",
+                failure: None,
+                sequence: 0,
+                quiesced: true,
+            };
+            if self.terminate_and_settle(&termination).await {
+                tracing::info!(environment_id = %env.id, "idle environment evicted for capacity");
+                evicted += 1;
+            }
+        }
+        evicted
     }
 
     /// Terminate one environment the pool owns (its row is `Draining`) and
@@ -1043,6 +1127,9 @@ impl EnvironmentPool {
             });
             return false;
         }
+        // Gone from the host: its reservation goes back to the node.
+        let reservation = self.reservations.lock().remove(&t.id);
+        drop(reservation);
         let now = self.clock.now();
         match self.repos.environments.get(&t.id) {
             Ok(Some(mut env)) => {
@@ -1087,6 +1174,7 @@ impl EnvironmentPool {
     ) {
         tracing::warn!(environment_id = %env.id, reason, quiesced, "retiring a pooled environment");
         let now = self.clock.now();
+        self.draining(&env.id);
         if env.mark_draining(now).is_ok()
             && let Err(e) = self.repos.environments.update(env.clone())
         {

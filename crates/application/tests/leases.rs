@@ -130,6 +130,7 @@ async fn deploy(app: &Application, name: &str) -> Function {
                 secrets: vec![],
                 description: String::new(),
                 publish_to_prod: true,
+                required_region: None,
             },
         )
         .await

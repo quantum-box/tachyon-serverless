@@ -249,6 +249,7 @@ fn revision_request(digest: &str, publish: bool) -> CreateRevisionRequest {
         secrets: vec![],
         description: String::new(),
         publish_to_prod: publish,
+        required_region: None,
     }
 }
 

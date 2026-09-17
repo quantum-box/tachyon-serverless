@@ -15,9 +15,45 @@ bridge_binary = "target/debug/tachyon-serverless-runtime-bridge"
 workdir = "./data/process"     # 環境ごとに <workdir>/<environment_id> が作られる
 
 [capacity]
-max_concurrency = 8            # gateway 全体の同時実行数
-max_queue = 32                 # 空き待ちできる invoke 数（超過は 429）
-queue_timeout_seconds = 10     # 空き待ちの上限（超過は 504 queue_timeout）
+max_concurrency = 8            # node 全体で Starting + Busy の環境数の上限
+max_queue = 32                 # 空き待ちできる invoke 数（超過は 429、reason = queue_full）
+queue_timeout_seconds = 10     # 空き待ちの上限（超過は 504 queue_timeout、reason = capacity | quota | queue_deadline）
+max_queue_bytes = 33554432     # 待ち行列が保持できる payload の合計（超過は 429 queue_full）
+
+# admission・autoscaler（PLT-4634、docs/adr/0006-autoscaling-and-admission.md）。
+# 省略時は資源の上限なし・tenant quota なし（max_concurrency だけが効く）。
+# [capacity.node]
+# name = "dev-mac"
+# region = "jp"                  # 配置ラベル。required_region を持つ tenant / revision はこれが一致する node でだけ動く
+# cpu_millis = 8000              # 省略した次元は上限なし
+# memory_mib = 16384
+# ephemeral_storage_mib = 65536
+# vmm_overhead_memory_mib = 16   # 環境ごとに予約へ足す VMM の常駐分（推定値。実測で置き換える）
+# bridge_overhead_memory_mib = 8 # 環境ごとに予約へ足す guest bridge 分
+# overhead_cpu_millis = 0
+# overhead_storage_mib = 0
+#
+# [capacity.tenant_defaults]     # 明示しない tenant すべて
+# max_concurrency = 6            # 1 tenant が同時に持てる環境数。max_concurrency 未満にしないと、
+#                                # 先に来た長時間の tenant が全枠を取り、終わるまで他を待たせうる（非 preemptive）
+# max_queue = 16                 # 1 tenant が待ち行列に置ける数（超過は 429、reason = quota）
+# weight = 1                     # 公平キューの重み
+#
+# [[capacity.tenants]]
+# tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+# required_region = "jp"         # jp-only。node の region が違う・無いときは 503 placement（緩めない）
+# max_concurrency = 2
+#
+# [capacity.start_rate]          # cold start の token bucket
+# per_second = 20
+# burst = 20
+#
+# [capacity.circuit_breaker]     # revision ごと。連続した起動失敗で open → 503 circuit_open
+# failure_threshold = 5
+# cooldown_seconds = 30          # 経過後に 1 件だけ probe を通す
+#
+# [capacity.autoscaler]
+# rate_window_seconds = 10       # 到着率の減衰時定数
 
 [invoke]
 inline_output_max_bytes = 65536   # これ以下の出力は台帳にインライン保存

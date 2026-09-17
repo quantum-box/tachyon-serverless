@@ -61,6 +61,7 @@ pub(crate) mod fx {
                 binding_ref: "billing-db".into(),
             }],
             description: String::new(),
+            placement: Default::default(),
         }
     }
 

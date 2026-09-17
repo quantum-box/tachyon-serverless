@@ -74,6 +74,7 @@ pub fn router(state: AppState) -> Router {
     // store, and are authenticated like invoke.
     let data = Router::new()
         .route("/v1/provider", get(handlers::provider_info))
+        .route("/v1/capacity", get(handlers::capacity_info))
         .route(
             "/v1/invocations/{invocation_id}",
             get(handlers::get_invocation).post(handlers::cancel_colon),

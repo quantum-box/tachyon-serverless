@@ -58,6 +58,13 @@
           "message": {
             "type": "string"
           },
+          "reason": {
+            "description": "Why admission refused or gave up on the request (PLT-4634):\n`capacity` | `quota` | `queue_full` | `queue_deadline` |\n`circuit_open` | `placement`. Absent for every other error.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "request_id": {
             "type": [
               "string",
@@ -208,6 +215,65 @@
         ],
         "type": "object"
       },
+      "CapacityInfo": {
+        "description": "`GET /v1/capacity`.",
+        "properties": {
+          "environments": {
+            "$ref": "#/components/schemas/EnvironmentCounts"
+          },
+          "in_flight": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeInfo"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueInfo"
+          },
+          "rejections": {
+            "additionalProperties": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "Rejections since start, by reason.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "reserved": {
+            "$ref": "#/components/schemas/ResourceAmounts",
+            "description": "Sum of every live reservation (starting, busy, parking, idle, draining)."
+          },
+          "revisions": {
+            "items": {
+              "$ref": "#/components/schemas/RevisionCapacityInfo"
+            },
+            "type": "array"
+          },
+          "start_rate": {
+            "$ref": "#/components/schemas/StartRateInfo"
+          },
+          "tenant": {
+            "$ref": "#/components/schemas/TenantCapacityInfo"
+          }
+        },
+        "required": [
+          "node",
+          "reserved",
+          "environments",
+          "in_flight",
+          "queue",
+          "start_rate",
+          "rejections",
+          "tenant",
+          "revisions"
+        ],
+        "type": "object"
+      },
       "CreateFunctionRequest": {
         "properties": {
           "description": {
@@ -269,6 +335,13 @@
           "publish_to_prod": {
             "description": "When true (default), also point alias `prod` at the revision once Ready.",
             "type": "boolean"
+          },
+          "required_region": {
+            "description": "Region the revision must run in (e.g. `jp`). Admission rejects the\ninvocation on a node with another or no region label (PLT-4634).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "resources": {
             "$ref": "#/components/schemas/ResourcesRequest"
@@ -344,6 +417,53 @@
         "required": [
           "cidr",
           "ports"
+        ],
+        "type": "object"
+      },
+      "EnvironmentCounts": {
+        "description": "Environments by lifecycle, as the admission ledger counts them.",
+        "properties": {
+          "busy": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "draining": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "idle": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parking": {
+            "description": "Being quiesced on the way into the pool.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "promised": {
+            "description": "Granted a pooled environment that has not been taken yet.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "starting": {
+            "description": "Booting (reserved from the moment the start was granted).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "starting",
+          "busy",
+          "promised",
+          "parking",
+          "idle",
+          "draining"
         ],
         "type": "object"
       },
@@ -929,6 +1049,53 @@
         ],
         "type": "object"
       },
+      "NodeInfo": {
+        "description": "The physical host. Distinct from the number of environments on it: adding\nhosts is not something this single-node prototype does.",
+        "properties": {
+          "capacity": {
+            "$ref": "#/components/schemas/ResourceAmounts",
+            "description": "Configured capacity; a missing dimension is unbounded."
+          },
+          "host_scale_out": {
+            "description": "How hosts are added: `not_supported` (single node; scale-out is out of scope).",
+            "type": "string"
+          },
+          "hosts": {
+            "description": "Hosts behind this gateway. Always 1 in the prototype.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_concurrency": {
+            "description": "Environments starting or busy at once, node-wide.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "per_environment_overhead": {
+            "$ref": "#/components/schemas/ResourceAmounts",
+            "description": "Added to every environment's reservation (VMM + bridge + host artefacts)."
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "hosts",
+          "host_scale_out",
+          "capacity",
+          "per_environment_overhead",
+          "max_concurrency"
+        ],
+        "type": "object"
+      },
       "ProviderInfo": {
         "properties": {
           "capabilities": {
@@ -958,6 +1125,81 @@
           "capabilities",
           "preflight"
         ],
+        "type": "object"
+      },
+      "QueueInfo": {
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "length": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_length": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oldest_age_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timeout_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "length",
+          "bytes",
+          "max_length",
+          "max_bytes",
+          "timeout_seconds"
+        ],
+        "type": "object"
+      },
+      "ResourceAmounts": {
+        "description": "CPU / memory / ephemeral storage. In [`NodeInfo::capacity`] a missing\nvalue means the dimension is not bounded by configuration.",
+        "properties": {
+          "cpu_millis": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ephemeral_storage_mib": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "memory_mib": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "ResourcesRequest": {
@@ -1008,6 +1250,58 @@
           "reason",
           "idle_quiesce",
           "idle_resume"
+        ],
+        "type": "object"
+      },
+      "RevisionCapacityInfo": {
+        "description": "Autoscaler view of one revision of the caller's tenant.",
+        "properties": {
+          "arrival_rate_per_second": {
+            "format": "double",
+            "type": "number"
+          },
+          "avg_duration_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "circuit_breaker": {
+            "description": "`closed` | `open` | `half_open`",
+            "type": "string"
+          },
+          "desired": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "environments": {
+            "$ref": "#/components/schemas/EnvironmentCounts"
+          },
+          "max_environments": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queued": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision_id",
+          "desired",
+          "max_environments",
+          "environments",
+          "queued",
+          "arrival_rate_per_second",
+          "circuit_breaker"
         ],
         "type": "object"
       },
@@ -1073,6 +1367,97 @@
         "required": [
           "env_name",
           "binding_ref"
+        ],
+        "type": "object"
+      },
+      "StartRateInfo": {
+        "properties": {
+          "burst": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "per_second": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tokens": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "per_second",
+          "burst",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "TenantCapacityInfo": {
+        "description": "The caller's own tenant. Other tenants are never listed.",
+        "properties": {
+          "in_flight": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_concurrency": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_queue": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "oldest_age_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "queued": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queued_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "required_region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "weight": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "in_flight",
+          "queued",
+          "queued_bytes",
+          "weight"
         ],
         "type": "object"
       },
@@ -1350,6 +1735,42 @@
         ],
         "tags": [
           "artifacts"
+        ]
+      }
+    },
+    "/v1/capacity": {
+      "get": {
+        "operationId": "capacity_info",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityInfo"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Node capacity versus reservations, environments by state, the wait queue,\nthe start-rate limiter and the caller's own tenant and revisions\n(PLT-4634). Other tenants are never listed.",
+        "tags": [
+          "provider"
         ]
       }
     },
@@ -1972,6 +2393,16 @@
               }
             },
             "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "admission refused: `error.reason` is `placement` or `circuit_open`"
           },
           "504": {
             "content": {

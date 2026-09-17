@@ -20,6 +20,7 @@ use crate::local_ports::{
 };
 use crate::repository::HeartbeatOutcome;
 use crate::repository::{InMemoryStore, Repositories, SqliteOptions, SqliteStore, StateStore};
+use crate::services::admission::{AdmissionController, AdmissionSettings};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::{
     AliasService, ArtifactService, Dispatcher, EnvironmentPool, FunctionService, HistoryService,
@@ -75,6 +76,8 @@ pub struct Application {
     /// The publication a `combined` gateway serves on
     /// `GET /v1/internal/config`. `None` on a data plane.
     pub config_publisher: Option<Arc<LedgerConfigSource>>,
+    /// Capacity ledger, fair queue, quotas and autoscaler gate (PLT-4634).
+    pub admission: Arc<AdmissionController>,
 }
 
 impl std::fmt::Debug for Application {
@@ -333,6 +336,25 @@ impl Application {
             control.role,
             config.control_plane_outage.allow_cold_start,
         ));
+        // Admission (PLT-4634). When a cold start is blocked on node resources
+        // that idle pooled environments hold, it asks the pool to evict them.
+        let admission = AdmissionController::new(
+            AdmissionSettings::from_config(&config.capacity),
+            clock.clone(),
+        );
+        {
+            let pool = Arc::downgrade(&pool);
+            admission.set_evictor(move |count| {
+                let Some(pool) = pool.upgrade() else {
+                    return;
+                };
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        pool.evict_idle(count).await;
+                    });
+                }
+            });
+        }
         let invoke = InvokeService::new(InvokeServiceDeps {
             repos: repos.clone(),
             artifacts: artifacts.clone(),
@@ -349,6 +371,7 @@ impl Application {
             pool: pool.clone(),
             dispatcher: dispatcher.clone(),
             gate: invoke_gate.clone(),
+            admission: admission.clone(),
         });
         // Reuse is visible at startup, on or off, with the gate that decided
         // it and the two capabilities behind it (PLT-4633 acceptance 4). The
@@ -366,6 +389,10 @@ impl Application {
             data_dir = %config.data_dir.display(),
             store = store.backend(),
             dispatcher_id = %dispatcher.id(),
+            node = %config.capacity.node.name,
+            node_region = config.capacity.node.region.as_deref().unwrap_or("none"),
+            node_memory_mib = ?config.capacity.node.memory_mib,
+            max_concurrency = config.capacity.max_concurrency,
             "application bootstrapped"
         );
         if policy.reuse_enabled() && !policy.idle_verified() {
@@ -404,6 +431,7 @@ impl Application {
             config_cache,
             invoke_gate,
             config_publisher,
+            admission,
         }))
     }
 

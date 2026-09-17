@@ -11,10 +11,11 @@ use base64::Engine;
 use serde::Deserialize;
 
 use tachyon_serverless_api_types::{
-    AliasResponse, ApiErrorBody, ArtifactUploadResponse, AttemptResponse, CreateFunctionRequest,
-    CreateRevisionRequest, DeadlinesResponse, FunctionResponse, InvocationErrorResponse,
-    InvocationResponse, InvokeQuery, ListResponse, LogEntryResponse, LogsResponse, ProviderInfo,
-    RevisionResponse, TimingsResponse, UpdateAliasRequest, UsageSummaryResponse, headers,
+    AliasResponse, ApiErrorBody, ArtifactUploadResponse, AttemptResponse, CapacityInfo,
+    CreateFunctionRequest, CreateRevisionRequest, DeadlinesResponse, FunctionResponse,
+    InvocationErrorResponse, InvocationResponse, InvokeQuery, ListResponse, LogEntryResponse,
+    LogsResponse, ProviderInfo, RevisionResponse, TimingsResponse, UpdateAliasRequest,
+    UsageSummaryResponse, headers,
 };
 use tachyon_serverless_application::services::invoke::inline_output;
 use tachyon_serverless_application::{AppError, InvocationDetail, InvokeOutcome, InvokeRequest};
@@ -159,6 +160,17 @@ pub async fn provider_info(
 ) -> ApiResult<Json<ProviderInfo>> {
     let info = state.provider_service.info().await.ctx(&ctx.request_id)?;
     Ok(Json(info))
+}
+
+/// Node capacity versus reservations, environments by state, the wait queue,
+/// the start-rate limiter and the caller's own tenant and revisions
+/// (PLT-4634). Other tenants are never listed.
+#[utoipa::path(get, path = "/v1/capacity", tag = "provider", security(("bearer" = [])), responses(
+    (status = 200, body = CapacityInfo),
+    (status = 401, body = ApiErrorBody)
+))]
+pub async fn capacity_info(State(state): State<AppState>, ctx: Ctx) -> Json<CapacityInfo> {
+    Json(state.admission.snapshot(&ctx.principal.tenant_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -607,7 +619,9 @@ async fn run_json_invoke(
     responses(
         (status = 200, description = "handler output (JSON); x-tachyon-invocation-id header", body = Object),
         (status = 404, body = ApiErrorBody), (status = 409, body = ApiErrorBody), (status = 413, body = ApiErrorBody),
-        (status = 429, body = ApiErrorBody), (status = 502, body = ApiErrorBody), (status = 504, body = ApiErrorBody)
+        (status = 429, body = ApiErrorBody), (status = 502, body = ApiErrorBody),
+        (status = 503, description = "admission refused: `error.reason` is `placement` or `circuit_open`", body = ApiErrorBody),
+        (status = 504, body = ApiErrorBody)
     ))]
 pub async fn invoke_json(
     State(state): State<AppState>,

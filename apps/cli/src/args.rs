@@ -54,6 +54,9 @@ pub enum Command {
     },
     /// Show the execution provider kind, isolation and capability table.
     Provider,
+    /// Show node capacity versus reservations, the wait queue and this tenant's
+    /// revisions (autoscaler view).
+    Capacity,
     /// Check /healthz and /readyz.
     Health,
     /// Run a binary end to end on a throwaway local gateway (process provider, no isolation).
@@ -190,6 +193,10 @@ pub struct DeployArgs {
     /// `[tcp|udp:]CIDR:PORT[,PORT...]`, e.g. `1.1.1.1/32:443` or `udp:1.1.1.1/32:53`.
     #[arg(long = "egress-allow", value_name = "[PROTO:]CIDR:PORTS")]
     pub egress_allow: Vec<String>,
+    /// Region the revision must run in (e.g. `jp`). A gateway whose node has another
+    /// or no region label rejects its invocations; the constraint is never relaxed.
+    #[arg(long = "region", value_name = "REGION")]
+    pub region: Option<String>,
     /// Do not move the `prod` alias to the new revision.
     #[arg(long)]
     pub no_publish: bool,
@@ -530,6 +537,7 @@ mod tests {
     #[test]
     fn other_commands_parse() {
         assert!(parse(&["provider"]).is_ok());
+        assert!(parse(&["capacity"]).is_ok());
         assert!(parse(&["health"]).is_ok());
         assert!(parse(&["dev", "--binary", "/tmp/x", "--keep"]).is_ok());
         assert!(parse(&["functions", "cancel", "inv_x"]).is_ok());

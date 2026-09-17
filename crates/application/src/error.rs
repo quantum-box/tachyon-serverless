@@ -6,6 +6,16 @@ use tachyon_serverless_provider_port::{ArtifactError, ProviderError, SecretError
 
 use crate::control::ControlError;
 use crate::repository::RepoError;
+use crate::services::admission::{RejectReason, Rejection, reason_for_error_type};
+
+impl From<Rejection> for AppError {
+    fn from(r: Rejection) -> Self {
+        Self::Admission {
+            reason: r.reason,
+            message: r.message,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -31,8 +41,14 @@ pub enum AppError {
     InvalidRequest(String),
     #[error("payload too large: {size} bytes (max {max})")]
     PayloadTooLarge { size: u64, max: u64 },
-    #[error("capacity exceeded: {0}")]
-    CapacityExceeded(String),
+    /// Admission refused the invocation before anything was recorded
+    /// (PLT-4634). `queue_full`, `quota` and `capacity` answer 429;
+    /// `circuit_open` and `placement` answer 503.
+    #[error("{}: {message}", reason.as_str())]
+    Admission {
+        reason: RejectReason,
+        message: String,
+    },
     #[error("revision not ready: {0}")]
     RevisionNotReady(String),
     #[error("function deleted: {0}")]
@@ -79,9 +95,22 @@ impl AppError {
             Self::Conflict(_) | Self::IdempotencyConflict { .. } => ErrorCode::Conflict,
             Self::InvalidRequest(_) => ErrorCode::InvalidRequest,
             Self::PayloadTooLarge { .. } => ErrorCode::PayloadTooLarge,
-            Self::CapacityExceeded(_) => ErrorCode::CapacityExceeded,
+            Self::Admission { reason, .. } => match reason {
+                RejectReason::QueueFull | RejectReason::Quota | RejectReason::Capacity => {
+                    ErrorCode::CapacityExceeded
+                }
+                RejectReason::QueueDeadline => ErrorCode::QueueTimeout,
+                RejectReason::CircuitOpen | RejectReason::Placement => {
+                    ErrorCode::ProviderUnavailable
+                }
+            },
             Self::RevisionNotReady(_) => ErrorCode::RevisionNotReady,
             Self::FunctionDeleted(_) => ErrorCode::FunctionDeleted,
+            Self::Invocation { error, .. }
+                if reason_for_error_type(&error.error_type) == Some(RejectReason::CircuitOpen) =>
+            {
+                ErrorCode::ProviderUnavailable
+            }
             // A cold start refused after acceptance is recorded as a platform
             // error, but answers with the code of its refusal (503).
             Self::Invocation { error, .. } => ControlError::from_error_type(&error.error_type)
@@ -113,6 +142,13 @@ impl AppError {
             Self::Control { kind, .. } => (None, Some(kind.error_type().to_string())),
             _ => (None, None),
         };
+        let reason = match self {
+            Self::Admission { reason, .. } => Some(reason.as_str().to_string()),
+            Self::Invocation { error, .. } => {
+                reason_for_error_type(&error.error_type).map(|r| r.as_str().to_string())
+            }
+            _ => None,
+        };
         ApiErrorBody {
             error: ApiError {
                 code: self.code(),
@@ -120,6 +156,7 @@ impl AppError {
                 request_id,
                 invocation_id,
                 error_type,
+                reason,
             },
         }
     }
@@ -219,7 +256,36 @@ mod tests {
     #[test]
     fn codes_and_statuses() {
         assert_eq!(AppError::NotFound("x".into()).http_status(), 404);
-        assert_eq!(AppError::CapacityExceeded("x".into()).http_status(), 429);
+        for (reason, status) in [
+            (RejectReason::QueueFull, 429),
+            (RejectReason::Quota, 429),
+            (RejectReason::Capacity, 429),
+            (RejectReason::CircuitOpen, 503),
+            (RejectReason::Placement, 503),
+        ] {
+            let e = AppError::Admission {
+                reason,
+                message: "x".into(),
+            };
+            assert_eq!(e.http_status(), status);
+            assert_eq!(
+                e.to_api_body(None).error.reason.as_deref(),
+                Some(reason.as_str())
+            );
+        }
+        let queued = AppError::Invocation {
+            invocation_id: InvocationId::generate(),
+            error: InvocationError::new(
+                ErrorClass::QueueTimeout,
+                "Host.CapacityWaitTimeout",
+                "node full",
+            ),
+        };
+        assert_eq!(queued.http_status(), 504);
+        assert_eq!(
+            queued.to_api_body(None).error.reason.as_deref(),
+            Some("capacity")
+        );
         let e = AppError::Invocation {
             invocation_id: InvocationId::generate(),
             error: InvocationError::new(ErrorClass::Timeout, "Host.Timeout", "late"),
