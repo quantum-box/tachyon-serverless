@@ -57,6 +57,113 @@ pub struct FirecrackerConfig {
     /// (PLT-4622, docs/adr/0005-egress-profiles.md). Only touched for
     /// environments that ask for egress; `none` never creates a device.
     pub network: NetworkConfig,
+    /// Host-side cgroup v2 limits per VMM (PLT-4622, [`crate::cgroup`]).
+    pub cgroup: CgroupConfig,
+    /// Launch the VMM through Firecracker's `jailer` (PLT-4622,
+    /// [`crate::jail`]). `None` runs `firecracker` directly as the gateway's
+    /// user, which is meant for development.
+    pub jailer: Option<JailerConfig>,
+}
+
+/// What to do when host cgroup v2 limits cannot be applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CgroupMode {
+    /// Every environment gets its cgroup, or it is not created
+    /// (`ProviderError::Unavailable`); preflight fails without delegation.
+    Required,
+    /// Apply the limits when the host allows it, otherwise boot without them
+    /// (logged, and reported in the capabilities).
+    #[default]
+    BestEffort,
+    /// Never touch cgroups.
+    Off,
+}
+
+impl CgroupMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Required => "required",
+            Self::BestEffort => "best-effort",
+            Self::Off => "off",
+        }
+    }
+}
+
+/// Default [`CgroupConfig::root`].
+pub const DEFAULT_CGROUP_ROOT: &str = "/sys/fs/cgroup";
+/// Default [`CgroupConfig::parent`].
+pub const DEFAULT_CGROUP_PARENT: &str = "tachyon";
+/// Default [`CgroupConfig::cpu_period_us`]: the CFS default of 100 ms.
+pub const DEFAULT_CPU_PERIOD_US: u64 = 100_000;
+/// Default [`CgroupConfig::memory_overhead_mib`] (docs/kvm.md §3.6 records
+/// the VMM overhead measured against it).
+pub const DEFAULT_MEMORY_OVERHEAD_MIB: u64 = 64;
+/// Default [`CgroupConfig::pids_max`].
+pub const DEFAULT_PIDS_MAX: u64 = 64;
+
+/// Host-side cgroup v2 limits of each VMM:
+/// `<root>/<parent>/<env_id>/{cpu.max, memory.max, pids.max}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CgroupConfig {
+    pub mode: CgroupMode,
+    /// A cgroup v2 hierarchy this process may create children in and move
+    /// processes into (the mount root, or a delegated subtree).
+    pub root: PathBuf,
+    /// Directory under `root` that holds one cgroup per environment.
+    pub parent: String,
+    /// CFS period written to `cpu.max`; the quota is
+    /// `cpu_millis * period / 1000`, shared by all vCPUs and VMM threads.
+    pub cpu_period_us: u64,
+    /// Added to the guest memory for `memory.max` (VMM heap, device
+    /// emulation, page cache of the drives).
+    pub memory_overhead_mib: u64,
+    /// `pids.max` (VMM threads plus the jailer).
+    pub pids_max: u64,
+}
+
+impl Default for CgroupConfig {
+    fn default() -> Self {
+        Self {
+            mode: CgroupMode::default(),
+            root: PathBuf::from(DEFAULT_CGROUP_ROOT),
+            parent: DEFAULT_CGROUP_PARENT.to_owned(),
+            cpu_period_us: DEFAULT_CPU_PERIOD_US,
+            memory_overhead_mib: DEFAULT_MEMORY_OVERHEAD_MIB,
+            pids_max: DEFAULT_PIDS_MAX,
+        }
+    }
+}
+
+/// Default [`JailerConfig::chroot_base`] (the jailer's own default).
+pub const DEFAULT_CHROOT_BASE: &str = "/srv/jailer";
+
+/// Firecracker `jailer` settings. The gateway must run as root: the jailer
+/// creates the chroot and device nodes, then drops to `uid` / `gid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JailerConfig {
+    /// Path of the `jailer` binary (same Firecracker release as the VMM).
+    pub binary: PathBuf,
+    /// Unprivileged uid / gid the VMM runs as. Must not be 0.
+    pub uid: u32,
+    pub gid: u32,
+    /// `<chroot_base>/<firecracker file name>/<instance id>/root` is the
+    /// chroot of one environment. It must be on the same file system as
+    /// `workdir`, `kernel` and `rootfs`: files are hard-linked into it.
+    pub chroot_base: PathBuf,
+    /// `--new-pid-ns`: the VMM runs as pid 1 of its own PID namespace.
+    pub new_pid_ns: bool,
+}
+
+impl Default for JailerConfig {
+    fn default() -> Self {
+        Self {
+            binary: PathBuf::from("jailer"),
+            uid: 64000,
+            gid: 64000,
+            chroot_base: PathBuf::from(DEFAULT_CHROOT_BASE),
+            new_pid_ns: true,
+        }
+    }
 }
 
 impl Default for FirecrackerConfig {
@@ -74,6 +181,8 @@ impl Default for FirecrackerConfig {
             fc_log_max_bytes: DEFAULT_FC_LOG_MAX_BYTES,
             min_host_free_bytes: DEFAULT_MIN_HOST_FREE_BYTES,
             network: NetworkConfig::default(),
+            cgroup: CgroupConfig::default(),
+            jailer: None,
         }
     }
 }
@@ -105,6 +214,19 @@ impl FirecrackerConfig {
         if !is_bare(&self.network.ip_binary) {
             self.network.ip_binary = abs(&self.network.ip_binary);
         }
+        if let Some(j) = self.jailer.as_mut() {
+            // The jailer is given absolute paths for both binaries.
+            if let Some(resolved) = crate::preflight::resolve_command(&j.binary) {
+                j.binary = resolved;
+            } else if !is_bare(&j.binary) {
+                j.binary = abs(&j.binary);
+            }
+            j.chroot_base = abs(&j.chroot_base);
+            if let Some(resolved) = crate::preflight::resolve_command(&self.firecracker_binary) {
+                self.firecracker_binary = resolved;
+            }
+        }
+        self.cgroup.root = abs(&self.cgroup.root);
         self.kernel = abs(&self.kernel);
         self.rootfs = abs(&self.rootfs);
         self.workdir = abs(&self.workdir);
@@ -126,6 +248,13 @@ mod tests {
         assert_eq!(c.console_log_max_bytes, 4 * 1024 * 1024);
         assert_eq!(c.fc_log_max_bytes, 4 * 1024 * 1024);
         assert_eq!(c.min_host_free_bytes, 512 * 1024 * 1024);
+        assert_eq!(c.cgroup.mode, CgroupMode::BestEffort);
+        assert_eq!(c.cgroup.root, PathBuf::from("/sys/fs/cgroup"));
+        assert_eq!(c.cgroup.parent, "tachyon");
+        assert_eq!(c.cgroup.cpu_period_us, 100_000);
+        assert!(c.jailer.is_none());
+        let j = JailerConfig::default();
+        assert!(j.new_pid_ns && j.uid != 0 && j.gid != 0);
     }
 
     #[test]

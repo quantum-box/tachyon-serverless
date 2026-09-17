@@ -109,9 +109,19 @@ kernel = ".kvm/vmlinux"
 rootfs = ".kvm/rootfs.ext4"
 workdir = ".kvm/run"
 vsock_port = 5000
+
+[provider.firecracker.cgroup]   # PLT-4622: VMM ごとの host cgroup v2 上限（production は required のみ）
+mode = "required"
+
+[provider.firecracker.jailer]   # PLT-4622: jailer で chroot・専用 uid・PID / mount namespace
+enabled = true
+binary = ".kvm/bin/jailer"
+uid = 64000
+gid = 64000
 ```
 
 provider は相対パスをプロセスの cwd 基準で絶対化するので、gateway はリポジトリルートで起動する。
+この設定（jailer と `mode = "required"` の cgroup）は **gateway を root で起動する必要がある**（jailer は root から uid 64000 に降格し、環境の cgroup へ VMM を移すには cgroup root の `cgroup.procs` への書き込みが要る）。root でない gateway では preflight の `host_cgroup` と `jailer` が失敗して `readyz` が 503 のままになり、環境の作成も `Unavailable` で拒否される（fail closed）。非特権で試すときは `profile = "dev"` のコピーで `[provider.firecracker.jailer]` を外し、cgroup を `best-effort`（dev の既定）にする。その構成では `enforce_resource_limits` が `unverified`（`cpu_millis` は vCPU 単位でしか効かず、VMM の host memory に上限が無い）と表示される。
 `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`（Track D）はこの設定で gateway を自分で起動し（`127.0.0.1:8080`）、登録 → publish → invoke → logs → timeout → rollback → 他 tenant 404 → cancel → 環境破棄を通す。別の gateway を同じポートで起動したまま実行しない。host の `127.0.0.1:8080` を他のプロセスが使っている場合は、`listen` を変えた設定のコピーを `TSLS_GATEWAY_CONFIG` に、同じ URL を `TSLS_API_URL` に渡す。Lima は guest の listen port を host の localhost に転送するため、host と VM で同じ port の gateway を同時に動かさない。確認済みの記録は `docs/evidence/20260915T125610Z-firecracker/`（27/27 PASS）。
 `GET /v1/provider` の capabilities は次のとおり（`Unverified` は「コードはあるが実機で未計測」）。
 
@@ -120,7 +130,7 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 | isolation | micro_vm |
 | create_terminate / observe / enforce_deadline | supported |
 | egress_none | supported（ADR-0001 M8 を実測。`docs/evidence/isolation-20260916T020934Z/`） |
-| enforce_resource_limits | supported（PLT-4622。vCPU / memory（M9）と ephemeral storage（DISK）を §3.6 で実測。証跡 `docs/evidence/isolation-20260917T011555Z/`。CPU は vCPU 単位で、host 側 cgroup の quota は無い） |
+| enforce_resource_limits | supported（PLT-4622。vCPU / memory（M9）、ephemeral storage（DISK）、VMM の host cgroup と 2 tenant 同居（HOST / NOISY）を §3.6 で実測。証跡 `docs/evidence/isolation-20260917T011555Z/`、`docs/evidence/isolation-20260917T041930Z/`。host cgroup が使えない host では `mode = "required"` なら unsupported、`best-effort` / `off` なら unverified） |
 | host_metering | unverified |
 | egress_restricted / egress_public_web | unsupported（ネットワークデバイス未設定） |
 | idle_quiesce / idle_resume | supported（PLT-4633 で `PATCH /vm {state: Paused/Resumed}` を実装し §3.7 で実機計測。証跡 `docs/evidence/warm-20260916T162532Z/`。再利用に入るかは `[pool] enabled`、既定 off） |
@@ -148,9 +158,11 @@ guest の中から egress（M8）、資源上限（M9）、ephemeral storage の
 | NET restricted | `--egress restricted --egress-allow 1.1.1.1/32:443` の revision に同じ probe | 1.1.1.1:443 だけ成功。1.0.0.1:443、1.1.1.1:80、metadata、管理網、node、IPv6、UDP DNS、名前解決は失敗 |
 | NET cross-tenant | tenant B（`NET_TOKEN_B`）の public-web revision で `{"probe":"listen","port":8080}` を `NET_LISTEN_MS` 起動したまま、tenant A の public-web 環境から B の guest :8080 / :22 と B の tap :22 / :8080 へ connect。2 環境が同時に存在する間の lease・tap・nft table を記録 | A の接続はすべて失敗、B の受付 0、A の 1.1.1.1:443 は成功 |
 | NET race / cleanup | gateway.log で環境ごとに `egress policy installed and verified` と `InstanceStart accepted` の時刻を比較。gateway 停止後に `tsls*` tap・`table inet tachyon_egress`・`net.json` が残っていないか | 起動したすべての policed 環境で policy が先。残留 0 |
+| HOST | 実行中ずっと `scripts/kvm/host-watch.sh`（root）が 0.5 秒ごとに `/sys/fs/cgroup/tachyon/<env>/` の `cpu.stat` / `memory.*` / `pids.current` を記録し、VMM ごとに 1 回（vCPU thread ができた時点で）uid / gid、`CapEff`、PID と mount namespace（host の `/proc/1/ns` と比較）、chroot（`/proc/<pid>/root/fc.sock` があり host の `/etc/passwd` が無い）、`/proc/<pid>/cgroup`、cgroup の member と上限、thread ごとの `Seccomp` を記録する。gateway 停止後に cgroup・jail・VMM プロセスの残留を見る | gateway.log の `firecracker spawned` 全件について、VMM が `0::/tachyon/<env>` にいて `cpu.max` / `memory.max` / `pids.max` が `max` でない。jailer 有効なら uid が `JAILER_UID`、`CapEff` 0、chroot、新しい PID / mount namespace、`fc_vcpu*` と `fc_api` の `Seccomp` が 2。残留 0 |
+| NOISY | tenant B（`NET_TOKEN_B`、1000 m）が固定の仕事（mixer 6 億回 + 64 KiB の fsync 書き込み 32 本、`{"probe":"work"}`）を単独で 5 回、tenant A（500 m・128 MiB・scratch 64 MiB）の 3 つの負荷 ― 4 thread の CPU burn 90 秒（`{"probe":"cpu"}`）、`/tmp` を `ENOSPC` まで埋めてから 1 MiB ずつ `fdatasync` で書き直し続ける 90 秒（`{"probe":"io"}`）、512 MiB の確保を繰り返す（`alloc_mib`） ― と同時に 5 回、A の終了後に 3 回実行する | A の CPU 使用量（cgroup の `cpu.stat` の `usage_usec`、5 秒以上のどの窓でも）が quota（0.5 core）の 1.10 倍以下、かつ warm-up 後の平均が quota の 80% 以上（負荷が本当に張り付いた）。B の 13 回すべて成功し、B の CPU 部分の中央値の遅延が 1.30 倍以下、fsync 書き込み p50 の中央値の遅延が 3.00 倍以下。上限値はこの 4 vCPU の nested host で初回計測の前に決めた値で、外れたら FAIL として記録する |
 | DISK fill | `--ephemeral-storage-mib 64` の revision（`--no-publish`）に `{"probe":"disk","fill_mib":256}`。`/tmp` に 1 MiB ずつ書き、失敗したところで止める。並行して host の空き容量（`df`）と provider の workdir（`du`）を 200 ms ごとに記録する | `stopped_by=enospc`、書けた量は cap（64 MiB）以下かつ 80%（`DISK_TOLERANCE_PCT`）以上。`/tmp` は `/dev/vdc` の ext4。`/` と `/function` への書き込みは `EROFS`。host の空きの減少は cap + 64 MiB（`DISK_HOST_SLACK_MIB`）以下 |
 
-主な環境変数: `PROBE_MEMORY_MIB`（既定 256）、`PROBE_CPU_MILLIS`（500）、`ALLOC_MEMORY_MIB`（128）、`ALLOC_MIB`（既定は `ALLOC_MEMORY_MIB` の 4 倍）、`MEM_TOLERANCE_PCT`（70）、`DISK_STORAGE_MIB`（64）、`DISK_FILL_MIB`（既定は `DISK_STORAGE_MIB` の 4 倍）、`DISK_TOLERANCE_PCT`（80）、`DISK_HOST_SLACK_MIB`（64）、`CONNECT_TIMEOUT_MS`（2000）、`DNS_TIMEOUT_MS`（5000）、`NET_MEASURE`（1）、`NET_TOKEN_B`（`dev-token-tenant-b`）、`NET_LISTEN_MS`（25000）、`NET_REDIRECT_URL`（httpbin.org の redirect-to）、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
+主な環境変数: `PROBE_MEMORY_MIB`（既定 256）、`PROBE_CPU_MILLIS`（500）、`ALLOC_MEMORY_MIB`（128）、`ALLOC_MIB`（既定は `ALLOC_MEMORY_MIB` の 4 倍）、`MEM_TOLERANCE_PCT`（70）、`DISK_STORAGE_MIB`（64）、`DISK_FILL_MIB`（既定は `DISK_STORAGE_MIB` の 4 倍）、`DISK_TOLERANCE_PCT`（80）、`DISK_HOST_SLACK_MIB`（64）、`CONNECT_TIMEOUT_MS`（2000）、`DNS_TIMEOUT_MS`（5000）、`NET_MEASURE`（1）、`NET_TOKEN_B`（`dev-token-tenant-b`）、`NET_LISTEN_MS`（25000）、`NET_REDIRECT_URL`（httpbin.org の redirect-to）、`HOST_MEASURE`（1）、`CGROUP_PARENT`（`/sys/fs/cgroup/tachyon`）、`JAIL_CHROOT_BASE`（`/srv/jailer`）、`JAILER_UID`（64000）、`NOISY_MEASURE`（1）、`NOISY_RUNS`（5）、`NOISY_AFTER_RUNS`（3）、`NOISY_A_CPU_MILLIS`（500）、`NOISY_A_THREADS`（4）、`NOISY_A_BURN_MS`（90000）、`NOISY_A_WARMUP_S`（15）、`NOISY_B_CPU_MILLIS`（1000）、`NOISY_B_ITERATIONS`（600000000）、`NOISY_B_FILES`（32）、`NOISY_B_FILE_KIB`（64）、`NOISY_QUOTA_TOLERANCE`（1.10）、`NOISY_CPU_SLOWDOWN_MAX`（1.30）、`NOISY_IO_SLOWDOWN_MAX`（3.00）、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。HOST と NOISY も gateway を `sudo -n` で root として起動する（jailer と cgroup のため）。
 
 結果の読み方:
 
@@ -172,6 +184,8 @@ guest の中から egress（M8）、資源上限（M9）、ephemeral storage の
 | 2 | 計測自体ができなかった（build / gateway / deploy / probe の失敗） |
 | 3 | ephemeral storage の上限が効かなかった（cap を超えて書けた、read-only のはずの場所に書けた、host の空きが budget 以上に減った。DISK FAIL） |
 | 4 | egress profile が効かなかった（拒否すべき宛先・他 tenant・node・管理網に届いた、policy の検証前に `InstanceStart` した、tap / table / lease が残った。NET FAIL）。許可すべき宛先に届かない・probe が動かないのは exit 2 |
+| 5 | NOISY FAIL: tenant A が cgroup の quota を超えて CPU を使った、tenant B の invocation が失敗した、または B の遅延が事前に決めた上限を超えた |
+| 6 | HOST FAIL: VMM が自分の cgroup の外にいた・上限が書かれていなかった、jailer 有効なのに uid / capability / chroot / namespace / seccomp が期待と違った、cgroup・jail・VMM プロセスが実行後に残った |
 
 証跡は `docs/evidence/isolation-<UTC>/`:
 
@@ -190,7 +204,11 @@ guest の中から egress（M8）、資源上限（M9）、ephemeral storage の
 | `net-{publicweb,restricted}-invocation.json` | invocation（`evidence.details` に `egress_profile` / `egress_tap` / `guest_ip` / `egress_policy_rules` / `egress_policy_verified_ms`） |
 | `net-cross-during.txt` / `net-race.json` / `net-counters.txt` / `net-cleanup.txt` | 2 環境同時の lease・tap・nft table、policy と `InstanceStart` の時刻、teardown 時の chain の counter、実行後の残留検査 |
 | `revision-{publicweb,restricted,tenant-b}.json` | NET で使った revision の spec（`egress` / `egress_allow` の正本） |
-| `provider.json` / `gateway.log` / `steps/` / `orphan-check.txt` | capability 表、gateway のログ、step ごとのログ、終了後の孤児監査 |
+| `cgroup-samples.tsv` / `vmm-isolation.jsonl` / `host-checks.json` / `host-spawned.json` / `host-cleanup.txt` | 環境 cgroup の 0.5 秒ごとの計数、VMM ごとの uid・capability・namespace・chroot・cgroup・seccomp、起動した VMM ごとの判定、実行後の残留検査 |
+| `noisy.json` / `noisy-b.jsonl` / `noisy-b-*.json` / `noisy-a-{cpu,io}.json` / `noisy-a-*-invocation.json` / `noisy-a-oom.jsonl` / `revision-noisy-*.json` | NOISY の集計（A の cgroup 使用量と quota、guest の steal、A の IO と OOM、B の中央値と遅延倍率、上限値）、B の各回、A の応答と invocation、revision |
+| `provider.json` / `gateway.log` / `steps/` / `orphan-check.txt` | capability 表、gateway のログ（`firecracker spawned` に `jailed` / `cgroup`、`cgroup stats at teardown` に環境ごとの `cpu.stat` / `memory.peak` / `memory.events`）、step ごとのログ、終了後の孤児監査 |
+
+jailer と host cgroup を有効にした設定での全ステップ（M8 / M9 / DISK / NET / HOST / NOISY）の記録は `docs/evidence/isolation-20260917T041930Z/`（exit 0。HOST 30/30、NOISY: A は 5 秒窓の最大 0.517 core / quota 0.5、B は 13/13 成功で CPU ×1.245・書き込み ×1.051・handler ×1.279。4 vCPU の nested host 1 台での 1 回で、CPU の遅延は上限 ×1.30 に近い。IO の帯域制限は無い）。
 
 NET の記録は `docs/evidence/isolation-20260917T031126Z/`（exit 0。public-web 16/16 拒否・4/4 許可、restricted 11/11・1/1、cross 4/4・1/1 で B の受付 0、race 4/4、残留 0）。
 

@@ -1,0 +1,162 @@
+[
+  {
+    "kind": "connect",
+    "target": "1.1.1.1:443",
+    "expect": "allow",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "1.1.1.1:443"
+  },
+  {
+    "kind": "connect",
+    "target": "1.0.0.1:443",
+    "expect": "allow",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "1.0.0.1:443"
+  },
+  {
+    "kind": "connect",
+    "target": "169.254.169.254:80",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "10.0.2.2:80",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "100.64.0.1:80",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "192.168.0.1:80",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "192.168.5.2:22",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "192.168.5.2:53",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "192.168.5.15:22",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "192.168.5.15:8080",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "172.30.0.1:22",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "172.30.0.5:22",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "[2606:4700:4700::1111]:443",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "Uncategorized"
+  },
+  {
+    "kind": "connect",
+    "target": "[::ffff:169.254.169.254]:80",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "Uncategorized"
+  },
+  {
+    "kind": "udp_dns",
+    "target": "1.1.1.1:53",
+    "expect": "allow",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "172.66.147.243,104.20.23.154"
+  },
+  {
+    "kind": "udp_dns",
+    "target": "8.8.8.8:53",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "WouldBlock"
+  },
+  {
+    "kind": "udp_dns",
+    "target": "192.168.5.2:53",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "WouldBlock"
+  },
+  {
+    "kind": "resolve+connect",
+    "target": "example.com",
+    "expect": "allow",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "172.66.147.243,104.20.23.154,2606:4700:10::ac42:93f3,2606:4700:10::6814:179a"
+  },
+  {
+    "kind": "resolve+connect",
+    "target": "169.254.169.254.nip.io",
+    "expect": "deny_connect",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "resolved=true to 169.254.169.254"
+  },
+  {
+    "kind": "http_redirect",
+    "target": "http://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F",
+    "expect": "deny_follow",
+    "ok": true,
+    "inconclusive": false,
+    "detail": "fetched=true status=302 location=http://169.254.169.254/latest/meta-data/"
+  }
+]

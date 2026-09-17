@@ -46,6 +46,30 @@
 #   NET_LISTEN_MS         how long tenant B's guest listens for tenant A (default 25000)
 #   NET_REDIRECT_URL      an http:// URL that answers 3xx towards the metadata address (default
 #                         httpbin.org redirect-to; unreachable = inconclusive, not a failure)
+#   HOST_MEASURE          1 (default) samples every VMM from the host while the run lasts
+#                         (scripts/kvm/host-watch.sh, as root) and checks HOST: each VMM ran in
+#                         its own cgroup with cpu.max / memory.max set, and, when the config enables
+#                         the jailer, as JAILER_UID without capabilities, chrooted, in new PID and
+#                         mount namespaces with seccomp on its vCPU / API threads; afterwards no
+#                         cgroup, jail or VMM process is left. Needs passwordless sudo.
+#   CGROUP_PARENT         cgroup directory of the environments (default /sys/fs/cgroup/tachyon)
+#   JAIL_CHROOT_BASE      chroot base of the jailer (default /srv/jailer)
+#   JAILER_UID            uid the jailed VMMs must run as (default 64000)
+#   NOISY_MEASURE         1 (default) runs NOISY (PLT-4622 noisy neighbour, needs HOST_MEASURE=1):
+#                         tenant B (NOISY_B_CPU_MILLIS, default 1000) runs a fixed workload
+#                         (NOISY_B_ITERATIONS mixer iterations, NOISY_B_FILES x NOISY_B_FILE_KIB fsynced
+#                         files) NOISY_RUNS times alone, then NOISY_RUNS times while tenant A
+#                         (NOISY_A_CPU_MILLIS, default 500, memory ALLOC_MEMORY_MIB, ephemeral storage
+#                         DISK_STORAGE_MIB) runs at once: a CPU burn with NOISY_A_THREADS threads, a
+#                         disk fill followed by fdatasync rewrites, and repeated allocations past
+#                         its memory; then NOISY_AFTER_RUNS more times alone. PASS needs: A's CPU
+#                         usage from its cgroup's cpu.stat stays within NOISY_QUOTA_TOLERANCE (1.10)
+#                         times its quota in every 5 s window, A actually used >= 80% of its quota,
+#                         every B invocation succeeded, and B's median CPU part and median fsync'd
+#                         write slowed down by no more than NOISY_CPU_SLOWDOWN_MAX (1.30) and
+#                         NOISY_IO_SLOWDOWN_MAX (3.00). The bounds were fixed before the first run
+#                         on the 4-vCPU nested host (docs/kvm.md section 3.6); a miss is reported as
+#                         FAIL, not tuned away.
 #
 # Output: docs/evidence/isolation-<UTC>/{egress.json,resources.json,alloc-invoke.json,
 #   alloc-invocation.json,alloc-logs.txt,revision-baseline.json,revision-alloc.json,
@@ -62,6 +86,10 @@
 #   4  a guest with egress restricted / public-web reached a destination its profile denies,
 #      another tenant's guest, the node or the management network, user code could start
 #      before the policy was verified, or taps / nftables state outlived the run (NET FAIL)
+#   5  tenant A exceeded its CPU quota, tenant B did not complete, or B slowed down past the
+#      documented bounds while A ran (NOISY FAIL)
+#   6  a VMM ran outside its cgroup or without its limits, a jailed VMM was not confined, or a
+#      cgroup / jail / VMM process outlived the run (HOST FAIL)
 #
 # Idempotent: the function is reused when it already exists, every run writes a new evidence
 # directory, and the gateway started here is always stopped again. This script never changes
@@ -103,9 +131,28 @@ NET_TOKEN_B="${NET_TOKEN_B:-dev-token-tenant-b}"
 NET_LISTEN_MS="${NET_LISTEN_MS:-25000}"
 NET_REDIRECT_URL="${NET_REDIRECT_URL:-http://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F}"
 NET_TABLE="tachyon_egress"
-# The gateway (and so the provider's nft / ip calls) runs as root only for the NET measurement.
+HOST_MEASURE="${HOST_MEASURE:-1}"
+CGROUP_PARENT="${CGROUP_PARENT:-/sys/fs/cgroup/tachyon}"
+JAIL_CHROOT_BASE="${JAIL_CHROOT_BASE:-/srv/jailer}"
+JAILER_UID="${JAILER_UID:-64000}"
+NOISY_MEASURE="${NOISY_MEASURE:-1}"
+NOISY_RUNS="${NOISY_RUNS:-5}"
+NOISY_AFTER_RUNS="${NOISY_AFTER_RUNS:-3}"
+NOISY_A_CPU_MILLIS="${NOISY_A_CPU_MILLIS:-500}"
+NOISY_A_THREADS="${NOISY_A_THREADS:-4}"
+NOISY_A_BURN_MS="${NOISY_A_BURN_MS:-90000}"
+NOISY_A_WARMUP_S="${NOISY_A_WARMUP_S:-15}"
+NOISY_B_CPU_MILLIS="${NOISY_B_CPU_MILLIS:-1000}"
+NOISY_B_ITERATIONS="${NOISY_B_ITERATIONS:-600000000}"
+NOISY_B_FILES="${NOISY_B_FILES:-32}"
+NOISY_B_FILE_KIB="${NOISY_B_FILE_KIB:-64}"
+NOISY_QUOTA_TOLERANCE="${NOISY_QUOTA_TOLERANCE:-1.10}"
+NOISY_CPU_SLOWDOWN_MAX="${NOISY_CPU_SLOWDOWN_MAX:-1.30}"
+NOISY_IO_SLOWDOWN_MAX="${NOISY_IO_SLOWDOWN_MAX:-3.00}"
+[ "$HOST_MEASURE" = "1" ] || NOISY_MEASURE=0
+# The gateway (the provider's nft / ip calls, the jailer, cgroups) runs as root for NET and HOST.
 SUDO=""
-if [ "$NET_MEASURE" = "1" ] && [ "$(id -u)" -ne 0 ]; then
+if { [ "$NET_MEASURE" = "1" ] || [ "$HOST_MEASURE" = "1" ]; } && [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo -n"
 fi
 
@@ -152,9 +199,15 @@ DISK_STATUS="UNKNOWN"
 DISK_DETAIL="the disk probe did not produce a report"
 NET_STATUS="SKIPPED"
 NET_DETAIL="NET_MEASURE=0"
+HOST_STATUS="SKIPPED"
+HOST_DETAIL="HOST_MEASURE=0"
+NOISY_STATUS="SKIPPED"
+NOISY_DETAIL="NOISY_MEASURE=0"
 ORPHAN_NOTE="not checked"
 FINDINGS=""
 ORIG_IP_FORWARD=""
+WATCH_PID=""
+WATCH_STOP="$WORK_DIR/host-watch.stop"
 
 gateway_alive() { [ -n "$GATEWAY_PID" ] && $SUDO kill -0 "$GATEWAY_PID" 2>/dev/null; }
 
@@ -185,6 +238,23 @@ stop_gateway() {
   fi
 }
 
+start_host_watch() {
+  [ "$HOST_MEASURE" = "1" ] || return 0
+  rm -f "$WATCH_STOP"
+  $SUDO "$SCRIPT_DIR/host-watch.sh" "$CGROUP_PARENT" "$EVIDENCE_DIR" "$WATCH_STOP" 0.5 \
+    > "$EVIDENCE_DIR/host-watch.stderr.txt" 2>&1 &
+  WATCH_PID=$!
+  e2e_log "host watcher pid $WATCH_PID (cgroups under $CGROUP_PARENT)"
+}
+
+stop_host_watch() {
+  [ -n "$WATCH_PID" ] || return 0
+  touch "$WATCH_STOP"
+  wait "$WATCH_PID" 2>/dev/null || true
+  WATCH_PID=""
+  $SUDO chown "$(id -u):$(id -g)" "$EVIDENCE_DIR/cgroup-samples.tsv" "$EVIDENCE_DIR/vmm-isolation.jsonl" 2>/dev/null || true
+}
+
 cleanup() {
   local rc=$?
   set +e
@@ -192,6 +262,7 @@ cleanup() {
     e2e_log "cleanup: stopping gateway $GATEWAY_PID"
     stop_gateway 10
   fi
+  stop_host_watch
   if [ -n "$ORIG_IP_FORWARD" ]; then
     $SUDO sysctl -q -w "net.ipv4.ip_forward=$ORIG_IP_FORWARD" >/dev/null 2>&1
   fi
@@ -229,6 +300,7 @@ start_gateway() {
     ORIG_IP_FORWARD="$(sysctl -n net.ipv4.ip_forward)"
     $SUDO sysctl -q -w net.ipv4.ip_forward=1
   fi
+  start_host_watch
   $SUDO env LOG_FORMAT=json TACHYON_GATEWAY_CONFIG="$CONFIG_PATH" \
     "$GATEWAY_BIN" "$GATEWAY_CONFIG_FLAG" "$CONFIG_PATH" >"$GATEWAY_LOG" 2>&1 &
   GATEWAY_PID=$!
@@ -592,7 +664,7 @@ run_net_probe() {
   net_checks "$EVIDENCE_DIR/net-$key.json" "$expect" > "$EVIDENCE_DIR/net-checks-$key.json"
   jq -r '.[] | "  \(if .ok then "ok  " else "BAD " end) \(.kind) \(.target) expect=\(.expect) (\(.detail))"' \
     "$EVIDENCE_DIR/net-checks-$key.json"
-  jq -r '.attempts[-1].evidence.details // .evidence.details // {} | "tap=\(.egress_tap) guest_ip=\(.guest_ip) rules=\(.egress_policy_rules) verified_ms=\(.egress_policy_verified_ms)"' \
+  jq -r '.attempts[-1].boot_evidence.details // {} | "tap=\(.egress_tap) guest_ip=\(.guest_ip) rules=\(.egress_policy_rules) verified_ms=\(.egress_policy_verified_ms)"' \
     "$EVIDENCE_DIR/net-$key-invocation.json" 2>/dev/null || true
 }
 
@@ -691,10 +763,138 @@ net_cleanup_check() {
 }
 
 # ---------------------------------------------------------------------------
+# 3c. NOISY: two tenants on one host (PLT-4622)
+# ---------------------------------------------------------------------------
+
+# invoke_as TOKEN FUNCTION PAYLOAD ARGS...: invoke_capture with another tenant's token.
+invoke_as() {
+  local token="$1" saved="$TSLS_TOKEN"
+  shift
+  export TSLS_TOKEN="$token"
+  invoke_capture "$@"
+  export TSLS_TOKEN="$saved"
+}
+
+deploy_noisy_revisions() {
+  ensure_function_b
+  local timeout=$(( NOISY_A_BURN_MS / 1000 + 90 )) rev
+  for spec in "cpu:cpu burn" "io:disk fill and fdatasync rewrites" "oom:allocation past memory"; do
+    rev="$(tsls functions deploy --function "$FUNCTION_NAME" --binary "$PROBE_BIN" --arch "$ARCH" \
+      --memory-mib "$ALLOC_MEMORY_MIB" --cpu-millis "$NOISY_A_CPU_MILLIS" \
+      --ephemeral-storage-mib "$DISK_STORAGE_MIB" --timeout-seconds "$timeout" --no-publish \
+      --description "noisy tenant A: ${spec#*:}" --json | jq -r .id)"
+    if [ -z "$rev" ] || [ "$rev" = "null" ]; then echo "noisy A deploy (${spec%%:*}) returned no revision" >&2; return 1; fi
+    state_set "rev.noisy_a_${spec%%:*}" "$rev"
+    tsls functions revision "$FUNCTION_NAME" "$rev" --json > "$EVIDENCE_DIR/revision-noisy-a-${spec%%:*}.json"
+  done
+  rev="$(TSLS_TOKEN="$NET_TOKEN_B" tsls functions deploy --function "$FUNCTION_NAME" --binary "$PROBE_BIN" \
+    --arch "$ARCH" --memory-mib "$PROBE_MEMORY_MIB" --cpu-millis "$NOISY_B_CPU_MILLIS" \
+    --timeout-seconds "$PROBE_TIMEOUT_SECONDS" --no-publish \
+    --description "noisy tenant B: fixed workload" --json | jq -r .id)"
+  if [ -z "$rev" ] || [ "$rev" = "null" ]; then echo "noisy B deploy returned no revision" >&2; return 1; fi
+  state_set rev.noisy_b "$rev"
+  TSLS_TOKEN="$NET_TOKEN_B" tsls functions revision "$FUNCTION_NAME" "$rev" --json > "$EVIDENCE_DIR/revision-noisy-b.json"
+}
+
+# noisy_b_run PHASE N: one invocation of B's workload, one JSON line in noisy-b.jsonl.
+noisy_b_run() {
+  local phase="$1" n="$2" payload record="{}"
+  payload="$(jq -nc --argjson i "$NOISY_B_ITERATIONS" --argjson f "$NOISY_B_FILES" --argjson k "$NOISY_B_FILE_KIB" \
+    '{probe: "work", cpu_iterations: $i, files: $f, file_kib: $k}')"
+  invoke_as "$NET_TOKEN_B" "$FUNCTION_NAME" "$payload" --revision-id "$(state_get rev.noisy_b)"
+  printf '%s\n' "$INVOKE_OUT" > "$EVIDENCE_DIR/noisy-b-$phase-$n.json"
+  if [ -n "$INVOKE_ID" ]; then
+    TSLS_TOKEN="$NET_TOKEN_B" tsls functions invocation "$INVOKE_ID" --json > "$EVIDENCE_DIR/noisy-b-$phase-$n-invocation.json" 2>/dev/null || true
+    record="$(cat "$EVIDENCE_DIR/noisy-b-$phase-$n-invocation.json" 2>/dev/null || echo '{}')"
+  fi
+  jq -nc --arg phase "$phase" --argjson n "$n" --argjson rc "$INVOKE_RC" --arg id "$INVOKE_ID" \
+    --argjson client_ms "$INVOKE_MS" --argjson record "$record" \
+    --slurpfile out <(printf '%s' "${INVOKE_OUT:-null}" | jq -c . 2>/dev/null || echo null) \
+    '($out[0] // {}) as $o | {phase: $phase, run: $n, rc: $rc, invocation: $id, client_ms: $client_ms,
+      status: ($record.status // null), env: ($record.attempts[-1].environment_id // null),
+      handler_ms: ($record.attempts[-1].timings.handler_ms // null),
+      boot_ms: ($record.attempts[-1].timings.environment_boot_ms // null),
+      ok: ($o.work.ok // false), cpu_ms: ($o.work.cpu.ms // null),
+      write_p50_ms: ($o.work.writes.latency.p50_ms // null), write_ms: ($o.work.writes.ms // null),
+      total_ms: ($o.work.total_ms // null)}' >> "$EVIDENCE_DIR/noisy-b.jsonl"
+  tail -n 1 "$EVIDENCE_DIR/noisy-b.jsonl" | jq -r '"  B \(.phase) #\(.run): status=\(.status) cpu \(.cpu_ms) ms, write p50 \(.write_p50_ms) ms, handler \(.handler_ms) ms"'
+}
+
+noisy_baseline() {
+  : > "$EVIDENCE_DIR/noisy-b.jsonl"
+  local i
+  for i in $(seq 1 "$NOISY_RUNS"); do noisy_b_run alone "$i"; done
+}
+
+# noisy_a_invoke KIND PAYLOAD: tenant A's invocation in the background; files noisy-a-KIND*.
+noisy_a_invoke() {
+  local kind="$1" payload="$2"
+  invoke_capture "$FUNCTION_NAME" "$payload" --revision-id "$(state_get "rev.noisy_a_$kind")"
+  printf '%s\n' "$INVOKE_OUT" > "$EVIDENCE_DIR/noisy-a-$kind.json"
+  printf '%s\n' "$INVOKE_ERR" > "$EVIDENCE_DIR/noisy-a-$kind.stderr.txt"
+  [ -z "$INVOKE_ID" ] || tsls functions invocation "$INVOKE_ID" --json > "$EVIDENCE_DIR/noisy-a-$kind-invocation.json" 2>/dev/null || true
+}
+
+noisy_contended() {
+  local cpu_pid io_pid oom_pid i done_file="$WORK_DIR/noisy-a-cpu.done"
+  rm -f "$done_file"
+  ( noisy_a_invoke cpu "$(jq -nc --argjson ms "$NOISY_A_BURN_MS" --argjson t "$NOISY_A_THREADS" \
+      '{probe: "cpu", burn_ms: $ms, threads: $t}')"; touch "$done_file" ) &
+  cpu_pid=$!
+  ( noisy_a_invoke io "$(jq -nc --argjson ms "$NOISY_A_BURN_MS" '{probe: "io", duration_ms: $ms, block_kib: 1024, fill_first: true}')" ) &
+  io_pid=$!
+  (
+    : > "$EVIDENCE_DIR/noisy-a-oom.jsonl"
+    local n=0 payload
+    payload="$(jq -nc --argjson mib "$ALLOC_MIB" '{probe: "resources", alloc_mib: $mib}')"
+    while [ ! -e "$done_file" ] && [ "$n" -lt 40 ]; do
+      n=$(( n + 1 ))
+      invoke_capture "$FUNCTION_NAME" "$payload" --revision-id "$(state_get rev.noisy_a_oom)"
+      local rec='{}'
+      [ -z "$INVOKE_ID" ] || rec="$(tsls functions invocation "$INVOKE_ID" --json 2>/dev/null || echo '{}')"
+      printf '%s' "$rec" | jq -c --argjson n "$n" --argjson rc "$INVOKE_RC" \
+        '{run: $n, rc: $rc, invocation: .id, status: .status, class: .error.class, error_type: .error.error_type,
+          env: .attempts[-1].environment_id}' >> "$EVIDENCE_DIR/noisy-a-oom.jsonl" 2>/dev/null || true
+    done
+  ) &
+  oom_pid=$!
+  e2e_log "tenant A started (cpu $cpu_pid, io $io_pid, oom loop $oom_pid); warming up ${NOISY_A_WARMUP_S}s"
+  state_set noisy.a_started_ms "$(now_ms)"
+  sleep "$NOISY_A_WARMUP_S"
+  state_set noisy.b_contended_start_ms "$(now_ms)"
+  for i in $(seq 1 "$NOISY_RUNS"); do noisy_b_run contended "$i"; done
+  state_set noisy.b_contended_end_ms "$(now_ms)"
+  [ -e "$done_file" ] && note_finding "NOISY: tenant A's CPU burn ended before tenant B's contended runs did (raise NOISY_A_BURN_MS)"
+  wait "$cpu_pid" "$io_pid" "$oom_pid" 2>/dev/null || true
+  for i in $(seq 1 "$NOISY_AFTER_RUNS"); do noisy_b_run after "$i"; done
+}
+
+# ---------------------------------------------------------------------------
+# 3d. HOST: cgroup placement and jail confinement of every VMM (PLT-4622)
+# ---------------------------------------------------------------------------
+
+# After the gateway stopped: no environment cgroup, jail or VMM process may be left.
+host_cleanup_check() {
+  local cgroups jails procs
+  cgroups="$(find "$CGROUP_PARENT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true)"
+  jails="$($SUDO find "$JAIL_CHROOT_BASE" -mindepth 1 -maxdepth 2 2>/dev/null || true)"
+  procs="$(pgrep -a -f '(^|/)(firecracker|jailer)( |$)' 2>/dev/null | grep -v -e host-watch -e pgrep || true)"
+  {
+    echo "cgroup parent $CGROUP_PARENT: $([ -d "$CGROUP_PARENT" ] && echo present || echo absent)"
+    echo "environment cgroups left: ${cgroups:-(none)}"
+    echo "jails left under $JAIL_CHROOT_BASE: ${jails:-(none)}"
+    echo "firecracker / jailer processes left: ${procs:-(none)}"
+  } > "$EVIDENCE_DIR/host-cleanup.txt"
+  cat "$EVIDENCE_DIR/host-cleanup.txt"
+  [ -z "$cgroups" ] && [ -z "$jails" ] && [ -z "$procs" ] && [ ! -d "$CGROUP_PARENT" ]
+}
+
+# ---------------------------------------------------------------------------
 # 4. verdicts
 # ---------------------------------------------------------------------------
 
 json_file_ok() { [ -s "$1" ] && jq -e . "$1" >/dev/null 2>&1; }
+json_or_null() { if json_file_ok "$1"; then jq -c . "$1"; else echo null; fi; }
 
 evaluate_m8() {
   local file="$EVIDENCE_DIR/egress.json" reached connected attempted dns
@@ -929,6 +1129,167 @@ evaluate_net() {
   NET_DETAIL="$detail"
 }
 
+evaluate_host() {
+  [ "$HOST_MEASURE" = "1" ] || return 0
+  local vmms="$EVIDENCE_DIR/vmm-isolation.jsonl" spawned="$EVIDENCE_DIR/host-spawned.json" checks="$EVIDENCE_DIR/host-checks.json"
+  local total seen bad missing jailed ok=1 unknown=0 detail
+  jq -R 'fromjson? // empty' "$GATEWAY_LOG" |
+    jq -s '[.[] | select(.message == "firecracker spawned") | {env_id, pid, jailed, cgroup}]' > "$spawned"
+  if [ ! -s "$vmms" ]; then
+    HOST_STATUS="UNKNOWN"
+    HOST_DETAIL="the host watcher recorded no VMM (host-watch.stderr.txt)"
+    return 0
+  fi
+  jq -s --slurpfile spawned "$spawned" --argjson uid "$JAILER_UID" --arg parent "/${CGROUP_PARENT#/sys/fs/cgroup/}" '
+    (map({key: .env, value: .}) | from_entries) as $by_env |
+    [ $spawned[0][] | . as $s | ($by_env[$s.env_id] // null) as $v |
+      {env: $s.env_id, jailed: ($s.jailed == true), observed: ($v != null),
+       in_cgroup: ($v != null and $v.cgroup == "0::\($parent)/\($s.env_id)"
+                  and ($v.cgroup_procs | split(" ") | index($v.pid | tostring)) != null),
+       limits_set: ($v != null and $v.cpu_max != "" and ($v.cpu_max | startswith("max") | not)
+                    and $v.memory_max != "max" and $v.pids_max != "max"),
+       unprivileged: ($v != null and $v.uid == $uid and $v.gid != 0 and $v.cap_eff == "0000000000000000"),
+       confined: ($v != null and $v.chroot and $v.new_pid_ns and $v.new_mnt_ns),
+       seccomp: ($v != null and ([$v.threads[] | select(.comm | test("^fc_(vcpu|api)")) | .seccomp] | length > 0
+                 and all(. == 2))),
+       cpu_max: ($v.cpu_max // null), memory_max: ($v.memory_max // null), uid: ($v.uid // null),
+       threads: ($v.threads // null)} ]' "$vmms" > "$checks"
+  total="$(jq length "$checks")"
+  seen="$(jq '[.[] | select(.observed)] | length' "$checks")"
+  jailed="$(jq '[.[] | select(.jailed)] | length' "$checks")"
+  missing="$(jq -r '[.[] | select(.observed | not) | .env] | join(", ")' "$checks")"
+  bad="$(jq -r '[.[] | select(.observed) | select((.in_cgroup and .limits_set) | not) | .env] | join(", ")' "$checks")"
+  detail="$seen/$total VMMs observed; in own cgroup with cpu.max/memory.max/pids.max: $(jq '[.[] | select(.in_cgroup and .limits_set)] | length' "$checks")/$seen"
+  if [ -n "$bad" ]; then
+    ok=0
+    note_finding "HOST: VMMs outside their cgroup or without limits: $bad"
+  fi
+  if [ -n "$missing" ]; then
+    unknown=1
+    note_finding "HOST: the watcher did not observe the VMM of $missing (it may have exited within a sample)"
+  fi
+  if [ "$jailed" -gt 0 ]; then
+    bad="$(jq -r '[.[] | select(.observed and .jailed) | select((.unprivileged and .confined and .seccomp) | not) | .env] | join(", ")' "$checks")"
+    detail="$detail; jailed (uid $JAILER_UID, CapEff 0, chroot, new PID+mount ns, seccomp 2 on vCPU/API threads): $(jq '[.[] | select(.observed and .jailed and .unprivileged and .confined and .seccomp)] | length' "$checks")/$(jq '[.[] | select(.observed and .jailed)] | length' "$checks")"
+    if [ -n "$bad" ]; then
+      ok=0
+      note_finding "HOST: jailed VMMs not confined as configured: $bad (host-checks.json)"
+    fi
+  else
+    detail="$detail; jailer not enabled in $CONFIG_PATH"
+    note_finding "HOST: the VMMs ran without the jailer"
+  fi
+  if [ "$(state_get host.cleanup)" = "clean" ]; then
+    detail="$detail; no cgroup / jail / VMM left"
+  else
+    ok=0
+    detail="$detail; leftovers (host-cleanup.txt)"
+    note_finding "HOST: cgroups, jails or VMM processes outlived the run (host-cleanup.txt)"
+  fi
+  if [ "$ok" -eq 0 ]; then HOST_STATUS="FAIL"; elif [ "$unknown" -eq 1 ]; then HOST_STATUS="UNKNOWN"; else HOST_STATUS="PASS"; fi
+  HOST_DETAIL="$detail"
+}
+
+# cgroup CPU usage of one environment from cgroup-samples.tsv: mean over its life after a warm-up
+# and the highest rate over any window of at least 5 s, in cores.
+cgroup_cpu_rates() { # ENV SKIP_MS
+  awk -F '\t' -v env="$1" -v skip="$2" '
+    NR > 1 && $2 == env && $3 != "" { n++; t[n] = $1; u[n] = $3 }
+    END {
+      if (n < 2) { print "{}"; exit }
+      start = 0
+      for (i = 1; i <= n; i++) if (t[i] >= t[1] + skip) { start = i; break }
+      mean = "null"
+      if (start > 0 && n > start && t[n] > t[start]) mean = (u[n] - u[start]) / ((t[n] - t[start]) * 1000)
+      max = 0; windows = 0
+      for (i = 1; i <= n; i++) {
+        for (j = i + 1; j <= n; j++) if (t[j] - t[i] >= 5000) break
+        if (j <= n) { r = (u[j] - u[i]) / ((t[j] - t[i]) * 1000); windows++; if (r > max) max = r }
+      }
+      printf "{\"samples\": %d, \"span_ms\": %d, \"mean_cores_after_warmup\": %s, \"max_cores_5s\": %.4f, \"windows_5s\": %d, \"usage_usec\": %d}\n", n, t[n] - t[1], mean, max, windows, u[n]
+    }' "$EVIDENCE_DIR/cgroup-samples.tsv"
+}
+
+evaluate_noisy() {
+  [ "$NOISY_MEASURE" = "1" ] || return 0
+  local b="$EVIDENCE_DIR/noisy-b.jsonl" out="$EVIDENCE_DIR/noisy.json" a_env quota rates ok=1 unknown=0 detail
+  if [ ! -s "$b" ] || ! json_file_ok "$EVIDENCE_DIR/noisy-a-cpu-invocation.json"; then
+    NOISY_STATUS="UNKNOWN"
+    NOISY_DETAIL="no tenant B record or no tenant A CPU invocation (see steps/)"
+    return 0
+  fi
+  a_env="$(jq -r '.attempts[-1].environment_id // empty' "$EVIDENCE_DIR/noisy-a-cpu-invocation.json")"
+  quota="$(awk -v m="$NOISY_A_CPU_MILLIS" 'BEGIN { printf "%.4f", m / 1000 }')"
+  rates="$(cgroup_cpu_rates "$a_env" 10000)"
+  jq -s --argjson rates "$rates" --arg a_env "$a_env" --argjson quota "$quota" \
+    --argjson tol "$NOISY_QUOTA_TOLERANCE" --argjson cpu_max "$NOISY_CPU_SLOWDOWN_MAX" \
+    --argjson io_max "$NOISY_IO_SLOWDOWN_MAX" \
+    --slurpfile a_cpu <(json_or_null "$EVIDENCE_DIR/noisy-a-cpu.json") \
+    --slurpfile a_io <(json_or_null "$EVIDENCE_DIR/noisy-a-io.json") \
+    --slurpfile a_oom <(jq -s . "$EVIDENCE_DIR/noisy-a-oom.jsonl" 2>/dev/null || echo '[]') \
+    --slurpfile teardown <(jq -R 'fromjson? // empty' "$GATEWAY_LOG" | jq -s '[.[] | select(.message == "cgroup stats at teardown") | {env_id, stats: (.stats | fromjson? // .stats)}]') '
+    def median: sort | if length == 0 then null elif length % 2 == 1 then .[length / 2 | floor]
+                       else (.[length / 2 - 1] + .[length / 2]) / 2 end;
+    def phase(p): [.[] | select(.phase == p)];
+    def ratio(a; b): if a == null or b == null or b == 0 then null else (a / b * 1000 | round) / 1000 end;
+    . as $all |
+    (phase("alone") | map(.cpu_ms) | median) as $cpu_alone |
+    (phase("contended") | map(.cpu_ms) | median) as $cpu_cont |
+    (phase("alone") | map(.write_p50_ms) | median) as $io_alone |
+    (phase("contended") | map(.write_p50_ms) | median) as $io_cont |
+    (phase("alone") | map(.handler_ms) | median) as $h_alone |
+    (phase("contended") | map(.handler_ms) | median) as $h_cont |
+    ($teardown[0] | map({key: .env_id, value: .stats}) | from_entries) as $td |
+    {
+      bounds: {quota_tolerance: $tol, cpu_slowdown_max: $cpu_max, io_slowdown_max: $io_max},
+      tenant_a: {
+        cpu: {env: $a_env, quota_cores: $quota, cgroup: $rates,
+              guest: ($a_cpu[0].cpu // null | if . then {threads, elapsed_ms, iterations_per_sec, proc_stat_delta} else null end),
+              teardown: ($td[$a_env] // null),
+              within_quota: ($rates.max_cores_5s != null and $rates.max_cores_5s <= $quota * $tol),
+              saturated: ($rates.mean_cores_after_warmup != null and $rates.mean_cores_after_warmup >= $quota * 0.8)},
+        io: ($a_io[0].io // null | if . then {fill, rewrite: (.rewrite | {ops, errors, mib_per_sec, latency})} else null end),
+        oom: {runs: ($a_oom[0] | length), classes: ($a_oom[0] | group_by(.class) | map({class: .[0].class, count: length})),
+              host_oom_kills: ([$a_oom[0][] | .env as $e | ($td[$e]["memory.events"].oom_kill // 0)] | add // 0)}
+      },
+      tenant_b: {
+        runs: ($all | length), succeeded: ([$all[] | select(.status == "succeeded" and .ok)] | length),
+        alone: {cpu_ms_median: $cpu_alone, write_p50_ms_median: $io_alone, handler_ms_median: $h_alone},
+        contended: {cpu_ms_median: $cpu_cont, write_p50_ms_median: $io_cont, handler_ms_median: $h_cont},
+        after: {cpu_ms_median: (phase("after") | map(.cpu_ms) | median),
+                write_p50_ms_median: (phase("after") | map(.write_p50_ms) | median),
+                handler_ms_median: (phase("after") | map(.handler_ms) | median)},
+        slowdown: {cpu: ratio($cpu_cont; $cpu_alone), write: ratio($io_cont; $io_alone), handler: ratio($h_cont; $h_alone)}
+      }
+    }' "$b" > "$out"
+  detail="$(jq -r '"A cpu \(.tenant_a.cpu.cgroup.max_cores_5s) cores max/5s, \(.tenant_a.cpu.cgroup.mean_cores_after_warmup) mean (quota \(.tenant_a.cpu.quota_cores), ≤ ×\(.bounds.quota_tolerance)); A io fill \(.tenant_a.io.fill.stopped_by // "-") at \(.tenant_a.io.fill.written_mib // "-") MiB; A oom runs \(.tenant_a.oom.runs) \(.tenant_a.oom.classes | map("\(.class)=\(.count)") | join(",")), host oom_kill \(.tenant_a.oom.host_oom_kills); B \(.tenant_b.succeeded)/\(.tenant_b.runs) ok, slowdown cpu ×\(.tenant_b.slowdown.cpu) (≤ ×\(.bounds.cpu_slowdown_max)), write ×\(.tenant_b.slowdown.write) (≤ ×\(.bounds.io_slowdown_max)), handler ×\(.tenant_b.slowdown.handler)"' "$out")"
+  if [ "$(jq -r '.tenant_a.cpu.within_quota' "$out")" != "true" ]; then
+    ok=0
+    note_finding "NOISY: tenant A used more CPU than its quota: $(jq -c '.tenant_a.cpu.cgroup' "$out")"
+  fi
+  if [ "$(jq -r '.tenant_a.cpu.saturated' "$out")" != "true" ]; then
+    unknown=1
+    note_finding "NOISY: tenant A did not use its quota (the burn did not saturate); the quota check is inconclusive"
+  fi
+  if [ "$(jq -r '.tenant_b.succeeded == .tenant_b.runs' "$out")" != "true" ]; then
+    ok=0
+    note_finding "NOISY: tenant B had failed invocations: $(jq -c '[.[] | select(.status != "succeeded" or (.ok | not)) | {phase, run, status, rc}]' -s "$b")"
+  fi
+  if [ "$(jq -r --argjson m "$NOISY_CPU_SLOWDOWN_MAX" '.tenant_b.slowdown.cpu != null and .tenant_b.slowdown.cpu <= $m' "$out")" != "true" ]; then
+    ok=0
+    note_finding "NOISY: tenant B's CPU work slowed down by ×$(jq -r '.tenant_b.slowdown.cpu' "$out") (bound ×$NOISY_CPU_SLOWDOWN_MAX)"
+  fi
+  if [ "$(jq -r --argjson m "$NOISY_IO_SLOWDOWN_MAX" '.tenant_b.slowdown.write != null and .tenant_b.slowdown.write <= $m' "$out")" != "true" ]; then
+    ok=0
+    note_finding "NOISY: tenant B's fsync'd writes slowed down by ×$(jq -r '.tenant_b.slowdown.write' "$out") (bound ×$NOISY_IO_SLOWDOWN_MAX; no io.max / drive rate limiter)"
+  fi
+  if [ "$(jq -r '.tenant_a.io.fill.stopped_by // "-"' "$out")" != "enospc" ]; then
+    note_finding "NOISY: tenant A's disk fill did not stop with ENOSPC: $(jq -c '.tenant_a.io.fill' "$out")"
+  fi
+  if [ "$ok" -eq 0 ]; then NOISY_STATUS="FAIL"; elif [ "$unknown" -eq 1 ]; then NOISY_STATUS="UNKNOWN"; else NOISY_STATUS="PASS"; fi
+  NOISY_DETAIL="$detail"
+}
+
 orphan_note() {
   local out
   if [ ! -x "$REPO_ROOT/scripts/e2e/orphan-check.sh" ] || ! command -v pgrep >/dev/null 2>&1; then
@@ -1032,25 +1393,49 @@ write_summary_txt() {
     fi
     [ ! -s "$EVIDENCE_DIR/net-cleanup.txt" ] || sed -n '1,3s/^/  [cleanup] /p' "$EVIDENCE_DIR/net-cleanup.txt"
     echo
+    echo "== HOST cgroup placement and jail confinement (PLT-4622) =="
+    if json_file_ok "$EVIDENCE_DIR/host-checks.json"; then
+      jq -r '.[] | "  \(.env) observed=\(.observed) cgroup=\(.in_cgroup) limits=\(.limits_set) cpu.max=\(.cpu_max) memory.max=\(.memory_max) jailed=\(.jailed) uid=\(.uid) confined=\(.confined) seccomp=\(.seccomp)"' \
+        "$EVIDENCE_DIR/host-checks.json"
+    fi
+    [ ! -s "$EVIDENCE_DIR/host-cleanup.txt" ] || sed 's/^/  [cleanup] /' "$EVIDENCE_DIR/host-cleanup.txt"
+    echo
+    echo "== NOISY two tenants on one host (PLT-4622) =="
+    if json_file_ok "$EVIDENCE_DIR/noisy.json"; then
+      jq -r '"  A cpu: quota \(.tenant_a.cpu.quota_cores) cores, cgroup max over 5 s \(.tenant_a.cpu.cgroup.max_cores_5s), mean after warm-up \(.tenant_a.cpu.cgroup.mean_cores_after_warmup), guest steal \(.tenant_a.cpu.guest.proc_stat_delta.steal_pct // "-")%",
+             "  A io: fill \(.tenant_a.io.fill // {} | "\(.stopped_by) at \(.written_mib) MiB"), rewrites \(.tenant_a.io.rewrite.ops // "-") at \(.tenant_a.io.rewrite.mib_per_sec // "-") MiB/s",
+             "  A oom: \(.tenant_a.oom.runs) runs \(.tenant_a.oom.classes | map("\(.class)=\(.count)") | join(" ")), host oom_kill \(.tenant_a.oom.host_oom_kills)",
+             "  B: \(.tenant_b.succeeded)/\(.tenant_b.runs) succeeded",
+             "  B median alone:     cpu \(.tenant_b.alone.cpu_ms_median) ms, write p50 \(.tenant_b.alone.write_p50_ms_median) ms, handler \(.tenant_b.alone.handler_ms_median) ms",
+             "  B median contended: cpu \(.tenant_b.contended.cpu_ms_median) ms, write p50 \(.tenant_b.contended.write_p50_ms_median) ms, handler \(.tenant_b.contended.handler_ms_median) ms",
+             "  B median after:     cpu \(.tenant_b.after.cpu_ms_median) ms, write p50 \(.tenant_b.after.write_p50_ms_median) ms, handler \(.tenant_b.after.handler_ms_median) ms",
+             "  B slowdown: cpu ×\(.tenant_b.slowdown.cpu) (≤ ×\(.bounds.cpu_slowdown_max)), write ×\(.tenant_b.slowdown.write) (≤ ×\(.bounds.io_slowdown_max)), handler ×\(.tenant_b.slowdown.handler)"' \
+        "$EVIDENCE_DIR/noisy.json"
+    fi
+    echo
     echo "== findings =="
     if [ -n "$FINDINGS" ]; then printf '%s' "$FINDINGS" | sed 's/^/  - /'; else echo "  none"; fi
     echo
     echo "== verdict =="
-    printf '  %-4s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
-    printf '  %-4s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
-    printf '  %-4s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
-    printf '  %-4s %-8s %s\n' "NET" "$NET_STATUS" "$NET_DETAIL"
+    printf '  %-5s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
+    printf '  %-5s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
+    printf '  %-5s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
+    printf '  %-5s %-8s %s\n' "NET" "$NET_STATUS" "$NET_DETAIL"
+    printf '  %-5s %-8s %s\n' "HOST" "$HOST_STATUS" "$HOST_DETAIL"
+    printf '  %-5s %-8s %s\n' "NOISY" "$NOISY_STATUS" "$NOISY_DETAIL"
   } > "$SUMMARY_TXT"
 }
 
 print_table() {
   echo
-  printf '%-4s %-8s %s\n' "CHK" "RESULT" "DETAIL"
-  printf '%-4s %-8s %s\n' "---" "------" "----------------------------------------"
-  printf '%-4s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
-  printf '%-4s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
-  printf '%-4s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
-  printf '%-4s %-8s %s\n' "NET" "$NET_STATUS" "$NET_DETAIL"
+  printf '%-5s %-8s %s\n' "CHK" "RESULT" "DETAIL"
+  printf '%-5s %-8s %s\n' "---" "------" "----------------------------------------"
+  printf '%-5s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
+  printf '%-5s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
+  printf '%-5s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
+  printf '%-5s %-8s %s\n' "NET" "$NET_STATUS" "$NET_DETAIL"
+  printf '%-5s %-8s %s\n' "HOST" "$HOST_STATUS" "$HOST_DETAIL"
+  printf '%-5s %-8s %s\n' "NOISY" "$NOISY_STATUS" "$NOISY_DETAIL"
   echo
   echo "evidence: $EVIDENCE_DIR"
   echo "summary:  $SUMMARY_TXT"
@@ -1084,6 +1469,11 @@ main() {
     step "NET: restricted probe" run_net_restricted
     step "NET: two tenants at once (A -> B)" run_net_cross_tenant
   fi
+  if [ "$NOISY_MEASURE" = "1" ]; then
+    step "NOISY: deploy tenant A (cpu / io / oom) and tenant B revisions" deploy_noisy_revisions
+    step "NOISY: tenant B alone (${NOISY_RUNS} runs)" noisy_baseline
+    step "NOISY: tenant B next to tenant A (${NOISY_RUNS} runs, then ${NOISY_AFTER_RUNS} after)" noisy_contended
+  fi
 
   local gw_rc=0
   if [ -n "$GATEWAY_PID" ]; then
@@ -1091,8 +1481,12 @@ main() {
     gw_rc=$STOP_RC
     e2e_log "gateway exit status $gw_rc"
   fi
+  stop_host_watch
   if [ "$NET_MEASURE" = "1" ]; then
     if net_cleanup_check; then state_set net.cleanup clean; else state_set net.cleanup dirty; fi
+  fi
+  if [ "$HOST_MEASURE" = "1" ]; then
+    if host_cleanup_check; then state_set host.cleanup clean; else state_set host.cleanup dirty; fi
   fi
   orphan_note
 
@@ -1100,6 +1494,8 @@ main() {
   evaluate_m9
   evaluate_disk
   evaluate_net
+  evaluate_host
+  evaluate_noisy
   write_summary_txt
 
   steps_write_summary "$EVIDENCE_DIR/summary.json" \
@@ -1111,6 +1507,8 @@ main() {
         --arg disk "$DISK_STATUS" --arg disk_detail "$DISK_DETAIL" \
         --arg disk_rev "$(state_get rev.disk)" \
         --arg net "$NET_STATUS" --arg net_detail "$NET_DETAIL" \
+        --arg host_status "$HOST_STATUS" --arg host_detail "$HOST_DETAIL" \
+        --arg noisy "$NOISY_STATUS" --arg noisy_detail "$NOISY_DETAIL" \
         --arg net_publicweb_rev "$(state_get rev.publicweb)" --arg net_restricted_rev "$(state_get rev.restricted)" \
         --arg net_tenant_b_rev "$(state_get rev.b)" \
         --argjson disk_storage_mib "$DISK_STORAGE_MIB" --argjson disk_fill_mib "$DISK_FILL_MIB" \
@@ -1128,7 +1526,9 @@ main() {
           measurements: {M8: {status: $m8, detail: $m8_detail},
                          M9: {status: $m9, detail: $m9_detail},
                          DISK: {status: $disk, detail: $disk_detail},
-                         NET: {status: $net, detail: $net_detail}},
+                         NET: {status: $net, detail: $net_detail},
+                         HOST: {status: $host_status, detail: $host_detail},
+                         NOISY: {status: $noisy, detail: $noisy_detail}},
           orphans: $orphans,
           findings: ($findings | split("\n") | map(select(length > 0)))}')"
 
@@ -1149,12 +1549,20 @@ main() {
     echo "FAIL: an egress profile did not hold (see findings)" >&2
     exit 4
   fi
+  if [ "$NOISY_STATUS" = "FAIL" ]; then
+    echo "FAIL: the noisy-neighbour measurement did not meet its bounds (see findings)" >&2
+    exit 5
+  fi
+  if [ "$HOST_STATUS" = "FAIL" ]; then
+    echo "FAIL: a VMM was not placed or confined as configured (see findings)" >&2
+    exit 6
+  fi
   if [ "$failed" -ne 0 ] || [ "$M8_STATUS" = "UNKNOWN" ] || [ "$DISK_STATUS" = "UNKNOWN" ] \
-    || [ "$NET_STATUS" = "UNKNOWN" ]; then
+    || [ "$NET_STATUS" = "UNKNOWN" ] || [ "$HOST_STATUS" = "UNKNOWN" ] || [ "$NOISY_STATUS" = "UNKNOWN" ]; then
     echo "INCOMPLETE: the measurement could not be taken ($failed step(s) failed)" >&2
     exit 2
   fi
-  echo "M8 PASS, DISK PASS, NET $NET_STATUS (M9 $M9_STATUS; M9 findings are reported, not fatal)"
+  echo "M8 PASS, DISK PASS, NET $NET_STATUS, HOST $HOST_STATUS, NOISY $NOISY_STATUS (M9 $M9_STATUS; M9 findings are reported, not fatal)"
   exit 0
 }
 

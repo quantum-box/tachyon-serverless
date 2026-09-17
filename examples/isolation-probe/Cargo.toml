@@ -11,7 +11,7 @@ publish = false
 # lists the guest interfaces and routes; {"probe":"resources"} reports the vCPU count, MemTotal and
 # the visible cgroup limits, and with {"alloc_mib": N} allocates and touches N MiB in chunks while
 # printing progress to stdout; {"probe":"disk","fill_mib":N} writes into /tmp until the write fails
-# and reports where it stopped (PLT-4622). Only `std` and `libc` are used: the example opens no
+# and reports where it stopped (PLT-4622); {"probe":"cpu"|"io"|"work"} generate CPU / disk load and time a fixed workload for the noisy-neighbour measurement (PLT-4622). Only `std` and `libc` are used: the example opens no
 # listener and needs no network crate, so it links statically for x86_64/aarch64-unknown-linux-musl.
 description = "Tachyon Serverless example: isolation probe reporting guest egress reachability, interfaces and resource limits as JSON."
 

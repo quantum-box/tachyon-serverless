@@ -797,6 +797,7 @@ impl HostNetwork {
         env_id: &str,
         profile: EgressProfile,
         allow: &[EgressAllowRule],
+        tap_owner: Option<(u32, u32)>,
     ) -> Result<VerifiedPolicy, String> {
         let started = std::time::Instant::now();
         host_support(&self.cfg)?;
@@ -815,8 +816,14 @@ impl HostNetwork {
         if Self::tap_exists(&lease.tap) {
             return Err(format!("tap {} already exists", lease.tap));
         }
-        self.ip(&["tuntap", "add", "dev", &lease.tap, "mode", "tap"])
-            .await?;
+        // A jailed VMM runs without CAP_NET_ADMIN: it may only attach to a
+        // persistent tap that names its uid / gid as owner.
+        let owner = tap_owner.map(|(u, g)| (u.to_string(), g.to_string()));
+        let mut add = vec!["tuntap", "add", "dev", &lease.tap, "mode", "tap"];
+        if let Some((uid, gid)) = &owner {
+            add.extend(["user", uid.as_str(), "group", gid.as_str()]);
+        }
+        self.ip(&add).await?;
         let tap = &lease.tap;
         Self::set_sysctl(&format!("/proc/sys/net/ipv6/conf/{tap}/disable_ipv6"), "1")?;
         for (key, value) in [

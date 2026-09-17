@@ -1,0 +1,140 @@
+tachyon-serverless isolation measurement 20260917T041930Z
+host              Linux 7.0.0-31-generic aarch64 (aarch64)
+gateway config    /home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml
+provider          firecracker / micro_vm / dev_only=false
+function          isolation-probe (fn_01m2kzn27ynn09aqqp0pk54dep)
+baseline revision rev_01m2pseqn2qkhth23zxh4xm29e (256 MiB, 500 m)
+alloc revision    rev_01m2psf82knqn9tg8ms47dwdz3 (128 MiB, alloc 512 MiB)
+orphans           clean
+
+== M8 egress (expected: every target fails) ==
+  1.1.1.1:443	connected=false	error=NetworkUnreachable	0 ms
+  169.254.169.254:80	connected=false	error=NetworkUnreachable	0 ms
+  10.0.2.2:80	connected=false	error=NetworkUnreachable	0 ms
+  dns example.com	resolved=false	error=ProbeTimeout	5003 ms
+  interfaces: lo (loopback_only=true, default routes 0)
+  guest boot_id: b76b1d1e-561e-4e7f-be6e-bbe80d53fb49
+
+== M9 resources (expected: the guest sees what the revision asked for) ==
+  vcpus: available_parallelism=1 cpuinfo=1
+  memory: MemTotal=232 MiB (238240 kB)
+  cgroup: available=false memory.max=- cpu.max=-
+  alloc invocation inv_01m2psf8b7m0g160fq7jv7tfk0: status=failed class=crash type=Runtime.Crash
+  last guest progress lines:
+    2026-09-17T04:20:00.395Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+    2026-09-17T04:20:00.926Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+
+== DISK ephemeral storage (expected: ENOSPC at 64 MiB, host unaffected) ==
+  fill: /tmp/isolation-probe-fill.104.1789618808305720334 wrote 61505536 B (58 MiB) stopped_by=enospc error=No space left on device (os error 28)
+  mount: /dev/vdc on /tmp ext4 rw,nosuid,nodev,relatime
+  statvfs before: total 62869504 B avail 61505536 B; after fill avail 0 B; after cleanup avail 61505536 B
+  write into /: refused=true Read-only file system (os error 30)
+  write into /function: refused=true Read-only file system (os error 30)
+  host: avail before 28723019776 B, min 28645904384 B, after 28722720768 B; run dir max 74911744 B (43 samples)
+
+== NET egress restricted / public-web (PLT-4622) ==
+  [publicweb]
+    ok  connect 1.1.1.1:443 expect=allow (1.1.1.1:443)
+    ok  connect 1.0.0.1:443 expect=allow (1.0.0.1:443)
+    ok  connect 169.254.169.254:80 expect=deny (TimedOut)
+    ok  connect 10.0.2.2:80 expect=deny (TimedOut)
+    ok  connect 100.64.0.1:80 expect=deny (TimedOut)
+    ok  connect 192.168.0.1:80 expect=deny (TimedOut)
+    ok  connect 192.168.5.2:22 expect=deny (TimedOut)
+    ok  connect 192.168.5.2:53 expect=deny (TimedOut)
+    ok  connect 192.168.5.15:22 expect=deny (TimedOut)
+    ok  connect 192.168.5.15:8080 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.5:22 expect=deny (TimedOut)
+    ok  connect [2606:4700:4700::1111]:443 expect=deny (Uncategorized)
+    ok  connect [::ffff:169.254.169.254]:80 expect=deny (Uncategorized)
+    ok  udp_dns 1.1.1.1:53 expect=allow (172.66.147.243,104.20.23.154)
+    ok  udp_dns 8.8.8.8:53 expect=deny (WouldBlock)
+    ok  udp_dns 192.168.5.2:53 expect=deny (WouldBlock)
+    ok  resolve+connect example.com expect=allow (172.66.147.243,104.20.23.154,2606:4700:10::ac42:93f3,2606:4700:10::6814:179a)
+    ok  resolve+connect 169.254.169.254.nip.io expect=deny_connect (resolved=true to 169.254.169.254)
+    ok  http_redirect http://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F expect=deny_follow (fetched=true status=302 location=http://169.254.169.254/latest/meta-data/)
+  [restricted]
+    ok  connect 1.1.1.1:443 expect=allow (1.1.1.1:443)
+    ok  connect 1.0.0.1:443 expect=deny (TimedOut)
+    ok  connect 1.1.1.1:80 expect=deny (TimedOut)
+    ok  connect 169.254.169.254:80 expect=deny (TimedOut)
+    ok  connect 192.168.5.2:22 expect=deny (TimedOut)
+    ok  connect 192.168.5.15:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.5:22 expect=deny (TimedOut)
+    ok  connect [2606:4700:4700::1111]:443 expect=deny (Uncategorized)
+    ok  udp_dns 1.1.1.1:53 expect=deny (WouldBlock)
+    ok  udp_dns 8.8.8.8:53 expect=deny (WouldBlock)
+    ok  resolve example.com expect=deny_resolve (ProbeTimeout)
+  [cross]
+    ok  connect 1.1.1.1:443 expect=allow (1.1.1.1:443)
+    ok  connect 172.30.0.2:8080 expect=deny (TimedOut)
+    ok  connect 172.30.0.2:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:8080 expect=deny (TimedOut)
+  [cross] tenant B listening=true accepted=0
+  [race] env_01m2psfzs5jye0p5bvtekw21gh public-web policy 2026-09-17T04:20:14.856681Z < start 2026-09-17T04:20:14.881119Z: true
+  [race] env_01m2psgjdf56qh16cq2a7272mx restricted policy 2026-09-17T04:20:33.929537Z < start 2026-09-17T04:20:33.954861Z: true
+  [race] env_01m2psgx50mxg5zv2cm8e9fy1y public-web policy 2026-09-17T04:20:44.926603Z < start 2026-09-17T04:20:44.952545Z: true
+  [race] env_01m2psh0bhvp3xjp633qfw2psg public-web policy 2026-09-17T04:20:48.212091Z < start 2026-09-17T04:20:48.241024Z: true
+  [cleanup] taps after the run: (none)
+  [cleanup] table inet tachyon_egress after the run: absent
+  [cleanup] net.json leases left under /home/takanorifukuyama.guest/tsls/.kvm/run: 0
+
+== HOST cgroup placement and jail confinement (PLT-4622) ==
+  env_01m2pseqxw7t698xcrfrza0jhx observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psf2c10yptk9k935tw625t observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psf8b8zt32f0498gvbhyyv observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psfmn8mfrbce5pc180pwhb observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psfzs5jye0p5bvtekw21gh observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psgjdf56qh16cq2a7272mx observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psgx50mxg5zv2cm8e9fy1y observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psh0bhvp3xjp633qfw2psg observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2pshwqd80vcz5pncd7mdkqb observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psj1bm2myjsbgg2b7ck7rz observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psj5x20999s04wrez23k5c observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psjajdyc3w9f2n4m8zzc3y observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psjf5tgkmjgr12tc9qjmek observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psjkpk151fsesss7wpkjw5 observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psjkptjxjvvpxk1vxzznnb observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psjkpnjdce1tnxvvbqms1v observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psk27sw5vmafymbjzh4h1h observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psk5tfxjkhcjyy63a3kbbc observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psk8jvp4vkcjnsg9djn6b4 observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2pskeqy59d378x899rj0e4p observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psknmpgwzq36ma1rv6n9v4 observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psknyryec2tj39wt7jpx0s observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2pskvws8g3a12ywwmjqdsjf observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psm8q0rnpsm7qb4zfg8ekf observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psmmsa1yy33fc0sj7j8cxf observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psn1rvg5v9sjvcsxk1nhyp observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psngzcwzpmf6vf3g7g98yb observed=true cgroup=true limits=true cpu.max=50000 100000 memory.max=201326592 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psp0n47n93hb0s5s6dz6e4 observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2psp5t0m9qrmb95e9fycysv observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  env_01m2pspagv3vx4dn0bwt5rczr5 observed=true cgroup=true limits=true cpu.max=100000 100000 memory.max=335544320 jailed=true uid=64000 confined=true seccomp=true
+  [cleanup] cgroup parent /sys/fs/cgroup/tachyon: absent
+  [cleanup] environment cgroups left: (none)
+  [cleanup] jails left under /srv/jailer: (none)
+  [cleanup] firecracker / jailer processes left: (none)
+
+== NOISY two tenants on one host (PLT-4622) ==
+  A cpu: quota 0.5000 cores, cgroup max over 5 s 0.5167, mean after warm-up 0.501208, guest steal 50.7%
+  A io: fill enospc at 58 MiB, rewrites 72579 at 806.1 MiB/s
+  A oom: 7 runs crash=7, host oom_kill 0
+  B: 13/13 succeeded
+  B median alone:     cpu 1708.003292 ms, write p50 0.500583 ms, handler 1831 ms
+  B median contended: cpu 2126.968627 ms, write p50 0.526208 ms, handler 2341 ms
+  B median after:     cpu 1711.843792 ms, write p50 0.555959 ms, handler 1847 ms
+  B slowdown: cpu ×1.245 (≤ ×1.30), write ×1.051 (≤ ×3.00), handler ×1.279
+
+== findings ==
+  none
+
+== verdict ==
+  M8    PASS     3/3 targets attempted, none connected, dns_resolved=false
+  M9    PASS     vcpu 1/1 vs 1 requested; MemTotal 232 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash
+  DISK  PASS     wrote 58 MiB of 256 MiB into 64 MiB (/dev/vdc ext4), stopped_by=enospc; read-only refused 2/2; host avail drop max 73 MiB (allowed 128 MiB)
+  NET   PASS     publicweb: 16/16 denied, 4/4 allowed; restricted: 11/11 denied, 1/1 allowed; cross: 4/4 denied, 1/1 allowed; tenant B accepted 0 connection(s); policy verified before InstanceStart in 4/4 policed boots; taps / table / leases gone after the run
+  HOST  PASS     30/30 VMMs observed; in own cgroup with cpu.max/memory.max/pids.max: 30/30; jailed (uid 64000, CapEff 0, chroot, new PID+mount ns, seccomp 2 on vCPU/API threads): 30/30; no cgroup / jail / VMM left
+  NOISY PASS     A cpu 0.5167 cores max/5s, 0.501208 mean (quota 0.5000, ≤ ×1.10); A io fill enospc at 58 MiB; A oom runs 7 crash=7, host oom_kill 0; B 13/13 ok, slowdown cpu ×1.245 (≤ ×1.30), write ×1.051 (≤ ×3.00), handler ×1.279

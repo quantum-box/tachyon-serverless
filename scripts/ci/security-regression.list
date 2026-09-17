@@ -105,3 +105,13 @@ resource_limits tachyon-serverless-runtime-bridge lib runtime_api::tests::oversi
 resource_limits tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_error_report_settles_the_attempt
 resource_limits tachyon-serverless-provider-firecracker lib drive::tests::scratch_drive_is_exactly_the_requested_size
 resource_limits tachyon-serverless-provider-firecracker lib provider::tests::archive_is_pruned_to_keep_limit
+# PLT-4622: host cgroup v2 limits of the VMM (fail closed when required) and the jailer launch
+resource_limits tachyon-serverless-application lib config::tests::firecracker_cgroup_and_jailer_sections
+resource_limits tachyon-serverless-provider-firecracker lib cgroup::tests::limits_follow_cpu_millis_and_memory
+resource_limits tachyon-serverless-provider-firecracker lib cgroup::tests::memory_max_may_round_down_to_a_page_only
+resource_limits tachyon-serverless-provider-firecracker lib cgroup::tests::names_are_single_components
+resource_limits tachyon-serverless-provider-firecracker lib provider::tests::resource_limits_claim_follows_the_host_cgroups
+resource_limits tachyon-serverless-provider-firecracker lib provider::tests::required_cgroups_fail_closed_before_anything_exists
+resource_limits tachyon-serverless-provider-firecracker lib provider::tests::jailed_paths_live_in_the_chroot
+resource_limits tachyon-serverless-provider-firecracker lib jail::tests::args_put_firecracker_flags_after_the_separator
+resource_limits tachyon-serverless-provider-firecracker lib jail::tests::prepare_links_and_remove_stays_inside_the_base

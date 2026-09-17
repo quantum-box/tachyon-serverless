@@ -37,9 +37,31 @@ pub struct EnvPaths {
     pub fc_log: PathBuf,
     pub console_log: PathBuf,
     pub pid_file: PathBuf,
+    /// Jail of the environment when the VMM runs under the jailer. The
+    /// socket paths above then point into its chroot.
+    pub jail: Option<crate::jail::JailLayout>,
 }
 
 impl EnvPaths {
+    /// Move the sockets into a jail's chroot (see [`crate::jail`]).
+    pub fn jailed(mut self, jail: crate::jail::JailLayout, vsock_port: u32) -> Self {
+        use crate::jail::{API_SOCK, VSOCK_UDS};
+        self.api_sock = jail.host(API_SOCK);
+        self.vsock_uds = jail.host(VSOCK_UDS);
+        self.vsock_listener = jail.host(&format!("{VSOCK_UDS}_{vsock_port}"));
+        self.jail = Some(jail);
+        self
+    }
+
+    /// The path the VMM is given for a host file: unchanged without a jail,
+    /// `/<in-chroot name>` with one.
+    pub fn vmm_path(&self, host: &Path, jail_name: &str) -> PathBuf {
+        match &self.jail {
+            Some(_) => crate::jail::JailLayout::guest(jail_name),
+            None => host.to_path_buf(),
+        }
+    }
+
     pub fn new(workdir: &Path, env_id: &str, vsock_port: u32) -> Self {
         let dir = workdir.join(env_id);
         Self {
@@ -54,6 +76,7 @@ impl EnvPaths {
             console_log: dir.join("console.log"),
             pid_file: dir.join("fc.pid"),
             dir,
+            jail: None,
         }
     }
 
@@ -70,21 +93,45 @@ impl EnvPaths {
 /// `sun_path` is 108 bytes on Linux including the terminating NUL.
 pub const MAX_UNIX_SOCKET_PATH: usize = 107;
 
-/// Spawn `firecracker --api-sock ... --id ... --log-path ... --level Warning`
-/// in a new process group with stdin closed and stdout/stderr (the guest
-/// serial console) sent through a pipe that a [`ConsoleCapture`] drains into
-/// `console_log`, keeping at most `console_cap` bytes (PLT-4622).
-pub fn spawn_firecracker(
-    binary: &Path,
-    paths: &EnvPaths,
-    instance_id: &str,
-    console_cap: u64,
-) -> std::io::Result<(Child, ConsoleCapture)> {
-    // Firecracker opens --log-path without O_CREAT; the file must exist.
+/// How the VMM process is started.
+#[derive(Debug, Clone, Copy)]
+pub enum Launcher<'a> {
+    /// `firecracker` directly, as the gateway's user.
+    Direct { binary: &'a Path },
+    /// `jailer ... -- <firecracker args>` (see [`crate::jail`]).
+    Jailer {
+        jailer: &'a crate::config::JailerConfig,
+        firecracker: &'a Path,
+    },
+}
+
+/// Create the (empty) `fc.log`: Firecracker opens `--log-path` without
+/// `O_CREAT`, so the file must exist (and, for a jail, be linked into it).
+pub fn create_fc_log(paths: &EnvPaths) -> std::io::Result<()> {
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&paths.fc_log)?;
+        .open(&paths.fc_log)
+        .map(drop)
+}
+
+/// Spawn the VMM (`firecracker --api-sock ... --id ... --log-path ... --level
+/// Warning`, directly or through the jailer) in a new process group with
+/// stdin closed and stdout/stderr (the guest serial console) sent through a
+/// pipe that a [`ConsoleCapture`] drains into `console_log`, keeping at most
+/// `console_cap` bytes (PLT-4622).
+///
+/// With `cgroup_procs` (an fd of a cgroup's `cgroup.procs` opened for
+/// writing) the child moves itself into that cgroup between `fork` and
+/// `exec`, so the VMM and every thread it creates start inside the limits.
+pub fn spawn_vmm(
+    launcher: Launcher<'_>,
+    paths: &EnvPaths,
+    instance_id: &str,
+    console_cap: u64,
+    cgroup_procs: Option<std::os::fd::RawFd>,
+) -> std::io::Result<(Child, ConsoleCapture)> {
+    create_fc_log(paths)?;
     let console = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -93,17 +140,45 @@ pub fn spawn_firecracker(
     // child survive the exec, so the pipe reaches EOF when the VMM exits.
     let (console_rx, console_tx) = std::io::pipe()?;
     let console_err = console_tx.try_clone()?;
-    let mut cmd = Command::new(binary);
-    cmd.arg("--api-sock")
-        .arg(&paths.api_sock)
-        .arg("--id")
-        .arg(instance_id)
-        .arg("--log-path")
-        .arg(&paths.fc_log)
-        .arg("--level")
-        .arg("Warning")
-        // A terminal on stdin would be switched to raw mode by Firecracker.
-        .stdin(Stdio::null())
+    let mut cmd = match launcher {
+        Launcher::Direct { binary } => {
+            let mut cmd = Command::new(binary);
+            cmd.arg("--api-sock")
+                .arg(&paths.api_sock)
+                .arg("--id")
+                .arg(instance_id)
+                .arg("--log-path")
+                .arg(&paths.fc_log)
+                .arg("--level")
+                .arg("Warning");
+            cmd
+        }
+        Launcher::Jailer {
+            jailer,
+            firecracker,
+        } => {
+            let mut cmd = Command::new(&jailer.binary);
+            cmd.args(crate::jail::jailer_args(jailer, firecracker, instance_id));
+            cmd
+        }
+    };
+    if let Some(fd) = cgroup_procs {
+        // SAFETY: the closure only calls write(2) on an fd that stays open in
+        // the parent for the duration of spawn, which is async-signal-safe
+        // and allocates nothing.
+        unsafe {
+            cmd.pre_exec(move || {
+                // "0" moves the writing process (the child) into the cgroup.
+                if libc::write(fd, b"0".as_ptr().cast(), 1) == 1 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+    }
+    // A terminal on stdin would be switched to raw mode by Firecracker.
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::from(console_tx))
         .stderr(Stdio::from(console_err))
         .current_dir(&paths.dir)
@@ -127,6 +202,19 @@ pub fn kill_process_group(pid: u32) {
     }
 }
 
+/// SIGKILL a VMM that may not lead its process group (a jailer cloned it):
+/// its group, unless that is the caller's own, and the process itself.
+pub fn kill_vmm(pid: u32) {
+    // SAFETY: plain syscalls on pids; no memory involved.
+    unsafe {
+        let pgid = libc::getpgid(pid as i32);
+        if pgid > 1 && pgid != libc::getpgid(0) {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+}
+
 /// True when a process with this pid exists (signal 0). EPERM also counts as
 /// alive: the process exists but belongs to another user.
 pub fn pid_alive(pid: u32) -> bool {
@@ -142,11 +230,17 @@ pub fn pid_alive(pid: u32) -> bool {
 /// `/proc/<pid>/cmdline`; returns `None` when that cannot be determined
 /// (non-Linux hosts, process gone), in which case callers must not kill.
 pub fn pid_belongs_to_env(pid: u32, dir: &Path) -> Option<bool> {
-    if !cfg!(target_os = "linux") {
+    pid_cmdline_contains(pid, dir.as_os_str().as_encoded_bytes())
+}
+
+/// Whether any argument of `pid`'s command line contains `needle` (`None`
+/// when unknown). A jailed VMM's command line holds no host path, only
+/// `--id <instance id>`, so the provider also matches the instance id.
+pub fn pid_cmdline_contains(pid: u32, needle: &[u8]) -> Option<bool> {
+    if !cfg!(target_os = "linux") || needle.is_empty() {
         return None;
     }
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let needle = dir.as_os_str().as_encoded_bytes();
     Some(
         raw.split(|b| *b == 0)
             .any(|arg| arg.windows(needle.len()).any(|w| w == needle)),
@@ -228,6 +322,29 @@ mod tests {
         assert_eq!(p.vsock_uds, PathBuf::from("/w/env_1/v.sock"));
         assert_eq!(p.vsock_listener, PathBuf::from("/w/env_1/v.sock_5000"));
         assert_eq!(p.longest_socket_path_len(), "/w/env_1/v.sock_5000".len());
+        assert_eq!(
+            p.vmm_path(&p.scratch_drive, crate::jail::SCRATCH_DRIVE),
+            p.scratch_drive
+        );
+
+        let jailer = crate::config::JailerConfig {
+            chroot_base: PathBuf::from("/srv/jailer"),
+            ..Default::default()
+        };
+        let j = p.jailed(crate::jail::layout(&jailer, "firecracker", "env-1"), 5000);
+        let root = PathBuf::from("/srv/jailer/firecracker/env-1/root");
+        assert_eq!(j.api_sock, root.join("fc.sock"));
+        assert_eq!(j.vsock_uds, root.join("v.sock"));
+        assert_eq!(j.vsock_listener, root.join("v.sock_5000"));
+        assert_eq!(
+            j.dir,
+            PathBuf::from("/w/env_1"),
+            "host artefacts stay in the env dir"
+        );
+        assert_eq!(
+            j.vmm_path(&j.scratch_drive, crate::jail::SCRATCH_DRIVE),
+            PathBuf::from("/scratch.ext4")
+        );
     }
 
     #[test]

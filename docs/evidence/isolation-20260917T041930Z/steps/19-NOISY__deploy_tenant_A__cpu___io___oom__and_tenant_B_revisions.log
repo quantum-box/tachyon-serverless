@@ -1,0 +1,21 @@
+[e2e] tenant B function isolation-probe: fn_01m2pnbzcee3svrjkxjj65e02h
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1853312 bytes, arch aarch64)
+artifact sha256:5c25c0972079a73f68639bfd91f973ff4fcfe386964c583629e49df033c74166
+revision rev_01m2pshv82tpf2fp2qy13j1tv9 (#31) created: pending
+revision rev_01m2pshv82tpf2fp2qy13j1tv9 is preparing
+revision rev_01m2pshv82tpf2fp2qy13j1tv9 is ready
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1853312 bytes, arch aarch64)
+artifact sha256:5c25c0972079a73f68639bfd91f973ff4fcfe386964c583629e49df033c74166
+revision rev_01m2pshvn3t92f3adt48fag5qt (#32) created: pending
+revision rev_01m2pshvn3t92f3adt48fag5qt is preparing
+revision rev_01m2pshvn3t92f3adt48fag5qt is ready
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1853312 bytes, arch aarch64)
+artifact sha256:5c25c0972079a73f68639bfd91f973ff4fcfe386964c583629e49df033c74166
+revision rev_01m2pshw1x4kgpp863n3t98mge (#33) created: pending
+revision rev_01m2pshw1x4kgpp863n3t98mge is preparing
+revision rev_01m2pshw1x4kgpp863n3t98mge is ready
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1853312 bytes, arch aarch64)
+artifact sha256:5c25c0972079a73f68639bfd91f973ff4fcfe386964c583629e49df033c74166
+revision rev_01m2pshwerrnwmcb17gzm3zq6y (#6) created: pending
+revision rev_01m2pshwerrnwmcb17gzm3zq6y is preparing
+revision rev_01m2pshwerrnwmcb17gzm3zq6y is ready

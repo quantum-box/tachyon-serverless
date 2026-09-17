@@ -20,6 +20,17 @@
 //! and an nftables chain, installed and read back before the network device
 //! is configured and before `InstanceStart` (crate::network, egress_gate).
 //!
+//! Host isolation of the VMM (PLT-4622):
+//!
+//! - every VMM starts inside `<cgroup root>/<parent>/<env_id>` with `cpu.max`
+//!   from `cpu_millis`, `memory.max` = guest memory + overhead and `pids.max`
+//!   (crate::cgroup), proven by reading `cgroup.procs` before configuration;
+//! - with `[provider.firecracker.jailer]` the VMM is started by the jailer in
+//!   `<chroot_base>/<exec name>/<instance id>/root` as an unprivileged uid in
+//!   new mount / PID namespaces (crate::jail). The sockets above then live in
+//!   that chroot and the drives, kernel, rootfs and `fc.log` are hard-linked
+//!   into it; the files in `<workdir>/<env_id>/` stay the host's copies.
+//!
 //! Guest-initiated vsock connections (guest -> host CID 2, port N) are
 //! forwarded by Firecracker to `<uds_path>_<N>` with no `CONNECT` handshake,
 //! so the accepted Unix stream carries bridge frames from the first byte.
@@ -44,7 +55,8 @@ use tachyon_serverless_provider_port::{
 
 use crate::api::ApiClient;
 use crate::boot_args::compose_boot_args;
-use crate::config::FirecrackerConfig;
+use crate::cgroup::{CgroupLimits, EnvCgroup, HostCgroups, verify_member};
+use crate::config::{CgroupMode, FirecrackerConfig};
 use crate::drive::{
     create_reserved_image, create_sparse_image, function_drive_size_bytes, mkfs_args,
     scratch_drive_size_bytes, scratch_mkfs_args,
@@ -54,12 +66,13 @@ use crate::elf::{ElfInfo, inspect_elf_file};
 use crate::host_guard::{
     ConsoleCapture, HostBudget, available_bytes, check_host_budget, spawn_log_watchdog,
 };
+use crate::jail::JailInputs;
 use crate::network::{HostNetwork, VerifiedPolicy, host_support};
 use crate::preflight::{DigestCache, probe_firecracker_version, run_preflight};
 use crate::vmm::{
-    EnvPaths, MAX_UNIX_SOCKET_PATH, instance_id_for, kill_process_group, pid_alive,
-    pid_belongs_to_env, read_pid_file, spawn_firecracker, tail_of_file, wait_pid_gone,
-    write_pid_file,
+    EnvPaths, Launcher, MAX_UNIX_SOCKET_PATH, create_fc_log, instance_id_for, kill_process_group,
+    kill_vmm, pid_alive, pid_belongs_to_env, pid_cmdline_contains, read_pid_file, spawn_vmm,
+    tail_of_file, wait_pid_gone, write_pid_file,
 };
 
 /// Name of the directory under `workdir` that keeps logs of terminated environments.
@@ -80,9 +93,65 @@ pub const VM_STATE_RESUMED: &str = "Resumed";
 const CONSOLE_TAIL_BYTES: usize = 4096;
 const FC_LOG_TAIL_BYTES: usize = 2048;
 
+/// A running VMM.
+///
+/// Started directly (or by a jailer that execs in place), the spawned child
+/// *is* the VMM. A jailer with `--new-pid-ns` clones the VMM and exits; then
+/// `child` is `None`, `pid` is the VMM recorded by the jailer and `pgid` the
+/// process group the jailer led (the VMM stays in it).
 struct Tracked {
     pid: u32,
-    child: Child,
+    pgid: u32,
+    child: Option<Child>,
+    instance_id: String,
+}
+
+impl Tracked {
+    /// `Some(description)` once the VMM has exited.
+    fn exited(&mut self) -> Option<String> {
+        match &mut self.child {
+            Some(child) => match child.try_wait() {
+                Ok(None) => None,
+                Ok(Some(status)) => Some(status.to_string()),
+                Err(e) => Some(format!("try_wait failed: {e}")),
+            },
+            None => {
+                let ours = pid_alive(self.pid)
+                    && pid_cmdline_contains(self.pid, self.instance_id.as_bytes()) != Some(false);
+                (!ours).then(|| format!("vmm pid {} is gone", self.pid))
+            }
+        }
+    }
+
+    async fn wait_exit(&mut self) -> String {
+        match &mut self.child {
+            Some(child) => child
+                .wait()
+                .await
+                .map(|s| s.to_string())
+                .unwrap_or_else(|e| e.to_string()),
+            None => loop {
+                if let Some(status) = self.exited() {
+                    return status;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            },
+        }
+    }
+
+    /// SIGKILL the VMM's process group and reap / wait for it.
+    async fn kill(&mut self) {
+        kill_process_group(self.pgid);
+        match &mut self.child {
+            Some(child) => {
+                let _ = child.wait().await;
+            }
+            None => {
+                kill_vmm(self.pid);
+                wait_pid_gone(self.pid, Duration::from_secs(2)).await;
+            }
+        }
+    }
 }
 
 /// Firecracker execution provider (Linux/KVM only; compiles everywhere).
@@ -95,6 +164,14 @@ pub struct FirecrackerProvider {
     /// [`host_support`] at construction: whether this process can enforce
     /// `restricted` / `public-web` on this host, or why not.
     net_support: Result<String, String>,
+    /// Environment cgroups; `None` when `mode = "off"`, or `"best-effort"` on
+    /// a host without cgroup delegation.
+    cgroups: Option<HostCgroups>,
+    /// [`crate::cgroup::host_support`] at construction.
+    cgroup_support: Result<String, String>,
+    /// File name of the Firecracker binary when the jailer is configured
+    /// (the jail's directory level), or why it cannot be used.
+    jail_exec: Option<Result<String, String>>,
 }
 
 impl std::fmt::Debug for FirecrackerProvider {
@@ -120,6 +197,36 @@ impl FirecrackerProvider {
                 "egress restricted / public-web are unavailable on this host (egress none is unaffected)"
             );
         }
+        let cgroup_support = crate::cgroup::host_support(&cfg.cgroup);
+        let cgroups = match (cfg.cgroup.mode, &cgroup_support) {
+            (CgroupMode::Off, _) => None,
+            (CgroupMode::BestEffort, Err(reason)) => {
+                tracing::warn!(
+                    reason,
+                    "host cgroup v2 limits are unavailable; VMMs run without cpu.max / memory.max \
+                     (cgroup mode best-effort; production requires mode = \"required\")"
+                );
+                None
+            }
+            (CgroupMode::Required, Err(reason)) => {
+                tracing::error!(
+                    reason,
+                    "host cgroup v2 limits are required but unavailable; every environment will be refused"
+                );
+                Some(HostCgroups::new(cfg.cgroup.clone()))
+            }
+            (_, Ok(_)) => Some(HostCgroups::new(cfg.cgroup.clone())),
+        };
+        let jail_exec = cfg
+            .jailer
+            .as_ref()
+            .map(|_| crate::jail::exec_name(&cfg.firecracker_binary));
+        if cfg.jailer.is_none() {
+            tracing::info!(
+                "the VMM runs without the jailer (no chroot, no dedicated uid); use \
+                 [provider.firecracker.jailer] outside development"
+            );
+        }
         Self {
             net: HostNetwork::new(cfg.network.clone()),
             cfg,
@@ -127,6 +234,9 @@ impl FirecrackerProvider {
             running: tokio::sync::Mutex::new(HashMap::new()),
             digests: DigestCache::default(),
             net_support,
+            cgroups,
+            cgroup_support,
+            jail_exec,
         }
     }
 
@@ -158,9 +268,14 @@ impl FirecrackerProvider {
             //   `ephemeral_storage_mib = 64`, a fill stops with ENOSPC after
             //   58 MiB (ext4 metadata), `/` and `/function` answer EROFS, and the
             //   host lost at most 70 MiB of free space (the reserved drive).
-            // The limits are VM-shaped: CPU is enforced in whole vCPUs (no
-            // host cgroup quota on the VMM), memory by the guest kernel, disk by
-            // the drive size. aarch64 under nested virtualization only.
+            // - host cgroup v2 on the VMM (docs/evidence/isolation-20260917T041930Z,
+            //   HOST / NOISY): every VMM ran in its own cgroup with cpu.max from
+            //   cpu_millis; a 500 m tenant spinning 4 threads used 0.517 cores at
+            //   most over any 5 s window while a neighbour's CPU work slowed by
+            //   x1.245 and its fsync'd writes by x1.051; memory.peak stayed under
+            //   guest + 64 MiB with no host oom_kill.
+            // Without host cgroups the claim is withdrawn per host
+            // (`resource_limits_support`). aarch64 under nested virtualization only.
             enforce_resource_limits: Support::Supported,
             // ADR-0001 M8 measured on aarch64 (docs/evidence/isolation-20260916T020934Z):
             // no network device is configured, the guest lists loopback only and
@@ -188,7 +303,74 @@ impl FirecrackerProvider {
     }
 
     fn paths_for(&self, env_id: &EnvironmentId) -> EnvPaths {
-        EnvPaths::new(&self.cfg.workdir, env_id.as_str(), self.cfg.vsock_port)
+        let paths = EnvPaths::new(&self.cfg.workdir, env_id.as_str(), self.cfg.vsock_port);
+        match (&self.cfg.jailer, &self.jail_exec) {
+            (Some(jailer), Some(Ok(exec))) => paths.jailed(
+                crate::jail::layout(jailer, exec, &instance_id_for(env_id.as_str())),
+                self.cfg.vsock_port,
+            ),
+            _ => paths,
+        }
+    }
+
+    /// Whether `pid` (read from a pid file) is this environment's VMM: its
+    /// command line names the environment directory (direct launch) or the
+    /// instance id (jailed launch). `None` when that cannot be determined.
+    fn pid_is_ours(pid: u32, env_id: &EnvironmentId, paths: &EnvPaths) -> Option<bool> {
+        let by_dir = pid_belongs_to_env(pid, &paths.dir);
+        let by_id = pid_cmdline_contains(pid, instance_id_for(env_id.as_str()).as_bytes());
+        match (by_dir, by_id) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (None, None) => None,
+            _ => Some(false),
+        }
+    }
+
+    /// Remove the cgroup and the jail of an environment (whatever of them
+    /// exists). The cgroup is killed first, so nothing survives in it.
+    async fn release_host(
+        &self,
+        environment_id: &EnvironmentId,
+        paths: &EnvPaths,
+        cleaned: &mut Vec<String>,
+    ) {
+        if let Some(cgroups) = &self.cgroups {
+            let path = cgroups.env_dir(environment_id.as_str());
+            match cgroups.remove(environment_id.as_str()).await {
+                Ok(Some(stats)) => {
+                    tracing::info!(
+                        env_id = %environment_id,
+                        cgroup = %path.display(),
+                        stats = %stats,
+                        "cgroup stats at teardown"
+                    );
+                    cleaned.push(format!("cgroup:{}", path.display()));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::error!(env_id = %environment_id, error = %e, "cgroup not removed");
+                    cleaned.push(format!("cgroup-remove-failed:{e}"));
+                }
+            }
+        }
+        if let (Some(jailer), Some(jail)) = (&self.cfg.jailer, &paths.jail) {
+            match crate::jail::remove(jailer, jail) {
+                Ok(true) => cleaned.push(format!("jail:{}", jail.jail_dir.display())),
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::error!(env_id = %environment_id, error = %e, "jail not removed");
+                    cleaned.push(format!("jail-remove-failed:{e}"));
+                }
+            }
+        }
+    }
+
+    /// Whether host isolation state (cgroup, jail) of an environment exists.
+    fn host_state_exists(&self, environment_id: &EnvironmentId, paths: &EnvPaths) -> bool {
+        self.cgroups
+            .as_ref()
+            .is_some_and(|c| c.env_dir(environment_id.as_str()).exists())
+            || paths.jail.as_ref().is_some_and(|j| j.jail_dir.exists())
     }
 
     fn archive_root(&self) -> std::path::PathBuf {
@@ -250,7 +432,7 @@ impl FirecrackerProvider {
         spec: &EnvironmentSpec,
         paths: &EnvPaths,
         created_at: Instant,
-        slot: &mut Option<Child>,
+        slot: &mut Option<Tracked>,
     ) -> Result<EnvironmentHandle, ProviderError> {
         let env_id = spec.environment_id.as_str();
 
@@ -264,6 +446,13 @@ impl FirecrackerProvider {
             scratch_drive_bytes: scratch_bytes,
             console_log_max_bytes: self.cfg.console_log_max_bytes,
             fc_log_max_bytes: self.cfg.fc_log_max_bytes,
+            // The jailer copies the Firecracker binary into every chroot.
+            vmm_binary_copy_bytes: match &self.cfg.jailer {
+                Some(_) => std::fs::metadata(&self.cfg.firecracker_binary)
+                    .map(|m| m.len())
+                    .unwrap_or(0),
+                None => 0,
+            },
         };
         let available = available_bytes(&paths.dir).map_err(|e| {
             ProviderError::Unavailable(format!(
@@ -334,6 +523,7 @@ impl FirecrackerProvider {
                     env_id,
                     spec.egress,
                     &spec.egress_allow,
+                    self.cfg.jailer.as_ref().map(|j| (j.uid, j.gid)),
                 )
                 .await
                 .map_err(|e| {
@@ -355,24 +545,80 @@ impl FirecrackerProvider {
         };
         let expected_nic: Option<ExpectedNic> = policy.as_ref().map(|p| p.lease().expected_nic());
 
+        // 2d. Host cgroup (PLT-4622): cpu.max / memory.max / pids.max, read
+        //     back, before the VMM exists. Required mode refuses to go on.
+        let limits = CgroupLimits::for_resources(
+            spec.resources.cpu_millis,
+            spec.resources.memory_mib,
+            &self.cfg.cgroup,
+        );
+        let cgroup: Option<EnvCgroup> = match &self.cgroups {
+            None => None,
+            Some(cgroups) => match cgroups.create(env_id, limits).await {
+                Ok(cg) => Some(cg),
+                Err(e) if self.cfg.cgroup.mode == CgroupMode::Required => {
+                    return Err(ProviderError::Unavailable(format!(
+                        "host cgroup limits are required and could not be applied: {e}"
+                    )));
+                }
+                Err(e) => {
+                    tracing::warn!(env_id, error = %e, "host cgroup limits not applied (best-effort)");
+                    None
+                }
+            },
+        };
+
+        // 2e. Jail (PLT-4622): hard-link what the VMM opens into its chroot.
+        if let (Some(jailer), Some(jail)) = (&self.cfg.jailer, &paths.jail) {
+            create_fc_log(paths)?;
+            crate::jail::prepare(
+                jailer,
+                jail,
+                &JailInputs {
+                    kernel: &self.cfg.kernel,
+                    rootfs: &self.cfg.rootfs,
+                    function_drive: &paths.function_drive,
+                    scratch_drive: &paths.scratch_drive,
+                    fc_log: &paths.fc_log,
+                },
+            )
+            .map_err(|e| ProviderError::Boot(format!("jail: {e}")))?;
+        }
+
         // 3. Listen for the guest-initiated vsock connection BEFORE the VM starts.
         let listener = UnixListener::bind(&paths.vsock_listener).map_err(|e| {
             ProviderError::Boot(format!("bind {}: {e}", paths.vsock_listener.display()))
         })?;
+        if let Some(jailer) = &self.cfg.jailer {
+            // The unprivileged VMM connects to it.
+            crate::jail::chown(&paths.vsock_listener, jailer.uid, jailer.gid)
+                .map_err(ProviderError::Boot)?;
+        }
 
-        // 4. Spawn Firecracker in its own process group.
+        // 4. Spawn the VMM in its own process group (and cgroup).
         let instance_id = instance_id_for(env_id);
-        let (child, console) = spawn_firecracker(
-            &self.cfg.firecracker_binary,
+        let launcher = match &self.cfg.jailer {
+            Some(jailer) => Launcher::Jailer {
+                jailer,
+                firecracker: &self.cfg.firecracker_binary,
+            },
+            None => Launcher::Direct {
+                binary: &self.cfg.firecracker_binary,
+            },
+        };
+        let (child, console) = spawn_vmm(
+            launcher,
             paths,
             &instance_id,
             self.cfg.console_log_max_bytes,
+            cgroup.as_ref().map(EnvCgroup::procs_fd),
         )
         .map_err(|e| {
-            ProviderError::Boot(format!(
-                "spawn {}: {e}",
-                self.cfg.firecracker_binary.display()
-            ))
+            let what = match &self.cfg.jailer {
+                Some(j) => j.binary.display().to_string(),
+                None => self.cfg.firecracker_binary.display().to_string(),
+            };
+            ProviderError::Boot(format!("spawn {what}: {e}"))
         })?;
         // fc.log is written by Firecracker itself; a watchdog keeps it bounded
         // until the environment directory is removed.
@@ -382,13 +628,76 @@ impl FirecrackerProvider {
             self.cfg.fc_log_max_bytes,
             env_id.to_owned(),
         );
-        let pid = child
+        let spawned = child
             .id()
             .ok_or_else(|| ProviderError::Internal("spawned child has no pid".into()))?;
+        *slot = Some(Tracked {
+            pid: spawned,
+            pgid: spawned,
+            child: Some(child),
+            instance_id: instance_id.clone(),
+        });
+        let vmm = slot.as_mut().expect("tracked stored above");
+        if let (Some(jailer), Some(jail)) = (&self.cfg.jailer, &paths.jail)
+            && jailer.new_pid_ns
+        {
+            // The jailer clones the VMM into a new PID namespace, records its
+            // pid in the chroot and exits.
+            let start = Instant::now();
+            loop {
+                let exited = vmm.child.as_mut().and_then(|c| c.try_wait().ok().flatten());
+                if let Some(status) = exited {
+                    if !status.success() {
+                        return Err(Self::boot_error_after_exit(
+                            paths,
+                            &console,
+                            format!("jailer exited with {status} before starting the VMM"),
+                        )
+                        .await);
+                    }
+                    break;
+                }
+                if start.elapsed() > API_SOCKET_WAIT {
+                    return Err(Self::boot_error(
+                        paths,
+                        format!(
+                            "the jailer did not hand over to the VMM within {API_SOCKET_WAIT:?}"
+                        ),
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            vmm.child = None;
+            vmm.pid = crate::jail::read_vmm_pid(jail).ok_or_else(|| {
+                Self::boot_error(
+                    paths,
+                    format!(
+                        "the jailer exited without recording the VMM pid in {}",
+                        jail.pid_file().display()
+                    ),
+                )
+            })?;
+        }
+        let pid = vmm.pid;
         write_pid_file(&paths.pid_file, pid)?;
-        *slot = Some(child);
-        let child = slot.as_mut().expect("child stored above");
-        tracing::info!(env_id, pid, instance_id, "firecracker spawned");
+        // Placement proof: the VMM (not only its launcher) is in the cgroup.
+        if let Some(cg) = &cgroup {
+            match verify_member(&self.cfg.cgroup.root, &cg.path, pid) {
+                Ok(()) => {}
+                Err(e) if self.cfg.cgroup.mode == CgroupMode::Required => {
+                    return Err(Self::boot_error(paths, format!("host cgroup: {e}")));
+                }
+                Err(e) => tracing::warn!(env_id, error = %e, "VMM cgroup placement not verified"),
+            }
+        }
+        tracing::info!(
+            env_id,
+            pid,
+            instance_id,
+            jailed = self.cfg.jailer.is_some(),
+            cgroup = cgroup.as_ref().map(|c| c.path.display().to_string()),
+            "firecracker spawned"
+        );
 
         // 5. Wait for the API socket.
         let start = Instant::now();
@@ -403,7 +712,7 @@ impl FirecrackerProvider {
             {
                 break;
             }
-            if let Ok(Some(status)) = child.try_wait() {
+            if let Some(status) = vmm.exited() {
                 return Err(Self::boot_error_after_exit(
                     paths,
                     &console,
@@ -442,13 +751,16 @@ impl FirecrackerProvider {
             ),
             (
                 "/boot-source",
-                serde_json::json!({"kernel_image_path": self.cfg.kernel, "boot_args": boot_args}),
+                serde_json::json!({
+                    "kernel_image_path": paths.vmm_path(&self.cfg.kernel, crate::jail::KERNEL),
+                    "boot_args": boot_args
+                }),
             ),
             (
                 "/drives/rootfs",
                 serde_json::json!({
                     "drive_id": "rootfs",
-                    "path_on_host": self.cfg.rootfs,
+                    "path_on_host": paths.vmm_path(&self.cfg.rootfs, crate::jail::ROOTFS),
                     "is_root_device": true,
                     "is_read_only": true
                 }),
@@ -457,7 +769,7 @@ impl FirecrackerProvider {
                 "/drives/function",
                 serde_json::json!({
                     "drive_id": "function",
-                    "path_on_host": paths.function_drive,
+                    "path_on_host": paths.vmm_path(&paths.function_drive, crate::jail::FUNCTION_DRIVE),
                     "is_root_device": false,
                     "is_read_only": true
                 }),
@@ -466,14 +778,17 @@ impl FirecrackerProvider {
                 "/drives/scratch",
                 serde_json::json!({
                     "drive_id": "scratch",
-                    "path_on_host": paths.scratch_drive,
+                    "path_on_host": paths.vmm_path(&paths.scratch_drive, crate::jail::SCRATCH_DRIVE),
                     "is_root_device": false,
                     "is_read_only": false
                 }),
             ),
             (
                 "/vsock",
-                serde_json::json!({"guest_cid": GUEST_CID, "uds_path": paths.vsock_uds}),
+                serde_json::json!({
+                    "guest_cid": GUEST_CID,
+                    "uds_path": paths.vmm_path(&paths.vsock_uds, crate::jail::VSOCK_UDS)
+                }),
             ),
         ]
         .into_iter()
@@ -491,8 +806,8 @@ impl FirecrackerProvider {
         .map_err(|e| Self::boot_error(paths, e))?;
         for (path, body) in &calls {
             if let Err(e) = api.put(path, body).await {
-                return Err(match child.try_wait() {
-                    Ok(Some(status)) => {
+                return Err(match vmm.exited() {
+                    Some(status) => {
                         Self::boot_error_after_exit(
                             paths,
                             &console,
@@ -502,7 +817,7 @@ impl FirecrackerProvider {
                         )
                         .await
                     }
-                    _ => Self::boot_error(paths, format!("firecracker API: {e}")),
+                    None => Self::boot_error(paths, format!("firecracker API: {e}")),
                 });
             }
         }
@@ -562,8 +877,7 @@ impl FirecrackerProvider {
                     ));
                 }
             },
-            status = child.wait() => {
-                let status = status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string());
+            status = vmm.wait_exit() => {
                 return Err(Self::boot_error_after_exit(
                     paths,
                     &console,
@@ -645,6 +959,28 @@ impl FirecrackerProvider {
                     policy.verified_ms().into(),
                 );
             }
+        }
+        details.insert("cgroup_mode".into(), self.cfg.cgroup.mode.as_str().into());
+        match &cgroup {
+            Some(cg) => {
+                details.insert("cgroup".into(), cg.path.display().to_string().into());
+                details.insert("cgroup_cpu_max".into(), cg.limits.cpu_max().into());
+                details.insert(
+                    "cgroup_memory_max_bytes".into(),
+                    cg.limits.memory_max_bytes.into(),
+                );
+                details.insert("cgroup_pids_max".into(), cg.limits.pids_max.into());
+            }
+            None => {
+                details.insert("cgroup".into(), serde_json::Value::Null);
+            }
+        }
+        details.insert("jailed".into(), self.cfg.jailer.is_some().into());
+        if let (Some(jailer), Some(jail)) = (&self.cfg.jailer, &paths.jail) {
+            details.insert("jail_root".into(), jail.root.display().to_string().into());
+            details.insert("vmm_uid".into(), jailer.uid.into());
+            details.insert("vmm_gid".into(), jailer.gid.into());
+            details.insert("vmm_new_pid_ns".into(), jailer.new_pid_ns.into());
         }
         details.insert("env_dir".into(), paths.dir.display().to_string().into());
         details.insert(
@@ -752,7 +1088,7 @@ impl FirecrackerProvider {
     /// such instead of as an API error at a socket nobody is listening on.
     async fn vmm_alive(&self, environment_id: &EnvironmentId, paths: &EnvPaths) -> bool {
         if let Some(t) = self.running.lock().await.get_mut(environment_id) {
-            return matches!(t.child.try_wait(), Ok(None));
+            return t.exited().is_none();
         }
         // Not spawned by this process (a previous gateway run): the pid file
         // is all we have.
@@ -821,18 +1157,17 @@ impl FirecrackerProvider {
     /// Kill a tracked child, waiting for a self-initiated poweroff first when
     /// `graceful`. Returns whether it was still running when we started.
     async fn stop_tracked(&self, t: &mut Tracked, graceful: bool) -> bool {
-        let was_running = matches!(t.child.try_wait(), Ok(None));
+        let was_running = t.exited().is_none();
         if was_running && graceful {
             let deadline = Instant::now() + self.cfg.kill_grace;
             while Instant::now() < deadline {
-                if !matches!(t.child.try_wait(), Ok(None)) {
+                if t.exited().is_some() {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
-        kill_process_group(t.pid);
-        let _ = t.child.wait().await;
+        t.kill().await;
         was_running
     }
 
@@ -879,6 +1214,34 @@ impl FirecrackerProvider {
 /// CAP_NET_ADMIN / nftables / ip_forward get `Unsupported` with the reason
 /// (`ExecutionProvider::capabilities`).
 const EGRESS_NETWORK_SUPPORT: Support = Support::Supported;
+
+/// `enforce_resource_limits` for this host.
+///
+/// The table value is what was measured with host cgroups in force (see
+/// [`FirecrackerProvider::capability_table`]). Without them, `cpu_millis` is
+/// enforced only in whole vCPUs and the VMM's host memory is unbounded, so
+/// the claim is withdrawn: `Unsupported` when the configuration requires the
+/// cgroups (every environment is refused), `Unverified` otherwise.
+fn resource_limits_support(
+    mode: CgroupMode,
+    host: &Result<String, String>,
+    measured: Support,
+) -> Support {
+    match (mode, host) {
+        (CgroupMode::Required | CgroupMode::BestEffort, Ok(_)) => measured,
+        (CgroupMode::Required, Err(reason)) => Support::unsupported(format!(
+            "host cgroup v2 limits are required but unavailable, so no environment can be created: {reason}"
+        )),
+        (_, Err(reason)) => Support::unverified(format!(
+            "host cgroup v2 limits are not applied ({reason}): cpu_millis is enforced in whole \
+             vCPUs only and the VMM's host memory is not bounded"
+        )),
+        (CgroupMode::Off, Ok(_)) => Support::unverified(
+            "host cgroup v2 limits are off: cpu_millis is enforced in whole vCPUs only and the \
+             VMM's host memory is not bounded",
+        ),
+    }
+}
 
 /// Whether a `PATCH /vm` fault means "the microVM is already in **the state
 /// that was requested**".
@@ -975,6 +1338,11 @@ impl ExecutionProvider for FirecrackerProvider {
             caps.egress_restricted = Support::unsupported(note.clone());
             caps.egress_public_web = Support::unsupported(note);
         }
+        caps.enforce_resource_limits = resource_limits_support(
+            self.cfg.cgroup.mode,
+            &self.cgroup_support,
+            caps.enforce_resource_limits,
+        );
         caps
     }
 
@@ -1046,6 +1414,22 @@ impl ExecutionProvider for FirecrackerProvider {
                 "egress none carries no allow rules".into(),
             ));
         }
+        // Host isolation (PLT-4622): fail closed before anything exists.
+        if self.cfg.cgroup.mode == CgroupMode::Required
+            && let Err(reason) = crate::cgroup::host_support(&self.cfg.cgroup)
+        {
+            return Err(ProviderError::Unavailable(format!(
+                "host cgroup limits are required (cgroup mode \"required\") but unavailable: {reason}"
+            )));
+        }
+        if let Some(jailer) = &self.cfg.jailer {
+            if let Some(Err(reason)) = &self.jail_exec {
+                return Err(ProviderError::Unavailable(format!("jailer: {reason}")));
+            }
+            if let Err(reason) = crate::jail::host_support(&self.cfg, jailer) {
+                return Err(ProviderError::Unavailable(format!("jailer: {reason}")));
+            }
+        }
         let longest = paths.longest_socket_path_len();
         if longest > MAX_UNIX_SOCKET_PATH {
             return Err(ProviderError::InvalidSpec(format!(
@@ -1062,26 +1446,24 @@ impl ExecutionProvider for FirecrackerProvider {
         }
         tokio::fs::create_dir_all(&paths.stage).await?;
 
-        let mut slot: Option<Child> = None;
+        let mut slot: Option<Tracked> = None;
         match self.boot(&spec, &paths, created_at, &mut slot).await {
             Ok(handle) => {
-                let child = slot.take().expect("boot succeeded with a child");
-                let pid = handle.evidence.host_pid.unwrap_or_default();
+                let tracked = slot.take().expect("boot succeeded with a VMM");
                 self.running
                     .lock()
                     .await
-                    .insert(spec.environment_id.clone(), Tracked { pid, child });
+                    .insert(spec.environment_id.clone(), tracked);
                 Ok(handle)
             }
             Err(err) => {
                 tracing::warn!(env_id = %spec.environment_id, error = %err, "boot failed; cleaning up");
-                if let Some(mut child) = slot.take() {
-                    if let Some(pid) = child.id() {
-                        kill_process_group(pid);
-                    }
-                    let _ = child.wait().await;
+                if let Some(mut t) = slot.take() {
+                    t.kill().await;
                 }
                 let mut cleaned = Vec::new();
+                self.release_host(&spec.environment_id, &paths, &mut cleaned)
+                    .await;
                 if spec.egress != EgressProfile::None {
                     self.teardown_network(&spec.environment_id, &mut cleaned)
                         .await;
@@ -1101,8 +1483,13 @@ impl ExecutionProvider for FirecrackerProvider {
         let paths = self.paths_for(environment_id);
         let tracked = self.running.lock().await.remove(environment_id);
         if tracked.is_none() && !paths.dir.exists() {
-            // A tap may outlive a directory removed by hand; never leave it.
+            // A tap, cgroup or jail may outlive a directory removed by hand;
+            // never leave them.
             let mut cleaned = Vec::new();
+            if self.host_state_exists(environment_id, &paths) {
+                self.release_host(environment_id, &paths, &mut cleaned)
+                    .await;
+            }
             if std::path::Path::new("/sys/class/net")
                 .join(crate::network::tap_name(environment_id.as_str()))
                 .exists()
@@ -1129,13 +1516,13 @@ impl ExecutionProvider for FirecrackerProvider {
         {
             // Not spawned by this process (e.g. a previous gateway run). Only
             // kill when the pid can be proven to be *our* Firecracker.
-            match pid_belongs_to_env(pid, &paths.dir) {
+            match Self::pid_is_ours(pid, environment_id, &paths) {
                 Some(true) => {
                     was_running = true;
                     if graceful {
                         wait_pid_gone(pid, self.cfg.kill_grace).await;
                     }
-                    kill_process_group(pid);
+                    kill_vmm(pid);
                     wait_pid_gone(pid, Duration::from_secs(1)).await;
                     cleaned.push(format!("process-group:{pid}"));
                 }
@@ -1145,6 +1532,10 @@ impl ExecutionProvider for FirecrackerProvider {
                 None => tracing::warn!(pid, "cannot verify pid ownership on this host; not killed"),
             }
         }
+        // The cgroup is killed as a whole: nothing the VMM (or a jailer) left
+        // behind survives, whether or not the pid could be attributed.
+        self.release_host(environment_id, &paths, &mut cleaned)
+            .await;
 
         if paths.dir.join(crate::network::LEASE_FILE).exists()
             || std::path::Path::new("/sys/class/net")
@@ -1196,18 +1587,31 @@ impl ExecutionProvider for FirecrackerProvider {
         environment_id: &EnvironmentId,
     ) -> Result<EnvironmentObservation, ProviderError> {
         if let Some(t) = self.running.lock().await.get_mut(environment_id) {
-            return match t.child.try_wait() {
-                Ok(None) => Ok(EnvironmentObservation::Running {
-                    host_pid: Some(t.pid),
+            let pid = t.pid;
+            return match &mut t.child {
+                Some(child) => match child.try_wait() {
+                    Ok(None) => Ok(EnvironmentObservation::Running {
+                        host_pid: Some(pid),
+                    }),
+                    Ok(Some(status)) => {
+                        use std::os::unix::process::ExitStatusExt;
+                        Ok(EnvironmentObservation::Exited {
+                            exit_code: status.code(),
+                            signal: status.signal(),
+                        })
+                    }
+                    Err(e) => Err(ProviderError::Internal(format!("try_wait: {e}"))),
+                },
+                // Not our child (jailer in a new PID namespace): no status.
+                None => Ok(match t.exited() {
+                    None => EnvironmentObservation::Running {
+                        host_pid: Some(pid),
+                    },
+                    Some(_) => EnvironmentObservation::Exited {
+                        exit_code: None,
+                        signal: None,
+                    },
                 }),
-                Ok(Some(status)) => {
-                    use std::os::unix::process::ExitStatusExt;
-                    Ok(EnvironmentObservation::Exited {
-                        exit_code: status.code(),
-                        signal: status.signal(),
-                    })
-                }
-                Err(e) => Err(ProviderError::Internal(format!("try_wait: {e}"))),
             };
         }
         let paths = self.paths_for(environment_id);
@@ -1215,7 +1619,10 @@ impl ExecutionProvider for FirecrackerProvider {
             return Ok(EnvironmentObservation::NotFound);
         }
         match read_pid_file(&paths.pid_file) {
-            Some(pid) if pid_alive(pid) && pid_belongs_to_env(pid, &paths.dir) != Some(false) => {
+            Some(pid)
+                if pid_alive(pid)
+                    && Self::pid_is_ours(pid, environment_id, &paths) != Some(false) =>
+            {
                 Ok(EnvironmentObservation::Running {
                     host_pid: Some(pid),
                 })
@@ -1257,6 +1664,18 @@ impl ExecutionProvider for FirecrackerProvider {
             }
             Ok(_) => {}
             Err(e) => tracing::error!(error = %e, "egress network sweep failed"),
+        }
+        // ... and cgroups / jails of environments that no longer exist.
+        let mut removed = Vec::new();
+        if let Some(cgroups) = &self.cgroups {
+            removed.extend(cgroups.sweep(&live).await);
+        }
+        if let (Some(jailer), Some(Ok(exec))) = (&self.cfg.jailer, &self.jail_exec) {
+            let live_instances: Vec<String> = live.iter().map(|id| instance_id_for(id)).collect();
+            removed.extend(crate::jail::sweep(jailer, exec, &live_instances));
+        }
+        if !removed.is_empty() {
+            tracing::warn!(?removed, "removed orphaned cgroups / jails");
         }
         Ok(ids)
     }
@@ -1690,6 +2109,113 @@ mod tests {
             p.observe_environment(&id).await.unwrap(),
             EnvironmentObservation::NotFound
         );
+    }
+
+    /// PLT-4622: the measured resource-limit claim holds only while host
+    /// cgroups are in force.
+    #[test]
+    fn resource_limits_claim_follows_the_host_cgroups() {
+        let ok: Result<String, String> = Ok("cgroup v2".into());
+        let missing: Result<String, String> = Err("not writable".into());
+        for mode in [CgroupMode::Required, CgroupMode::BestEffort] {
+            assert!(resource_limits_support(mode, &ok, Support::Supported).is_supported());
+        }
+        assert!(matches!(
+            resource_limits_support(CgroupMode::Required, &missing, Support::Supported),
+            Support::Unsupported { reason } if reason.contains("not writable")
+        ));
+        for (mode, host) in [
+            (CgroupMode::BestEffort, &missing),
+            (CgroupMode::Off, &missing),
+            (CgroupMode::Off, &ok),
+        ] {
+            assert!(matches!(
+                resource_limits_support(mode, host, Support::Supported),
+                Support::Unverified { note } if note.contains("whole vCPUs")
+            ));
+        }
+    }
+
+    /// With the jailer, sockets move into the chroot and the jail directory
+    /// is named after the instance id.
+    #[test]
+    fn jailed_paths_live_in_the_chroot() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = FirecrackerProvider::new(FirecrackerConfig {
+            firecracker_binary: dir.path().join("firecracker"),
+            kernel: dir.path().join("vmlinux"),
+            rootfs: dir.path().join("rootfs.ext4"),
+            workdir: dir.path().join("run"),
+            jailer: Some(crate::config::JailerConfig {
+                chroot_base: dir.path().join("jail"),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let id = EnvironmentId::generate();
+        let paths = p.paths_for(&id);
+        let jail = paths.jail.as_ref().expect("jailed");
+        assert_eq!(
+            jail.jail_dir,
+            dir.path()
+                .join("jail/firecracker")
+                .join(instance_id_for(id.as_str()))
+        );
+        assert!(paths.api_sock.starts_with(&jail.root));
+        assert!(paths.vsock_listener.starts_with(&jail.root));
+        assert!(paths.function_drive.starts_with(dir.path().join("run")));
+    }
+
+    /// A configuration that requires host cgroups refuses to create anything
+    /// on a host that cannot provide them (macOS, unprivileged Linux).
+    #[tokio::test]
+    async fn required_cgroups_fail_closed_before_anything_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = FirecrackerProvider::new(FirecrackerConfig {
+            firecracker_binary: dir.path().join("no-firecracker"),
+            kernel: dir.path().join("vmlinux"),
+            rootfs: dir.path().join("rootfs.ext4"),
+            workdir: dir.path().join("run"),
+            cgroup: crate::config::CgroupConfig {
+                mode: CgroupMode::Required,
+                root: dir.path().join("not-a-cgroup"),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        assert!(matches!(
+            p.capabilities().enforce_resource_limits,
+            Support::Unsupported { .. }
+        ));
+        let spec = EnvironmentSpec {
+            environment_id: EnvironmentId::generate(),
+            tenant_id: TenantId::generate(),
+            revision_id: RevisionId::generate(),
+            artifact: ArtifactLocation {
+                path: dir.path().join("nope"),
+                digest: Sha256Digest::of_bytes(b""),
+                size_bytes: 0,
+            },
+            architecture: Architecture::host().unwrap(),
+            resources: Default::default(),
+            egress: EgressProfile::None,
+            egress_allow: Vec::new(),
+            connect_timeout: Duration::from_secs(1),
+        };
+        let id = spec.environment_id.clone();
+        assert!(matches!(
+            p.create_environment(spec).await,
+            Err(ProviderError::Unavailable(m)) if m.contains("cgroup")
+        ));
+        assert!(!p.paths_for(&id).dir.exists());
+        let report = p.preflight().await.unwrap();
+        let cg = report
+            .checks
+            .iter()
+            .find(|c| c.name == crate::preflight::HOST_CGROUP_CHECK)
+            .unwrap();
+        assert!(!cg.ok && cg.detail.starts_with("required"), "{}", cg.detail);
+        assert!(!report.ok);
     }
 
     #[tokio::test]

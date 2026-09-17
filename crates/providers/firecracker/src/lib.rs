@@ -23,11 +23,13 @@
 
 pub mod api;
 pub mod boot_args;
+pub mod cgroup;
 pub mod config;
 pub mod drive;
 pub mod egress_gate;
 pub mod elf;
 pub mod host_guard;
+pub mod jail;
 pub mod network;
 pub mod preflight;
 pub mod provider;
