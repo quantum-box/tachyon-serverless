@@ -363,7 +363,16 @@ mod tests {
             .expect("spawn sleep");
         let pid = child.id();
         assert!(!pid_is_zombie(pid));
-        assert_eq!(pid_cmdline_contains(pid, b"30"), Some(true));
+        // Right after spawn the child may still be inside exec, when
+        // /proc/<pid>/cmdline reads back empty (`None`): the very race the
+        // provider now tolerates. Wait for exec to finish before asserting.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut matched = pid_cmdline_contains(pid, b"30");
+        while matched.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            matched = pid_cmdline_contains(pid, b"30");
+        }
+        assert_eq!(matched, Some(true));
         child.kill().expect("kill");
         // Killed but not reaped: a zombie, which must never count as a running VMM.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
