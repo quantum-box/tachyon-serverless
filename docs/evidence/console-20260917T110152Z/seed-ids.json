@@ -1,0 +1,19 @@
+{
+  "baseUrl": "http://127.0.0.1:61447",
+  "tenants": {
+    "a": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+    "b": "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+  },
+  "ids": {
+    "hello": "fn_01m2qggqh64mktd684rvcb1jn1",
+    "cpuBurn": "fn_01m2qggqhnxac2q4kbfbf066gt",
+    "revV1": "rev_01m2qggr4yvtjbzahj9v8nrjgm",
+    "revV2": "rev_01m2qggs7z7r4pbdzhdzgyeys5",
+    "revFailed": "rev_01m2qggsrk3v3h09q6j5q0bgcc",
+    "seedInvocation": "inv_01m2qggtwkmz3ffn9g54y32yh1",
+    "dlqInvocation": "inv_01m2qggvg40bstdkj079f5kn7f",
+    "deadLetter": "dlq_01m2qggwaf4de60qdeddg2c7j3",
+    "bFunction": "fn_01m2qggwb2bxygr57y46616epj",
+    "bInvocation": "inv_01m2qggxescppbpdtfxpczb8gq"
+  }
+}

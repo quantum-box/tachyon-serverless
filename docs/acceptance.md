@@ -44,6 +44,8 @@
 | `docs/evidence/20260917T034846Z-process/` | `scripts/e2e/demo.sh`（PLT-4631: dispatcher の登録・slot の acquire / complete・heartbeat 付きの gateway での P1 互換確認。`gateway.log` に `dispatcher registered`、`startup reconcile finished` に `foreign` / `reclaimed_dispatchers` / `fenced_*`。設定は listen・data_dir・workdir だけを変えたコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/queue-objects-20260917T052554Z/` | PLT-4638: `scripts/queue/verify.sh`（`verify/`: 認証拒否、kill -9 後の再配送、容量境界、`max_age`、JetStream 契約テスト、object store テスト）と `scripts/e2e/demo.sh`（`e2e/`: `[queue]` / `[objects]` 未設定の gateway の P1 互換確認。listen・data_dir・workdir だけを変えた設定のコピー）、`summary.txt` | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、process provider（隔離なし） | verify 16/16 ok、E2E 28/28 PASS |
 | `docs/evidence/async-e2e-20260917T064155Z/` | PLT-4639: `scripts/queue/async-e2e.sh`（`results.txt`、受け付けた invocation id、JetStream から読んだ message と envelope の照合 `consume.txt`、gateway の JSON log、nats-server log） | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、gateway は feature `failpoints` の debug build、process provider | 31/31 ok（受付 24、SIGKILL 4 回、nats-server 停止 1 回、message 24 通・欠落 0・余分 0） |
+| `docs/evidence/console-20260917T110152Z/` | PLT-4644: `scripts/console/e2e.sh`（`summary.txt`、`results.json`、`playwright-report/`、`screenshots/` 22 枚、`seed-ids.json`、gateway の JSON log。token と secret 値は含まない（script が grep で検査）） | macOS（Darwin 25.6.0 arm64）、process provider、`[queue] backend = "sqlite"`、`[budget]` file、`[console] enabled`、Playwright 1.61.1 Chromium headless、node 22.21.1 | 15/15 passed |
+| `docs/evidence/20260917T110054Z-process/` | `scripts/e2e/demo.sh`（PLT-4644: `[console]` を足した gateway の P1 互換確認。`TSLS_GENERATE_CONFIG=1` で空き port） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/triggers-e2e-20260917T081400Z/` | PLT-4641: `scripts/queue/triggers-e2e.sh`（`results.txt`、`trigger_fires.txt`、`cron-fires-before-restart.txt`、gateway の JSON log。secret は含まない） | macOS（Darwin 25.6.0 arm64）、process provider、`[queue] backend = "sqlite"` | 32/32 ok（cron 12 fire・重複 0、SIGKILL 1 回 + SIGTERM 1 回、webhook 202 / 再送 2 / 401 / 401 / 413 / 400 / 410 / 404） |
 | `docs/evidence/20260917T064259Z-process/` | `scripts/e2e/demo.sh`（PLT-4639: `invokeAsync` を足した gateway の P1 互換確認。PLT-4635 の merge 後に rebase した commit で実行。`[queue]` 未設定。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T051140Z-process/` | `scripts/e2e/demo.sh`（PLT-4634: semaphore を admission に置き換えた後の P1 互換確認。PLT-4636 の統合後の branch。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
@@ -748,6 +750,42 @@ cron trigger と検証用 source（`generic-hmac`）の webhook trigger を、fi
 | 非同期 invoke（PLT-4640）の run の予約 | 実装済み（fake provider・SQLite queue） / 未検証（E2E） | `invoke_async::dispatch_tests::asynchronous_runs_reserve_budget_and_a_refused_run_is_deferred`（run id `<invocation>:run-0:<ulid>` の予約が 1 件、attempt 1 件で精算。hard limit 0 の tenant の run は `Rescheduled{counted: false}`、attempts 0・deferrals 1、`Host.BudgetExhausted`、何も起動せず予約も残らない） |
 
 残り・制約: 予算 store は local の SQLite で複製・署名が無い（T50、§14-18）。最大料金は timeout と最大 response size から出すので、短い処理でも予約は大きく、上限が小さいと実消費よりずっと少ない並列数で止まる。collector の停止は全 tenant の受付を止める。`data_dir` を共有しない gateway 同士は予算を共有しない。期間は UTC の暦月だけ。
+
+## PLT-4644 Functions 最小 Console（配備・実行履歴・ログ・利用量）
+
+CLI 以外から状態と失敗原因を確認する最小画面を `apps/console` に作った（`docs/console.md`）。Tachyon Console（quantum-box/tachyon-apps `apps/tachyon`）と同じ Next.js 14.2.35 App Router・React 19.2.6・shadcn/ui new-york・`@tachyon-sdk/native-ui` の preset と tokens（同じ commit）・SWR・Radix toast で、**管理 API（`docs/openapi.json` から生成した型）だけを正本**にする。gateway の変更は `[console]`（既定無効）の静的配信と設定だけ（`apps/gateway/src/console.rs`）。記録日 2026-09-17、branch `feat/plt-4644-console`。再現: `cd apps/console && pnpm install --frozen-lockfile && pnpm lint && pnpm ts && pnpm test && pnpm check:api && pnpm build`、`cargo test -p tachyon-serverless-gateway --test console_static --lib console`、`scripts/console/e2e.sh`。E2E の `…` は `apps/console/e2e/console.spec.ts` のテスト名。
+
+**既存 Tachyon Console への統合は未着手（設計のみ、`docs/console-integration.md`）。** tachyon-apps への PR は出していない。認証は gateway の静的 token の貼り付けで、Tachyon の利用者 session との連携は無い。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1a | loading / empty / error / permission denied を表示できる | 実装済み（E2E 実測、loading・empty・error・401 は mock） | `src/components/functions/data-state.tsx`（全 data view 共通。404・unavailable も）。E2E `permission denied: an operator token …`（実 gateway の 403: invocations・usage・invoke）、`loading, empty, error and unauthorized states (mocked API responses)` |
+| 1b | OutcomeUnknown を表示できる | 実装済み（E2E は mock） | `notices.tsx::OutcomeUnknownNotice`（同期は自動再実行しない・非同期は retry に数える、の説明）。E2E `OutcomeUnknown is explained …`（invocation 詳細と test invoke の 502 を `page.route` で返す。process provider で Invoke 送信後の切断を任意に起こせないため。`docs/console.md` §3） |
+| 2a | 履歴から該当 attempt / log / Revision へ移動できる | 実装済み（E2E 実測） | 一覧 → 詳細 → attempt ごとの「Logs of this attempt」（`&attempt=` で絞り込み）→ revision link（`#revision-…`）。E2E `test invoke: synchronous success opens the invocation, its attempt, logs and revision`、`invocation history: …` |
+| 2b | retry と新規実行を区別する | 実装済み（E2E 実測） | attempt 1 = `initial`、2 以降 = `retry`（同じ invocation）、一覧の「(n retries)」、redrive / test invoke は `new` / `redrive` の origin（詳細に元 invocation・dead letter・理由）。E2E `invocation history: filters, retries versus new invocations, and dead letters`（非同期の失敗 2 attempts = 1 retry）、`redrive: … a new invocation linked to its source`（origin filter で redrive 1 件）。`src/lib/lib.test.ts` |
+| 3a | Secret 値や入力全文を既定表示しない | 実装済み（E2E 実測） | secret は binding 名だけ（API に値が無い）、env var の値は伏せて明示操作で表示、入力は digest / size だけで「Reveal input」は API に取得手段が無いことを表示、出力は折りたたみ、test invoke の入力は保存しない。token は tab の `sessionStorage` だけ。E2E `no secret value or token anywhere in the DOM across the main pages`（9 page を全展開して demo secret 値と 3 token が DOM・URL・localStorage・cookie に無い）、`deploy state …`。証跡 directory 全体も token / secret 値で grep（`scripts/console/e2e.sh`）。**handler 自身が書いたログは API のとおり表示する**（`example-hello` は payload を stderr に出す） |
+| 3b | tenant 境界を API 側でも強制する | 実装済み（既存 API の強制を E2E で確認、gateway の変更なし） | console は同一 origin の `/v1` だけを閲覧者の token で呼ぶ（`client.ts::buildUrl`、`lib.test.ts`）。E2E `sign-in refuses … a mismatched tenant`（`x-tachyon-tenant-id` 不一致 403）、`cross-tenant URLs answer not found for functions, invocations and dead letters`（A→B の function / invocation、B→A の dead letter / invocation / invocations 一覧がすべて 404）。gateway の検査に穴は見つからなかった。静的配信が credential を持たず root の外を返さないことは `apps/gateway/tests/console_static.rs` |
+| 4a | rollback / redrive / cancel に確認と結果通知がある | 実装済み（E2E 実測） | `confirm-action.tsx`（AlertDialog、実行中は閉じない、redrive は理由入力）＋ toast（成功 / 失敗、HTTP・code・reason）。E2E `rollback: …`（取り消しで変化なし → 確認で prod が #2→#1、`expected_generation` 付き）、`cancel: …`（非同期の cpu-burn を running で cancel → `cancelled`）、`redrive: …`（理由が redrive 記録に残る、2 回目は無効） |
+| 4b | 仮料金は実請求でないと明示する | 実装済み（E2E 実測） | Usage と Budget の先頭に常に「Provisional estimate — not an invoice」banner と API の `notice`。E2E `usage and budget show the provisional banner; budget state; capacity renders` |
+
+画面と検証:
+
+| 項目 | 状態 | 証跡 |
+|---|---|---|
+| Function / Revision / Alias 一覧・deploy 状態 | 実装済み（E2E 実測） | E2E `deploy state: ready and failed revisions …`（OCI 参照の revision が `failed` と理由、prod alias） |
+| test invoke（同期・非同期・入力 editor・結果） | 実装済み（E2E 実測） | E2E `test invoke: …` 2 件（成功、`user_error`、非同期の受付から `succeeded`、不正 JSON は送らない） |
+| Invocation 詳細（attempts・timings・boot evidence・logs・deadlines・dispatch） | 実装済み（E2E 実測） | 上の 2a |
+| DLQ 一覧 / 詳細 / redrive | 実装済み（E2E 実測） | 上の 4a |
+| 利用量・仮料金 | 実装済み（E2E 実測） | E2E の usage 部分（`GET /v1/usage` の合計と明細、価格表） |
+| 予算状態（PLT-4643） | 実装済み（E2E 実測、API 不在の表示は mock） | `GET /v1/budget` の admitting / limit / committed / remaining / alert / function 予算 / guarantee。E2E で `[budget]` をファイル配信し hard limit と 100% alert の発火を表示、route の無い gateway の 404 は mock で「Not available」 |
+| capacity 要約 | 実装済み（E2E 実測） | E2E の capacity 部分 |
+| Playwright 主要導線・越境拒否・エラー表示 | 実装済み（macOS arm64 実測 1 回、15/15 passed） | `docs/evidence/console-20260917T110152Z/`（`summary.txt`、`results.json`、`playwright-report/`、`screenshots/` 22 枚、`seed-ids.json`、`gateway.log`） |
+| gate 実行中の flaky | 記録のみ | `cargo test --workspace` の 1 回目で `gateway_integration::a_data_plane_enforces_delivered_budgets_and_reports_them_per_tenant`（PLT-4643、この変更は触れていない）が alias の 404 で 1 回失敗。単独 3 回・ファイル全体 3 回・workspace 再実行はすべて成功 |
+| CI | 実装済み（静的検査のみ）/ 未検証（hosted runner での実行） | `.github/workflows/ci.yml` の `console` job（lint・typecheck・vitest・API 型の一致・static export）を `ci-gate` に追加。PR を開いていないので未実行。Playwright E2E は CI に無い（手元のみ、`docs/ci.md`） |
+| UI 無しで P1 デモが完了する | 実装済み | `scripts/e2e/demo.sh` は console を使わない（`docs/evidence/20260917T110054Z-process/`（この branch で 28/28 PASS）） |
+| 既存 Tachyon Console への統合 | **未着手（設計のみ）** | `docs/console-integration.md`（置き場所 `apps/tachyon/src/app/v1beta/[tenant_id]/serverless/…`、sidebar・辞書・API client・認証 adapter） |
+
+残り・制約: API の history 一覧に `dispatch` が無く、dead-letter 一覧の `redrives` が空なので、一覧の redrive 判定は dead letter の詳細を最大 50 件追加取得して補っている（`invoke` role が無いと一覧では判定できない）。history に cursor が無く最大 500 件。UI は英語のみ。id は query parameter（static export の制約）。Function の作成・deploy・削除・trigger と budget の設定は画面に無い（CLI・設定）。OutcomeUnknown と loading / empty / error / 401 は mock でしか確認していない。Firecracker provider・Linux・Chromium 以外の browser では試していない。
 
 ## ADR-0001 残る測定の状況
 

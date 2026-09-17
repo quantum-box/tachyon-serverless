@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Same base layer as quantum-box/tachyon-apps apps/tachyon/src/app/globals.css.
+ * Colors, radii and type come from @tachyon-sdk/native-ui (tokens.css + the
+ * Tailwind preset); nothing console-specific is defined here.
+ */
+@layer base {
+	* {
+		@apply border-border;
+	}
+	body {
+		@apply bg-background text-foreground font-sans;
+	}
+}
