@@ -366,6 +366,111 @@
         ],
         "type": "object"
       },
+      "CreateTriggerRequest": {
+        "description": "`POST /v1/functions/{function_id}/triggers`. Exactly one of `cron` /\n`webhook`, matching `kind`.",
+        "properties": {
+          "cron": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CronTriggerRequest"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "`cron` | `webhook`.",
+            "type": "string"
+          },
+          "name": {
+            "description": "1..=64 characters, a label (not unique).",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/TriggerTargetRequest"
+          },
+          "webhook": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WebhookTriggerRequest"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "CronTriggerInfo": {
+        "properties": {
+          "expression": {
+            "type": "string"
+          },
+          "last_scheduled_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "missed_run_policy": {
+            "$ref": "#/components/schemas/MissedRunPolicyRequest"
+          },
+          "next_fire_at": {
+            "description": "The next scheduled time (UTC) the scheduler will fire; `null` while\ndisabled or deleted.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload": {
+            "type": "object"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expression",
+          "timezone",
+          "payload",
+          "missed_run_policy"
+        ],
+        "type": "object"
+      },
+      "CronTriggerRequest": {
+        "properties": {
+          "expression": {
+            "description": "5 fields (`minute hour day-of-month month day-of-week`) or 6 fields\nwith a leading `second`. `*`, lists, ranges, steps, `JAN`-`DEC`,\n`SUN`-`SAT` (0 and 7 are Sunday) and `@hourly` / `@daily` /\n`@weekly` / `@monthly` / `@yearly`.",
+            "type": "string"
+          },
+          "missed_run_policy": {
+            "$ref": "#/components/schemas/MissedRunPolicyRequest"
+          },
+          "payload": {
+            "description": "Static JSON handed to the function as `payload` of every fire.",
+            "type": "object"
+          },
+          "timezone": {
+            "description": "IANA time zone the expression is read in (default `UTC`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expression"
+        ],
+        "type": "object"
+      },
       "DeadlinesResponse": {
         "properties": {
           "client_deadline": {
@@ -548,7 +653,8 @@
           "config_unavailable",
           "control_plane_unavailable",
           "async_unavailable",
-          "usage_journal_full"
+          "usage_journal_full",
+          "gone"
         ],
         "type": "string"
       },
@@ -1255,6 +1361,180 @@
         ],
         "type": "object"
       },
+      "ListResponse_TriggerFireResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "description": "One fire of a trigger: a scheduled time or a webhook event.",
+              "properties": {
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "event_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "fire_key": {
+                  "description": "`cron:<scheduled_at>` | `event:<event_id>`.",
+                  "type": "string"
+                },
+                "invocation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "outcome": {
+                  "description": "`accepted` (an asynchronous invocation exists) | `refused` (the\nacceptance was refused for good, `reason` says why).",
+                  "type": "string"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "scheduled_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "trigger_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "trigger_id",
+                "fire_key",
+                "outcome",
+                "created_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListResponse_TriggerResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "cron": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CronTriggerInfo"
+                    }
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "function_id": {
+                  "type": "string"
+                },
+                "generation": {
+                  "description": "Bumped by every change; the CAS guard of `PATCH`.",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "`cron` | `webhook`.",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "secret": {
+                  "description": "The webhook secret. Present **only** in the response that created or\nrotated it; never returned again.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "description": "`enabled` | `disabled` | `deleted`.",
+                  "type": "string"
+                },
+                "status_reason": {
+                  "description": "Why the platform disabled it (`function_deleted`), if it did.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/components/schemas/TriggerTargetRequest"
+                },
+                "updated_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "webhook": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WebhookTriggerInfo"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "function_id",
+                "name",
+                "kind",
+                "enabled",
+                "status",
+                "generation",
+                "target",
+                "created_at",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "LogEntryResponse": {
         "properties": {
           "attempt_id": {
@@ -1317,6 +1597,62 @@
           "items"
         ],
         "type": "object"
+      },
+      "MissedRunPolicyRequest": {
+        "description": "What happens to scheduled times that passed while no scheduler ran (a\nstopped gateway, a disabled lease owner). Times older than\n`[triggers] max_catchup_seconds` are always skipped.",
+        "oneOf": [
+          {
+            "description": "Late times are not run (default).",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "skip"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Only the most recent late time is run.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "run_once"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The most recent `max_runs` late times are run, oldest first.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "run_all"
+                ],
+                "type": "string"
+              },
+              "max_runs": {
+                "format": "int32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "max_runs",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "NodeInfo": {
         "description": "The physical host. Distinct from the number of environments on it: adding\nhosts is not something this single-node prototype does.",
@@ -2060,6 +2396,164 @@
         },
         "type": "object"
       },
+      "TriggerFireResponse": {
+        "description": "One fire of a trigger: a scheduled time or a webhook event.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "event_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fire_key": {
+            "description": "`cron:<scheduled_at>` | `event:<event_id>`.",
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "description": "`accepted` (an asynchronous invocation exists) | `refused` (the\nacceptance was refused for good, `reason` says why).",
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduled_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trigger_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id",
+          "fire_key",
+          "outcome",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "TriggerResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cron": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CronTriggerInfo"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "function_id": {
+            "type": "string"
+          },
+          "generation": {
+            "description": "Bumped by every change; the CAS guard of `PATCH`.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "`cron` | `webhook`.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret": {
+            "description": "The webhook secret. Present **only** in the response that created or\nrotated it; never returned again.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "`enabled` | `disabled` | `deleted`.",
+            "type": "string"
+          },
+          "status_reason": {
+            "description": "Why the platform disabled it (`function_deleted`), if it did.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/TriggerTargetRequest"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "webhook": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WebhookTriggerInfo"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "function_id",
+          "name",
+          "kind",
+          "enabled",
+          "status",
+          "generation",
+          "target",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "TriggerTargetRequest": {
+        "description": "What a fire runs: an alias resolved at acceptance (default `prod`) or a\npinned revision. At most one of the two.",
+        "properties": {
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "UnitPricesMicros": {
         "description": "Unit prices in micro-units (1e-6) of `currency`.",
         "properties": {
@@ -2137,6 +2631,101 @@
         "required": [
           "revision_id"
         ],
+        "type": "object"
+      },
+      "UpdateTriggerRequest": {
+        "description": "`PATCH /v1/functions/{function_id}/triggers/{trigger_id}`. Absent fields\nkeep their value. With `expected_generation` the update applies only at\nthat generation (409 otherwise).",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "event_id_header": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "expression": {
+            "description": "Cron only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_body_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "missed_run_policy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MissedRunPolicyRequest"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "rotate_secret": {
+            "description": "Webhook only: generate a new secret, returned once in this response.\nThe old secret stops verifying at once.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TriggerTargetRequest"
+              }
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tolerance_seconds": {
+            "description": "Webhook only.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "UsageQuantities": {
@@ -2394,12 +2983,130 @@
           "not_billable"
         ],
         "type": "object"
+      },
+      "WebhookAcceptedResponse": {
+        "description": "`202` of `POST /v1/hooks/{trigger_id}`.",
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": "string"
+          },
+          "replayed": {
+            "description": "True when this event id (or this exact signed delivery) was accepted\nbefore: the same invocation, nothing new was created.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "`accepted` | `queued` | later states on a replay.",
+            "type": "string"
+          },
+          "trigger_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id",
+          "event_id",
+          "invocation_id",
+          "status",
+          "replayed"
+        ],
+        "type": "object"
+      },
+      "WebhookTriggerInfo": {
+        "properties": {
+          "event_id_header": {
+            "type": "string"
+          },
+          "max_body_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "secret_fingerprint": {
+            "description": "Fingerprint of the current secret (`sha256:` + 12 hex of SHA-256 over\nthe secret), for telling secrets apart. Never the secret.",
+            "type": "string"
+          },
+          "signature_header": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "timestamp_header": {
+            "type": "string"
+          },
+          "tolerance_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "url": {
+            "description": "`POST` deliveries here (relative to the gateway).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "tolerance_seconds",
+          "max_body_bytes",
+          "event_id_header",
+          "timestamp_header",
+          "signature_header",
+          "url",
+          "secret_fingerprint"
+        ],
+        "type": "object"
+      },
+      "WebhookTriggerRequest": {
+        "properties": {
+          "event_id_header": {
+            "description": "Header that carries the sender's event id (default\n`x-tachyon-webhook-id`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_body_bytes": {
+            "description": "Largest accepted body (default and maximum `[triggers]\nwebhook_max_body_bytes`).",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Verification source. Only `generic-hmac`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tolerance_seconds": {
+            "description": "Accepted difference between the signed timestamp and the gateway clock\n(default 300, at most 3600).",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       }
     },
     "securitySchemes": {
       "bearer": {
         "scheme": "bearer",
         "type": "http"
+      },
+      "webhook_signature": {
+        "description": "v1=<hex HMAC-SHA256(trigger secret, \"{x-tachyon-webhook-timestamp}.{raw body}\")>",
+        "in": "header",
+        "name": "x-tachyon-webhook-signature",
+        "type": "apiKey"
       }
     }
   },
@@ -3569,6 +4276,422 @@
         ]
       }
     },
+    "/v1/functions/{function_id}/triggers": {
+      "get": {
+        "operationId": "list_triggers",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_TriggerResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "triggers"
+        ]
+      },
+      "post": {
+        "operationId": "create_trigger",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTriggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerResponse"
+                }
+              }
+            },
+            "description": "created; a webhook trigger's `secret` is in this response only"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "function deleted, or the function has `max_triggers_per_function` triggers"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "cron payload over the payload limit"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`reason` = `not_configured`: no asynchronous invoke on this gateway"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "triggers"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/triggers/{trigger_id}": {
+      "delete": {
+        "operationId": "delete_trigger",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "trigger id",
+            "in": "path",
+            "name": "trigger_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerResponse"
+                }
+              }
+            },
+            "description": "deleted: no fire commits after this; fires accepted before continue as ordinary asynchronous invocations"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "triggers"
+        ]
+      },
+      "get": {
+        "operationId": "get_trigger",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "trigger id",
+            "in": "path",
+            "name": "trigger_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "triggers"
+        ]
+      },
+      "patch": {
+        "operationId": "update_trigger",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "trigger id",
+            "in": "path",
+            "name": "trigger_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTriggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerResponse"
+                }
+              }
+            },
+            "description": "updated; `secret` present only when `rotate_secret` was set"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`expected_generation` does not match, or a concurrent change"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "triggers"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/triggers/{trigger_id}/fires": {
+      "get": {
+        "operationId": "list_trigger_fires",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "trigger id",
+            "in": "path",
+            "name": "trigger_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "max items (default 50, at most 1000)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_TriggerFireResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "triggers"
+        ]
+      }
+    },
     "/v1/functions/{function_id}/usage": {
       "get": {
         "operationId": "usage",
@@ -3612,6 +4735,150 @@
         ],
         "tags": [
           "usage"
+        ]
+      }
+    },
+    "/v1/hooks/{trigger_id}": {
+      "post": {
+        "operationId": "receive_webhook",
+        "parameters": [
+          {
+            "description": "webhook trigger id",
+            "in": "path",
+            "name": "trigger_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unix seconds at signing; must be within the trigger's tolerance of the gateway clock",
+            "in": "header",
+            "name": "x-tachyon-webhook-timestamp",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`v1=<hex HMAC-SHA256(secret, \"{timestamp}.{body}\")>` (comma-separated entries accepted)",
+            "in": "header",
+            "name": "x-tachyon-webhook-signature",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "event id (1..=128 visible ASCII); the header name is the trigger's `event_id_header`",
+            "in": "header",
+            "name": "x-tachyon-webhook-id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "raw body as signed; JSON is passed as `body`, other UTF-8 as `body_text`, anything else as `body_base64`",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAcceptedResponse"
+                }
+              }
+            },
+            "description": "accepted (invocation, input, outbox event and fire row in one transaction), or a resend of an accepted event id / signed delivery (`replayed = true`, the same invocation)"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "missing or invalid event id (after a valid signature)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "missing, malformed or wrong signature, or a timestamp outside the tolerance; nothing is stored"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "unknown, deleted or non-webhook trigger (indistinguishable)"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "the trigger is disabled (only answered to a correctly signed delivery)"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "body over the trigger's `max_body_bytes`; refused before it is read in full"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "webhook_signature": []
+          }
+        ],
+        "tags": [
+          "triggers"
         ]
       }
     },
@@ -3989,6 +5256,9 @@
     },
     {
       "name": "usage"
+    },
+    {
+      "name": "triggers"
     },
     {
       "name": "internal"

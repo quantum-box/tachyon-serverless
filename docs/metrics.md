@@ -194,6 +194,19 @@ process provider は idle の段階が無い（destroy-after-invoke）ので、i
 | `tsls_usage_ledger_duplicates_ignored_total` | counter | | ledger が既に持っていた event id として捨てた配送の累計 |
 | `tsls_metrics_series_truncated` | gauge | `dimension` | cardinality 上限で `_other` に畳んだ数（`revision` / `tenant` / `environment`） |
 
+### 3.8 trigger（PLT-4641）
+
+trigger を持つ gateway（`invokeAsync` が有効な `combined`）だけが出す。label は閉じた集合だけで、tenant・trigger id・event id は付けない（`docs/adr/0014-cron-and-webhook-triggers.md`）。fire が受け付けた invocation 自体の数・実行結果は非同期 invocation と dispatcher の family に出る。
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_trigger_scheduler_owner` | gauge | | 最後の scheduler の pass でこの gateway が lease を持っていれば 1（同じ `state.db` の gateway のうち 1 つだけが 1） |
+| `tsls_trigger_cron_fires_total` | counter | `result` | cron の予定時刻の処理結果: `accepted`（invocation を受け付けた）/ `already_fired`（再起動・別 scheduler で既に発火済み。増え続けるなら二重に回っている）/ `refused`（恒久的な拒否を記録）/ `deferred`（backlog・queue・設定 cache などの一時的な拒否で次の pass に回した）/ `inactive`（無効化・削除・変更との競合） |
+| `tsls_trigger_cron_missed_runs_total` | counter | `action` | late（`grace_seconds` を過ぎた）予定時刻を missed-run policy が `run`（実行を試みた）/ `skipped`（policy または `max_catchup_seconds` で捨てた） |
+| `tsls_trigger_webhook_deliveries_total` | counter | `result` | webhook の配信結果: `accepted` / `replayed`（event id か署名の dedup で同じ invocation）/ `signature_refused` / `timestamp_refused`（401）/ `too_large`（413）/ `invalid_event_id`（400）/ `disabled`（410）/ `not_found`（404）/ `refused`（受付の拒否: 409 / 429 / 503） |
+
+`signature_refused` と `timestamp_refused` の急増は偽造・再送の試行か sender の時計ずれ、`deferred` の継続は outbox の滞留（`tsls_async_outbox_*`）を示す。
+
 ## 4. boot identity（再利用の証跡）
 
 - guest bridge は Hello で `/proc/sys/kernel/random/boot_id` を報告し、環境の `BootEvidence.guest_boot_id` に残る（PLT-4630）。attempt の API（`attempts[].boot_evidence`）にも出る。

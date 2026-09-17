@@ -9,6 +9,7 @@ pub mod invoke;
 pub mod logs;
 pub mod provider;
 pub mod rollback;
+pub mod triggers;
 pub mod usage;
 
 use std::time::Duration;
@@ -16,7 +17,7 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use tachyon_serverless_api_types::ListResponse;
 
-use crate::args::{Cli, Command, FunctionsCommand};
+use crate::args::{Cli, Command, FunctionsCommand, TriggersCommand};
 use crate::client::{ApiClient, ApiResponse, ClientConfig};
 use crate::error::CliError;
 use crate::output::Printer;
@@ -105,6 +106,31 @@ pub async fn dispatch(cli: Cli, p: &mut Printer<'_>) -> Result<(), CliError> {
             let client = ApiClient::new(cfg)?;
             provider::provider(&client, p).await
         }
+        Command::Triggers { command } => match command {
+            TriggersCommand::WebhookSign(args) => triggers::webhook_sign(&args, p),
+            command => {
+                let client = ApiClient::new(cfg)?;
+                match command {
+                    TriggersCommand::Create(args) => triggers::create(&client, &args, p).await,
+                    TriggersCommand::List { function } => {
+                        triggers::list(&client, &function, p).await
+                    }
+                    TriggersCommand::Get { function, trigger } => {
+                        triggers::get(&client, &function, &trigger, p).await
+                    }
+                    TriggersCommand::Update(args) => triggers::update(&client, &args, p).await,
+                    TriggersCommand::Delete { function, trigger } => {
+                        triggers::delete(&client, &function, &trigger, p).await
+                    }
+                    TriggersCommand::Fires {
+                        function,
+                        trigger,
+                        limit,
+                    } => triggers::fires(&client, &function, &trigger, limit, p).await,
+                    TriggersCommand::WebhookSign(args) => triggers::webhook_sign(&args, p),
+                }
+            }
+        },
         Command::Capacity => {
             let client = ApiClient::new(cfg)?;
             provider::capacity(&client, p).await

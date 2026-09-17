@@ -35,6 +35,7 @@ pub mod outbox;
 pub mod restart;
 pub mod slot;
 pub mod sqlite;
+pub mod triggers;
 
 #[cfg(test)]
 pub(crate) mod contract_tests;
@@ -56,6 +57,10 @@ pub use slot::{
     ReclaimRequest, SlotAcquire, SlotCompletion, SlotStore,
 };
 pub use sqlite::{SqliteOptions, SqliteStore};
+pub use triggers::{
+    CronSpec, FireClaim, FireOutcome, FireRecord, MissedRunPolicy, Trigger, TriggerAcceptOutcome,
+    TriggerKind, TriggerRepository, TriggerSpec, TriggerStatus, TriggerTarget, WebhookSpec,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RepoError {

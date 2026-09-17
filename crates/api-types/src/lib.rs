@@ -26,6 +26,8 @@
 //! GET    /v1/invocations/{invocation_id}/logs
 //! GET    /v1/functions/{function_id}/usage
 //! GET    /v1/usage?from&to&group_by&function_id   provisional usage report (not an invoice)
+//! POST   /v1/functions/{function_id}/triggers      cron / webhook triggers (see `triggers`)
+//! POST   /v1/hooks/{trigger_id}                    signed webhook delivery
 //! GET    /openapi.json
 //! ```
 //!
@@ -40,6 +42,9 @@ use utoipa::ToSchema;
 
 use tachyon_serverless_domain as domain;
 use tachyon_serverless_provider_port as port;
+
+pub mod triggers;
+pub use triggers::*;
 
 pub mod headers {
     pub const TENANT_ID: &str = "x-tachyon-tenant-id";
@@ -97,6 +102,10 @@ pub enum ErrorCode {
     /// unavailable: the gateway will not run what it cannot meter (PLT-4642).
     /// `reason` is `usage_journal_full` or `usage_journal_unavailable`.
     UsageJournalFull,
+    /// The target exists for the caller but no longer takes new work: a
+    /// disabled webhook trigger answering a correctly signed delivery
+    /// (PLT-4641).
+    Gone,
 }
 
 impl ErrorCode {
@@ -119,6 +128,7 @@ impl ErrorCode {
             Self::ConfigUnavailable | Self::ControlPlaneUnavailable => 503,
             Self::AsyncUnavailable => 503,
             Self::UsageJournalFull => 503,
+            Self::Gone => 410,
         }
     }
 }

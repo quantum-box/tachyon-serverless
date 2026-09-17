@@ -54,6 +54,11 @@ pub enum Command {
     },
     /// Show the execution provider kind, isolation and capability table.
     Provider,
+    /// Cron and signed webhook triggers of a function (PLT-4641).
+    Triggers {
+        #[command(subcommand)]
+        command: TriggersCommand,
+    },
     /// Show node capacity versus reservations, the wait queue and this tenant's
     /// revisions (autoscaler view).
     Capacity,
@@ -229,6 +234,130 @@ impl DeployArgs {
     pub fn should_wait(&self) -> bool {
         !self.no_wait
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TriggersCommand {
+    /// Create a cron or webhook trigger. A webhook trigger's secret is printed once.
+    Create(TriggerCreateArgs),
+    /// List the triggers of a function.
+    List { function: String },
+    /// Show one trigger (never its secret).
+    Get { function: String, trigger: String },
+    /// Change, enable / disable or rotate the secret of a trigger (CAS on
+    /// `--expected-generation`).
+    Update(TriggerUpdateArgs),
+    /// Delete a trigger: no new fires; fires accepted before continue.
+    Delete { function: String, trigger: String },
+    /// Show the fires of a trigger (scheduled times and webhook events).
+    Fires {
+        function: String,
+        trigger: String,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Print the timestamp and signature headers of a webhook delivery (offline).
+    WebhookSign(WebhookSignArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct TriggerCreateArgs {
+    /// Function name or id.
+    pub function: String,
+    #[arg(long)]
+    pub name: String,
+    /// `cron` or `webhook`.
+    #[arg(long)]
+    pub kind: String,
+    /// Create it disabled.
+    #[arg(long)]
+    pub disabled: bool,
+    /// Alias resolved at each fire (default `prod`).
+    #[arg(long, conflicts_with = "revision_id")]
+    pub alias: Option<String>,
+    /// Pin a revision instead of an alias.
+    #[arg(long)]
+    pub revision_id: Option<String>,
+    /// Cron: 5 fields, or 6 with a leading seconds field (quote it).
+    #[arg(long)]
+    pub schedule: Option<String>,
+    /// Cron: IANA time zone (default UTC).
+    #[arg(long)]
+    pub timezone: Option<String>,
+    /// Cron: static JSON payload.
+    #[arg(long)]
+    pub payload: Option<String>,
+    /// Cron: skip (default), run-once or run-all (with --max-runs).
+    #[arg(long)]
+    pub missed_run: Option<String>,
+    #[arg(long)]
+    pub max_runs: Option<u32>,
+    /// Webhook: accepted clock difference in seconds.
+    #[arg(long)]
+    pub tolerance_seconds: Option<u64>,
+    /// Webhook: largest accepted body.
+    #[arg(long)]
+    pub max_body_bytes: Option<u64>,
+    /// Webhook: header carrying the event id (default x-tachyon-webhook-id).
+    #[arg(long)]
+    pub event_id_header: Option<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct TriggerUpdateArgs {
+    /// Function name or id.
+    pub function: String,
+    pub trigger: String,
+    #[arg(long)]
+    pub expected_generation: Option<u64>,
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(long)]
+    pub enable: bool,
+    #[arg(long)]
+    pub disable: bool,
+    #[arg(long, conflicts_with = "revision_id")]
+    pub alias: Option<String>,
+    #[arg(long)]
+    pub revision_id: Option<String>,
+    #[arg(long)]
+    pub schedule: Option<String>,
+    #[arg(long)]
+    pub timezone: Option<String>,
+    #[arg(long)]
+    pub payload: Option<String>,
+    #[arg(long)]
+    pub missed_run: Option<String>,
+    #[arg(long)]
+    pub max_runs: Option<u32>,
+    #[arg(long)]
+    pub tolerance_seconds: Option<u64>,
+    #[arg(long)]
+    pub max_body_bytes: Option<u64>,
+    #[arg(long)]
+    pub event_id_header: Option<String>,
+    /// Webhook: generate a new secret (printed once); the old one stops working.
+    #[arg(long)]
+    pub rotate_secret: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct WebhookSignArgs {
+    /// The trigger secret (`whsec_...`). Prefer --secret-env: arguments are visible
+    /// in the process list.
+    #[arg(long)]
+    pub secret: Option<String>,
+    /// Environment variable holding the secret.
+    #[arg(long)]
+    pub secret_env: Option<String>,
+    /// Body exactly as it will be sent.
+    #[arg(long)]
+    pub body: Option<String>,
+    #[arg(long)]
+    pub body_file: Option<PathBuf>,
+    /// Unix seconds to sign (default now).
+    #[arg(long, allow_hyphen_values = true)]
+    pub timestamp: Option<i64>,
 }
 
 #[derive(Debug, Args, Clone)]

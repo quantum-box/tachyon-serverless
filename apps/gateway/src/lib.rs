@@ -20,6 +20,7 @@ pub mod handlers;
 pub mod middleware;
 pub mod openapi;
 pub mod providers;
+pub mod trigger_handlers;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -126,7 +127,22 @@ pub fn router(state: AppState) -> Router {
             "/v1/functions/{function_id}/invocations",
             get(handlers::list_invocations),
         )
-        .route("/v1/functions/{function_id}/usage", get(handlers::usage));
+        .route("/v1/functions/{function_id}/usage", get(handlers::usage))
+        // Cron and webhook triggers (PLT-4641).
+        .route(
+            "/v1/functions/{function_id}/triggers",
+            post(trigger_handlers::create_trigger).get(trigger_handlers::list_triggers),
+        )
+        .route(
+            "/v1/functions/{function_id}/triggers/{trigger_id}",
+            get(trigger_handlers::get_trigger)
+                .patch(trigger_handlers::update_trigger)
+                .delete(trigger_handlers::delete_trigger),
+        )
+        .route(
+            "/v1/functions/{function_id}/triggers/{trigger_id}/fires",
+            get(trigger_handlers::list_trigger_fires),
+        );
 
     // Layers run outermost-last: the management gate answers a data plane's
     // 503 before any credential is looked at.
@@ -157,6 +173,13 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(handlers::healthz))
         .route("/readyz", get(handlers::readyz))
         .route("/openapi.json", get(handlers::openapi_json))
+        // Signed webhook deliveries (PLT-4641): authenticated by the trigger's
+        // HMAC signature, not by a bearer token. The body limit is the
+        // trigger's own, enforced while reading.
+        .route(
+            "/v1/hooks/{trigger_id}",
+            post(trigger_handlers::receive_webhook).layer(DefaultBodyLimit::disable()),
+        )
         .merge(authenticated)
         .fallback(handlers::not_found)
         .layer(axum::middleware::from_fn_with_state(
@@ -279,6 +302,39 @@ pub async fn serve(
             }
         })
     });
+    // The cron scheduler (PLT-4641): one gateway on the ledger holds its
+    // lease; the others' passes do nothing. A duplicate fire is impossible
+    // either way (unique fire rows), the lease only avoids wasted work.
+    let trigger_scheduler = app
+        .triggers
+        .as_ref()
+        .filter(|t| t.config().scheduler_enabled)
+        .map(|_| {
+            let weak = Arc::downgrade(&app);
+            tokio::spawn(async move {
+                use futures::FutureExt;
+                loop {
+                    let Some(app) = weak.upgrade() else {
+                        return;
+                    };
+                    let Some(triggers) = app.triggers.clone() else {
+                        return;
+                    };
+                    drop(app);
+                    let pass = std::panic::AssertUnwindSafe(triggers.run_scheduler_once())
+                        .catch_unwind()
+                        .await;
+                    match pass {
+                        Ok(report) if report.due_triggers > 0 => {
+                            tracing::debug!(?report, "trigger scheduler pass");
+                        }
+                        Ok(_) => {}
+                        Err(_) => tracing::error!("trigger scheduler pass panicked; continuing"),
+                    }
+                    tokio::time::sleep(triggers.next_wake()).await;
+                }
+            })
+        });
     // Inline invocation outputs past their retention become digests
     // (`[store] output_retention_seconds`), and idempotency keys past theirs
     // are purged (`[store] idempotency_retention_seconds`).
@@ -399,6 +455,12 @@ pub async fn serve(
     }
     if let Some(outbox) = outbox {
         outbox.abort();
+    }
+    if let Some(task) = trigger_scheduler {
+        task.abort();
+    }
+    if let Some(triggers) = &app.triggers {
+        triggers.release_scheduler();
     }
     // Nothing of this process is in flight any more: another gateway on the
     // same data_dir may take over whatever is left at once.

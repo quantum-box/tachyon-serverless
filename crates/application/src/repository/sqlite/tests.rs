@@ -154,7 +154,10 @@ fn migrations_upgrade_a_database_at_an_older_version() {
         now(),
     )
     .unwrap();
-    assert_eq!(store.open_report().migrations_applied, vec![2, 3, 4, 5, 6]);
+    assert_eq!(
+        store.open_report().migrations_applied,
+        (2..=migrations::LATEST).collect::<Vec<_>>()
+    );
     assert_eq!(store.open_report().schema_version, migrations::LATEST);
     assert_eq!(FunctionRepository::get(&store, &f.id).unwrap(), Some(f));
     assert_eq!(

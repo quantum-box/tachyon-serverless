@@ -11,6 +11,7 @@
 //! | `att`  | InvocationAttempt    |
 //! | `env`  | ExecutionEnvironment |
 //! | `lse`  | ExecutionLease       |
+//! | `trg`  | Trigger (cron / webhook, PLT-4641) |
 
 use std::fmt;
 use std::str::FromStr;
@@ -154,6 +155,11 @@ define_id!(
     /// leases of the process before it.
     DispatcherId,
     "dsp"
+);
+define_id!(
+    /// A cron or webhook trigger of a function (PLT-4641).
+    TriggerId,
+    "trg"
 );
 
 /// Alias name such as `prod`. Lowercase DNS-label-like, 1..=32 chars.

@@ -537,6 +537,46 @@ OutboxPublisher::run_once ◀────────┘（gateway の loop、ca
 | failpoint | `crates/application/src/failpoints.rs`。unit test と feature `failpoints` の build だけで動き、`TSLS_FAILPOINTS`（例 `outbox.after_publish=kill`）で E2E が SIGKILL を起こす（`scripts/queue/async-e2e.sh`） |
 | 範囲外 | queue からの取り出し・実行・retry・DLQ（PLT-4640）。`queued` の先には進まない |
 
+### trigger（PLT-4641）
+
+決定は `docs/adr/0014-cron-and-webhook-triggers.md`、API は `docs/api.md` §5.11。
+
+```
+TriggerService::run_scheduler_once（gateway の loop、scheduler_interval_ms と最早の next_fire_at）
+    dispatcher が fenced → 何もしない
+    trigger_scheduler の lease（owner = dispatcher id、TTL = dispatcher lease）を取る / 更新する
+    due な cron trigger ごとに:
+        [max(cursor, now - max_catchup), now] の予定時刻を trigger の zone で列挙
+        （存在しない local 時刻は skip、2 回ある時刻は早い方 1 回）
+        grace 内 = on time、それ以前 = late → missed-run policy で選ぶ
+        各時刻 ─▶ fire（下）─▶ accepted / already fired → 次、Inactive → 中断、
+                                一時的拒否 → cursor をその時刻に置いて中断、恒久的拒否 → refused を記録
+        cursor（next_fire_at）を now の次へ CAS（generation・enabled）
+
+POST /v1/hooks/{trg} ─▶ webhook trigger を引く（404）→ body 上限（413）→ timestamp（401）
+    → 定数時間 HMAC（401）→ 有効か（410）→ event id（400）→ event id / 署名の dedup（202 replayed）
+
+fire = AsyncInvokeService::accept_for_trigger（§「非同期 invoke と outbox」の受付と同じ）
+    principal = trigger の tenant + invoke。ConfigCache::authorize_tenant、resolve（revision を固定）
+    Idempotency-Key = cron:{trg}:{scheduled_at} / webhook:{trg}:{event_id}
+    state.db の 1 トランザクション:
+        trigger 行を読み直す（削除・無効・generation 違い → Inactive）
+        trigger_fires の (trigger, fire_key) / 署名 digest → AlreadyFired
+        accept_in（invocation・key・入力・outbox、backlog 上限）
+        trigger_fires 行（主キーで一意）
+```
+
+| 項目 | 内容 |
+|---|---|
+| 有効になる条件 | `invokeAsync` が有効（`[queue]` + `state.db`）で `role = "combined"`。webhook は `[triggers] secret_key_file`（または `secret_key_env`）も要る |
+| 台帳 | migration 007: `triggers`（spec の JSON、`status`、`generation`、`next_fire_at`、封じた `secret_sealed`）、`trigger_fires`（主キー `(trigger_id, fire_key)`、`(trigger_id, signature_digest)` の一意 index、`outcome`、`invocation_id`）、`trigger_scheduler`（lease 1 行） |
+| 重複しない根拠 | fire 行と invocation が同じトランザクション。lease は無駄を減らすだけで、2 つの scheduler が同じ時刻を処理しても主キーで 1 つだけが commit する |
+| disable / delete | trigger 行の generation を上げる。fire のトランザクションが trigger 行を読み直すので、それより後に commit する fire は無い。受付済みの invocation は outbox・dispatcher の通常の経路で続く |
+| secret | 生成して 1 回だけ返し、AES-256-GCM（AAD = trigger id + tenant id）で `state.db` に封じる。削除で消す |
+| 保持 | webhook の fire 行 `webhook_dedup_retention_seconds`（7 日）、cron の fire 行 `fire_retention_seconds`（30 日、`max_catchup_seconds` より長いことを設定検証で強制）。scheduler の pass が 1 時間ごとに消す |
+| `[triggers]` の主な設定 | `scheduler_enabled`、`scheduler_interval_ms`（1000）、`scheduler_batch`（100）、`grace_seconds`（30）、`max_catchup_seconds`（86400）、`max_run_all`（100）、`max_triggers_per_function`（20）、`webhook_max_body_bytes`（262144）、`webhook_default_tolerance_seconds`（300）、`webhook_max_tolerance_seconds`（3600）、`webhook_dedup_retention_seconds`（604800）、`fire_retention_seconds`（2592000）、`secret_key_file` / `secret_key_env` |
+| 範囲外 | trigger 固有の retry・DLQ・concurrency policy（前の実行中は skip 等）、source 別の webhook 検証 |
+
 ## 5. 決め事（実装者が守ること）
 
 1. domain / application は `firecracker` `kube` `axum` を import しない。provider は `ExecutionProvider` だけを実装する。

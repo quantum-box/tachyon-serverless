@@ -341,6 +341,27 @@ pub const FAMILIES: &[(&str, &str, &str)] = &[
         "gauge",
         "1 for the queue condition the outbox publisher last saw (healthy, full, unavailable).",
     ),
+    // triggers (PLT-4641), only on a gateway with triggers
+    (
+        "tsls_trigger_scheduler_owner",
+        "gauge",
+        "1 when this gateway held the cron scheduler lease on its last pass.",
+    ),
+    (
+        "tsls_trigger_cron_fires_total",
+        "counter",
+        "Scheduled cron times handled by result (accepted, already_fired, refused, deferred, inactive).",
+    ),
+    (
+        "tsls_trigger_cron_missed_runs_total",
+        "counter",
+        "Late scheduled cron times by what the missed-run policy did (run, skipped).",
+    ),
+    (
+        "tsls_trigger_webhook_deliveries_total",
+        "counter",
+        "Webhook deliveries by result (accepted, replayed, signature_refused, timestamp_refused, too_large, invalid_event_id, disabled, not_found, refused).",
+    ),
     // usage metering (PLT-4642)
     (
         "tsls_usage_journal_healthy",

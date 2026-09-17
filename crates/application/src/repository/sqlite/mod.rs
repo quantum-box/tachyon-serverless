@@ -51,6 +51,7 @@ pub mod migrations;
 mod objects;
 mod outbox;
 mod slot;
+mod triggers;
 
 /// Fixed-width RFC 3339 UTC, so timestamps order correctly as text.
 pub(crate) fn ts(t: &Timestamp) -> String {

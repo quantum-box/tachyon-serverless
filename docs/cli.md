@@ -64,6 +64,29 @@ tsls functions list
 | `functions rollback <fn> [--alias prod] [--to <rev_id>]` | 直前の revision に戻す（§8） |
 | `functions cancel <inv_id>` | 実行中の invocation を cancel |
 
+### triggers（PLT-4641）
+
+| コマンド | 説明 |
+|---|---|
+| `triggers create <fn> --name <n> --kind cron --schedule '<expr>' [--timezone Asia/Tokyo] [--payload '<json>'] [--missed-run skip\|run-once\|run-all --max-runs N] [--alias prod \| --revision-id <rev>] [--disabled]` | cron trigger を作る（`POST /v1/functions/{id}/triggers`）。式は 5 field か、先頭に秒を足した 6 field（シェルの展開を避けるため quote する） |
+| `triggers create <fn> --name <n> --kind webhook [--tolerance-seconds 300] [--max-body-bytes N] [--event-id-header <h>]` | webhook trigger を作る。**secret は標準出力にこの 1 回だけ表示される**（`secret whsec_...`、`--json` なら `.secret`）。URL は `webhook.url` |
+| `triggers list <fn>` / `triggers get <fn> <trg_id>` | 一覧 / 詳細（secret は表示しない。`secret_fingerprint` だけ） |
+| `triggers update <fn> <trg_id> [--enable \| --disable] [--schedule ...] [--timezone ...] [--payload ...] [--missed-run ...] [--tolerance-seconds ...] [--rotate-secret] [--expected-generation <g>]` | `PATCH`。`--rotate-secret` は新しい secret を 1 回だけ表示する。generation 不一致は 409 → exit 2 |
+| `triggers delete <fn> <trg_id>` | 削除。以後の fire は無い。受付済みの invocation は続く |
+| `triggers fires <fn> <trg_id> [--limit 50]` | fire の記録（`cron:<予定時刻>` / `event:<event id>`、`accepted` / `refused`、invocation id） |
+| `triggers webhook-sign (--secret-env VAR \| --secret whsec_...) [--body '<raw>' \| --body-file <path>] [--timestamp <unix>]` | **送信しない**。`x-tachyon-webhook-timestamp` と `x-tachyon-webhook-signature` の header 行を表示する（`--json` なら `{timestamp, signature, headers}`）。`--secret` は process 一覧に見えるので `--secret-env` を推奨。token は不要 |
+
+webhook の試験例:
+
+```sh
+SECRET=$(tsls --json triggers create hello --name orders --kind webhook | jq -r .secret)
+BODY='{"order":42}'
+tsls triggers webhook-sign --secret-env SECRET --body "$BODY"   # 2 行の header
+TS=$(date +%s); SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/^.*= *//')
+curl -X POST "$TSLS_API_URL/v1/hooks/<trg_id>" -H "x-tachyon-webhook-timestamp: $TS" \
+  -H "x-tachyon-webhook-signature: v1=$SIG" -H 'x-tachyon-webhook-id: evt-1' --data-binary "$BODY"
+```
+
 ### その他
 
 | コマンド | 説明 |

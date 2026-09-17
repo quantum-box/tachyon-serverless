@@ -55,6 +55,12 @@
 | GET | `/v1/invocations/{invocation_id}/logs` | ログ（invocation 単位、行数 / bytes 上限あり） | 200 `LogsResponse` | 404 |
 | GET | `/v1/functions/{function_id}/usage` | 使用量集計（課金ではない） | 200 `UsageSummaryResponse` | 404 |
 | GET | `/v1/usage` | token の tenant の**仮**利用量・仮料金の報告（PLT-4642、§5.10.1。請求書ではない）。query: `from`, `to`（RFC 3339 か `YYYY-MM-DD`）、`group_by`（`function` / `day` / `function,day` / `none`）、`function_id` | 200 `UsageReportResponse` | 400（範囲・`group_by`）, 401, 403（`invoke` role が無い） |
+| POST | `/v1/functions/{function_id}/triggers` | cron / webhook trigger の作成（PLT-4641、§5.11、`deploy` role）。webhook の `secret` はこの応答にだけ入る | 201 `TriggerResponse` | 400, 403, 404, 409（function 削除済み・`max_triggers_per_function`）, 413（cron payload）, 503 `async_unavailable`（`not_configured`） |
+| GET | `/v1/functions/{function_id}/triggers`<br>`/v1/functions/{function_id}/triggers/{trigger_id}` | 一覧・取得（削除済みは含まない。secret は返さない） | 200 `ListResponse<TriggerResponse>` / `TriggerResponse` | 404 |
+| PATCH | `/v1/functions/{function_id}/triggers/{trigger_id}` | 更新・有効 / 無効・secret の rotate（`expected_generation` で CAS） | 200 `TriggerResponse` | 400, 404, 409 `conflict` |
+| DELETE | `/v1/functions/{function_id}/triggers/{trigger_id}` | 削除。以後の fire は commit しない。受付済みの fire は通常の非同期 invocation として続く | 200 `TriggerResponse`（`status = deleted`） | 404, 409 |
+| GET | `/v1/functions/{function_id}/triggers/{trigger_id}/fires` | fire の記録（予定時刻・event id・invocation id・refused の理由。query: `limit`） | 200 `ListResponse<TriggerFireResponse>` | 404 |
+| POST | `/v1/hooks/{trigger_id}` | 署名付き webhook の配信（bearer token なし、HMAC 署名で認証、§5.11.2） | 202 `WebhookAcceptedResponse` | 400（event id）, 401（署名・timestamp）, 404, 410（無効）, 413, 429, 503 |
 | GET | `/openapi.json` | OpenAPI 3 | 200 | — |
 | GET | `/v1/internal/config?since=<generation>` | data plane 向けの設定配信（`combined` で `internal_token` を設定した gateway だけ。§7） | 200 `ConfigDelivery` | 401（内部 credential でない）, 404（提供しない gateway）, 503 `control_plane_unavailable`（store） |
 
@@ -432,6 +438,138 @@ x-tachyon-invocation-id: inv_01j7z2k3m4n5p6q7r8s9t0v1w2
 | function 削除中・削除済み（PLT-4635） / revision が ready でない / 他 tenant の function | 409 `function_deleted`（`Host.FunctionDeleted`） / 409 `revision_not_ready` / 404 | なし |
 
 配送は at-least-once。publisher が queue の ACK を得た後、台帳に送信済みを記録する前に止まると、同じ event（message id = invocation id）がもう一度 publish される。broker の duplicate window（既定 120 s）内なら 1 通にまとまるが、外なら 2 通届きうる。consumer は message ではなく invocation id で台帳に照らして決着する。
+
+### 5.11 trigger（PLT-4641）
+
+cron と署名付き webhook。決定の詳細は `docs/adr/0014-cron-and-webhook-triggers.md`。**trigger は何も実行しない**: すべての fire は §5.6.1 の非同期 invocation として受け付けられ（設定 cache での tenant の認可と解決、revision の固定、outbox、受付の上限）、実行・retry・DLQ・利用量の計測（PLT-4642）は非同期 invocation の共通経路（PLT-4640）で、fire の受付では計測しない。fire の記録（`trigger_fires`）は invocation と同じトランザクションで書かれ、`(trigger_id, fire_key)` で一意。
+
+trigger を使えるのは、`invokeAsync` が有効（`[queue]` と `state.db`）な `combined` gateway だけ。data plane では CRUD が 503 `control_plane_unavailable`、webhook が 503 `async_unavailable`（`not_configured`）。
+
+#### 5.11.1 CRUD
+
+`POST /v1/functions/{function_id}/triggers`:
+
+```json
+{
+  "name": "nightly-report",
+  "kind": "cron",
+  "enabled": true,
+  "target": { "alias": "prod" },
+  "cron": {
+    "expression": "30 2 * * *",
+    "timezone": "Asia/Tokyo",
+    "payload": { "report": "daily" },
+    "missed_run_policy": { "kind": "run_all", "max_runs": 3 }
+  }
+}
+```
+
+```json
+{ "name": "orders", "kind": "webhook", "webhook": { "tolerance_seconds": 300, "max_body_bytes": 65536, "event_id_header": "x-tachyon-webhook-id" } }
+```
+
+| field | 内容 |
+|---|---|
+| `name` | 1..=64 文字の label（一意でない） |
+| `kind` | `cron` \| `webhook`。対応する `cron` / `webhook` だけを持つ |
+| `enabled` | 既定 `true` |
+| `target` | `alias`（既定 `prod`、fire ごとに解決して固定）か `revision_id`（その revision に固定）。両方は 400 |
+| `cron.expression` | 5 field（`minute hour day-of-month month day-of-week`）か、先頭に秒を足した 6 field。`*` `n` `a-b` `*/s` `a-b/s` `a/s` `,`、`JAN`-`DEC`、`SUN`-`SAT`（0 と 7 は日曜）、`@yearly` `@monthly` `@weekly` `@daily` `@hourly`。day-of-month と day-of-week の両方を制限すると **どちらか** に一致した日 |
+| `cron.timezone` | IANA 名（既定 `UTC`）。式は wall-clock 時刻で評価し、DST で **存在しない時刻は発火しない**、**2 回ある時刻は早い方で 1 回** |
+| `cron.payload` | 静的 JSON（上限 `limits.max_payload_bytes` − 1 KiB） |
+| `cron.missed_run_policy` | `{"kind":"skip"}`（既定） \| `{"kind":"run_once"}` \| `{"kind":"run_all","max_runs":N}`（1..=`[triggers] max_run_all`）。§5.11.3 |
+| `webhook.source` | `generic-hmac`（唯一） |
+| `webhook.tolerance_seconds` | 既定 `[triggers] webhook_default_tolerance_seconds`（300）、上限 `webhook_max_tolerance_seconds`（3600） |
+| `webhook.max_body_bytes` | 既定・上限 `[triggers] webhook_max_body_bytes`（256 KiB、`limits.max_payload_bytes` で頭打ち） |
+| `webhook.event_id_header` | 既定 `x-tachyon-webhook-id`。小文字の header 名で、timestamp / signature / 標準 header 以外 |
+
+`201` の `TriggerResponse`（webhook）。`secret` は **この応答（と rotate の応答）にだけ** 入り、`Cache-Control: no-store`。以後の GET / list は `secret_fingerprint` だけを返す:
+
+```json
+{
+  "id": "trg_01j7z3a4b5c6d7e8f9g0h1j2k3",
+  "function_id": "fn_01j7z0a1b2c3d4e5f6g7h8j9k0",
+  "name": "orders",
+  "kind": "webhook",
+  "enabled": true,
+  "status": "enabled",
+  "generation": 1,
+  "target": {},
+  "webhook": {
+    "source": "generic-hmac",
+    "tolerance_seconds": 300,
+    "max_body_bytes": 65536,
+    "event_id_header": "x-tachyon-webhook-id",
+    "timestamp_header": "x-tachyon-webhook-timestamp",
+    "signature_header": "x-tachyon-webhook-signature",
+    "url": "/v1/hooks/trg_01j7z3a4b5c6d7e8f9g0h1j2k3",
+    "secret_fingerprint": "sha256:5a0532de6876"
+  },
+  "secret": "whsec_6f1c...(64 hex)",
+  "created_at": "2026-09-17T07:00:00Z",
+  "updated_at": "2026-09-17T07:00:00Z"
+}
+```
+
+cron の `TriggerResponse` は `cron: {expression, timezone, payload, missed_run_policy, next_fire_at, last_scheduled_at}` を持つ。`next_fire_at` は scheduler が次に処理する予定時刻（UTC、無効・削除済みは無し）。
+
+`PATCH`（`UpdateTriggerRequest`）: 指定した field だけを変える。`expected_generation` が違えば 409。`enabled`、`name`、`target`、cron の `expression` / `timezone` / `payload` / `missed_run_policy`、webhook の `tolerance_seconds` / `max_body_bytes` / `event_id_header` / `rotate_secret: true`（新しい secret をこの応答で 1 回だけ返し、旧 secret は即座に無効）。kind に合わない field は 400。有効化・式 / zone の変更で `next_fire_at` は **現在時刻の次** から始まる（無効だった期間を catch-up しない）。
+
+`DELETE` は `status = deleted` にして webhook の secret を消す。削除済みの trigger は GET / list / PATCH / DELETE で 404。
+
+`GET .../fires?limit=50` → `TriggerFireResponse`: `fire_key`（`cron:<scheduled_at>` / `event:<event_id>`）、`scheduled_at` または `event_id`、`outcome`（`accepted` = invocation を受け付けた / `refused` = 恒久的に拒否、`reason` 付き）、`invocation_id`、`created_at`。
+
+他 tenant の function・trigger はどの操作でも 404。作成・更新・削除は `deploy`、読み取りは `deploy` / `invoke` / `operator`。
+
+#### 5.11.2 webhook の配信
+
+```http
+POST /v1/hooks/trg_01j7z3a4b5c6d7e8f9g0h1j2k3
+content-type: application/json
+x-tachyon-webhook-timestamp: 1789630500
+x-tachyon-webhook-signature: v1=3b0d...(64 hex)
+x-tachyon-webhook-id: evt_123
+
+{"order":42}
+```
+
+- 署名: `v1=` + hex(`HMAC-SHA256(key = secret 文字列の UTF-8, message = "{timestamp}.{raw body}")`)。`,` 区切りで複数の `v1=` を送れる（どれか 1 つが一致すればよい）。`printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET"`、または `tsls triggers webhook-sign`。
+- `timestamp` は 10 進の Unix 秒。gateway の時計との差が `tolerance_seconds` を超えれば（過去・未来とも）401。
+
+```json
+{ "trigger_id": "trg_01j7z3a4b5c6d7e8f9g0h1j2k3", "event_id": "evt_123", "invocation_id": "inv_01j7z4...", "status": "accepted", "replayed": false }
+```
+
+| 状況 | 応答 | 記録 |
+|---|---|---|
+| 未知・削除済み・cron の trigger id、形式不正の id | 404 `not_found`（同じ本文） | なし |
+| body が `max_body_bytes` 超過（`Content-Length` なら読まずに、無ければ読みながら打ち切る） | 413 `payload_too_large` | なし |
+| timestamp が無い・不正・tolerance 外 | 401 `unauthorized` | なし |
+| 署名が無い・不正・不一致（別 secret、body や timestamp の改変） | 401 `unauthorized` | なし |
+| 署名は正しいが trigger が無効 | 410 `gone` | なし |
+| 署名は正しいが event id が無い・不正（1..=128 の可視 ASCII） | 400 `invalid_request` | なし |
+| 受付 | 202、`replayed = false`、`x-tachyon-invocation-id` | invocation・入力・outbox event・fire 行 |
+| 同じ event id の再送（署名し直し・body が違っても） | 202、**同じ `invocation_id`**、`replayed = true` | 何も増えない |
+| 同じ署名済み request を別の event id で再送 | 202、同じ `invocation_id`、`replayed = true`、元の `event_id` | 何も増えない |
+| 受付の拒否（function 削除、backlog、queue、store） | §5.6.1 と同じ | なし |
+
+関数に渡る JSON: `{"source":"tachyon.webhook","trigger_id","trigger_name","event_id","content_type","body":<JSON>}`（JSON でなければ `body_text`、UTF-8 でなければ `body_base64`）。cron は `{"source":"tachyon.cron","trigger_id","trigger_name","scheduled_at","timezone","payload"}`。どちらも invocation の Idempotency-Key は `cron:{trigger_id}:{scheduled_at}` / `webhook:{trigger_id}:{event_id}`。
+
+event id の dedup は `[triggers] webhook_dedup_retention_seconds`（既定 7 日）保持する。
+
+#### 5.11.3 cron の発火と missed run
+
+scheduler は gateway の中で `[triggers] scheduler_interval_ms`（既定 1000）ごとに回り、同じ `state.db` の gateway のうち scheduler lease を持つ 1 つだけが発火する（owner は dispatcher id）。予定時刻から `grace_seconds`（既定 30）以内は on time、それより遅いものは late:
+
+| policy | late の時刻 | on time の時刻 |
+|---|---|---|
+| `skip` | 実行しない | 実行 |
+| `run_once` | 最新の 1 つを実行 | 実行 |
+| `run_all {max_runs}` | 新しい方から `max_runs` 個を古い順に実行 | 実行 |
+
+`max_catchup_seconds`（既定 24 時間）より古い時刻は実行しない。受付が一時的に拒否された時刻（`backlog`、queue、設定 cache、store）は次の pass で再試行し、恒久的に拒否された時刻（function 削除、alias / revision 無し、revision 未 ready、policy）は `refused` として記録して進む。function が削除されていれば trigger を無効化する（`status_reason = function_deleted`）。
+
+同じ予定時刻の fire 行は 1 つだけ（再起動・2 つの scheduler・fire と cursor 更新の間の crash のどれでも）。
 
 ### 5.7 HTTP アダプタ
 

@@ -1,0 +1,32 @@
+deploy.revision_ready                        ok rev_01m2q6x7qh27q4x5xa6brsd33p
+cron.created_via_tsls                        ok trg_01m2q6x8hzhk18hs46rdb360rh next=2026-09-17T08:14:42Z
+cron.fired                                   ok fires=5 after 9s
+cron.each_fire_is_an_async_invocation_of_the_pinned_revision ok invocations=5
+cron.idempotency_key_per_scheduled_time      ok keys=5 distinct_times=5
+cron.fires_listed_via_tsls                   ok 6 lines
+restart.fires_resume                         ok before=5 after=12
+restart.no_scheduled_time_twice              ok fires=12 distinct_times=12 invocations=12
+restart.unique_fire_rows                     ok duplicate keys=0
+restart.skip_policy_skips_the_downtime       ok fired_inside_downtime=0 window=1789632890..1789632896
+restart.skipped_logged                       ok log_lines=1
+restart.scheduler_lease_owner                ok dsp_01m2q6xxncdp5n809rx37a4af6
+disable.status                               ok disabled next_fire_at=null
+disable.no_new_fires                         ok fires 12 -> 12, invocations 12 -> 12 over 5s
+disable.accepted_fires_stay_queued           ok accepted_or_queued=12 of 12
+webhook.secret_shown_once_on_create          ok fingerprint=sha256:e12cfde2f43d
+webhook.secret_never_returned_again          ok get has secret field: false
+webhook.openssl_and_tsls_signatures_agree    ok 
+webhook.invalid_signature_401                ok code=401
+webhook.expired_timestamp_401                ok code=401
+webhook.oversized_body_413                   ok code=413
+webhook.missing_event_id_400                 ok code=400
+webhook.refusals_store_nothing               ok fires/invocations before=0/12 after=0/12
+webhook.valid_202                            ok code=202 invocation=inv_01m2q6y9d94zn3f1atwsaek7vz
+webhook.duplicate_event_same_invocation      ok code=202 {"invocation_id":"inv_01m2q6y9d94zn3f1atwsaek7vz","replayed":true}
+webhook.replayed_signature_new_event_id_same_invocation ok code=202
+webhook.one_fire_row                         ok rows=1
+webhook.invocation_readable_async            ok {"status":"queued","mode":"async","revision_id":"rev_01m2q6x7qh27q4x5xa6brsd33p"}
+webhook.disabled_410                         ok code=410
+webhook.deleted_404                          ok code=404
+webhook.deleted_secret_erased                ok 
+evidence.no_secret                           ok 
