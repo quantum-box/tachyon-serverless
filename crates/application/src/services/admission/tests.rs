@@ -1472,3 +1472,175 @@ fn scale_operations_keep_the_ledger_exact_under_random_interleavings() {
         assert_eq!(s.reserved(), Resources::ZERO, "seed {seed}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// metrics (PLT-4637)
+// ---------------------------------------------------------------------------
+
+fn tenant_metrics<'a>(m: &'a AdmissionMetrics, t: &TenantId) -> &'a TenantMetrics {
+    m.tenants.iter().find(|x| &x.tenant == t).expect("tenant")
+}
+
+/// Every gauge and counter `GET /metrics` reads from admission follows the
+/// state transitions, on a fake clock: environments by state, reservations,
+/// queue length and wait ages (node and per tenant), grants by kind and per
+/// tenant, scale events, start results, breaker opens and rejections.
+#[test]
+fn metrics_follow_admission_state_transitions_on_a_fake_clock() {
+    let mut cfg = settings();
+    cfg.max_concurrency = 2;
+    cfg.max_queue = 2;
+    let mut s = AdmissionState::new(cfg);
+    let mut d = Deliveries::default();
+    let (a, b) = (tenant(1), tenant(2));
+    let (rev_a, rev_b) = (RevisionId::generate(), RevisionId::generate());
+
+    let m = s.metrics(t(0));
+    assert_eq!(m.in_flight, 0);
+    assert_eq!(m.queue_length, 0);
+    assert_eq!(m.oldest_wait_seconds, None);
+    assert!(m.revisions.is_empty());
+    assert_eq!(m.counters, AdmissionCounters::default());
+
+    // 0 -> 2 starting, 1 waiting.
+    for _ in 0..3 {
+        s.enqueue(ticket(&a, &rev_a, 4, t(60_000)), false, t(0))
+            .unwrap();
+    }
+    d.collect(&mut s);
+    let m = s.metrics(t(0));
+    assert_eq!(m.environments.starting, 2);
+    assert_eq!(m.in_flight, 2);
+    assert_eq!(m.reserved.memory_mib, 2 * 280);
+    assert_eq!(m.queue_length, 1);
+    assert_eq!(m.counters.arrivals, 3);
+    assert_eq!(m.counters.grants_cold, 2);
+    assert_eq!(
+        m.counters.scale_events.get(&("activation", "backlog")),
+        Some(&1)
+    );
+    assert_eq!(
+        m.counters.scale_events.get(&("scale_up", "backlog")),
+        Some(&1)
+    );
+    assert_eq!(tenant_metrics(&m, &a).grants, 2);
+    assert_eq!(m.revisions.len(), 1);
+    assert_eq!(m.revisions[0].environments.starting, 2);
+    assert_eq!(m.revisions[0].queued, 1);
+    assert_eq!(m.revisions[0].breaker, "closed");
+
+    // The wait ages advance with the clock.
+    let m = s.metrics(t(1_500));
+    assert_eq!(m.oldest_wait_seconds, Some(1.5));
+    assert_eq!(tenant_metrics(&m, &a).oldest_wait_seconds, Some(1.5));
+
+    // Booted: starting -> busy, start results counted.
+    let granted: Vec<ReservationId> = d.granted.values().map(|(r, _)| *r).collect();
+    for r in &granted {
+        s.start_result(*r, true, t(1_600));
+        s.ready(*r);
+    }
+    let m = s.metrics(t(1_600));
+    assert_eq!((m.environments.starting, m.environments.busy), (0, 2));
+    assert_eq!(m.counters.start_successes, 2);
+
+    // Tenant B waits behind a full node while A's waiter is older.
+    s.enqueue(ticket(&b, &rev_b, 4, t(60_000)), false, t(2_000))
+        .unwrap();
+    let m = s.metrics(t(4_000));
+    assert_eq!(m.queue_length, 2);
+    assert_eq!(tenant_metrics(&m, &b).oldest_wait_seconds, Some(2.0));
+    assert_eq!(tenant_metrics(&m, &b).grants, 0);
+    // The queue is full now: the next arrival is refused and counted.
+    assert_eq!(
+        s.enqueue(ticket(&a, &rev_a, 4, t(60_000)), false, t(4_000))
+            .unwrap_err()
+            .reason,
+        RejectReason::QueueFull
+    );
+
+    // One environment ends: the fair queue serves B (0 in flight) first.
+    s.release(granted[0], t(4_500));
+    d.collect(&mut s);
+    let m = s.metrics(t(4_500));
+    assert_eq!(tenant_metrics(&m, &b).grants, 1);
+    assert_eq!(tenant_metrics(&m, &b).oldest_wait_seconds, None);
+    assert_eq!(m.rejections.get(&RejectReason::QueueFull), Some(&1));
+    assert_eq!(m.counters.grants_cold, 3);
+    s.check_invariants();
+
+    // Everything ends: back to 0 with the counters kept.
+    let rest: Vec<ReservationId> = d
+        .granted
+        .values()
+        .map(|(r, _)| *r)
+        .filter(|r| *r != granted[0])
+        .collect();
+    for r in rest {
+        s.release(r, t(5_000));
+    }
+    for (_, o) in s.take_outbox() {
+        if let Outcome::Granted { reservation, .. } = o {
+            s.release(reservation, t(5_100));
+        }
+    }
+    let m = s.metrics(t(5_200));
+    assert_eq!(m.in_flight, 0);
+    assert_eq!(m.reserved, Resources::ZERO);
+    assert_eq!(m.queue_length, 0);
+    assert_eq!(
+        m.counters.arrivals, 5,
+        "the refused arrival was counted too"
+    );
+    assert!(m.counters.grants_cold >= 3);
+}
+
+/// Coalesced waits and starts avoided: an arrival held back while an
+/// environment of its revision is parking takes that environment instead of
+/// booting one; three failed boots open the breaker once.
+#[test]
+fn metrics_count_coalesced_starts_and_breaker_opens() {
+    let mut s = AdmissionState::new(settings());
+    let (a, rev) = (tenant(1), RevisionId::generate());
+    let r = serve_and_park(&mut s, ticket(&a, &rev, 10, t(60_000)), t(0));
+    // Take the idle environment, then send it back into the pool (parking).
+    let w = s
+        .enqueue(ticket(&a, &rev, 10, t(60_000)), false, t(100))
+        .unwrap();
+    let mut d = Deliveries::default();
+    d.collect(&mut s);
+    let (promise, kind) = d.granted[&w];
+    assert_eq!(kind, GrantKind::Warm);
+    let busy = s.adopt(Some(promise), r, t(110));
+    s.park(busy, t(200));
+    // An arrival while it parks is coalesced onto it.
+    let w = s
+        .enqueue(ticket(&a, &rev, 10, t(60_000)), false, t(210))
+        .unwrap();
+    d.collect(&mut s);
+    assert!(s.is_queued(w));
+    s.parked(busy, t(300));
+    d.collect(&mut s);
+    assert_eq!(d.granted[&w].1, GrantKind::Warm);
+    let m = s.metrics(t(300));
+    assert_eq!(m.counters.grants_warm, 2);
+    assert_eq!(m.counters.coalesced_waits, 1);
+    assert_eq!(m.counters.starts_avoided, 1);
+    assert_eq!(m.environments.promised, 1);
+
+    let bad = RevisionId::generate();
+    for _ in 0..3 {
+        s.enqueue(ticket(&a, &bad, 3, t(60_000)), false, t(400))
+            .unwrap();
+    }
+    let mut d = Deliveries::default();
+    d.collect(&mut s);
+    for (r, _) in d.granted.values() {
+        s.start_result(*r, false, t(500));
+    }
+    let m = s.metrics(t(500));
+    assert_eq!(m.counters.start_failures, 3);
+    assert_eq!(m.counters.breaker_opens, 1);
+    let bad_rev = m.revisions.iter().find(|x| x.revision == bad).unwrap();
+    assert_eq!(bad_rev.breaker, "open");
+}

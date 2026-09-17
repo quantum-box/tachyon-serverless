@@ -150,6 +150,7 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/v1/internal/config", get(handlers::internal_config))
+        .route("/metrics", get(handlers::metrics))
         .route("/healthz", get(handlers::healthz))
         .route("/readyz", get(handlers::readyz))
         .route("/openapi.json", get(handlers::openapi_json))

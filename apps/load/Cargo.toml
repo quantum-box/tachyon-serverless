@@ -1,0 +1,32 @@
+[package]
+name = "tachyon-serverless-load"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "tsls-load: bounded, local-only load scenarios, metrics sampling, detectors and timeline reports (PLT-4637)."
+publish = false
+
+[lib]
+name = "tachyon_serverless_load"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tsls-load"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+# alerts.rs: the rule file parses, and names only families in the gateway's catalog.
+serde_norway = "0.9"
+tachyon-serverless-application = { workspace = true }

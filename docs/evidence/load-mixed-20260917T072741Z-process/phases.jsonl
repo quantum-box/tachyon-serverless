@@ -1,0 +1,3 @@
+{"end_t_ms":15014,"phase":"a-long","result":{"not_sent_duration_limit":0,"sent":12},"spec":{"concurrency":6,"handler_ms":2000,"jitter_ms":200,"kind":"invoke","name":"a-long","requests":12,"tenant":"a","wave":1},"start_t_ms":1219}
+{"end_t_ms":15895,"phase":"b-short","result":{"not_sent_duration_limit":0,"sent":16},"spec":{"concurrency":2,"handler_ms":100,"jitter_ms":300,"kind":"invoke","name":"b-short","requests":16,"tenant":"b","wave":1},"start_t_ms":1220}
+{"end_t_ms":15897,"phase":"idle","result":{"reached_zero_t_ms":15897},"spec":{"kind":"idle_until_zero","name":"idle","tenant":"a","timeout_ms":30000},"start_t_ms":15896}

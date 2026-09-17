@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" width="960" height="380" font-family="system-ui, sans-serif" font-size="11">
+<style>
+  .surface { fill: #fcfcfb; } .ink { fill: #0b0b0b; } .muted { fill: #52514e; }
+  .grid { stroke: #e4e3dc; stroke-width: 1; } .gap { fill: #d9d8d0; opacity: .6; } .band { fill: #efeee8; }
+  .s-busy { stroke: #2a78d6; fill: none; }
+  .s-starting { stroke: #eb6834; fill: none; }
+  .s-idle { stroke: #1baf7a; fill: none; }
+  .s-queue { stroke: #e34948; fill: none; }
+
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; } .ink { fill: #ffffff; } .muted { fill: #c3c2b7; }
+    .grid { stroke: #3a3a37; } .gap { fill: #4a4a45; } .band { fill: #242423; }
+    .s-busy { stroke: #3987e5; fill: none; }
+    .s-starting { stroke: #d95926; fill: none; }
+    .s-idle { stroke: #199e70; fill: none; }
+    .s-queue { stroke: #e66767; fill: none; }
+
+  }
+</style>
+<title>idle-to-zero: burst -&gt; 0 -&gt; idle -&gt; re-access -&gt; 0</title>
+<rect class="surface" width="960" height="380"/>
+<text class="ink" x="48" y="20" font-size="14" font-weight="600">idle-to-zero: burst -&gt; 0 -&gt; idle -&gt; re-access -&gt; 0</text>
+<text class="muted" x="48" y="36">environments by admission state and queue length (tsls_environments, tsls_queue_length) sampled from GET /metrics; observations, not an SLA</text>
+<rect class="band" x="149.0" y="64" width="194.3" height="252.0"/>
+<text class="muted" x="246.2" y="346.0" text-anchor="middle" font-size="10">burst</text>
+<text class="muted" x="343.9" y="358.0" text-anchor="middle" font-size="10">idle</text>
+<rect class="band" x="343.5" y="64" width="455.3" height="252.0"/>
+<text class="muted" x="571.1" y="346.0" text-anchor="middle" font-size="10">stay-idle</text>
+<text class="muted" x="819.0" y="358.0" text-anchor="middle" font-size="10">reaccess</text>
+<rect class="band" x="839.3" y="64" width="1.0" height="252.0"/>
+<text class="muted" x="839.8" y="346.0" text-anchor="middle" font-size="10">idle-again</text>
+<line class="grid" x1="48" x2="936.0" y1="316.0" y2="316.0"/><text class="muted" x="42.0" y="320.0" text-anchor="end">0</text>
+<line class="grid" x1="48" x2="936.0" y1="232.0" y2="232.0"/><text class="muted" x="42.0" y="236.0" text-anchor="end">1</text>
+<line class="grid" x1="48" x2="936.0" y1="148.0" y2="148.0"/><text class="muted" x="42.0" y="152.0" text-anchor="end">2</text>
+<line class="grid" x1="48" x2="936.0" y1="64.0" y2="64.0"/><text class="muted" x="42.0" y="68.0" text-anchor="end">3</text>
+<text class="muted" x="48.0" y="330.0" text-anchor="middle">0s</text>
+<text class="muted" x="196.0" y="330.0" text-anchor="middle">2s</text>
+<text class="muted" x="344.0" y="330.0" text-anchor="middle">3s</text>
+<text class="muted" x="492.0" y="330.0" text-anchor="middle">5s</text>
+<text class="muted" x="640.0" y="330.0" text-anchor="middle">7s</text>
+<text class="muted" x="788.0" y="330.0" text-anchor="middle">8s</text>
+<text class="muted" x="936.0" y="330.0" text-anchor="middle">10s</text>
+<path class="s-busy" d="M48.1,316.0 L70.9,316.0 L93.8,316.0 L116.3,316.0 L139.2,316.0 L162.0,64.0 L184.8,64.0 L207.4,64.0 L230.3,64.0 L252.8,64.0 L275.7,64.0 L298.4,148.0 L321.2,148.0 L343.9,316.0 L366.6,316.0 L389.3,316.0 L412.2,316.0 L434.9,316.0 L457.7,316.0 L480.4,316.0 L503.3,316.0 L525.9,316.0 L548.7,316.0 L571.5,316.0 L594.5,316.0 L617.0,316.0 L639.8,316.0 L662.6,316.0 L685.4,316.0 L707.9,316.0 L730.9,316.0 L753.4,316.0 L776.1,316.0 L799.1,232.0 L822.0,232.0 L845.0,316.0 L867.7,316.0 L890.5,316.0 L913.2,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round"/>
+<path class="s-starting" d="M48.1,316.0 L70.9,316.0 L93.8,316.0 L116.3,316.0 L139.2,316.0 L162.0,64.0 L184.8,64.0 L207.4,316.0 L230.3,64.0 L252.8,316.0 L275.7,232.0 L298.4,232.0 L321.2,316.0 L343.9,316.0 L366.6,316.0 L389.3,316.0 L412.2,316.0 L434.9,316.0 L457.7,316.0 L480.4,316.0 L503.3,316.0 L525.9,316.0 L548.7,316.0 L571.5,316.0 L594.5,316.0 L617.0,316.0 L639.8,316.0 L662.6,316.0 L685.4,316.0 L707.9,316.0 L730.9,316.0 L753.4,316.0 L776.1,316.0 L799.1,232.0 L822.0,232.0 L845.0,316.0 L867.7,316.0 L890.5,316.0 L913.2,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round"/>
+<path class="s-idle" d="M48.1,316.0 L70.9,316.0 L93.8,316.0 L116.3,316.0 L139.2,316.0 L162.0,316.0 L184.8,316.0 L207.4,316.0 L230.3,316.0 L252.8,316.0 L275.7,316.0 L298.4,316.0 L321.2,316.0 L343.9,316.0 L366.6,316.0 L389.3,316.0 L412.2,316.0 L434.9,316.0 L457.7,316.0 L480.4,316.0 L503.3,316.0 L525.9,316.0 L548.7,316.0 L571.5,316.0 L594.5,316.0 L617.0,316.0 L639.8,316.0 L662.6,316.0 L685.4,316.0 L707.9,316.0 L730.9,316.0 L753.4,316.0 L776.1,316.0 L799.1,316.0 L822.0,316.0 L845.0,316.0 L867.7,316.0 L890.5,316.0 L913.2,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round"/>
+<path class="s-queue" d="M48.1,316.0 L70.9,316.0 L93.8,316.0 L116.3,316.0 L139.2,316.0 L162.0,232.0 L184.8,232.0 L207.4,232.0 L230.3,232.0 L252.8,232.0 L275.7,316.0 L298.4,316.0 L321.2,316.0 L343.9,316.0 L366.6,316.0 L389.3,316.0 L412.2,316.0 L434.9,316.0 L457.7,316.0 L480.4,316.0 L503.3,316.0 L525.9,316.0 L548.7,316.0 L571.5,316.0 L594.5,316.0 L617.0,316.0 L639.8,316.0 L662.6,316.0 L685.4,316.0 L707.9,316.0 L730.9,316.0 L753.4,316.0 L776.1,316.0 L799.1,316.0 L822.0,316.0 L845.0,316.0 L867.7,316.0 L890.5,316.0 L913.2,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 3"/>
+<line class="s-busy" x1="48.0" x2="64.0" y1="52.0" y2="52.0" stroke-width="2"/><text class="ink" x="68.0" y="56.0">in flight (starting + busy + promised)</text>
+<line class="s-starting" x1="308.0" x2="324.0" y1="52.0" y2="52.0" stroke-width="2"/><text class="ink" x="328.0" y="56.0">of which starting</text>
+<line class="s-idle" x1="442.0" x2="458.0" y1="52.0" y2="52.0" stroke-width="2"/><text class="ink" x="462.0" y="56.0">idle + parking (warm pool)</text>
+<line class="s-queue" x1="630.0" x2="646.0" y1="52.0" y2="52.0" stroke-width="2" stroke-dasharray="5 3"/><text class="ink" x="650.0" y="56.0">queue length</text>
+</svg>

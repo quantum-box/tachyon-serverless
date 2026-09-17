@@ -1,0 +1,6 @@
+{"end_t_ms":2597,"phase":"single-1","result":{"not_sent_duration_limit":0,"sent":1},"spec":{"concurrency":1,"handler_ms":200,"jitter_ms":0,"kind":"invoke","name":"single-1","requests":1,"tenant":"a"},"start_t_ms":1131}
+{"end_t_ms":4601,"phase":"gap-1","result":{},"spec":{"kind":"pause","ms":2000,"name":"gap-1"},"start_t_ms":2598}
+{"end_t_ms":5159,"phase":"single-2","result":{"not_sent_duration_limit":0,"sent":1},"spec":{"concurrency":1,"handler_ms":200,"jitter_ms":0,"kind":"invoke","name":"single-2","requests":1,"tenant":"a"},"start_t_ms":4602}
+{"end_t_ms":7162,"phase":"gap-2","result":{},"spec":{"kind":"pause","ms":2000,"name":"gap-2"},"start_t_ms":5160}
+{"end_t_ms":7740,"phase":"single-3","result":{"not_sent_duration_limit":0,"sent":1},"spec":{"concurrency":1,"handler_ms":200,"jitter_ms":0,"kind":"invoke","name":"single-3","requests":1,"tenant":"a"},"start_t_ms":7163}
+{"end_t_ms":7742,"phase":"idle","result":{"reached_zero_t_ms":7742},"spec":{"kind":"idle_until_zero","name":"idle","tenant":"a","timeout_ms":30000},"start_t_ms":7741}

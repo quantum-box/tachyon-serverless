@@ -1,0 +1,26 @@
+{
+  "scenario": "mixed",
+  "plan": "tenant A 6 workers x 2 s handlers and tenant B 2 workers x 0.1 s handlers at once (node 4, tenant quota 3)",
+  "commit": "31ea62d66f757b858dc3e59459efec16fc1db9ff",
+  "dirty_tracked_files": 0,
+  "provider": "process",
+  "seed": 20260917,
+  "sample_interval_ms": 250,
+  "limits": {
+    "max_concurrency": 12,
+    "max_requests": 150,
+    "max_duration_seconds": 240
+  },
+  "gateway_config": "gateway.toml",
+  "gateway_config_sha256": "3ed8c7bbdc00b4215034fc91b980fa794d0a717f4cb04c566fad46e5b2c2aa27",
+  "host": "Darwin 25.6.0 arm64",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "target": "http://127.0.0.1:64888",
+  "started_at": "2026-09-17T07:27:45Z",
+  "revision": {
+    "max_concurrency": 3,
+    "idle_ttl_seconds": 2,
+    "scale_down_cooldown_seconds": 1
+  },
+  "note": "observations of one run on one machine; not an SLA"
+}

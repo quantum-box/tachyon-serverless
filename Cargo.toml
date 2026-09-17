@@ -15,6 +15,7 @@ members = [
   "crates/sdk",
   "apps/gateway",
   "apps/cli",
+  "apps/load",
   "examples/hello",
   "examples/http-axum",
   "examples/cpu-burn",

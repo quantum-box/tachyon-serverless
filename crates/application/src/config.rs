@@ -818,6 +818,43 @@ pub struct GatewayConfig {
     /// publisher. Used only when `[queue]` selects a queue.
     #[serde(default)]
     pub invoke_async: crate::services::invoke_async::InvokeAsyncConfig,
+    /// `[metrics]` (PLT-4637): `GET /metrics` for an operator credential.
+    #[serde(default)]
+    pub metrics: MetricsConfig,
+}
+
+/// `[metrics]` (PLT-4637, docs/metrics.md). `GET /metrics` exposes every
+/// tenant's revisions and queue, so it is served only to a platform operator
+/// credential of its own, never to a tenant token; without `bearer_token` it
+/// answers 404.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// The operator credential of `GET /metrics` (at least 16 bytes).
+    pub bearer_token: Option<ConfigToken>,
+    /// Revision series (tenant + revision labels) before the rest are folded
+    /// into `_other`.
+    pub max_revision_series: usize,
+    /// Tenant series before the rest are folded into `_other`.
+    pub max_tenant_series: usize,
+    /// Per-environment host usage series (the idle CPU detector still sees
+    /// every environment).
+    pub max_environment_series: usize,
+}
+
+impl MetricsConfig {
+    pub const MIN_TOKEN_LEN: usize = 16;
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            bearer_token: None,
+            max_revision_series: 64,
+            max_tenant_series: 32,
+            max_environment_series: 128,
+        }
+    }
 }
 
 fn default_listen() -> String {
@@ -999,6 +1036,36 @@ impl GatewayConfig {
                     "[provider.firecracker.jailer] uid / gid must not be 0".into(),
                 ));
             }
+        }
+        if let Some(t) = &self.metrics.bearer_token
+            && t.expose().len() < MetricsConfig::MIN_TOKEN_LEN
+        {
+            return Err(ConfigError::Invalid(format!(
+                "[metrics] bearer_token must be at least {} bytes",
+                MetricsConfig::MIN_TOKEN_LEN
+            )));
+        }
+        if self
+            .identity
+            .tokens
+            .iter()
+            .any(|t| Some(&t.token) == self.metrics.bearer_token.as_ref())
+            || (self.metrics.bearer_token.is_some()
+                && self.metrics.bearer_token == self.control_plane.internal_token)
+        {
+            return Err(ConfigError::Invalid(
+                "[metrics] bearer_token must not be a tenant token ([[identity.tokens]]) or the \
+                 control plane's internal_token"
+                    .into(),
+            ));
+        }
+        if self.metrics.max_revision_series == 0
+            || self.metrics.max_tenant_series == 0
+            || self.metrics.max_environment_series == 0
+        {
+            return Err(ConfigError::Invalid(
+                "[metrics] max_*_series must be at least 1".into(),
+            ));
         }
         if self.profile == Profile::Production && self.provider.kind.is_dev_only() {
             return Err(ConfigError::Invalid(format!(
@@ -1541,6 +1608,30 @@ value = "demo-secret-value-a"
         ] {
             let err = GatewayConfig::from_toml(&text).unwrap_err();
             assert!(err.to_string().contains(needle), "{needle}: {err}");
+        }
+    }
+
+    #[test]
+    fn metrics_section_is_off_without_a_token_and_refuses_weak_or_tenant_tokens() {
+        let cfg = GatewayConfig::from_toml(DEV).unwrap();
+        assert!(cfg.metrics.bearer_token.is_none());
+        assert_eq!(cfg.metrics.max_tenant_series, 32);
+        let ok = format!(
+            "{DEV}\n[metrics]\nbearer_token = \"metrics-operator-0123\"\nmax_revision_series = 8\n"
+        );
+        let cfg = GatewayConfig::from_toml(&ok).unwrap();
+        assert_eq!(cfg.metrics.max_revision_series, 8);
+        assert!(!format!("{:?}", cfg.metrics).contains("metrics-operator-0123"));
+        for (bad, needle) in [
+            ("bearer_token = \"short\"", "at least 16"),
+            ("bearer_token = \"dev-token-tenant-a\"", "tenant token"),
+            ("max_tenant_series = 0", "at least 1"),
+            ("unknown = 1", "unknown"),
+        ] {
+            let err = GatewayConfig::from_toml(&format!("{DEV}\n[metrics]\n{bad}\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(needle), "{bad}: {err}");
         }
     }
 

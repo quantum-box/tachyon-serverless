@@ -33,8 +33,8 @@ use async_trait::async_trait;
 use tachyon_serverless_domain::{Architecture, BootEvidence, EnvironmentId, ProviderKind};
 use tachyon_serverless_provider_port::{
     ArtifactLocation, Capabilities, EnvironmentHandle, EnvironmentObservation, EnvironmentSpec,
-    ExecutionProvider, IsolationLevel, PreflightCheck, PreflightReport, ProviderError, Support,
-    TerminateReason, TerminateReport,
+    EnvironmentStats, ExecutionProvider, IsolationLevel, PreflightCheck, PreflightReport,
+    ProviderError, Support, TerminateReason, TerminateReport,
 };
 use tokio::net::UnixListener;
 use tokio::process::{Child, Command};
@@ -238,6 +238,85 @@ fn pid_alive(pid: u32) -> bool {
 #[cfg(not(unix))]
 fn pid_alive(_pid: u32) -> bool {
     false
+}
+
+/// Host CPU and memory of one process (the bridge; not its children), for
+/// metrics (PLT-4637). `None` where the host offers no per-process reading.
+#[cfg(target_os = "linux")]
+fn process_usage(pid: u32) -> Option<EnvironmentStats> {
+    if !valid_pid(pid) {
+        return None;
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after the parenthesised command name: utime and stime are the
+    // 14th and 15th fields of the line, the 12th and 13th after the name.
+    let rest = &stat[stat.rfind(')')? + 1..];
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    let utime: u64 = fields.get(11)?.parse().ok()?;
+    let stime: u64 = fields.get(12)?.parse().ok()?;
+    // SAFETY: sysconf has no side effects.
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    let cpu = (ticks > 0).then(|| (utime + stime) as f64 / ticks as f64);
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+    let kib = |key: &str| {
+        status
+            .lines()
+            .find_map(|l| l.strip_prefix(key))
+            .and_then(|v| v.split_whitespace().next())
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|k| k * 1024)
+    };
+    Some(EnvironmentStats {
+        cpu_seconds: cpu,
+        memory_current_bytes: kib("VmRSS:"),
+        memory_peak_bytes: kib("VmHWM:"),
+        scope: "procfs".into(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+// `libc` points to the `mach2` crate for `mach_timebase_info`; one call does
+// not justify another dependency of a dev-only provider.
+#[allow(deprecated)]
+fn process_usage(pid: u32) -> Option<EnvironmentStats> {
+    if !valid_pid(pid) {
+        return None;
+    }
+    // SAFETY: an all-zero `rusage_info_v4` is a valid value.
+    let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+    // SAFETY: `info` is a correctly sized `rusage_info_v4` for this flavor.
+    let rc = unsafe {
+        libc::proc_pid_rusage(
+            pid as libc::c_int,
+            libc::RUSAGE_INFO_V4,
+            (&mut info as *mut libc::rusage_info_v4).cast(),
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    // CPU times are in mach absolute time units.
+    let mut timebase = libc::mach_timebase_info { numer: 0, denom: 0 };
+    // SAFETY: plain out-parameter.
+    unsafe { libc::mach_timebase_info(&mut timebase) };
+    let nanos = |t: u64| {
+        if timebase.denom == 0 {
+            t as f64
+        } else {
+            t as f64 * f64::from(timebase.numer) / f64::from(timebase.denom)
+        }
+    };
+    Some(EnvironmentStats {
+        cpu_seconds: Some((nanos(info.ri_user_time) + nanos(info.ri_system_time)) / 1e9),
+        memory_current_bytes: Some(info.ri_phys_footprint),
+        memory_peak_bytes: Some(info.ri_lifetime_max_phys_footprint),
+        scope: "proc_pid_rusage".into(),
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn process_usage(_pid: u32) -> Option<EnvironmentStats> {
+    None
 }
 
 #[cfg(unix)]
@@ -821,6 +900,19 @@ impl ExecutionProvider for ProcessProvider {
         Ok(report)
     }
 
+    /// The bridge process's own CPU time and memory (procfs on Linux,
+    /// `proc_pid_rusage` on macOS). The user process is a child of the bridge
+    /// and is not included: these numbers are a lower bound, and the process
+    /// provider is dev-only anyway (PLT-4637; read-only).
+    async fn environment_stats(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<Option<EnvironmentStats>, ProviderError> {
+        Ok(self
+            .tracked(environment_id)
+            .and_then(|t| process_usage(t.pid)))
+    }
+
     async fn observe_environment(
         &self,
         environment_id: &EnvironmentId,
@@ -892,6 +984,20 @@ impl ExecutionProvider for ProcessProvider {
 mod tests {
     use super::*;
     use tachyon_serverless_domain::Sha256Digest;
+
+    #[test]
+    fn process_usage_reads_this_process_where_the_host_supports_it() {
+        let stats = process_usage(std::process::id());
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            let stats = stats.expect("per-process usage on linux / macos");
+            assert!(stats.cpu_seconds.is_some_and(|s| s >= 0.0));
+            assert!(stats.memory_current_bytes.is_some_and(|b| b > 0));
+            assert!(!stats.scope.is_empty());
+        } else {
+            assert!(stats.is_none());
+        }
+        assert!(process_usage(0).is_none());
+    }
 
     fn provider(dir: &Path) -> ProcessProvider {
         ProcessProvider::new(ProcessProviderConfig {

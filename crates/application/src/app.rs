@@ -638,12 +638,134 @@ impl Application {
     /// attempts. The gateway runs this every `[dispatcher]
     /// heartbeat_interval_seconds`; tests call it directly.
     pub fn heartbeat(&self) -> HeartbeatOutcome {
+        let metrics = self.admission.metrics();
         match self.dispatcher.heartbeat() {
-            Ok(outcome) => outcome,
+            Ok(outcome) => {
+                match &outcome {
+                    HeartbeatOutcome::Renewed { leases } => metrics.heartbeat("renewed", *leases),
+                    HeartbeatOutcome::Fenced => metrics.heartbeat("fenced", 0),
+                }
+                outcome
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "dispatcher heartbeat failed");
+                metrics.heartbeat("error", 0);
                 HeartbeatOutcome::Renewed { leases: 0 }
             }
+        }
+    }
+
+    /// `GET /metrics` (PLT-4637, docs/metrics.md): the Prometheus text
+    /// exposition of admission, pool, attempts, boot identity, host usage of
+    /// this dispatcher's live environments, the dispatcher lease and the
+    /// configuration cache. Covers every tenant: serve it to the `[metrics]`
+    /// operator credential only.
+    ///
+    /// Each call also takes one host usage sample per live environment; the
+    /// idle CPU figures compare it with the previous call's.
+    pub async fn render_metrics(&self) -> String {
+        use crate::metrics::render::{EnvironmentUsage, MetricsInput, SeriesLimits, render};
+        const MAX_SAMPLED: usize = 1024;
+        let owner = self.dispatcher.id().clone();
+        let live: Vec<_> = self
+            .repos
+            .environments
+            .list_active()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.owner.as_ref() == Some(&owner) && !e.state.is_terminal())
+            .take(MAX_SAMPLED)
+            .collect();
+        let mut environments = Vec::with_capacity(live.len());
+        let mut samples = Vec::new();
+        for env in &live {
+            let stats = self
+                .provider
+                .environment_stats(&env.id)
+                .await
+                .ok()
+                .flatten();
+            if let Some(cpu) = stats.as_ref().and_then(|s| s.cpu_seconds) {
+                samples.push((
+                    env.id.clone(),
+                    crate::metrics::EnvSample {
+                        at: std::time::Instant::now(),
+                        cpu_seconds: cpu,
+                        idle: env.state.name() == "idle",
+                    },
+                ));
+            }
+            environments.push(EnvironmentUsage {
+                environment: env.id.to_string(),
+                tenant: env.tenant_id.to_string(),
+                revision: env.revision_id.to_string(),
+                state: env.state.name(),
+                stats,
+            });
+        }
+        let metrics = self.admission.metrics();
+        metrics.sample_round(&samples);
+        // The async outbox backlog (PLT-4639), only where there is one.
+        let outbox = match (&self.outbox, &self.async_ledger) {
+            (Some(publisher), Some(ledger)) => ledger.outbox_stats().ok().map(|stats| {
+                use crate::services::invoke_async::QueueCondition;
+                crate::metrics::render::OutboxMetrics {
+                    pending: stats.pending,
+                    oldest_pending_at: stats.oldest_pending_at,
+                    sent_retained: stats.sent,
+                    queue_condition: match publisher.health().condition() {
+                        QueueCondition::Healthy => "healthy",
+                        QueueCondition::Full => "full",
+                        QueueCondition::Unavailable => "unavailable",
+                    },
+                }
+            }),
+            _ => None,
+        };
+        let m = &self.config.metrics;
+        render(&MetricsInput {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            provider: self.provider.kind().as_str().to_string(),
+            reuse_enabled: self.pool.policy().reuse_enabled(),
+            pool_held: self.pool.held() as u64,
+            pool_quiescing: self.pool.quiescing() as u64,
+            admission: self.admission.metrics_view(),
+            events: metrics.snapshot(),
+            environments,
+            dispatcher_fenced: self.dispatcher.is_fenced(),
+            config: self.config_cache.status(),
+            now: self.clock.now(),
+            limits: SeriesLimits {
+                revisions: m.max_revision_series,
+                tenants: m.max_tenant_series,
+                environments: m.max_environment_series,
+            },
+            outbox,
+        })
+    }
+
+    /// Whether this gateway reuses environments, and what the boot identity
+    /// check has seen (PLT-4637). Part of `GET /v1/capacity`: node-wide, no
+    /// tenant data.
+    pub fn reuse_report(&self) -> tachyon_serverless_api_types::EnvironmentReuseReport {
+        use crate::metrics::BootCheck;
+        let events = self.admission.metrics().snapshot();
+        let count = |c: BootCheck| events.boot_checks.get(&c).copied().unwrap_or(0);
+        let policy = self.pool.policy();
+        let enabled = policy.reuse_enabled();
+        tachyon_serverless_api_types::EnvironmentReuseReport {
+            provider: self.provider.kind().as_str().to_string(),
+            mode: if enabled {
+                "warm_reuse"
+            } else {
+                "every_invocation_boots"
+            }
+            .to_string(),
+            reason: policy.reason().to_string(),
+            first_boots: count(BootCheck::FirstBoot),
+            same_boot_reuses: count(BootCheck::SameBoot),
+            boot_id_changed: count(BootCheck::BootChanged),
+            boot_id_unreported: count(BootCheck::Unreported),
         }
     }
 

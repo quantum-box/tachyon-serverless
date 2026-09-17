@@ -38,8 +38,8 @@ use tachyon_serverless_protocol::{
 };
 use tachyon_serverless_provider_port::{
     ArtifactLocation, Capabilities, EnvironmentHandle, EnvironmentObservation, EnvironmentSpec,
-    ExecutionProvider, IsolationLevel, PreflightCheck, PreflightReport, ProviderError, Support,
-    TerminateReason, TerminateReport,
+    EnvironmentStats, ExecutionProvider, IsolationLevel, PreflightCheck, PreflightReport,
+    ProviderError, Support, TerminateReason, TerminateReport,
 };
 
 /// Boxed future returned by a custom script closure.
@@ -215,6 +215,8 @@ struct Inner {
     /// call happened and what the pool did about its failure.
     quiesced: Vec<EnvironmentId>,
     resumed: Vec<EnvironmentId>,
+    /// Scripted host usage per environment (PLT-4637 metrics tests).
+    stats: HashMap<EnvironmentId, EnvironmentStats>,
 }
 
 /// Test-only [`ExecutionProvider`].
@@ -267,6 +269,15 @@ impl FakeExecutionProvider {
     /// Queue a script for the next environment.
     pub fn push_script(&self, script: FakeGuestScript) {
         self.inner.lock().scripts.push_back(script);
+    }
+
+    /// What [`ExecutionProvider::environment_stats`] reports for a running
+    /// environment (nothing is reported for one without scripted stats).
+    pub fn set_environment_stats(&self, environment_id: &EnvironmentId, stats: EnvironmentStats) {
+        self.inner
+            .lock()
+            .stats
+            .insert(environment_id.clone(), stats);
     }
 
     /// Script used when the queue is empty. `None` makes creation fail.
@@ -573,6 +584,17 @@ impl ExecutionProvider for FakeExecutionProvider {
                 signal: None,
             },
             None => EnvironmentObservation::NotFound,
+        })
+    }
+
+    async fn environment_stats(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<Option<EnvironmentStats>, ProviderError> {
+        let inner = self.inner.lock();
+        Ok(match inner.environments.get(environment_id) {
+            Some(env) if env.running => inner.stats.get(environment_id).cloned(),
+            _ => None,
         })
     }
 

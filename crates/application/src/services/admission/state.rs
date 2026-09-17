@@ -353,6 +353,9 @@ struct TenantEntry {
     queued_bytes: u64,
     /// Serve sequence of the last grant: the round-robin tie-break.
     last_served: u64,
+    /// Grants since start (PLT-4637: starvation is "waiting while others
+    /// are granted").
+    grants: u64,
 }
 
 #[derive(Debug)]
@@ -360,6 +363,99 @@ struct Waiter {
     ticket: Ticket,
     enqueued_at: Timestamp,
     blocked: BlockReason,
+    /// Held back by the autoscaler gate at least once: it waited for an
+    /// environment that was ready or starting instead of booting its own
+    /// (activation coalescing, PLT-4637 metrics).
+    coalesced: bool,
+}
+
+/// Monotonic admission counters since the process started (PLT-4637).
+/// Kept outside the per-revision entries, which are forgotten at zero.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdmissionCounters {
+    /// New arrivals (retries are not counted).
+    pub arrivals: u64,
+    /// Grants that reserved a new environment (`Starting`).
+    pub grants_cold: u64,
+    /// Grants of a pooled environment (a promise).
+    pub grants_warm: u64,
+    /// Grants to waiters the autoscaler gate held back at least once.
+    pub coalesced_waits: u64,
+    /// Of those, the ones served by an existing environment: a boot the
+    /// coalescing avoided.
+    pub starts_avoided: u64,
+    /// Cold start results reported to the breakers.
+    pub start_successes: u64,
+    pub start_failures: u64,
+    /// Transitions of a revision's breaker into `open`.
+    pub breaker_opens: u64,
+    /// Scale decisions by (kind, reason).
+    pub scale_events: BTreeMap<(&'static str, &'static str), u64>,
+}
+
+/// One revision in [`AdmissionMetrics`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevisionMetrics {
+    pub tenant: TenantId,
+    pub revision: RevisionId,
+    pub environments: api::EnvironmentCounts,
+    pub desired: u32,
+    pub max_environments: u32,
+    pub min_ready: u32,
+    pub queued: u32,
+    /// `closed` | `half_open` | `open`.
+    pub breaker: &'static str,
+}
+
+/// One tenant in [`AdmissionMetrics`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TenantMetrics {
+    pub tenant: TenantId,
+    pub in_flight: u64,
+    pub queued: u64,
+    pub queued_bytes: u64,
+    /// Age of the tenant's oldest waiter.
+    pub oldest_wait_seconds: Option<f64>,
+    /// Grants since start.
+    pub grants: u64,
+    pub max_concurrency: Option<u64>,
+}
+
+/// Everything admission knows, for `GET /metrics` (PLT-4637). Unlike
+/// [`AdmissionState::snapshot`] it covers every tenant, so it is served only
+/// to an operator credential.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdmissionMetrics {
+    pub node_name: String,
+    pub capacity: NodeCapacity,
+    pub overhead: Resources,
+    pub reserved: Resources,
+    pub max_concurrency: u64,
+    pub in_flight: u64,
+    pub environments: api::EnvironmentCounts,
+    pub queue_length: u64,
+    pub queue_bytes: u64,
+    pub max_queue: u64,
+    pub max_queue_bytes: u64,
+    pub oldest_wait_seconds: Option<f64>,
+    pub start_tokens: u32,
+    pub rejections: BTreeMap<RejectReason, u64>,
+    pub counters: AdmissionCounters,
+    pub revisions: Vec<RevisionMetrics>,
+    pub tenants: Vec<TenantMetrics>,
+}
+
+impl RejectReason {
+    /// Every reason, so a metric can start each series at zero.
+    pub const ALL: [RejectReason; 7] = [
+        RejectReason::Capacity,
+        RejectReason::Quota,
+        RejectReason::QueueFull,
+        RejectReason::QueueDeadline,
+        RejectReason::CircuitOpen,
+        RejectReason::Placement,
+        RejectReason::FunctionDeleted,
+    ];
 }
 
 /// Static settings of [`AdmissionState`].
@@ -408,6 +504,8 @@ pub struct AdmissionState {
     drains: HashMap<RevisionId, DrainReason>,
     /// The last scale decision per revision, kept after it scaled to zero.
     scale_records: HashMap<RevisionId, ScaleRecord>,
+    /// Monotonic counters for metrics (PLT-4637).
+    counters: AdmissionCounters,
 }
 
 impl std::fmt::Debug for AdmissionState {
@@ -474,6 +572,7 @@ impl AdmissionState {
             routed: std::collections::HashSet::new(),
             drains: HashMap::new(),
             scale_records: HashMap::new(),
+            counters: AdmissionCounters::default(),
         }
     }
 
@@ -531,6 +630,7 @@ impl AdmissionState {
                     queue: VecDeque::new(),
                     queued_bytes: 0,
                     last_served: 0,
+                    grants: 0,
                 },
             );
         }
@@ -573,6 +673,11 @@ impl AdmissionState {
         reason: &'static str,
         now: Timestamp,
     ) {
+        *self
+            .counters
+            .scale_events
+            .entry((kind, reason))
+            .or_default() += 1;
         let event = ScaleEvent {
             kind,
             reason,
@@ -645,6 +750,9 @@ impl AdmissionState {
             rev.stats.record_arrival(now, window);
         }
         rev.queued += 1;
+        if !retry {
+            self.counters.arrivals += 1;
+        }
         let id = self.next();
         let tenant = ticket.tenant.clone();
         let bytes = ticket.payload_bytes;
@@ -663,6 +771,7 @@ impl AdmissionState {
                 ticket,
                 enqueued_at: now,
                 blocked: BlockReason::Pending,
+                coalesced: false,
             },
         );
         self.pump(now);
@@ -850,6 +959,7 @@ impl AdmissionState {
                         Eval::Blocked(reason, node_wide) => {
                             if let Some(w) = self.waiters.get_mut(&id) {
                                 w.blocked = reason;
+                                w.coalesced |= reason == BlockReason::Scaling;
                             }
                             if node_wide && node_block.is_none() {
                                 node_block = Some(reason);
@@ -945,6 +1055,16 @@ impl AdmissionState {
         let Some(w) = self.remove_waiter(id) else {
             return;
         };
+        match kind {
+            GrantKind::Cold => self.counters.grants_cold += 1,
+            GrantKind::Warm => self.counters.grants_warm += 1,
+        }
+        if w.coalesced {
+            self.counters.coalesced_waits += 1;
+            if kind == GrantKind::Warm {
+                self.counters.starts_avoided += 1;
+            }
+        }
         let t = w.ticket;
         let (state, resources, probe) = match kind {
             GrantKind::Warm => (ResState::Promised, t.resources, false),
@@ -984,7 +1104,9 @@ impl AdmissionState {
         );
         self.serve_seq += 1;
         let seq = self.serve_seq;
-        self.tenant_entry(&t.tenant).last_served = seq;
+        let entry = self.tenant_entry(&t.tenant);
+        entry.last_served = seq;
+        entry.grants += 1;
         self.outbox.push((
             id,
             Outcome::Granted {
@@ -1168,12 +1290,18 @@ impl AdmissionState {
         };
         r.probe = false;
         let revision = r.revision.clone();
+        if ok {
+            self.counters.start_successes += 1;
+        } else {
+            self.counters.start_failures += 1;
+        }
         let Some(rev) = self.revisions.get_mut(&revision) else {
             return;
         };
         if ok {
             rev.breaker.record_success();
         } else if rev.breaker.record_failure(now) {
+            self.counters.breaker_opens += 1;
             let doomed: Vec<WaiterId> = self
                 .waiters
                 .iter()
@@ -1590,6 +1718,78 @@ impl AdmissionState {
             tenant: tenant_info,
             revisions,
             scaling: api::ScalingInfo::default(),
+            reuse: api::EnvironmentReuseReport::default(),
+        }
+    }
+
+    /// Every tenant and revision, for `GET /metrics` (PLT-4637). Revisions
+    /// that scaled to zero and were forgotten are not listed (their counts
+    /// are zero); the monotonic counters survive that.
+    pub fn metrics(&mut self, now: Timestamp) -> AdmissionMetrics {
+        let age = |w: &Waiter| (now - w.enqueued_at).num_milliseconds().max(0) as f64 / 1000.0;
+        let window = self.window();
+        let mut oldest_by_tenant: HashMap<&TenantId, f64> = HashMap::new();
+        let mut oldest: Option<f64> = None;
+        for w in self.waiters.values() {
+            let a = age(w);
+            oldest = Some(oldest.map_or(a, |o: f64| o.max(a)));
+            let e = oldest_by_tenant.entry(&w.ticket.tenant).or_insert(a);
+            *e = e.max(a);
+        }
+        let tenants = self
+            .tenants
+            .iter()
+            .map(|(id, t)| TenantMetrics {
+                tenant: id.clone(),
+                in_flight: t.in_flight as u64,
+                queued: t.queue.len() as u64,
+                queued_bytes: t.queued_bytes,
+                oldest_wait_seconds: oldest_by_tenant.get(id).copied(),
+                grants: t.grants,
+                max_concurrency: t.quota.max_concurrency.map(|m| m as u64),
+            })
+            .collect();
+        let mut revisions: Vec<RevisionMetrics> = self
+            .revisions
+            .iter_mut()
+            .map(|(id, rev)| RevisionMetrics {
+                tenant: rev.tenant.clone(),
+                revision: id.clone(),
+                environments: rev.counts.api(),
+                desired: desired_environments(DemandInput {
+                    arrival_rate: rev.stats.arrival_rate(now, window),
+                    avg_duration_seconds: rev.stats.avg_duration().unwrap_or(0.0),
+                    in_flight: rev.counts.in_flight(),
+                    backlog: rev.queued,
+                    concurrency_per_environment: rev.concurrency_per_environment,
+                    min_ready: rev.min_ready,
+                    max_environments: rev.max_environments,
+                }),
+                max_environments: rev.max_environments,
+                min_ready: rev.min_ready,
+                queued: rev.queued,
+                breaker: rev.breaker.name(now),
+            })
+            .collect();
+        revisions.sort_by(|a, b| a.revision.cmp(&b.revision));
+        AdmissionMetrics {
+            node_name: self.settings.node.name.clone(),
+            capacity: self.capacity,
+            overhead: self.overhead,
+            reserved: self.reserved,
+            max_concurrency: self.settings.max_concurrency as u64,
+            in_flight: self.counts.in_flight().into(),
+            environments: self.counts.api(),
+            queue_length: self.queued as u64,
+            queue_bytes: self.queued_bytes,
+            max_queue: self.settings.max_queue as u64,
+            max_queue_bytes: self.settings.max_queue_bytes,
+            oldest_wait_seconds: oldest,
+            start_tokens: self.bucket.tokens(now),
+            rejections: self.rejections.clone(),
+            counters: self.counters.clone(),
+            revisions,
+            tenants,
         }
     }
 

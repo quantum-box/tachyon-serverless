@@ -32,6 +32,7 @@
 |---|---|---|---|---|
 | GET | `/healthz` | liveness | 200 | — |
 | GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）） | 200 | 503 |
+| GET | `/metrics` | Prometheus text exposition（PLT-4637、`docs/metrics.md`）。全 tenant の revision・待ちを含むので `[metrics] bearer_token` の operator credential だけを受け付ける（tenant の token は operator role でも 401）。未設定の gateway には無い | 200 `text/plain; version=0.0.4` | 401, 404 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
 | GET | `/v1/capacity` | node の容量と予約・状態別の環境数・待ち行列・start rate・拒否数・自 tenant の revision（PLT-4634、§5.1.1）、scale policy・route 状態・最後の scale event と `scaling`（PLT-4635、§8） | 200 `CapacityInfo` | 401 |
 | POST | `/v1/artifacts` | 実行ファイルの生バイト (`application/octet-stream`) を upload → digest | 200 `ArtifactUploadResponse` | 401, 413 `payload_too_large` |
@@ -237,6 +238,7 @@ node（物理 host）と、その上の環境を分けて返す。`tenant` と `
 - `hosts` は常に 1、`host_scale_out` は `not_supported`（host の追加はこの prototype の範囲外）。admission が増減するのはこの node の上の環境だけ。
 - `desired` は autoscaler の目標（`docs/architecture.md` §4「admission・autoscaler」）。起動はこれを超えないが、待機中の invocation の無い先行起動はしない。
 - 状態は gateway プロセスのメモリにあり、再起動で `rejections`・到着率・breaker は初期化される。
+- `reuse`（PLT-4637、node 全体・tenant の情報なし）: `{provider, mode, reason, first_boots, same_boot_reuses, boot_id_changed, boot_id_unreported}`。`mode` は `warm_reuse`（pool の環境を再利用する）か `every_invocation_boots`（warm の段階が無く毎回起動。process provider は常にこれ）。後ろ 4 つは attempt の guest boot id をその環境の最初の boot id と比べた数で、`boot_id_changed` は 0 のままであるべき値（`docs/metrics.md` §4）。プロセスのメモリにあり再起動で 0 に戻る。
 - PLT-4635 の欄（§8）: revision の `min_ready` / `idle_ttl_seconds` / `scale_down_cooldown_seconds`（既定値を解決した値）、`route_state`、`last_scale_event`。環境が 0 になり admission が revision を忘れた後も、最後の event を持つ revision は環境数 0 で載る。「ready」の環境は `idle`（pool にあってすぐ使える）に当たる。
 
 ### 5.2 `POST /v1/artifacts`

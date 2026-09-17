@@ -1,0 +1,142 @@
+# Tachyon Serverless reuse / scaling alerts (PLT-4637, docs/metrics.md §5).
+#
+# The same conditions run without Prometheus in the load harness
+# (apps/load/src/detect.rs) over the samples a scenario recorded. Thresholds are
+# starting points for the prototype, not SLOs. Series come from GET /metrics,
+# which is served only to the [metrics] operator credential.
+#
+# Validation: apps/load/tests/alerts.rs parses this file and checks that every
+# expression names metric families that exist; run `promtool check rules` too
+# when promtool is installed.
+groups:
+  - name: tsls-reservation-overshoot
+    rules:
+      - alert: TslsReservedMemoryOverCapacity
+        expr: tsls_node_reserved_memory_bytes > on() tsls_node_capacity_memory_bytes
+        for: 0m
+        labels:
+          severity: critical
+          detector: overshoot
+        annotations:
+          summary: "Reserved memory exceeds the node's configured capacity"
+          description: "Admission reserved {{ $value }} bytes, more than [capacity.node] memory_mib. Reservations must never overshoot (ADR-0006 decision 2)."
+      - alert: TslsReservedCpuOverCapacity
+        expr: tsls_node_reserved_cpu_millicores > on() tsls_node_capacity_cpu_millicores
+        for: 0m
+        labels:
+          severity: critical
+          detector: overshoot
+        annotations:
+          summary: "Reserved CPU exceeds the node's configured capacity"
+          description: "Admission reserved {{ $value }} millicores, more than [capacity.node] cpu_millis."
+      - alert: TslsInFlightOverMaxConcurrency
+        expr: tsls_node_in_flight > on() tsls_node_max_concurrency
+        for: 0m
+        labels:
+          severity: critical
+          detector: overshoot
+        annotations:
+          summary: "Promised + starting + busy exceed [capacity] max_concurrency"
+          description: "{{ $value }} environments in flight on the node."
+      - alert: TslsRevisionOverMaxEnvironments
+        expr: >-
+          sum by (tenant, revision) (tsls_revision_environments{state=~"starting|busy|promised",revision!="_other"})
+          > on (tenant, revision) tsls_revision_max_environments
+        for: 0m
+        labels:
+          severity: critical
+          detector: overshoot
+        annotations:
+          summary: "A revision has more environments in flight than its max_concurrency"
+          description: "Revision {{ $labels.revision }}: {{ $value }} starting + busy + promised."
+      - alert: TslsTenantOverQuota
+        expr: tsls_tenant_in_flight{tenant!="_other"} > on (tenant) tsls_tenant_max_concurrency
+        for: 0m
+        labels:
+          severity: critical
+          detector: overshoot
+        annotations:
+          summary: "A tenant has more environments in flight than its quota"
+          description: "Tenant {{ $labels.tenant }}: {{ $value }} in flight."
+
+  - name: tsls-starvation
+    rules:
+      - alert: TslsTenantStarved
+        # A tenant with nothing in flight and no grant in the last minute has an oldest
+        # waiter older than 5 s while other tenants were granted environments. A tenant
+        # with environments in flight waits for its own quota or fair share, not starvation.
+        # (The harness compares grants over the exact wait; this rule uses a 1 m window.)
+        expr: >-
+          (tsls_tenant_queue_oldest_age_seconds{tenant!="_other"} > 5)
+          and on (tenant) (tsls_tenant_in_flight == 0)
+          and on () (sum(increase(tsls_tenant_grants_total[1m])) > 0)
+          unless on (tenant) (increase(tsls_tenant_grants_total[1m]) > 0)
+        for: 15s
+        labels:
+          severity: warning
+          detector: starvation
+        annotations:
+          summary: "A tenant waits while other tenants are served"
+          description: "Tenant {{ $labels.tenant }} oldest wait {{ $value }} s. Check tenant quotas ([capacity.tenant_defaults] max_concurrency < max_concurrency, ADR-0006 decision 4)."
+
+  - name: tsls-idle-resource-use
+    rules:
+      - alert: TslsIdleEnvironmentCpu
+        # CPU seconds per wall second of an environment that stayed idle between two
+        # scrapes. A quiesced (paused) microVM should be close to 0.
+        expr: tsls_idle_environment_cpu_ratio_max > 0.05 and on () tsls_idle_environments_sampled > 0
+        for: 1m
+        labels:
+          severity: warning
+          detector: idle_cpu
+        annotations:
+          summary: "An idle (quiesced) environment keeps using CPU"
+          description: "Highest idle CPU ratio {{ $value }}. Quiesce may not have taken (PLT-4633)."
+      - alert: TslsIdleCpuAccumulating
+        expr: rate(tsls_idle_environment_cpu_seconds_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          detector: idle_cpu
+        annotations:
+          summary: "Idle environments together burn more than 0.05 CPU"
+          description: "{{ $value }} CPU seconds per second across idle environments."
+
+  - name: tsls-reuse-and-starts
+    rules:
+      - alert: TslsBootIdentityChanged
+        expr: increase(tsls_boot_identity_checks_total{result="boot_changed"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          detector: boot_identity
+        annotations:
+          summary: "An environment reported a different guest boot id than it booted with"
+          description: "A reused environment is not the guest it claims to be."
+      - alert: TslsCircuitBreakerOpen
+        expr: tsls_revision_circuit_breaker_state == 2
+        for: 0m
+        labels:
+          severity: warning
+          detector: starts
+        annotations:
+          summary: "A revision's start-failure breaker is open"
+          description: "Revision {{ $labels.revision }} is refusing invocations (circuit_open)."
+      - alert: TslsDispatcherFenced
+        expr: tsls_dispatcher_fenced == 1
+        for: 0m
+        labels:
+          severity: critical
+          detector: dispatcher
+        annotations:
+          summary: "This gateway lost its dispatcher lease and takes no new work"
+          description: "PLT-4631 fencing."
+      - alert: TslsConfigurationExpired
+        expr: tsls_config_valid_remaining_seconds < 0
+        for: 0m
+        labels:
+          severity: warning
+          detector: config
+        annotations:
+          summary: "The configuration cache expired (control plane unreachable)"
+          description: "New invocations are refused until a refresh succeeds (ADR-0007)."
