@@ -1,0 +1,18 @@
+[chaos baseline] begin (none (steady workload, graceful stop)) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.8QRGAQ
+[chaos baseline]   ok   workload.sync_ok sync_200_with_secret=3/3
+[chaos baseline]   ok   workload.async_accepted accepted=9 refused=0
+[chaos baseline]   ok   cv.accepted_never_lost accepted=9 missing_rows=0
+[chaos baseline]   ok   cv.accepted_all_terminal accepted=9 not_terminal=0
+[chaos baseline]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos baseline]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos baseline]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=6
+[chaos baseline]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos baseline]   ok   cv.ledger_all_terminal invocations=14 non_terminal=0 by_status=succeeded:14
+[chaos baseline]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos baseline]   ok   cv.cron_each_time_once fires=2 distinct_times=2
+[chaos baseline]   ok   cv.usage_counted_once journal_pending=0 ledger_events=70 distinct=70 attempts_settled_twice=0 duplicates_ignored=0
+[chaos baseline]   ok   cv.every_terminal_environment_metered_once terminal environments=14 without a stop event=0 environments with a stop=14 (pooled ones report when they stop, after this check)
+[chaos baseline]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos baseline]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos baseline]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos baseline]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.8QRGAQ)

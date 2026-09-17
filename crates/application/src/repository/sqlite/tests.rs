@@ -1175,6 +1175,22 @@ fn slot_race_child() {
                 std::process::id()
             )
         }
+        "freeze" => {
+            // Stop this whole process between BEGIN IMMEDIATE and COMMIT, as
+            // a SIGSTOP that lands mid-transaction does.
+            use crate::repository::StateStore;
+            let stopped = std::sync::atomic::AtomicBool::new(false);
+            store.set_write_hook(Some(Arc::new(move |_site| {
+                if !stopped.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    // SAFETY: raise(2) on this process; it resumes on SIGCONT.
+                    unsafe {
+                        libc::raise(libc::SIGSTOP);
+                    }
+                }
+            })));
+            let owner = register(&store, "frozen", std::process::id(), 3600);
+            format!("resumed {owner}")
+        }
         other => panic!("unknown action {other}"),
     };
     std::fs::write(var("TSLS_OUT"), out).unwrap();
@@ -1448,4 +1464,249 @@ fn a_held_write_lock_fails_every_concurrent_caller_within_a_bounded_time() {
     assert!(started.elapsed() < std::time::Duration::from_secs(14));
     locker.execute_batch("ROLLBACK").unwrap();
     assert_eq!(store.purge_expired_idempotency(now()).unwrap(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// write-transaction discipline (PLT-4646, docs/adr/0003)
+// ---------------------------------------------------------------------------
+
+fn observation(key: &str, digest: &str) -> crate::repository::ConfigObservation {
+    crate::repository::ConfigObservation {
+        key: key.into(),
+        natural_version: 1,
+        digest: digest.into(),
+        body: format!("{key}:{digest}"),
+    }
+}
+
+fn publish(store: &SqliteStore, observed: &[(&str, &str)]) -> crate::repository::StampedConfig {
+    use crate::repository::ConfigPublicationRepository;
+    let observed: Vec<_> = observed.iter().map(|(k, d)| observation(k, d)).collect();
+    store
+        .stamp_config(&mut |_rows| Ok(observed.clone()), 0)
+        .unwrap()
+}
+
+/// The configuration sync runs after every commit of another gateway on the
+/// same file. When nothing changed it must not take the write lock at all,
+/// and when something did, the parsing, hashing and observing happen before
+/// the (short) write transaction, not inside it.
+#[test]
+fn an_unchanged_configuration_sync_takes_no_write_lock() {
+    use crate::repository::{ConfigPublicationRepository, StateStore};
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    let first = publish(&store, &[("a", "1"), ("b", "1")]);
+    assert_eq!(first.generation, 2);
+    let before = store.write_transaction_stats().transactions;
+    let again = publish(&store, &[("a", "1"), ("b", "1")]);
+    assert_eq!(again.generation, 2);
+    assert_eq!(again.entries.len(), 2);
+    assert_eq!(
+        store.write_transaction_stats().transactions,
+        before,
+        "nothing changed: no write transaction"
+    );
+
+    // While `observe` runs, another connection can write: no lock is held.
+    let other = open(dir.path());
+    let mut wrote_meanwhile = false;
+    store
+        .stamp_config(
+            &mut |_rows| {
+                other
+                    .register_dispatcher(DispatcherRecord {
+                        id: DispatcherId::generate(),
+                        instance: "meanwhile".into(),
+                        hostname: "h".into(),
+                        pid: 1,
+                        started_at: now(),
+                        heartbeat_at: now(),
+                        lease_expires_at: now(),
+                        stopped_at: None,
+                        reclaimed_at: None,
+                    })
+                    .unwrap();
+                wrote_meanwhile = true;
+                Ok(vec![observation("a", "1"), observation("b", "1")])
+            },
+            0,
+        )
+        .unwrap();
+    assert!(wrote_meanwhile);
+
+    // A change is one short write transaction.
+    let before = store.write_transaction_stats().transactions;
+    let changed = publish(&store, &[("a", "2"), ("b", "1")]);
+    assert_eq!(changed.generation, 3);
+    assert_eq!(store.write_transaction_stats().transactions, before + 1);
+}
+
+/// Two gateways stamping at once: the one whose snapshot went stale while it
+/// observed notices the moved generation counter and stamps again, so no
+/// generation is issued twice and nothing is lost.
+#[test]
+fn a_stamp_that_lost_a_race_starts_again_from_the_new_publication() {
+    use crate::repository::ConfigPublicationRepository;
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    let other = open(dir.path());
+    publish(&store, &[("a", "1")]);
+    let mut rounds = 0;
+    let stamped = store
+        .stamp_config(
+            &mut |_rows| {
+                rounds += 1;
+                if rounds == 1 {
+                    // The other gateway publishes `b` between our snapshot
+                    // and our write.
+                    publish(&other, &[("a", "1"), ("b", "1")]);
+                }
+                Ok(vec![observation("a", "2"), observation("b", "1")])
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(rounds, 2, "the stale round was discarded");
+    assert_eq!(stamped.generation, 3, "a=1 (1), b=1 (2), a=2 (3)");
+    let generations: Vec<u64> = stamped.entries.iter().map(|e| e.generation).collect();
+    assert_eq!(generations, vec![2, 3]);
+    let reread = publish(&other, &[("a", "2"), ("b", "1")]);
+    assert_eq!(reread.generation, 3, "both see the same publication");
+}
+
+/// A write transaction held past the threshold (here: a hook that sleeps
+/// inside it, as a process descheduled or frozen mid-transaction would) is
+/// counted and reported with the call site that held the lock.
+#[test]
+fn a_slow_write_transaction_is_counted_with_its_call_site() {
+    use crate::repository::StateStore;
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    store.set_write_hook(Some(Arc::new(|_site| {
+        std::thread::sleep(
+            crate::repository::SLOW_WRITE_TRANSACTION + std::time::Duration::from_millis(50),
+        );
+    })));
+    store.purge_expired_idempotency(now()).unwrap();
+    store.set_write_hook(None);
+    store.purge_expired_idempotency(now()).unwrap();
+    let stats = store.write_transaction_stats();
+    assert_eq!(stats.slow, 1, "{stats:?}");
+    assert!(stats.max_held_ms >= 250, "{stats:?}");
+    let site = stats.max_held_site.unwrap();
+    assert!(site.contains("repository/sqlite/mod.rs"), "{site}");
+}
+
+/// PLT-4646 residual limit, with a real **OS process**: a gateway process
+/// stopped (SIGSTOP) between `BEGIN IMMEDIATE` and `COMMIT` keeps the SQLite
+/// write lock of the shared `state.db` for as long as it is stopped. Nothing
+/// in another process can take it back: every write there is refused within
+/// the bounded store wait (never queued), reads keep working (WAL), and the
+/// writes succeed again as soon as the stopped process continues and commits.
+#[cfg(unix)]
+#[test]
+fn a_process_stopped_inside_a_write_transaction_holds_the_lock_until_it_continues() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    let owner = register(&store, "running", std::process::id(), 3600);
+    let (child, out) = spawn_child(dir.path(), 0, "freeze", &[]);
+    let pid = child.id() as libc::pid_t;
+    let ready = std::path::PathBuf::from(format!("{}.ready", out.display()));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !ready.exists() {
+        assert!(std::time::Instant::now() < deadline, "child never ready");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    std::fs::write(dir.path().join("go"), b"go").unwrap();
+    // Wait until the child stopped itself inside its transaction.
+    let mut status = 0;
+    // SAFETY: waitpid on our own child; WUNTRACED reports the stop without
+    // reaping it.
+    let rc = unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED) };
+    assert_eq!(rc, pid);
+    assert!(libc::WIFSTOPPED(status), "child status {status:#x}");
+
+    let started = std::time::Instant::now();
+    let refused = store.heartbeat(&owner, chrono::Duration::seconds(30), now());
+    let waited = started.elapsed();
+    assert!(
+        matches!(refused, Err(RepoError::Store(_))),
+        "the write lock is held by the stopped process: {refused:?}"
+    );
+    assert!(
+        waited >= std::time::Duration::from_secs(4)
+            && waited <= STORE_WAIT * 2 + std::time::Duration::from_secs(2),
+        "bounded wait, not a hang: {waited:?}"
+    );
+    assert!(
+        store.get_dispatcher(&owner).unwrap().is_some(),
+        "reads still work"
+    );
+
+    // SAFETY: kill(2) on our own stopped child.
+    unsafe {
+        libc::kill(pid, libc::SIGCONT);
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(
+        std::fs::read_to_string(&out)
+            .unwrap()
+            .starts_with("resumed ")
+    );
+    assert!(matches!(
+        store
+            .heartbeat(&owner, chrono::Duration::seconds(30), now())
+            .unwrap(),
+        crate::repository::HeartbeatOutcome::Renewed { .. }
+    ));
+}
+
+/// PLT-4646: the periodic polls that usually have nothing to do — the outbox
+/// publisher (every 200 ms) and the cron scheduler of a gateway that does not
+/// hold the lease — answer from a read and never open a write transaction,
+/// so they cannot be the transaction a frozen gateway holds the file's write
+/// lock in (the KVM final run's `stale_owner_sync_lease`; the chaos
+/// reproduction froze in the outbox claim every time before this change).
+#[test]
+fn idle_outbox_and_scheduler_polls_take_no_write_lock() {
+    use crate::repository::{AsyncInvocationRepository, StateStore, TriggerRepository};
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    let holder = register(&store, "holder", std::process::id(), 3600);
+    let other = register(&store, "other", std::process::id(), 3600);
+    let ttl = chrono::Duration::seconds(10);
+    assert!(
+        store
+            .acquire_scheduler_lease(holder.as_str(), now(), ttl)
+            .unwrap()
+    );
+    let before = store.write_transaction_stats().transactions;
+    for _ in 0..10 {
+        assert!(
+            store
+                .claim_outbox("publisher", now(), ttl, 16)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !store
+                .acquire_scheduler_lease(other.as_str(), at(1), ttl)
+                .unwrap()
+        );
+    }
+    assert_eq!(store.write_transaction_stats().transactions, before);
+    // The holder still renews, and a lease that expired is still taken over.
+    assert!(
+        store
+            .acquire_scheduler_lease(holder.as_str(), at(2), ttl)
+            .unwrap()
+    );
+    assert!(
+        store
+            .acquire_scheduler_lease(other.as_str(), at(30), ttl)
+            .unwrap()
+    );
+    assert_eq!(store.write_transaction_stats().transactions, before + 2);
 }

@@ -343,6 +343,22 @@ impl AsyncInvocationRepository for SqliteStore {
         let limit = i64::try_from(max).unwrap_or(i64::MAX);
         let expires = ts(&(now + ttl));
         let now_s = ts(&now);
+        // The publisher polls every 200 ms and there is usually nothing to
+        // claim. Ask with a read first (WAL: no write lock), so an idle poll
+        // never holds the database write lock that every other gateway on
+        // the file waits for (PLT-4646, docs/adr/0003 「書込み transaction の
+        // 規律」). The write below re-checks everything.
+        let claimable: Option<i64> = self.read(|c| {
+            Ok(c.prepare_cached(
+                "SELECT 1 FROM outbox WHERE sent = 0 AND next_attempt_at <= ?1 \
+                 AND (claimed_by IS NULL OR claim_expires_at <= ?1) LIMIT 1",
+            )?
+            .query_row([now_s.as_str()], |r| r.get(0))
+            .optional()?)
+        })?;
+        if claimable.is_none() || limit == 0 {
+            return Ok(Vec::new());
+        }
         self.write(|tx| {
             let ids: Vec<String> = tx
                 .prepare_cached(

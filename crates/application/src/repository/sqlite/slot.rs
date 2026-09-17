@@ -120,6 +120,61 @@ fn settle_invocation(
     Ok(())
 }
 
+impl SqliteStore {
+    /// [`SlotStore::heartbeat`] (`revive = false`) and
+    /// [`SlotStore::renew_after_store_outage`] (`revive = true`).
+    fn renew_dispatcher(
+        &self,
+        id: &DispatcherId,
+        ttl: chrono::Duration,
+        now: Timestamp,
+        revive: bool,
+    ) -> Result<HeartbeatOutcome, RepoError> {
+        self.write(|tx| {
+            let Some(mut d) = get_dispatcher(tx, id)? else {
+                return Ok(HeartbeatOutcome::Fenced);
+            };
+            // Only while unexpired: once the lease has passed, another
+            // dispatcher may already be reclaiming it. After a store outage
+            // the owner may renew what nobody reclaimed (the check below and
+            // this write are one transaction, serialized with any reclaim).
+            if !d.is_live() || (!revive && now >= d.lease_expires_at) {
+                return Ok(HeartbeatOutcome::Fenced);
+            }
+            d.heartbeat_at = now;
+            d.lease_expires_at = d.lease_expires_at.max(now + ttl);
+            let n = tx
+                .prepare_cached(
+                    "UPDATE dispatchers SET lease_expires_at = ?1, body = ?2 \
+                     WHERE id = ?3 AND stopped_at IS NULL AND reclaimed_at IS NULL",
+                )?
+                .execute(params![ts(&d.lease_expires_at), to_json(&d)?, id.as_str()])?;
+            if n != 1 {
+                return Ok(HeartbeatOutcome::Fenced);
+            }
+            let leases: Vec<ExecutionLease> = bodies(
+                tx,
+                "SELECT body FROM leases WHERE owner_id = ?1 AND released = 0 ORDER BY id",
+                [id.as_str()],
+            )?;
+            let mut renewed = 0;
+            for mut lease in leases {
+                // An expired slot lease is not revived, even for a live owner,
+                // except after a store outage: unreleased means unreclaimed.
+                let ok = match revive {
+                    true => lease.revive(now, ttl).is_ok(),
+                    false => lease.renew(now, ttl).is_ok(),
+                };
+                if ok {
+                    write_lease_row(tx, &lease, false)?;
+                    renewed += 1;
+                }
+            }
+            Ok(HeartbeatOutcome::Renewed { leases: renewed })
+        })
+    }
+}
+
 impl SlotStore for SqliteStore {
     fn register_dispatcher(&self, record: DispatcherRecord) -> Result<(), RepoError> {
         self.write(|tx| {
@@ -159,41 +214,16 @@ impl SlotStore for SqliteStore {
         ttl: chrono::Duration,
         now: Timestamp,
     ) -> Result<HeartbeatOutcome, RepoError> {
-        self.write(|tx| {
-            let Some(mut d) = get_dispatcher(tx, id)? else {
-                return Ok(HeartbeatOutcome::Fenced);
-            };
-            // Only while unexpired: once the lease has passed, another
-            // dispatcher may already be reclaiming it.
-            if !d.is_live() || now >= d.lease_expires_at {
-                return Ok(HeartbeatOutcome::Fenced);
-            }
-            d.heartbeat_at = now;
-            d.lease_expires_at = d.lease_expires_at.max(now + ttl);
-            let n = tx
-                .prepare_cached(
-                    "UPDATE dispatchers SET lease_expires_at = ?1, body = ?2 \
-                     WHERE id = ?3 AND stopped_at IS NULL AND reclaimed_at IS NULL",
-                )?
-                .execute(params![ts(&d.lease_expires_at), to_json(&d)?, id.as_str()])?;
-            if n != 1 {
-                return Ok(HeartbeatOutcome::Fenced);
-            }
-            let leases: Vec<ExecutionLease> = bodies(
-                tx,
-                "SELECT body FROM leases WHERE owner_id = ?1 AND released = 0 ORDER BY id",
-                [id.as_str()],
-            )?;
-            let mut renewed = 0;
-            for mut lease in leases {
-                // An expired slot lease is not revived, even for a live owner.
-                if lease.renew(now, ttl).is_ok() {
-                    write_lease_row(tx, &lease, false)?;
-                    renewed += 1;
-                }
-            }
-            Ok(HeartbeatOutcome::Renewed { leases: renewed })
-        })
+        self.renew_dispatcher(id, ttl, now, false)
+    }
+
+    fn renew_after_store_outage(
+        &self,
+        id: &DispatcherId,
+        ttl: chrono::Duration,
+        now: Timestamp,
+    ) -> Result<HeartbeatOutcome, RepoError> {
+        self.renew_dispatcher(id, ttl, now, true)
     }
 
     fn stop_dispatcher(&self, id: &DispatcherId, now: Timestamp) -> Result<(), RepoError> {
@@ -529,6 +559,13 @@ impl SlotStore for SqliteStore {
             } = &request;
             let now = *now;
             let mut report = ReclaimReport::default();
+
+            // 0. Only a reclaimer that still holds its own lease reclaims.
+            if !get_dispatcher(tx, reclaimer)?
+                .is_some_and(|d| d.is_live() && now < d.lease_expires_at)
+            {
+                return Ok(report);
+            }
 
             // 1. Dispatchers that can no longer be trusted, marked once.
             let dispatchers: Vec<DispatcherRecord> =

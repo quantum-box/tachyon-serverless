@@ -249,6 +249,7 @@ impl Application {
                     outputs_purged = report.outputs_purged,
                     "state store opened"
                 );
+                crate::failpoints::install_store_freeze(&sqlite, config.profile);
                 let sqlite = Arc::new(sqlite);
                 durable_ledger = Some(sqlite.clone());
                 sqlite
@@ -379,6 +380,7 @@ impl Application {
             provider.clone(),
             clock.clone(),
             dispatcher.clone(),
+            metered_sink.clone(),
         ));
         // The pool gets the usage sink because it, not the driver, is what
         // ends a pooled environment's life (TTL sweep, drain, retire) and

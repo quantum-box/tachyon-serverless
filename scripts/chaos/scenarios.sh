@@ -14,6 +14,7 @@ async_kill_after_claim
 async_kill_before_commit
 async_kill_after_commit_before_ack
 stale_owner_sync_lease
+stale_owner_frozen_in_transaction
 stale_owner_async_claim
 db_locked_within_lease
 db_locked_past_lease
@@ -42,6 +43,7 @@ scenario_fault() {
     async_kill_before_commit) echo "SIGKILL at failpoint dispatch.before_commit (side effect done, outcome not committed)" ;;
     async_kill_after_commit_before_ack) echo "SIGKILL at failpoint dispatch.after_commit (terminal committed, message not ACKed)" ;;
     stale_owner_sync_lease) echo "SIGSTOP gateway A holding a sync slot lease past expiry; B on the same data_dir reclaims; SIGCONT A" ;;
+    stale_owner_frozen_in_transaction) echo "gateway A stops itself (SIGSTOP) between BEGIN IMMEDIATE and COMMIT of a state.db write, past both leases; B on the same data_dir; SIGCONT A" ;;
     stale_owner_async_claim) echo "SIGSTOP gateway A holding an async claim past expiry; B on the same data_dir retries; SIGCONT A" ;;
     db_locked_within_lease) echo "state.db write-locked (BEGIN EXCLUSIVE from another process) for 20 s < dispatcher lease 60 s" ;;
     db_locked_past_lease) echo "state.db write-locked for 12 s > dispatcher lease 6 s + skew" ;;
@@ -295,7 +297,7 @@ scenario_async_kill_after_commit_before_ack() { async_failpoint async_kill_after
 # ---------------------------------------------------------------------------
 
 scenario_stale_owner_sync_lease() {
-  # Firecracker: environments ended first by another path report `unknown` host usage (lib.sh cv_usage).
+  # Firecracker: an environment nobody could sample before it ended reports `unknown` (lib.sh cv_usage).
   CH_CGROUP_UNKNOWN_OK=1
   sc_begin stale_owner_sync_lease "$(scenario_fault stale_owner_sync_lease)"
   common_start
@@ -359,6 +361,111 @@ print(int((p(r) - p(e)).total_seconds() * 1000))' "$lease_row" 2>/dev/null || ec
   wait_until 30 test -s "$WORK/long.code" || true
   obs_s client.a_answer_to_the_stale_invocation "$(cat "$WORK/long.code" 2>/dev/null) $(jq -c '.error | {code, error_type}' "$WORK/long.out" 2>/dev/null || true)"
   # Operations restart the fenced gateway (ADR-0003: no re-registration).
+  gw_stop a TERM
+  gw_start a
+  gw_wait_ready a 60
+  mark_recovered
+  wl_steady a 1 post-a
+  steady_checks 1
+  gw_stop b TERM
+  common_finish a
+}
+
+# The KVM final run's stale_owner_sync_lease failure made deterministic (PLT-4646): a SIGSTOP that
+# lands inside a state.db write transaction. A's TSLS_STORE_FREEZE_FLAG failpoint (failpoints build,
+# dev profile) stops A at its next write transaction once the flag file exists. Nothing can take the
+# SQLite write lock back, so B cannot write while A is stopped, and both leases pass. After SIGCONT:
+# B, which kept trying (no stall of its own), takes back the lease nobody reclaimed and reclaims A;
+# A, which was stopped, gets its expired lease refused, is fenced and reclaims nobody.
+scenario_stale_owner_frozen_in_transaction() {
+  CH_CGROUP_UNKNOWN_OK=1
+  sc_begin stale_owner_frozen_in_transaction "$(scenario_fault stale_owner_frozen_in_transaction)"
+  nats_up
+  gw_config a "$(free_port)" chaos-a
+  gw_start a "" TSLS_STORE_FREEZE_FLAG="$WORK/freeze-a"
+  gw_wait_ready a 60
+  wl_setup a 1 1
+  gw_config b "$(free_port)" chaos-b
+  gw_start b
+  gw_wait_ready b 60
+  wl_steady a 1 pre-a
+  wl_steady b 1 pre-b
+  cron_disable a
+  local a_id b_id url inv env_id pid state site
+  a_id="$(curl -s "$(gw_url a)/readyz" | jq -r .dispatcher.id)"
+  b_id="$(curl -s "$(gw_url b)/readyz" | jq -r .dispatcher.id)"
+  url="$(gw_url a)"
+  printf '{"seconds":15}' >"$WORK/long.json"
+  curl -s -o "$WORK/long.out" -w '%{http_code}' --max-time 120 -X POST -H "authorization: Bearer $TOKEN" \
+    -H 'content-type: application/json' --data-binary "@$WORK/long.json" \
+    "$url/v1/functions/$F_BURN/invoke" >"$WORK/long.code" 2>/dev/null &
+  wait_until 30 nonempty running_of "$F_BURN"
+  inv="$(running_of "$F_BURN" | head -n 1)"
+  env_id="$(env_of_invocation "$inv")"
+  ck setup.a_owns_the_running_invocation "$([ "$(sql "SELECT owner_id FROM invocations WHERE id = '$inv'")" = "$a_id" ] && echo 0 || echo 1)" "invocation=$inv a=$a_id env=$env_id"
+  pid="$(gw_pid a)"
+  mark_injected
+  : >"$WORK/freeze-a"
+  # A's next write transaction (heartbeat every second) stops the process.
+  a_stopped() { case "$(ps -o stat= -p "$pid" 2>/dev/null)" in T*) return 0 ;; *) return 1 ;; esac; }
+  wait_until 20 a_stopped || true
+  state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+  site="$(grep -o '"site":"[^"]*"' "$WORK/gateway-a.log" | tail -n 1)"
+  ck fault.a_stopped_inside_a_write_transaction "$(a_stopped && [ ! -e "$WORK/freeze-a" ] && [ -n "$site" ] && echo 0 || echo 1)" \
+    "ps stat=$state flag consumed=$([ -e "$WORK/freeze-a" ] && echo no || echo yes) $site"
+  # While A holds the write lock, a sync invoke on B. Each store call is bounded (~10 s), the request
+  # as a whole is not (docs/failure-matrix.md §6.2 「store lock 中の要求の総遅延」): recorded, not judged.
+  local t0 b_ms
+  t0="$(now_ms)"
+  API_MAX_TIME=20 wl_sync b "$F_HELLO" '{}'
+  b_ms=$(( $(now_ms) - t0 ))
+  obs_s outage.b_sync_while_a_frozen "code=$HTTP_CODE error_type=$(jqb '.error.error_type // "-"') after=${b_ms}ms (client max 20 s)"
+  # Both leases (6 s + 0.5 s skew) pass while A stays stopped.
+  sleep 15
+  ck outage.nobody_reclaimed_while_the_store_was_locked "$([ -z "$(sql "SELECT reclaimed_at FROM dispatchers WHERE id IN ('$a_id', '$b_id') AND reclaimed_at IS NOT NULL")" ] && echo 0 || echo 1)" \
+    "reclaimed rows: $(sql "SELECT id || '=' || reclaimed_at FROM dispatchers WHERE reclaimed_at IS NOT NULL AND id IN ('$a_id', '$b_id')" | paste -sd, -)"
+  mark_restored
+  gw_signal a CONT
+  # B reclaims A; A fences itself. A's handler kept its (15 s) course while A was stopped: if A's
+  # completion reaches the store before B's reclaim, it is accepted (nobody had reclaimed the lease
+  # yet, the answer is real); otherwise B settles the invocation as outcome_unknown. Either way it is
+  # settled exactly once and never overwritten afterwards.
+  wait_until 45 sh -c "[ \"\$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT terminal FROM invocations WHERE id = ?\", (sys.argv[2],)).fetchone()[0])' '$WORK/data/state.db' '$inv')\" = 1 ]" || true
+  local s_after
+  sleep 2
+  s_after="$(api_status b "$inv")"
+  obs_s reclaim.invocation_settled_as "$s_after"
+  ck reclaim.invocation_settled_once "$({ [ "$s_after" = "outcome_unknown Host.LeaseExpired" ] || [ "$s_after" = "succeeded -" ]; } && echo 0 || echo 1)" "status=$s_after"
+  local settled_digest
+  settled_digest="$(inv_digest "$inv")"
+  ck reclaim.b_reclaimed_a_not_the_other_way "$([ -n "$(sql "SELECT reclaimed_at FROM dispatchers WHERE id = '$a_id'")" ] && [ -z "$(sql "SELECT reclaimed_at FROM dispatchers WHERE id = '$b_id'")" ] && echo 0 || echo 1)" \
+    "a.reclaimed_at=$(sql "SELECT COALESCE(reclaimed_at, '-') FROM dispatchers WHERE id = '$a_id'") b.reclaimed_at=$(sql "SELECT COALESCE(reclaimed_at, '-') FROM dispatchers WHERE id = '$b_id'")"
+  # B kept running, so it either renewed in time or took its lease back once the
+  # store answered (the renewal log). Never fenced, never reclaimed.
+  obs_s lease.b_took_its_lease_back "$(grep -c 'dispatcher lease renewed after the store was unavailable' "$WORK/gateway-b.log") renewals after the outage"
+  ck lease.b_is_not_fenced "$([ "$(readyz_field b .dispatcher.fenced)" = false ] && [ -z "$(sql "SELECT reclaimed_at FROM dispatchers WHERE id = '$b_id'")" ] && echo 0 || echo 1)" \
+    "b fenced=$(readyz_field b .dispatcher.fenced) reclaimed_at=$(sql "SELECT COALESCE(reclaimed_at, '-') FROM dispatchers WHERE id = '$b_id'") renewal log=$(grep -c 'dispatcher lease renewed after the store was unavailable' "$WORK/gateway-b.log")"
+  wait_eq 15 503 readyz_code a || true
+  ck fencing.a_is_fenced "$(curl -s "$(gw_url a)/readyz" | jq -e '.dispatcher.fenced == true' >/dev/null && echo 0 || echo 1)" \
+    "readyz=$(readyz_code a) fenced=$(readyz_field a .dispatcher.fenced) stall log=$(grep -c 'this process was not running for a while' "$WORK/gateway-a.log")"
+  wait_eq 30 0 nlines procs_of_env "$env_id" || true
+  wait_eq 30 1 sql "SELECT terminal FROM environments WHERE id = '$env_id'" || true
+  ck reclaim.fenced_environment_terminated "$([ "$(procs_of_env "$env_id" | wc -l | tr -d ' ')" = 0 ] && [ "$(sql "SELECT terminal FROM environments WHERE id = '$env_id'")" = 1 ] && echo 0 || echo 1)" \
+    "env=$env_id state=$(sql "SELECT state FROM environments WHERE id = '$env_id'")"
+  local deadline=$((SECONDS + 30))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    wl_sync b "$F_HELLO" '{}'
+    [ "$HTTP_CODE" = 200 ] && break
+    sleep 0.5
+  done
+  ck fencing.b_keeps_serving "$([ "$HTTP_CODE" = 200 ] && echo 0 || echo 1)" "code=$HTTP_CODE"
+  wl_sync a "$F_HELLO" '{}'
+  ck fencing.a_refuses_new_invocations "$([ "$HTTP_CODE" = 503 ] && echo 0 || echo 1)" "code=$HTTP_CODE"
+  ck fencing.settled_invocation_not_overwritten "$([ "$(inv_digest "$inv")" = "$settled_digest" ] && echo 0 || echo 1)" \
+    "invocation $settled_digest -> $(inv_digest "$inv")"
+  obs_s store.slow_write_transactions_a "$(grep -o '"message":"state.db write transaction held[^}]*' "$WORK/gateway-a.log" | grep -o '"site":"[^"]*","held_ms":[0-9]*' | tail -n 3 | paste -sd' ' -)"
+  wait_until 30 test -s "$WORK/long.code" || true
+  obs_s client.a_answer_to_the_stale_invocation "$(cat "$WORK/long.code" 2>/dev/null)"
   gw_stop a TERM
   gw_start a
   gw_wait_ready a 60
@@ -487,9 +594,11 @@ db_locked() { # db_locked ID SECONDS REQUIRE_503 EXPECT(serve|fenced)
   obs_s outage.readyz "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$(gw_url a)/readyz")"
   wait "$LOCK_PID" 2>/dev/null || true
   mark_restored
-  # Recovery: within the lease the gateway serves again without a restart. Past the lease
-  # (+ skew) its heartbeat renewal is refused and it fences itself (ADR-0003 PLT-4631 choice 5:
-  # no re-registration): only a restart brings it back. That is recorded, not hidden.
+  # Recovery: the gateway serves again without a restart, within the lease and past it. Past the
+  # lease (+ skew) nobody reclaimed it and it kept retrying its heartbeat through the outage, so the
+  # first renewal the store answers takes the lease back (SlotStore::renew_after_store_outage,
+  # ADR-0003 「store が止まった間の lease」, PLT-4646). Before that change it fenced itself and needed
+  # a restart; `fenced` is kept for a scenario that expects that.
   local deadline=$((SECONDS + 30)) ok=0
   while [ "$SECONDS" -lt "$deadline" ]; do
     wl_sync a "$F_HELLO" '{}'
@@ -534,7 +643,7 @@ db_locked() { # db_locked ID SECONDS REQUIRE_503 EXPECT(serve|fenced)
 }
 
 scenario_db_locked_within_lease() { CH_LEASE_TTL=60 CH_HEARTBEAT=5 db_locked db_locked_within_lease 20 1 serve; }
-scenario_db_locked_past_lease() { db_locked db_locked_past_lease 12 0 fenced; }
+scenario_db_locked_past_lease() { db_locked db_locked_past_lease 12 0 serve; }
 
 # ---------------------------------------------------------------------------
 # 5. broker stopped
@@ -942,7 +1051,7 @@ scenario_control_plane_outage() {
 # ---------------------------------------------------------------------------
 
 scenario_orphan_recovery_after_crash() {
-  # Firecracker: environments ended first by another path report `unknown` host usage (lib.sh cv_usage).
+  # Firecracker: an environment nobody could sample before it ended reports `unknown` (lib.sh cv_usage).
   CH_CGROUP_UNKNOWN_OK=1
   CH_MAX_PENDING=100
   # The orphan object must still be there at the crash.

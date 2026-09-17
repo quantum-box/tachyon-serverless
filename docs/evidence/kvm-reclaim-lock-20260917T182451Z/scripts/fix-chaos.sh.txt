@@ -1,0 +1,31 @@
+#!/bin/bash
+# Inside the Lima VM: run the Firecracker chaos subset once. Usage: fix-chaos.sh RUN_NAME [ONLY]
+set -uo pipefail
+source ~/.cargo/env 2>/dev/null || true
+export PATH="$HOME/.cargo/bin:$PATH"
+RUN="$1"
+ONLY="${2:-stale_owner_sync_lease,stale_owner_frozen_in_transaction,sync_gateway_kill,orphan_recovery_after_crash}"
+OUT=~/verify/reclaim-lock/$RUN
+mkdir -p ~/w "$OUT"
+sudo rm -rf "$OUT/matrix"
+sudo chmod 666 /dev/kvm
+cd ~/tsls
+C="$(cat .kvm/vm/commit.txt 2>/dev/null)"
+{ echo "== before $(date -u +%FT%TZ)"; uptime; df -h / | tail -1; } >> "$OUT/host.txt"
+sudo -n env PATH="$PATH" HOME="$HOME" TMPDIR="$HOME/w" CHAOS_TMP="$HOME/w" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 TSLS_COMMIT="$C" \
+  bash scripts/chaos/matrix.sh --only "$ONLY" --retries 0 --evidence "$OUT/matrix" > "$OUT/stdout.txt" 2>&1
+rc=$?
+{
+  echo "matrix exit=$rc commit=$C"
+  echo "== after $(date -u +%FT%TZ)"; uptime; df -h / | tail -1
+  echo "-- processes"; pgrep -a -f '(^|/)(firecracker|jailer|tachyon-serverless-gateway|nats-server)( |$)|effects-store.py' | grep -v pgrep || echo none
+  echo "-- cgroups"; find /sys/fs/cgroup/tachyon -mindepth 1 -maxdepth 1 -type d 2>/dev/null; echo "(end)"
+  echo "-- jails"; sudo find /srv/jailer -mindepth 1 -maxdepth 2 2>/dev/null; echo "(end)"
+  echo "-- taps"; ip -br link | awk '$1 ~ /^(tsls|effx)/'; echo "(end)"
+  echo "-- netns"; ip netns list; echo "(end)"
+  echo "-- nft"; sudo nft list tables
+  echo "-- ip_forward=$(sysctl -n net.ipv4.ip_forward)"
+} >> "$OUT/host.txt" 2>&1
+sudo chown -R "$(id -u):$(id -g)" "$OUT"
+cat "$OUT/matrix/summary.md" 2>/dev/null
+echo "CHAOS-DONE rc=$rc"

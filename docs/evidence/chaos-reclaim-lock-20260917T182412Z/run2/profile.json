@@ -1,0 +1,32 @@
+{
+  "stamp": "20260917T182735Z",
+  "commit": "f588b4b19d17021ffa4e213279be8e4263c6a186",
+  "uncommitted_files": 0,
+  "os": "Darwin 25.6.0 arm64",
+  "os_version": "26.6.2",
+  "cpus": "10",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "nats_server": "v2.14.7 (nats-server: v2.14.7)",
+  "bash": "3.2.57(1)-release",
+  "python_sqlite": "3.51.0",
+  "provider": "process (dev-only, no isolation)",
+  "build": "debug gateway with --features failpoints",
+  "gateway_sha256": "c684df9b42c31f2c7aefef747865b628dfac15a4b57f7a3577e671424f628a4a",
+  "harness_sha256": {
+    "lib": "230fc0ae53a0896187d3b2a7c50b5d0c0f51622253f8699d561d41abed9d7892",
+    "scenarios": "d9e6c983c03b9ee1abb46dd4ee9eef9b2249682f42213ddd6cafb109f6bf14bb"
+  },
+  "config_digest_note": "each attempt stores its gateway configuration (secret redacted) next to its result; results carry their sha256",
+  "scenarios": [
+    "baseline",
+    "sync_gateway_kill",
+    "stale_owner_sync_lease",
+    "stale_owner_frozen_in_transaction",
+    "db_locked_within_lease",
+    "db_locked_past_lease",
+    "orphan_recovery_after_crash"
+  ],
+  "retries": 0,
+  "seeds": "none: scenarios use fixed timings; secrets and keys are random per scenario",
+  "scope": "single host; not evidence of multi-host HA"
+}

@@ -466,6 +466,26 @@ impl ExecutionLease {
         Ok(())
     }
 
+    /// Renew a lease whose expiry may already have passed, for an owner that
+    /// could not reach the store while it did (PLT-4646, docs/adr/0003
+    /// 「store が止まった間の lease」). Only the store may call this, in the
+    /// same transaction that checks that nobody reclaimed the owner: a reclaim
+    /// always releases the leases it takes, so an unreleased lease is one
+    /// nobody took. The expiry never moves backwards.
+    pub fn revive(&mut self, now: Timestamp, ttl: chrono::Duration) -> Result<(), DomainError> {
+        if self.released_at.is_some() {
+            return Err(DomainError::Terminal {
+                entity: "ExecutionLease",
+                state: "released".into(),
+            });
+        }
+        let next = now + ttl;
+        if self.expires_at.is_none_or(|e| next > e) {
+            self.expires_at = Some(next);
+        }
+        Ok(())
+    }
+
     pub fn release(&mut self, now: Timestamp) -> Result<(), DomainError> {
         if self.released_at.is_some() {
             return Err(DomainError::Terminal {

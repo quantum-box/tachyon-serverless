@@ -135,6 +135,56 @@ fn settle_invocation<Q: Queryable>(
     Ok(())
 }
 
+impl TidbStore {
+    /// [`SlotStore::heartbeat`] (`revive = false`) and
+    /// [`SlotStore::renew_after_store_outage`] (`revive = true`).
+    fn renew_dispatcher(
+        &self,
+        id: &DispatcherId,
+        ttl: chrono::Duration,
+        now: Timestamp,
+        revive: bool,
+    ) -> Result<HeartbeatOutcome, RepoError> {
+        self.write(|tx| {
+            let Some(mut d) = get_dispatcher(tx, id, true)? else {
+                return Ok(HeartbeatOutcome::Fenced);
+            };
+            if !d.is_live() || (!revive && now >= d.lease_expires_at) {
+                return Ok(HeartbeatOutcome::Fenced);
+            }
+            d.heartbeat_at = now;
+            d.lease_expires_at = d.lease_expires_at.max(now + ttl);
+            let n = exec_count(
+                tx,
+                "UPDATE dispatchers SET lease_expires_at = ?, body = ? \
+                 WHERE id = ? AND stopped_at IS NULL AND reclaimed_at IS NULL",
+                p![ts(&d.lease_expires_at), to_json(&d)?, id.as_str()],
+            )?;
+            if n != 1 {
+                return Ok(HeartbeatOutcome::Fenced);
+            }
+            let leases: Vec<ExecutionLease> = bodies(
+                tx,
+                "SELECT body FROM leases WHERE owner_id = ? AND released = 0 ORDER BY id \
+                 FOR UPDATE",
+                p![id.as_str()],
+            )?;
+            let mut renewed = 0;
+            for mut lease in leases {
+                let ok = match revive {
+                    true => lease.revive(now, ttl).is_ok(),
+                    false => lease.renew(now, ttl).is_ok(),
+                };
+                if ok {
+                    write_lease_row(tx, &lease, false)?;
+                    renewed += 1;
+                }
+            }
+            Ok(HeartbeatOutcome::Renewed { leases: renewed })
+        })
+    }
+}
+
 impl SlotStore for TidbStore {
     fn register_dispatcher(&self, record: DispatcherRecord) -> Result<(), RepoError> {
         self.write(|tx| {
@@ -175,39 +225,16 @@ impl SlotStore for TidbStore {
         ttl: chrono::Duration,
         now: Timestamp,
     ) -> Result<HeartbeatOutcome, RepoError> {
-        self.write(|tx| {
-            let Some(mut d) = get_dispatcher(tx, id, true)? else {
-                return Ok(HeartbeatOutcome::Fenced);
-            };
-            if !d.is_live() || now >= d.lease_expires_at {
-                return Ok(HeartbeatOutcome::Fenced);
-            }
-            d.heartbeat_at = now;
-            d.lease_expires_at = d.lease_expires_at.max(now + ttl);
-            let n = exec_count(
-                tx,
-                "UPDATE dispatchers SET lease_expires_at = ?, body = ? \
-                 WHERE id = ? AND stopped_at IS NULL AND reclaimed_at IS NULL",
-                p![ts(&d.lease_expires_at), to_json(&d)?, id.as_str()],
-            )?;
-            if n != 1 {
-                return Ok(HeartbeatOutcome::Fenced);
-            }
-            let leases: Vec<ExecutionLease> = bodies(
-                tx,
-                "SELECT body FROM leases WHERE owner_id = ? AND released = 0 ORDER BY id \
-                 FOR UPDATE",
-                p![id.as_str()],
-            )?;
-            let mut renewed = 0;
-            for mut lease in leases {
-                if lease.renew(now, ttl).is_ok() {
-                    write_lease_row(tx, &lease, false)?;
-                    renewed += 1;
-                }
-            }
-            Ok(HeartbeatOutcome::Renewed { leases: renewed })
-        })
+        self.renew_dispatcher(id, ttl, now, false)
+    }
+
+    fn renew_after_store_outage(
+        &self,
+        id: &DispatcherId,
+        ttl: chrono::Duration,
+        now: Timestamp,
+    ) -> Result<HeartbeatOutcome, RepoError> {
+        self.renew_dispatcher(id, ttl, now, true)
     }
 
     fn stop_dispatcher(&self, id: &DispatcherId, now: Timestamp) -> Result<(), RepoError> {
@@ -541,6 +568,13 @@ impl SlotStore for TidbStore {
             } = &request;
             let now = *now;
             let mut report = ReclaimReport::default();
+
+            // 0. Only a reclaimer that still holds its own lease reclaims.
+            if !get_dispatcher(tx, reclaimer, true)?
+                .is_some_and(|d| d.is_live() && now < d.lease_expires_at)
+            {
+                return Ok(report);
+            }
 
             // 1. Dispatchers, locked: concurrent reclaimers queue here.
             let dispatchers: Vec<DispatcherRecord> = bodies(

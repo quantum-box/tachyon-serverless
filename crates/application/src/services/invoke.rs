@@ -36,9 +36,10 @@ use tokio::sync::watch;
 use tachyon_serverless_domain::{
     AliasName, AttemptId, AttemptKind, Clock, Deadlines, EnvironmentId, ErrorClass, EventKind,
     ExecutionEnvironment, ExecutionLease, Function, FunctionId, FunctionRevision, IdGenerator,
-    Invocation, InvocationAttempt, InvocationError, InvocationId, InvocationMode, LeaseId, Limits,
-    LogPhase, Metered, PayloadRef, ResourceProfile, ReuseKey, RevisionId, Sha256Digest, StartKind,
-    Timestamp, UsageBytes, UsageEvent, UsageEventType, UsageOutcome, UsageResources, UsageSegments,
+    Invocation, InvocationAttempt, InvocationError, InvocationId, InvocationMode, LeaseId,
+    LifetimeSource, Limits, LogPhase, Metered, PayloadRef, ResourceProfile, ReuseKey, RevisionId,
+    Sha256Digest, StartKind, StoppedBy, Timestamp, UsageBytes, UsageEvent, UsageEventType,
+    UsageOutcome, UsageResources, UsageSegments, environment_stopped_event_id,
 };
 use tachyon_serverless_protocol::GuestErrorKind;
 use tachyon_serverless_provider_port::{
@@ -1388,6 +1389,11 @@ struct AttemptMeter {
     /// Admitted while the journal refused, under the dev-only
     /// `accept_unmetered` policy.
     unmetered: bool,
+    /// The provider's host sample of an environment, read just before this
+    /// driver terminated it on a path without its own sample (boot, init,
+    /// cancel and shutdown failures), for that environment's
+    /// `EnvironmentStopped`.
+    host_sample: Option<(EnvironmentId, EnvironmentStats)>,
 }
 
 impl AttemptMeter {
@@ -1522,15 +1528,30 @@ impl Driver {
     /// release the lease, fail the open attempt, mark the environment Failed
     /// and emit `EnvironmentStopped`, so destroy-after-invoke holds on every
     /// exit path (docs/threat-model.md T16).
+    /// Terminate an environment this driver owns, reading the provider's host
+    /// sample first, while the provider can still see it, so the
+    /// environment's single `EnvironmentStopped` carries what the host
+    /// measured instead of `unknown` (PLT-4642, docs/adr/0012).
+    async fn terminate_sampled(
+        &mut self,
+        env_id: &EnvironmentId,
+        reason: TerminateReason,
+    ) -> Result<tachyon_serverless_provider_port::TerminateReport, ProviderError> {
+        let provider = self.svc.provider.clone();
+        if let Some(sample) = sample_before_terminate(provider.as_ref(), env_id).await {
+            self.meter.host_sample = Some((env_id.clone(), sample));
+        }
+        provider.terminate_environment(env_id, reason).await
+    }
+
     async fn cleanup_after_panic(&mut self) {
         let Some(env_id) = self.env_id.take() else {
             return;
         };
         let svc = self.svc.clone();
         tracing::warn!(environment_id = %env_id, "terminating environment after a driver panic");
-        if let Err(e) = svc
-            .provider
-            .terminate_environment(&env_id, TerminateReason::Crashed)
+        if let Err(e) = self
+            .terminate_sampled(&env_id, TerminateReason::Crashed)
             .await
         {
             tracing::warn!(error = %e, environment_id = %env_id, "terminate after driver panic failed");
@@ -1665,7 +1686,7 @@ impl Driver {
     /// as cancelled and the invocation ends as `Timeout`
     /// (docs/threat-model.md §8).
     async fn stop_for_client_deadline(
-        &self,
+        &mut self,
         session: Option<&mut BridgeSession>,
         env: &mut ExecutionEnvironment,
         logs: &LogForwarder,
@@ -1681,9 +1702,7 @@ impl Driver {
         let _ = env.mark_stopped(self.now());
         self.save_env(env);
         let _ = self
-            .svc
-            .provider
-            .terminate_environment(&env.id, TerminateReason::Cancelled)
+            .terminate_sampled(&env.id, TerminateReason::Cancelled)
             .await;
         self.fail_invocation(InvocationError::new(
             ErrorClass::Timeout,
@@ -1734,8 +1753,15 @@ impl Driver {
         // collide with those of the invocation that ran on the same
         // environment before it — while re-sending the *same* event keeps
         // the same id, so the sink still de-duplicates it.
+        // An environment's stop has one id whoever reports it (the reclaimer
+        // of a fenced environment derives the same one), so the ledger keeps
+        // exactly one stop per environment (docs/adr/0012).
+        let stop = event_type == UsageEventType::EnvironmentStopped;
         let mut event = UsageEvent::new(
-            format!("{env}:{}:{sequence}", self.epoch),
+            match stop {
+                true => environment_stopped_event_id(env),
+                false => format!("{env}:{}:{sequence}", self.epoch),
+            },
             self.function.tenant_id.clone(),
             env.clone(),
             event_type,
@@ -1751,11 +1777,46 @@ impl Driver {
         event.revision_id = Some(self.revision.id.clone());
         event.epoch = self.epoch;
         event.boot_id = self.meter.boot_id.clone();
-        event.resources = usage_resources(resources, None);
+        event.resources = usage_resources(
+            resources,
+            self.meter
+                .host_sample
+                .as_ref()
+                .filter(|(id, _)| stop && id == env)
+                .map(|(_, sample)| sample),
+        );
+        if stop {
+            event.stopped_by = Some(StoppedBy::Owner);
+        }
         event
     }
 
     async fn record_usage(&self, mut event: UsageEvent) {
+        if event.event_type == UsageEventType::EnvironmentStopped {
+            event.lifetime_source = match event.monotonic_duration_ms {
+                Some(_) => LifetimeSource::LedgerOwnerClock,
+                None => LifetimeSource::Unknown,
+            };
+            // A reclaim fenced this environment while the driver was away (a
+            // frozen or partitioned owner): the reclaimer terminates it and
+            // reports its stop, sampled before its terminate. A late owner
+            // that measured nothing itself leaves that report alone instead
+            // of racing it with an `unknown` under the same id; one that did
+            // measure the VMM (it got there first) reports, and whichever
+            // reaches the journal first is the one the ledger keeps.
+            let measured = !event.resources.cgroup_cpu_usec.is_unknown()
+                || !event.resources.cgroup_memory_peak_bytes.is_unknown();
+            if !measured
+                && let Ok(Some(row)) = self.svc.repos.environments.get(&event.environment_id)
+                && row.is_fenced()
+            {
+                tracing::info!(
+                    environment_id = %event.environment_id,
+                    "environment fenced by a reclaim: its stop is reported by the reclaimer"
+                );
+                return;
+            }
+        }
         if self.meter.unmetered {
             // Admitted under `accept_unmetered` while the journal refused:
             // every quantity is unknown, so nothing of it is ever rated.
@@ -2169,9 +2230,8 @@ impl Driver {
                 "the function was deleted before the handler was dispatched; not starting it",
             );
             let _ = session.shutdown("function deleted").await;
-            let _ = svc
-                .provider
-                .terminate_environment(&env_id, TerminateReason::Cancelled)
+            let _ = self
+                .terminate_sampled(&env_id, TerminateReason::Cancelled)
                 .await;
             self.grant = None;
             let now = self.now();
@@ -2199,9 +2259,8 @@ impl Driver {
             let _ = session.shutdown("invocation missing").await;
             let _ = env.mark_failed("invocation record missing", self.now());
             self.save_env(&env);
-            let _ = svc
-                .provider
-                .terminate_environment(&env_id, TerminateReason::Crashed)
+            let _ = self
+                .terminate_sampled(&env_id, TerminateReason::Crashed)
                 .await;
             self.emit_environment_abandoned().await;
             return Attempted::Done(None);
@@ -2293,9 +2352,8 @@ impl Driver {
                     ),
                 );
                 let _ = session.shutdown("slot lost").await;
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::Crashed)
+                let _ = self
+                    .terminate_sampled(&env_id, TerminateReason::Crashed)
                     .await;
                 let _ = env.mark_failed("slot acquisition lost", self.now());
                 self.save_env(&env);
@@ -2944,9 +3002,8 @@ impl Driver {
             Err(session) => {
                 let mut session = *session;
                 let _ = session.shutdown("not pooled").await;
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::Completed)
+                let _ = self
+                    .terminate_sampled(&env_id, TerminateReason::Completed)
                     .await;
                 self.grant = None;
                 let now = self.now();
@@ -3331,7 +3388,7 @@ impl Driver {
             k = wait_cancel(&mut self.cancel_rx) => {
                 let _ = env.mark_stopped(self.now());
                 self.save_env(&env);
-                let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
+                let _ = self.terminate_sampled(&env_id, cancel_reason(k)).await;
                 self.fail_invocation(cancel_error(k, "during environment creation"));
                 return None;
             }
@@ -3346,9 +3403,8 @@ impl Driver {
                 }
                 let _ = env.mark_failed(format!("create failed: {e}"), self.now());
                 self.save_env(&env);
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::InitFailed)
+                let _ = self
+                    .terminate_sampled(&env_id, TerminateReason::InitFailed)
                     .await;
                 self.boot_failed();
                 let (class, error_type) = match &e {
@@ -3421,9 +3477,8 @@ impl Driver {
                 }
                 let _ = env.mark_failed(format!("handshake failed: {e}"), self.now());
                 self.save_env(&env);
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::InitFailed)
+                let _ = self
+                    .terminate_sampled(&env_id, TerminateReason::InitFailed)
                     .await;
                 self.boot_failed();
                 self.fail_invocation(InvocationError::new(
@@ -3454,7 +3509,7 @@ impl Driver {
                 let _ = session.shutdown("cancelled").await;
                 let _ = env.mark_stopped(self.now());
                 self.save_env(&env);
-                let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
+                let _ = self.terminate_sampled(&env_id, cancel_reason(k)).await;
                 self.fail_invocation(cancel_error(k, "during initialization"));
                 return None;
             }
@@ -3490,9 +3545,8 @@ impl Driver {
                 let _ = session.shutdown("init failed").await;
                 let _ = env.mark_failed(format!("init failed: {error_type}"), self.now());
                 self.save_env(&env);
-                let _ = svc
-                    .provider
-                    .terminate_environment(&env_id, TerminateReason::InitFailed)
+                let _ = self
+                    .terminate_sampled(&env_id, TerminateReason::InitFailed)
                     .await;
                 self.boot_failed();
                 self.fail_invocation(InvocationError::new(

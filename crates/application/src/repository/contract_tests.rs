@@ -255,6 +255,8 @@ contract!(
     reclaim_happens_once_fences_and_only_a_confirmed_terminate_settles,
     a_live_dispatcher_is_never_reclaimed_and_a_stopped_one_is_at_once,
     a_fenced_dispatcher_can_neither_renew_nor_acquire,
+    a_dispatcher_renews_after_a_store_outage_only_while_nobody_reclaimed_it,
+    a_reclaimer_without_its_own_lease_reclaims_nothing,
     idempotency_bindings_expire_after_their_invocation_finished,
     the_pool_only_hands_out_and_sweeps_its_owners_environments,
     only_an_exactly_matching_reuse_key_is_reused,
@@ -2144,4 +2146,107 @@ fn the_pool_only_hands_out_and_sweeps_its_owners_environments(make: fn(Limits) -
             .map(|e| e.id),
         Some(env.id)
     );
+}
+
+/// PLT-4646: a dispatcher whose heartbeats the store could not answer may take
+/// back its lease — and its unreleased slot leases — once the store answers,
+/// even though they passed meanwhile, but only while nobody reclaimed it. A
+/// reclaim and such a renewal are serialized by the store: whichever commits
+/// first wins, and the loser changes nothing.
+fn a_dispatcher_renews_after_a_store_outage_only_while_nobody_reclaimed_it(
+    make: fn(Limits) -> Store,
+) {
+    let s = make(Limits::default());
+    let ttl = Duration::seconds(10);
+    let reclaimer = fx::dispatcher(slots(&s), "reclaimer", 3600);
+
+    // Kept running through the outage: its lease and slot lease passed at
+    // 10 s; the ordinary heartbeat refuses, the post-outage renewal does not.
+    let owner = fx::dispatcher(slots(&s), "kept-running", 10);
+    let (env, inv) = ready_slot(&s, &owner);
+    let request = slot_request(&env, &inv, &owner, now(), 10);
+    let lease_id = request.lease.id.clone();
+    assert_eq!(
+        slots(&s).acquire(request).unwrap(),
+        AcquireOutcome::Acquired
+    );
+    assert_eq!(
+        slots(&s).heartbeat(&owner, ttl, at(15)).unwrap(),
+        HeartbeatOutcome::Fenced,
+        "the ordinary heartbeat never revives"
+    );
+    assert_eq!(
+        slots(&s)
+            .renew_after_store_outage(&owner, ttl, at(15))
+            .unwrap(),
+        HeartbeatOutcome::Renewed { leases: 1 }
+    );
+    let record = slots(&s).get_dispatcher(&owner).unwrap().unwrap();
+    assert_eq!(record.lease_expires_at, at(25));
+    let lease = slots(&s).get_lease(&lease_id).unwrap().unwrap();
+    assert_eq!(lease.expires_at, Some(at(25)));
+    assert!(lease.released_at.is_none());
+    // Renewed first: a reclaim right after sees a valid lease.
+    assert!(reclaim(&s, &reclaimer, at(16)).is_empty());
+
+    // Reclaimed first: the renewal after the outage is refused and changes
+    // nothing.
+    let late = fx::dispatcher(slots(&s), "reclaimed-first", 10);
+    assert_eq!(
+        reclaim(&s, &reclaimer, at(13)).dispatchers,
+        vec![late.clone()]
+    );
+    assert_eq!(
+        slots(&s)
+            .renew_after_store_outage(&late, ttl, at(14))
+            .unwrap(),
+        HeartbeatOutcome::Fenced
+    );
+    assert_eq!(
+        slots(&s)
+            .get_dispatcher(&late)
+            .unwrap()
+            .unwrap()
+            .lease_expires_at,
+        at(10)
+    );
+    let stopped = fx::dispatcher(slots(&s), "stopped", 3600);
+    slots(&s).stop_dispatcher(&stopped, at(1)).unwrap();
+    assert_eq!(
+        slots(&s)
+            .renew_after_store_outage(&stopped, ttl, at(2))
+            .unwrap(),
+        HeartbeatOutcome::Fenced
+    );
+}
+
+/// PLT-4646: a reclaimer that cannot prove its own lease reclaims nothing — a
+/// gateway frozen past its lease must not wake up and reclaim the ones that
+/// kept running while it was away.
+fn a_reclaimer_without_its_own_lease_reclaims_nothing(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let victim = fx::dispatcher(slots(&s), "victim", 5);
+    let expired = fx::dispatcher(slots(&s), "frozen-reclaimer", 5);
+    assert!(
+        reclaim(&s, &expired, at(20)).is_empty(),
+        "its own lease passed at 5 s"
+    );
+    let stopped = fx::dispatcher(slots(&s), "stopped-reclaimer", 3600);
+    slots(&s).stop_dispatcher(&stopped, at(1)).unwrap();
+    assert!(reclaim(&s, &stopped, at(20)).is_empty());
+    assert!(
+        reclaim(&s, &DispatcherId::generate(), at(20)).is_empty(),
+        "an unregistered reclaimer"
+    );
+    assert!(
+        slots(&s)
+            .get_dispatcher(&victim)
+            .unwrap()
+            .unwrap()
+            .reclaimed_at
+            .is_none()
+    );
+    let live = fx::dispatcher(slots(&s), "live-reclaimer", 3600);
+    let report = reclaim(&s, &live, at(20));
+    assert!(report.dispatchers.contains(&victim), "{report:?}");
 }

@@ -64,6 +64,7 @@ use tachyon_serverless_api_types::ReuseInfo;
 use tachyon_serverless_domain::{
     Clock, DispatcherId, EnvironmentId, ExecutionEnvironment, FunctionRevision, Metered, ReuseKey,
     RevisionId, Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType, UsageSegments,
+    environment_stopped_event_id,
 };
 use tachyon_serverless_provider_port::{
     Capabilities, ExecutionProvider, Support, TerminateReason, UsageSink,
@@ -1382,10 +1383,10 @@ impl EnvironmentPool {
     /// `monotonic_duration_ms` is [`environment_lifetime_ms`], the same
     /// host-observed span the driver reports for an environment it ends
     /// itself. `sequence` continues the environment's own event count, so the
-    /// stop event is the last number of its life. The id is
-    /// `<environment>:<epoch>:pool-stopped`, which never collides with the
-    /// driver's `<environment>:<epoch>:<sequence>` (a sequence is a number) and
-    /// is stable, so a re-send of the same event still de-duplicates.
+    /// stop event is the last number of its life. The id is the environment's
+    /// single stop id ([`environment_stopped_event_id`]), the one every other
+    /// path that could end it derives too, so the ledger keeps one stop per
+    /// environment whoever reports it first.
     async fn emit_stopped(
         &self,
         env: &ExecutionEnvironment,
@@ -1400,7 +1401,7 @@ impl EnvironmentPool {
             .map(|r| r.spec.resources)
             .unwrap_or_default();
         let mut event = UsageEvent::new(
-            format!("{}:{}:pool-stopped", env.id, env.epoch),
+            environment_stopped_event_id(&env.id),
             env.tenant_id.clone(),
             env.id.clone(),
             UsageEventType::EnvironmentStopped,
@@ -1416,6 +1417,8 @@ impl EnvironmentPool {
         event.boot_id = env.evidence.guest_boot_id.clone();
         event.segments = segments;
         event.resources = crate::services::invoke::usage_resources(&resources, host_sample);
+        event.stopped_by = Some(tachyon_serverless_domain::StoppedBy::Pool);
+        event.lifetime_source = tachyon_serverless_domain::LifetimeSource::LedgerOwnerClock;
         self.usage.record(event).await;
     }
 }
@@ -1923,6 +1926,14 @@ mod tests {
             now: Timestamp,
         ) -> Result<HeartbeatOutcome, RepoError> {
             self.inner.heartbeat(id, ttl, now)
+        }
+        fn renew_after_store_outage(
+            &self,
+            id: &DispatcherId,
+            ttl: chrono::Duration,
+            now: Timestamp,
+        ) -> Result<HeartbeatOutcome, RepoError> {
+            self.inner.renew_after_store_outage(id, ttl, now)
         }
         fn stop_dispatcher(&self, id: &DispatcherId, now: Timestamp) -> Result<(), RepoError> {
             self.inner.stop_dispatcher(id, now)
@@ -2620,7 +2631,7 @@ mod tests {
         assert_eq!(events[0].tenant_id, key.tenant_id);
         assert!(events[0].monotonic_duration_ms.is_some());
         assert!(
-            events[0].event_id.ends_with(":pool-stopped"),
+            events[0].event_id.ends_with(":environment-stopped"),
             "{}",
             events[0].event_id
         );

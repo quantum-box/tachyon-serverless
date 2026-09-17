@@ -6,8 +6,8 @@ Accepted（2026-09-17、PLT-4642）。**実請求はしない**。`[usage.billin
 
 実装:
 
-- event: `crates/domain/src/usage.rs`（`UsageEvent` schema v2、`Metered` / `Measurement`、`UsageSegments`、`UsageResources`、`UsageBytes`、`GuestReportedUsage`、`AttemptKind`、`UsageOutcome`）
-- 計測点: `crates/application/src/services/invoke.rs`（`AttemptMeter`、`emit_attempt_settled`、`emit_environment_abandoned`、`usage_resources`）、`crates/application/src/services/pool.rs`（`emit_stopped`、`PooledSession.pooled_at`、`WarmEnvironment.idle_ms`）
+- event: `crates/domain/src/usage.rs`（`UsageEvent` schema v2、`environment_stopped_event_id`・`StoppedBy`・`LifetimeSource`（§9）、`Metered` / `Measurement`、`UsageSegments`、`UsageResources`、`UsageBytes`、`GuestReportedUsage`、`AttemptKind`、`UsageOutcome`）
+- 計測点: `crates/application/src/services/invoke.rs`（`AttemptMeter`、`emit_attempt_settled`、`emit_environment_abandoned`、`terminate_sampled`、`usage_resources`）、`crates/application/src/services/pool.rs`（`emit_stopped`、`PooledSession.pooled_at`、`WarmEnvironment.idle_ms`）、reclaim と起動時 reconcile: `crates/application/src/services/{reconcile.rs, stopped.rs}`（§9）
 - host の resource 値: PLT-4637 の `ExecutionProvider::environment_stats`（`GET /metrics` と同じ読み取り口）を terminate の直前に 1 回読む（`crates/application/src/services/invoke.rs::{sample_before_terminate, usage_resources}`）。別の reader は足していない
 - metrics: `crates/application/src/metrics/{catalog.rs, render.rs}` の `tsls_usage_*`（`docs/metrics.md` §3）
 - journal: `crates/application/src/usage/journal.rs`（`UsageJournal`、`<data_dir>/usage/journal.db`）
@@ -45,7 +45,7 @@ v1 の field はそのまま残し（既存の履歴 API・試験が読む）、
 
 | field | 内容 |
 |---|---|
-| `event_id` | 決定的: `<environment>:<epoch>:<sequence>`（pool が終わらせた環境は `<environment>:<epoch>:pool-stopped`）。再送しても同じ id |
+| `event_id` | 決定的: `<environment>:<epoch>:<sequence>`。`EnvironmentStopped` だけは環境 id だけから作る `<environment>:environment-stopped`（§9。誰が出しても同じ id）。再送しても同じ id |
 | `tenant_id` / `function_id` / `revision_id` / `invocation_id` / `attempt_id` | 帰属。pre-start（`min_ready`）には invocation が無い |
 | `attempt_number` / `attempt_kind` | 台帳の attempt 番号と `first` / `retry`（今の retry は warm 環境に `Invoke` が届かなかったときの cold 1 回だけ。PLT-4640 の再配送もこの field で区別する） |
 | `outcome` | `succeeded` / `failed` / `timeout` / `cancelled` / `outcome_unknown`。完了の書き込みが fenced で拒否された attempt（他 dispatcher が回収）は `outcome_unknown` |
@@ -74,7 +74,7 @@ v1 の field はそのまま残し（既存の履歴 API・試験が読む）、
 | event | 出す所 | 役割 |
 |---|---|---|
 | `AttemptSettled`（新） | driver: attempt の後始末の後（terminate 済み、または pool に渡した直後）、`EnvironmentStopped` の前。warm dispatch 失敗の retire でも出す | **rating が課金対象として読む唯一の event** |
-| `EnvironmentStopped` | driver / pool（従来どおり環境 1 つに 1 回）。加えて、dispatch 前に終わった環境（boot・handshake・init の失敗、初期化中の cancel、dispatch 前の client deadline、slot 取得失敗、invocation 消失）でも出す（`emit_environment_abandoned`、attempt 無し・`outcome` 付き） | 原価（環境寿命、idle、teardown、cgroup CPU / memory） |
+| `EnvironmentStopped` | 環境 1 つに 1 回、終わらせた経路に関係なく: driver / pool、dispatch 前に終わった環境（boot・handshake・init の失敗、初期化中の cancel、dispatch 前の client deadline、slot 取得失敗、invocation 消失。`emit_environment_abandoned`、attempt 無し・`outcome` 付き）、**reclaim と起動時 reconcile**（§9） | 原価（環境寿命、idle、teardown、cgroup CPU / memory） |
 | `EnvironmentStarted` / `HandlerStarted` / `HandlerFinished` | 従来どおり | 監査用。合算しない（`AttemptSettled` と二重になるため） |
 
 `AttemptSettled` の sequence は pool に渡す前に予約する（`release_for` に `seq + 1` を渡す）ので、環境の sequence は pool をまたいでも単調のまま。
@@ -142,12 +142,29 @@ v1 の field はそのまま残し（既存の履歴 API・試験が読む）、
 
 `TSLS_USAGE_CRASH_POINT=collector.after_ledger_commit` は **`profile = "dev"` のときだけ**有効で、collector が ledger に commit した直後・cursor を進める前にプロセス自身へ `SIGKILL` を送る（E2E の B 段）。production profile では環境変数があっても何もしない。
 
+### 9. 回収された環境の計量（2026-09-18、KVM 最終検証の finding）
+
+KVM 最終検証（`docs/evidence/kvm-final-chaos-20260917T152228Z/`、`docs/failure-matrix.md` §8）で、死んだ / fence された owner の環境を reclaim・起動時 reconcile が終わらせると `EnvironmentStopped` が出ず、その microVM の寿命全体の host 原価が計上されないことが分かった（最終回で `sync_gateway_kill` 7 環境中 4、`orphan_recovery_after_crash` 14 中 6、`stale_owner_sync_lease` 11 中 4）。また、reclaim が先に terminate した fence 済み環境を旧 owner が遅れて確定した場合と、graceful shutdown で起動途中に放棄された環境は `unknown` だった。決定:
+
+1. **terminal になった環境はすべて、どの process・経路で終わっても `EnvironmentStopped` を 1 つだけ持つ**。経路は event の `stopped_by`（`owner` / `pool` / `reclaim` / `reconcile`）に記録する。
+   - reclaim（`ReconcileService::reclaim`）: fence 済み環境の provider terminate が成功した後、`confirm_terminated` で `Lost` にする**前に**出す。間で crash しても行は fence のまま残り、次の回が terminate をやり直して同じ id を出す（ledger が捨てる）。
+   - 起動時 reconcile（`ReconcileService::reconcile`）: host に残った孤児を terminate したとき、ledger に行があれば（terminal 済みの行、別 incarnation の行）出す。行が無い孤児は tenant が分からないので出せない（log に残す）。provider がもう知らない環境を `Lost` にしたときも出す（量はすべて `unknown`、寿命も `unknown`）。
+   - driver: 起動途中の失敗・cancel・shutdown で terminate する経路はすべて `terminate_sampled` を通り、terminate の直前に host sample を読む。
+2. **id は環境だけから作る**: `environment_stopped_event_id(env) = <environment>:environment-stopped`（`crates/domain/src/usage.rs`）。環境 id は 1 回しか発行されず、環境は 1 回しか終わらないので、epoch（reclaim が進める）も sequence（reclaimer には分からない）も要らない。旧 owner の遅れた確定と reclaimer の報告は同じ id になり、**ledger の主キーが 1 つだけ残す**（先に journal に入った方）。driver・pool の `EnvironmentStopped` も同じ id に揃えた（旧 `<env>:<epoch>:<seq>` と `<env>:<epoch>:pool-stopped` は使わない）。reclaimer の `sequence` は分からないので `STOP_SEQUENCE_UNKNOWN`（`i64::MAX`、ledger の `INTEGER` で最後に並ぶ）。
+3. **sample してから terminate**: 終わらせる側が provider の `environment_stats` を terminate の直前に読む。Firecracker は VMM cgroup（`/sys/fs/cgroup/<parent>/<env>`）が残っていれば、その VMM を起動した process でなくても読む（`crates/providers/firecracker/src/provider.rs::environment_stats`。以前は自 process の `running` 表にある環境だけ）。読めなかった量は `unknown` で、推定しない。process provider の sample は bridge だけなので従来どおり `unknown`。
+4. **遅れた旧 owner は、自分で測れなかったときは出さない**: driver が `EnvironmentStopped` を出す時点で ledger の行が fence 済み（reclaim が入った）で、自分の host sample が無い（cgroup がもう無い）なら出さず reclaimer の報告に任せる（`record_usage`）。自分で VMM を測れた場合（reclaimer の terminate より先に終わらせた）は出し、reclaimer の後の報告が重複になる。どちらの順でも ledger は 1 行で、測れた値があればそれが残る。完全に同時の競合（reclaimer が sample した直後に旧 owner が `unknown` で先に journal に入る）では `unknown` が残りうる（推定値にはならない）。
+5. **寿命は ledger の時刻**: `monotonic_duration_ms` は ledger の `created_at` から終わりを見た時刻まで（どの経路でも同じ量）。どの時計で終わりを読んだかを `lifetime_source` に記録する: `ledger_owner_clock`（作った dispatcher の時計）、`ledger_reclaimer_clock`（`created_at` は owner の時計、終わりは reclaimer の時計。差は最大 `max_clock_skew_ms`）、`unknown`（終わりを誰も見ていない）。rating は従来どおり読まない。
+6. **残る穴**: 所有者の無い行（dispatcher 導入前の P1 `state.json` import だけが作る）が store を開いたときの restart 規則で `Lost` になり、host にも残っていない場合は出ない（tenant は分かるが、誰も終わりを観測していない。PLT-4631 以降の gateway はこの行を作らない）。ledger に行の無い孤児も出ない。
+
+試験（fake provider、それぞれ host stats あり / なしの 2 通りで「ledger に 1 件、あれば `provider_reported`・無ければ `unknown`」を確認、`scripts/ci/security-regression.list` の `resource_limits`）: `crates/application/tests/reclaim_usage.rs::{a_reclaimed_environment_is_metered_once_by_the_reclaimer, a_fenced_environment_settled_late_by_its_old_owner_is_metered_once, two_reporters_of_one_stop_collide_on_the_event_id, the_startup_reconcile_meters_every_orphan_once, a_boot_abandoned_by_a_shutdown_is_metered_once}`。chaos matrix は全シナリオで `cv.every_terminal_environment_metered_once`（terminal な環境のうち stop event の無いもの 0）を検査する（`scripts/chaos/lib.sh::cv_usage`）。
+
 ## 結果（consequences）
 
 - 実行ごとに `AttemptSettled` と `EnvironmentStopped` の 2 行ほど（最大 5 行）の fsync が増える。process provider の E2E と application 試験で目立った遅延は無いが、Firecracker 上の latency 影響は**未計測**。
 - journal が満杯・停止すると新規 invoke が 503 になる（可用性より計測の正しさを取る）。collector が止まった gateway は `journal_max_events - admission_headroom_events` 件の event を書いたところで受付を止める。
 - 環境寿命（原価）は wall clock の差のまま。時計が飛ぶと原価の参考値は狂うが、利用量と仮料金は変わらない（試験 `wall_clock_skew_does_not_change_quantities`）。
-- warm 環境の idle は次に claim した attempt の `AttemptSettled` か pool の `EnvironmentStopped` に載る（二重には載らない）。pool から取り出した後 retire した環境の idle は `unknown`。
+- warm 環境の idle は次に claim した attempt の `AttemptSettled` か pool の `EnvironmentStopped` に載る（二重には載らない）。pool から取り出した後 retire した環境の idle は `unknown`。reclaim・reconcile が出す `EnvironmentStopped` は attempt・pool の区間を知らないので `teardown_ms`（自分で測った terminate）以外の区間は `unknown`。
+- reclaim / reconcile で終わった環境の host 原価も計上される（§9）。`EnvironmentStopped` の id が環境ごとに 1 つになったので、旧版（`<env>:<epoch>:<seq>` / `pool-stopped`）で既に ledger にある stop と、更新後に同じ環境を回収した stop は重複排除されない（更新をまたいで生き残った環境だけの一回きりの差）。
 - 非同期 invoke（PLT-4639）の受付は journal を見ない（まだ実行しない）。PLT-4640 の dispatcher は実行前に `UsageMeter::admit` を呼ぶこと。
 
 ## 検証
@@ -163,6 +180,7 @@ v1 の field はそのまま残し（既存の履歴 API・試験が読む）、
 | 丸め property | `usage::tests::property_charges_are_monotonic_in_the_quantity`、`property_per_invocation_ceil_never_undercounts_the_sum`、`property_line_split_is_bounded_and_totals_are_sums`、`rating_follows_the_documented_formula` |
 | guest 申告を使わない | `tests/usage.rs::guest_reported_times_never_reach_a_charge`、`usage::tests::unknown_and_guest_reported_segments_contribute_nothing_and_are_reported` |
 | 原価と価格の境界 | `tests/usage.rs::provider_reported_cgroup_usage_is_cost_not_price`、`a_failed_initialization_is_accounted_without_an_attempt` |
+| 回収・reconcile・遅れた旧 owner・shutdown 中の boot で終わった環境（§9） | `tests/reclaim_usage.rs::{a_reclaimed_environment_is_metered_once_by_the_reclaimer, a_fenced_environment_settled_late_by_its_old_owner_is_metered_once, two_reporters_of_one_stop_collide_on_the_event_id, the_startup_reconcile_meters_every_orphan_once, a_boot_abandoned_by_a_shutdown_is_metered_once}`、chaos の `cv.every_terminal_environment_metered_once` |
 | tenant 境界 | `tests/usage.rs::usage_reports_are_tenant_scoped`、`usage::tests::the_ledger_only_answers_for_the_callers_tenant`、gateway `usage_report_is_provisional_tenant_scoped_and_fails_closed`、E2E 9 |
 | 改竄 | `usage::tests::a_tampered_journal_row_stops_collection` |
 | 請求無効 | `usage::tests::billing_cannot_be_enabled_and_accept_unmetered_is_dev_only` |
@@ -173,7 +191,7 @@ v1 の field はそのまま残し（既存の履歴 API・試験が読む）、
 - 多重化 HTTP（1 環境で並列）の active 区間の和集合。今の実行は 1 環境 1 invocation なので重ならない。
 - durable stream（JetStream）経由の配送、regional ledger service、保持期間・archive。
 - 保存量（object store）の課金。
-- Firecracker 実機での cgroup CPU usec の検証（`environment_stats` を読む配線と fake での経路だけ。E2E は process provider）。
+- ~~Firecracker 実機での cgroup CPU usec の検証~~（KVM 最終検証で実施、`docs/evidence/kvm-final-usage-budget-20260917T151250Z/`）。
 
 ## 参照
 

@@ -14,6 +14,7 @@ pub mod provider;
 pub mod reconcile;
 pub mod revision;
 pub mod scaling;
+pub mod stopped;
 pub mod triggers;
 
 pub use admission::{AdmissionController, Grant, RejectReason, Rejection};

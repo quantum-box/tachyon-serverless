@@ -1,0 +1,57 @@
+Reclaimed-environment metering and the frozen state.db writer — Firecracker re-run (PLT-4642 / PLT-4646)
+
+host      Lima VM tsls-kvm (Apple M4 -> vz nested virtualization, aarch64, 4 vCPU / 8 GiB), root,
+          jailer + host cgroup required, warm pool on, CHAOS_TMP = $HOME/w
+command   sudo -n env ... TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 \
+            scripts/chaos/matrix.sh --only stale_owner_sync_lease,stale_owner_frozen_in_transaction,
+            sync_gateway_kill,orphan_recovery_after_crash --retries 0 --evidence <run>/matrix
+          (.kvm/fix-build.sh, .kvm/fix-chaos.sh of the branch fix/reclaim-metering-and-lock-stall)
+tree      f588b4b (see run*/matrix/profile.json)
+
+WHY: the KVM final batch (docs/evidence/kvm-final-chaos-20260917T152228Z/) left two product gaps:
+  (a) environments a reclaim / startup reconcile terminated got no EnvironmentStopped at all
+      (run3-final: 4 of 7, 6 of 14, 4 of 11), and fenced environments settled late by their old
+      owner, or abandoned while booting during a shutdown, reported `unknown` host usage;
+  (b) `stale_owner_sync_lease` failed: the SIGSTOPped gateway A held the state.db write lock, B
+      could not write for ~2.5 minutes and lost its own lease; on SIGCONT the woken A reclaimed B.
+
+RESULTS (3 runs x 4 scenarios, all first attempts)
+run   sync_gateway_kill  stale_owner_sync_lease  stale_owner_frozen_in_transaction  orphan_recovery
+run1  pass               pass                    pass                               pass
+run2  pass               pass                    pass                               pass
+run3  pass               pass                    pass                               pass
+
+(a) usage — every terminal environment is metered exactly once, whichever path ended it
+  usage.environments_without_stop_event = 0 in all 12 scenario runs (was 4/7, 6/14, 4/11 before).
+  cv.every_terminal_environment_metered_once passed in all 12 (new check, every provider).
+  Host usage of the VMM cgroup: 134 of 137 EnvironmentStopped events are provider_reported with
+  cpu usec > 0 and memory.peak > 0; 3 are `unknown` (environments nobody could sample before they
+  were gone). No value is ever invented (cv.usage_from_cgroup_accounting_or_unknown: other = 0).
+  Breakdown of one run's ledger (.kvm/peek-usage.sh): ('pool', provider_reported, owner clock) 3,
+  ('reclaim', provider_reported, reclaimer clock) 4 — the reclaim path now carries the cgroup numbers.
+
+(b) the frozen writer — new scenario `stale_owner_frozen_in_transaction`
+  A stops itself (SIGSTOP) *inside* a state.db write transaction with the TSLS_STORE_FREEZE_FLAG
+  failpoint (failpoints build, dev profile), 35.3 s, and the harness records where: all three runs
+    crates/application/src/repository/sqlite/triggers.rs:522 (the cron scheduler lease renewal)
+  While A is stopped nobody reclaims anybody (outage.nobody_reclaimed_while_the_store_was_locked).
+  After SIGCONT: B (which kept running) takes its lease back — `dispatcher lease renewed after the
+  store was unavailable`, lease.b_is_not_fenced ok, 1 renewal — and reclaims A; A detects its own
+  stall (`this process was not running for a while`), is fenced, refuses new invocations with 503
+  and reclaims nobody; the fenced environment is terminated and settled; B keeps serving 200; the
+  invocation is settled exactly once and never overwritten afterwards.
+  A's frozen transaction is reported by the store guard on resume:
+    "state.db write transaction held the database write lock for long" site=triggers.rs:522
+    held_ms = 35402 / 35394 / 35417 (run1 / run2 / run3).
+
+RESIDUAL (unchanged by this work, see docs/adr/0003 and docs/failure-matrix.md §6.2)
+  While a process is stopped inside a write transaction nothing can take the SQLite write lock
+  back: other gateways get 503 Host.StoreUnavailable per store call (~10 s bound), reads keep
+  working, and a request that makes several store calls can exceed that bound
+  (outage.b_sync_while_a_frozen: no answer within the 20 s client timeout in all three Firecracker
+  runs; on the process provider 503 Host.StoreUnavailable after 5.3 s in 2 of 3 runs and a 20 s
+  timeout in the third).
+
+CLEAN-UP after every run (run*/host.txt): no gateway / firecracker / jailer / nats process, no
+/sys/fs/cgroup/tachyon/*, no jail under /srv/jailer, no tsls* tap, no netns, nft only Lima's
+`table ip nat`, ip_forward 0, disk 39 %.

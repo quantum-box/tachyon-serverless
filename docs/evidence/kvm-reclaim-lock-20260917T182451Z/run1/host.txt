@@ -1,0 +1,20 @@
+== before 2026-09-17T18:24:12Z
+ 03:24:12 up 16:14,  1 user,  load average: 1.07, 1.20, 1.15
+/dev/vda1        38G   15G   24G  39% /
+matrix exit=0 commit=f588b4b19d17021ffa4e213279be8e4263c6a186
+== after 2026-09-17T18:28:03Z
+ 03:28:03 up 16:18,  1 user,  load average: 1.40, 1.36, 1.23
+/dev/vda1        38G   15G   24G  39% /
+-- processes
+none
+-- cgroups
+(end)
+-- jails
+(end)
+-- taps
+(end)
+-- netns
+(end)
+-- nft
+table ip nat
+-- ip_forward=0

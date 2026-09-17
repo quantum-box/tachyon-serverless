@@ -1,0 +1,136 @@
+listen = "127.0.0.1:43953"
+profile = "dev"
+data_dir = "/home/takanorifukuyama.guest/w/tsls-chaos.5wm8ZO/data"
+
+[provider]
+kind = "firecracker"
+
+[provider.firecracker]
+firecracker_binary = "/home/takanorifukuyama.guest/tsls/.kvm/bin/firecracker"
+kernel = "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux"
+rootfs = "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4"    # read-only base rootfs（/sbin/tachyon-init = runtime-bridge）
+workdir = "/home/takanorifukuyama.guest/w/tsls-chaos.5wm8ZO/data/fc"           # 環境ごとの API socket / vsock uds / function drive / log
+vsock_port = 5000
+
+# egress restricted / public-web（PLT-4622、docs/adr/0005-egress-profiles.md）。
+# 環境ごとに tap と nftables の chain（table inet tachyon_egress）を作るので、gateway を root
+# （または CAP_NET_ADMIN）で動かし、host の net.ipv4.ip_forward を 1 にしておく。満たさない host では
+# 2 つの capability が理由付きの unsupported になり、egress none だけが動く。省略時は下の既定値。
+# VMM の host 側 cgroup v2 上限（PLT-4622、docs/kvm.md §3.6）。環境ごとに
+# <root>/<parent>/<env_id> を作り、cpu.max = cpu_millis 相当（500m -> "50000 100000"、全 vCPU と
+# VMM の thread の合計）、memory.max = guest memory + memory_overhead_mib、pids.max を書いて読み戻し、
+# VMM を exec 前にその cgroup へ入れて cgroup.procs で所属を確認する。profile = "production" では
+# mode は required（省略時も required、best-effort / off は設定エラー）で、root の cgroup.procs に
+# 書けない host（gateway が root でない、委譲が無い）では preflight が失敗し環境の作成を拒否する。
+# dev profile の省略時は best-effort（使えなければ上限なしで起動し、capability を unverified にする）。
+[provider.firecracker.cgroup]
+mode = "required"
+# root = "/sys/fs/cgroup"        # cgroup v2 の root か、gateway に委譲された subtree
+# parent = "tachyon"
+# memory_overhead_mib = 64       # VMM 自身と drive の page cache の分
+# pids_max = 64
+
+# jailer（PLT-4622）。gateway を root で動かし、VMM を jailer 経由で起動する:
+# <chroot_base>/<firecracker のファイル名>/<instance id>/root に chroot、uid / gid へ降格、
+# mount / PID namespace を分離、Firecracker 既定の seccomp filter。kernel / rootfs / drive / fc.log は
+# chroot へ hard link するので chroot_base は workdir・kernel・rootfs と同じ file system に置く。
+# jailer は Firecracker と同じ release のもの（scripts/kvm/bootstrap.sh が .kvm/bin/jailer に置く）。
+[provider.firecracker.jailer]
+enabled = true
+binary = "/home/takanorifukuyama.guest/tsls/.kvm/bin/jailer"
+uid = 64000
+gid = 64000
+# chroot_base = "/srv/jailer"
+# new_pid_ns = true
+
+# [provider.firecracker.network]
+# guest_cidr = "172.30.0.0/16"   # 環境ごとの /30 を切り出す private 範囲
+# dns_resolver = "1.1.1.1"       # public-web の guest が問い合わせてよい唯一の DNS（公開アドレスのみ）
+# nft_binary = "nft"
+# ip_binary = "ip"
+
+[capacity]
+max_concurrency = 8
+max_queue = 32
+queue_timeout_seconds = 90
+
+[pool]
+enabled = true
+allow_unverified_idle = false
+idle_ttl_seconds = 300
+
+[limits]
+max_response_bytes = 65536
+
+[invoke]
+inline_output_max_bytes = 16384
+
+[dispatcher]
+instance = "chaos-b"
+lease_ttl_seconds = 6
+heartbeat_interval_seconds = 1
+max_clock_skew_ms = 500
+
+[[identity.tokens]]
+token = "chaos-token-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "chaos"
+roles = ["deploy", "invoke", "redrive"]
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+binding_ref = "chaos-secret"
+value = "<redacted>"
+
+[objects]
+backend = "filesystem"
+key_file = "/home/takanorifukuyama.guest/w/tsls-chaos.5wm8ZO/objects.key"
+orphan_grace_seconds = 6
+gc_interval_seconds = 2
+
+[invoke_async]
+inline_input_max_bytes = 1024
+max_pending_events = 1000
+claim_ttl_seconds = 3
+retry_initial_ms = 200
+retry_max_ms = 1000
+publish_interval_ms = 100
+
+[async_dispatch]
+workers = 2
+ack_wait_seconds = 4
+max_deliver = 1000
+fetch_wait_ms = 200
+claim_ttl_seconds = 4
+admission_wait_ms = 2000
+max_attempts = 3
+backoff_initial_ms = 300
+backoff_max_ms = 1000
+backoff_floor_ms = 100
+retry_budget = 0
+reaper_interval_seconds = 1
+stall_timeout_seconds = 60
+
+[usage]
+collect_interval_ms = 300
+collect_batch = 500
+journal_max_events = 100000
+admission_headroom_events = 1000
+
+[triggers]
+scheduler_interval_ms = 200
+grace_seconds = 1
+max_catchup_seconds = 600
+fire_retention_seconds = 3600
+webhook_max_body_bytes = 16384
+secret_key_file = "/home/takanorifukuyama.guest/w/tsls-chaos.5wm8ZO/triggers.key"
+
+[queue]
+backend = "nats"
+
+[queue.nats]
+url = "nats://127.0.0.1:33021"
+user = "gateway"
+password_file = "/home/takanorifukuyama.guest/w/tsls-chaos.5wm8ZO/nats/gateway.password"
+connect_timeout_ms = 2000
+request_timeout_ms = 2000

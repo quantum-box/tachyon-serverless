@@ -407,8 +407,11 @@ async fn a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced()
     let attempt = a.repos.invocations.attempts_of(&inv).unwrap()[0].clone();
     let env_id = attempt.environment_id.clone();
 
-    // B's clock is 31 s ahead: A's 30 s lease has passed by 1 s, which is
-    // within the 2 s skew B must tolerate. Nothing is reclaimed.
+    // B keeps renewing its own lease (a reclaimer without one reclaims
+    // nothing). B's clock is 31 s ahead: A's 30 s lease has passed by 1 s,
+    // which is within the 2 s skew B must tolerate. Nothing is reclaimed.
+    clock_b.set(epoch_start() + chrono::Duration::seconds(20));
+    assert_eq!(b.heartbeat(), HeartbeatOutcome::Renewed { leases: 0 });
     clock_b.set(epoch_start() + chrono::Duration::seconds(31));
     let early = b.reclaim_expired().await;
     assert_eq!((early.dispatchers, early.leases), (0, 0), "{early:?}");
@@ -622,6 +625,8 @@ async fn a_fenced_environment_stays_fenced_until_its_terminate_succeeds() {
     provider
         .failing
         .store(true, std::sync::atomic::Ordering::SeqCst);
+    clock_b.set(epoch_start() + chrono::Duration::seconds(20));
+    assert_eq!(b.heartbeat(), HeartbeatOutcome::Renewed { leases: 0 });
     clock_b.set(epoch_start() + chrono::Duration::seconds(40));
     for pass in 0..3 {
         let summary = b.reclaim_expired().await;

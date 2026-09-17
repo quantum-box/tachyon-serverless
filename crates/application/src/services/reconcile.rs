@@ -41,13 +41,17 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::Serialize;
 
-use tachyon_serverless_domain::{Clock, DispatcherId, EnvironmentId, ExecutionEnvironment};
+use tachyon_serverless_domain::{
+    Clock, DispatcherId, EnvironmentId, ExecutionEnvironment, StoppedBy,
+};
 use tachyon_serverless_provider_port::{
-    EnvironmentObservation, ExecutionProvider, TerminateReason,
+    EnvironmentObservation, ExecutionProvider, TerminateReason, UsageSink,
 };
 
 use crate::repository::Repositories;
 use crate::services::Dispatcher;
+use crate::services::invoke::sample_before_terminate;
+use crate::services::stopped::{ReclaimedStop, record_reclaimed_stop};
 
 /// Result of one reconcile pass. Also rendered by `GET /readyz`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -100,6 +104,9 @@ pub struct ReconcileService {
     provider: Arc<dyn ExecutionProvider>,
     clock: Arc<dyn Clock>,
     dispatcher: Arc<Dispatcher>,
+    /// Every environment a reclaim or this reconcile ends is metered here,
+    /// once (docs/adr/0012 「回収された環境の計量」).
+    usage: Arc<dyn UsageSink>,
     last: Mutex<Option<ReconcileReport>>,
 }
 
@@ -109,12 +116,14 @@ impl ReconcileService {
         provider: Arc<dyn ExecutionProvider>,
         clock: Arc<dyn Clock>,
         dispatcher: Arc<Dispatcher>,
+        usage: Arc<dyn UsageSink>,
     ) -> Self {
         Self {
             repos,
             provider,
             clock,
             dispatcher,
+            usage,
             last: Mutex::new(None),
         }
     }
@@ -142,12 +151,32 @@ impl ReconcileService {
             }
         };
         for env in fenced {
+            // Sampled while the provider can still see the VMM (on Firecracker
+            // its cgroup, whichever process started it).
+            let host_sample = sample_before_terminate(self.provider.as_ref(), &env.id).await;
+            let teardown_started = std::time::Instant::now();
             match self
                 .provider
                 .terminate_environment(&env.id, TerminateReason::Reconcile)
                 .await
             {
                 Ok(done) => {
+                    // Metered before the row is settled: a crash in between
+                    // leaves it fenced, the next pass terminates again and
+                    // emits the same event id, which the ledger drops.
+                    record_reclaimed_stop(
+                        &self.repos,
+                        self.usage.as_ref(),
+                        ReclaimedStop {
+                            env: &env,
+                            stopped_by: StoppedBy::Reclaim,
+                            host_sample,
+                            teardown: Some(teardown_started.elapsed()),
+                            ended_at: Some(self.clock.now()),
+                            now: self.clock.now(),
+                        },
+                    )
+                    .await;
                     match self
                         .repos
                         .slots
@@ -285,12 +314,44 @@ impl ReconcileService {
                 }
                 None => None,
             };
+            let host_sample = sample_before_terminate(self.provider.as_ref(), &id).await;
+            let teardown_started = std::time::Instant::now();
             match self
                 .provider
                 .terminate_environment(&id, TerminateReason::Reconcile)
                 .await
             {
                 Ok(done) => {
+                    // The ledger row, when there is one (a disowned row, or one
+                    // already terminal whose host process outlived it), is
+                    // metered once: a stop its driver already reported has
+                    // the same event id. Without a row there is no tenant to
+                    // meter against.
+                    let row = match &disowned {
+                        Some(env) => Some(env.clone()),
+                        None => self.repos.environments.get(&id).ok().flatten(),
+                    };
+                    match &row {
+                        Some(env) => {
+                            record_reclaimed_stop(
+                                &self.repos,
+                                self.usage.as_ref(),
+                                ReclaimedStop {
+                                    env,
+                                    stopped_by: StoppedBy::Reconcile,
+                                    host_sample,
+                                    teardown: Some(teardown_started.elapsed()),
+                                    ended_at: Some(self.clock.now()),
+                                    now: self.clock.now(),
+                                },
+                            )
+                            .await
+                        }
+                        None => tracing::warn!(
+                            environment_id = %id,
+                            "orphan without a ledger row: its host usage cannot be attributed"
+                        ),
+                    }
                     report.terminated += 1;
                     tracing::info!(
                         environment_id = %id,
@@ -317,8 +378,23 @@ impl ReconcileService {
             if seen.contains(&env.id) {
                 continue;
             }
-            if self.mark_lost(env, "provider no longer tracks this environment") {
+            if self.mark_lost(env.clone(), "provider no longer tracks this environment") {
                 report.lost += 1;
+                // Nobody saw it end and nothing is left to sample: the stop is
+                // recorded with every quantity unknown, never estimated.
+                record_reclaimed_stop(
+                    &self.repos,
+                    self.usage.as_ref(),
+                    ReclaimedStop {
+                        env: &env,
+                        stopped_by: StoppedBy::Reconcile,
+                        host_sample: None,
+                        teardown: None,
+                        ended_at: None,
+                        now: self.clock.now(),
+                    },
+                )
+                .await;
             }
         }
         self.finish(report)

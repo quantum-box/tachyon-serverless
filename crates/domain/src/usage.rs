@@ -279,6 +279,71 @@ pub enum WallClockSource {
     Unknown,
 }
 
+/// Which path ended the environment an `EnvironmentStopped` reports
+/// (docs/adr/0012 「回収された環境」). Every path emits the same event id
+/// ([`environment_stopped_event_id`]), so whichever reaches the journal first
+/// is the one the ledger keeps and a second attempt is a duplicate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoppedBy {
+    /// The dispatcher that drove it (the invoke driver).
+    Owner,
+    /// The pool of the dispatcher that owned it (TTL sweep, drain, retire).
+    Pool,
+    /// Another dispatcher (or the next incarnation of the owner) after the
+    /// owner lost its lease: fence, provider terminate, settle `Lost`.
+    Reclaim,
+    /// The startup reconcile: an orphan still running on the host, or an
+    /// environment the provider no longer tracks.
+    Reconcile,
+}
+
+impl StoppedBy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Owner => "owner",
+            Self::Pool => "pool",
+            Self::Reclaim => "reclaim",
+            Self::Reconcile => "reconcile",
+        }
+    }
+}
+
+/// Where [`UsageEvent::monotonic_duration_ms`] of an `EnvironmentStopped`
+/// came from. The lifetime is always the ledger's `created_at` to the moment
+/// the environment ended, i.e. the difference of two wall-clock readings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LifetimeSource {
+    /// `created_at` and the end were both read from the wall clock of the
+    /// dispatcher that created the environment.
+    LedgerOwnerClock,
+    /// `created_at` from the owner's wall clock, the end from the reclaiming
+    /// dispatcher's: the two may differ by up to `max_clock_skew_ms`.
+    LedgerReclaimerClock,
+    /// Not measured (the end was not observed, or an event written before
+    /// this field existed).
+    #[default]
+    Unknown,
+}
+
+/// The single id of an environment's `EnvironmentStopped`, whoever emits it.
+///
+/// An environment id is minted once and an environment ends once, so the id
+/// needs neither the epoch (a reclaim moves it) nor the sequence (a reclaimer
+/// cannot know it): an old owner that settles late and the dispatcher that
+/// reclaimed the environment derive the same id, and the ledger (primary key
+/// `event_id`) keeps exactly one of them.
+pub fn environment_stopped_event_id(environment_id: &EnvironmentId) -> String {
+    format!("{environment_id}:environment-stopped")
+}
+
+/// The `sequence` of an `EnvironmentStopped` written by a dispatcher that did
+/// not drive the environment and so cannot know how many events it had (a
+/// reclaim or the startup reconcile). The largest value the ledger's
+/// `INTEGER` column holds, so the stop still orders last.
+pub const STOP_SEQUENCE_UNKNOWN: u64 = i64::MAX as u64;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageEvent {
     /// Unique per event; duplicates (re-sends) must be de-duplicated by this id.
@@ -345,6 +410,12 @@ pub struct UsageEvent {
     pub bytes: UsageBytes,
     #[serde(default)]
     pub guest_reported: GuestReportedUsage,
+    /// `EnvironmentStopped` only: which path ended the environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_by: Option<StoppedBy>,
+    /// `EnvironmentStopped` only: where the lifetime came from.
+    #[serde(default)]
+    pub lifetime_source: LifetimeSource,
 }
 
 impl UsageEvent {
@@ -386,6 +457,8 @@ impl UsageEvent {
             resources: UsageResources::default(),
             bytes: UsageBytes::default(),
             guest_reported: GuestReportedUsage::default(),
+            stopped_by: None,
+            lifetime_source: LifetimeSource::Unknown,
         }
     }
 }

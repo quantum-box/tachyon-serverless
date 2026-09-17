@@ -493,6 +493,32 @@ impl TriggerRepository for SqliteStore {
         ttl: chrono::Duration,
     ) -> Result<bool, RepoError> {
         let (now_s, expires) = (ts(&now), ts(&(now + ttl)));
+        // Every gateway asks every scheduler tick; only the holder (or a
+        // taker of an expired / abandoned lease) has anything to write. The
+        // others learn "not yours" from a read and never take the write lock
+        // (PLT-4646). The write below decides again.
+        let held_by_another_live: bool = self.read(|c| {
+            let current: Option<(String, String)> = c
+                .prepare_cached(
+                    "SELECT owner_id, expires_at FROM trigger_scheduler WHERE name = 'cron'",
+                )?
+                .query_row([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            Ok(match current {
+                Some((o, exp)) if o != owner && exp.as_str() > now_s.as_str() => c
+                    .prepare_cached(
+                        "SELECT 1 FROM dispatchers WHERE id = ?1 \
+                         AND (stopped_at IS NOT NULL OR reclaimed_at IS NOT NULL)",
+                    )?
+                    .query_row([o.as_str()], |r| r.get::<_, i64>(0))
+                    .optional()?
+                    .is_none(),
+                _ => false,
+            })
+        })?;
+        if held_by_another_live {
+            return Ok(false);
+        }
         self.write(|tx| {
             let current: Option<(String, String)> = tx
                 .prepare_cached(
