@@ -99,8 +99,10 @@ cp "$CONFIG" "$EVIDENCE_DIR/gateway.toml"
 
 "$GATEWAY_BIN" --config "$CONFIG" >"$GATEWAY_LOG" 2>&1 &
 GATEWAY_PID=$!
+# cleanup runs from the EXIT trap, which shellcheck cannot follow (SC2317).
+# shellcheck disable=SC2317
 cleanup() {
-  [ -n "${POLL_PID:-}" ] && kill "$POLL_PID" 2>/dev/null || true
+  if [ -n "${POLL_PID:-}" ]; then kill "$POLL_PID" 2>/dev/null || true; fi
   stop_process "$GATEWAY_PID" 10
   cp "$GATEWAY_LOG" "$EVIDENCE_DIR/gateway.log" 2>/dev/null || true
   rm -rf "$WORK_DIR"
@@ -148,21 +150,21 @@ poll_capacity "$EVIDENCE_DIR/capacity-burst1.jsonl" & POLL_PID=$!
 burst 7 "$WORK_DIR/b1"
 kill "$POLL_PID" 2>/dev/null || true; wait "$POLL_PID" 2>/dev/null || true; POLL_PID=""
 ok1="$(cat "$WORK_DIR"/b1/*.status | grep -c '^200$' || true)"
-check "burst-7-all-served" "$([ "$ok1" = 7 ]; echo $?)" "200s=$ok1/7"
+check "burst-7-all-served" "$(if [ "$ok1" = 7 ]; then echo 0; else echo 1; fi)" "200s=$ok1/7"
 max_inflight="$(jq -s 'map(.in_flight) | max' "$EVIDENCE_DIR/capacity-burst1.jsonl")"
 max_reserved="$(jq -s 'map(.reserved_mib) | max' "$EVIDENCE_DIR/capacity-burst1.jsonl")"
 max_queue="$(jq -s 'map(.queue) | max' "$EVIDENCE_DIR/capacity-burst1.jsonl")"
-check "no-overshoot-in-flight" "$([ "$max_inflight" -le 3 ] && [ "$max_inflight" -ge 2 ]; echo $?)" \
+check "no-overshoot-in-flight" "$(if [ "$max_inflight" -le 3 ] && [ "$max_inflight" -ge 2 ]; then echo 0; else echo 1; fi)" \
   "max in_flight=$max_inflight (node fits 3 incl. overhead)"
-check "no-overshoot-memory" "$([ "$max_reserved" -le 900 ]; echo $?)" "max reserved=${max_reserved} MiB of 900"
-check "queued-while-full" "$([ "$max_queue" -ge 1 ]; echo $?)" "max queue length=$max_queue"
+check "no-overshoot-memory" "$(if [ "$max_reserved" -le 900 ]; then echo 0; else echo 1; fi)" "max reserved=${max_reserved} MiB of 900"
+check "queued-while-full" "$(if [ "$max_queue" -ge 1 ]; then echo 0; else echo 1; fi)" "max queue length=$max_queue"
 
 # 2. burst beyond the queue: bounded, explicit queue_full.
 burst 14 "$WORK_DIR/b2"
 ok2="$(cat "$WORK_DIR"/b2/*.status | grep -c '^200$' || true)"
 full2="$(cat "$WORK_DIR"/b2/*.status | grep -c '^429$' || true)"
 reasons="$(for f in "$WORK_DIR"/b2/*.body; do jq -r '.error.reason // empty' "$f" 2>/dev/null; done | sort | uniq -c | tr '\n' ';')"
-check "burst-14-bounded" "$([ $((ok2 + full2)) -eq 14 ] && [ "$ok2" -le 10 ] && [ "$full2" -ge 4 ]; echo $?)" \
+check "burst-14-bounded" "$(if [ $((ok2 + full2)) -eq 14 ] && [ "$ok2" -le 10 ] && [ "$full2" -ge 4 ]; then echo 0; else echo 1; fi)" \
   "200s=$ok2 429s=$full2 reasons=[$reasons]"
 check "queue-full-reason" "$(echo "$reasons" | grep -q 'queue_full'; echo $?)" "$reasons"
 
@@ -171,7 +173,7 @@ code="$(curl -sS -o "$WORK_DIR/b.body" -w '%{http_code}' -X POST -H "authorizati
   -H 'content-type: application/json' --data '{"seconds":0}' "$API_URL/v1/functions/$FN_B/invoke")"
 reason="$(jq -r .error.reason "$WORK_DIR/b.body")"
 cp "$WORK_DIR/b.body" "$EVIDENCE_DIR/placement-error.json"
-check "jp-only-placement" "$([ "$code" = 503 ] && [ "$reason" = placement ]; echo $?)" "status=$code reason=$reason"
+check "jp-only-placement" "$(if [ "$code" = 503 ] && [ "$reason" = placement ]; then echo 0; else echo 1; fi)" "status=$code reason=$reason"
 
 # 4. host vs environments, tenant scoped.
 capacity | jq . > "$EVIDENCE_DIR/capacity-final.json"
@@ -180,7 +182,7 @@ if jq -e '.node.hosts == 1 and .node.host_scale_out == "not_supported" and .node
   "$EVIDENCE_DIR/capacity-final.json" >/dev/null; then report_rc=0; else report_rc=1; fi
 check "capacity-report" "$report_rc" "$(jq -c '{node: .node.name, hosts: .node.hosts, rejections}' "$EVIDENCE_DIR/capacity-final.json")"
 leak="$(grep -c "$TENANT_B_ID" "$EVIDENCE_DIR/capacity-final.json" || true)"
-check "capacity-tenant-scoped" "$([ "$leak" = 0 ]; echo $?)" "tenant B mentions=$leak"
+check "capacity-tenant-scoped" "$(if [ "$leak" = 0 ]; then echo 0; else echo 1; fi)" "tenant B mentions=$leak"
 
 echo "evidence: $EVIDENCE_DIR"
 exit "$FAILED"
