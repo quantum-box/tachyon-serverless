@@ -7,6 +7,7 @@ use tachyon_serverless_provider_port::{ArtifactError, ProviderError, SecretError
 use crate::control::ControlError;
 use crate::repository::RepoError;
 use crate::services::admission::{RejectReason, Rejection, reason_for_error_type};
+use crate::services::invoke_async::AsyncRefusal;
 
 impl From<Rejection> for AppError {
     fn from(r: Rejection) -> Self {
@@ -47,6 +48,14 @@ pub enum AppError {
     #[error("{}: {message}", reason.as_str())]
     Admission {
         reason: RejectReason,
+        message: String,
+    },
+    /// An asynchronous invocation was refused before anything was committed
+    /// (PLT-4639): outbox backlog, queue, object store, input size or not
+    /// configured. `reason` is in the body.
+    #[error("{}: {message}", reason.as_str())]
+    AsyncRefused {
+        reason: AsyncRefusal,
         message: String,
     },
     #[error("revision not ready: {0}")]
@@ -105,6 +114,7 @@ impl AppError {
                 }
                 RejectReason::FunctionDeleted => ErrorCode::FunctionDeleted,
             },
+            Self::AsyncRefused { reason, .. } => reason.code(),
             Self::RevisionNotReady(_) => ErrorCode::RevisionNotReady,
             Self::FunctionDeleted(_) => ErrorCode::FunctionDeleted,
             // A queued invocation refused because its function was deleted
@@ -161,6 +171,7 @@ impl AppError {
         };
         let reason = match self {
             Self::Admission { reason, .. } => Some(reason.as_str().to_string()),
+            Self::AsyncRefused { reason, .. } => Some(reason.as_str().to_string()),
             Self::Invocation { error, .. } => {
                 reason_for_error_type(&error.error_type).map(|r| r.as_str().to_string())
             }

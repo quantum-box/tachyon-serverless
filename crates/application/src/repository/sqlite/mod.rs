@@ -49,6 +49,7 @@ use super::{
 mod config;
 pub mod migrations;
 mod objects;
+mod outbox;
 mod slot;
 
 /// Fixed-width RFC 3339 UTC, so timestamps order correctly as text.
@@ -344,7 +345,13 @@ impl SqliteStore {
             };
             let invocations: Vec<Invocation> = bodies(
                 tx,
-                "SELECT body FROM invocations WHERE terminal = 0 AND owner_id IS NULL ORDER BY id",
+                // An asynchronous invocation that is still waiting to be
+                // dispatched survives a restart: its input and its outbox
+                // event are durable and delivery resumes (PLT-4639).
+                "SELECT body FROM invocations WHERE terminal = 0 AND owner_id IS NULL \
+                 AND NOT (status IN ('accepted', 'queued') \
+                          AND id IN (SELECT invocation_id FROM invocation_inputs)) \
+                 ORDER BY id",
                 [],
             )?;
             for mut inv in invocations {
@@ -1422,6 +1429,40 @@ fn live_binding(
     .transpose()
 }
 
+/// Bind the invocation's key (if any) to it. A binding left without its
+/// invocation, or expired, is stale and replaced; the caller checked
+/// [`live_binding`] in the same transaction. The primary key keeps the binding
+/// unique across every process on this file.
+fn bind_idempotency(
+    tx: &Connection,
+    invocation: &Invocation,
+    retention: Retention,
+) -> Result<(), RepoError> {
+    if let Some(key) = &invocation.idempotency_key {
+        tx.execute(
+            "DELETE FROM idempotency WHERE tenant_id = ?1 AND function_id = ?2 AND idem_key = ?3",
+            params![
+                invocation.tenant_id.as_str(),
+                invocation.function_id.as_str(),
+                key
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO idempotency (tenant_id, function_id, idem_key, invocation_id, input_digest, \
+             expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                invocation.tenant_id.as_str(),
+                invocation.function_id.as_str(),
+                key,
+                invocation.id.as_str(),
+                invocation.input_digest.as_str(),
+                idempotency_expires_at(invocation, retention)
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 impl IdempotencyRepository for SqliteStore {
     fn lookup(
         &self,
@@ -1448,31 +1489,7 @@ impl IdempotencyRepository for SqliteStore {
                 return Ok(IdempotencyOutcome::Existing(existing));
             }
             insert_invocation_checked(tx, &invocation, max, retention)?;
-            if let Some(key) = &invocation.idempotency_key {
-                // A binding left without its invocation, or expired, is
-                // stale: replace it. The primary key keeps the binding unique
-                // across every process on this file.
-                tx.execute(
-                    "DELETE FROM idempotency WHERE tenant_id = ?1 AND function_id = ?2 AND idem_key = ?3",
-                    params![
-                        invocation.tenant_id.as_str(),
-                        invocation.function_id.as_str(),
-                        key
-                    ],
-                )?;
-                tx.execute(
-                    "INSERT INTO idempotency (tenant_id, function_id, idem_key, invocation_id, input_digest, \
-                     expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        invocation.tenant_id.as_str(),
-                        invocation.function_id.as_str(),
-                        key,
-                        invocation.id.as_str(),
-                        invocation.input_digest.as_str(),
-                        idempotency_expires_at(&invocation, retention)
-                    ],
-                )?;
-            }
+            bind_idempotency(tx, &invocation, retention)?;
             Ok(IdempotencyOutcome::Inserted)
         })
     }

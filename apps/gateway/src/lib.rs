@@ -59,6 +59,11 @@ pub fn router(state: AppState) -> Router {
             "/v1/functions/{function_id}/invoke",
             post(handlers::invoke_json),
         )
+        // `POST /v1/functions/{id}:invokeAsync` lands on the colon route above.
+        .route(
+            "/v1/functions/{function_id}/invokeAsync",
+            post(handlers::invoke_async),
+        )
         .route("/v1/functions/{function_id}/http", any(handlers::http_root))
         .route(
             "/v1/functions/{function_id}/http/",
@@ -238,6 +243,38 @@ pub async fn serve(
             }
         })
     });
+    // The transactional outbox publisher (PLT-4639): publishes committed
+    // asynchronous invocations. A panic in one pass is caught and the loop
+    // continues; whatever that pass had claimed is re-published after its
+    // claim expires.
+    let outbox = app.outbox.is_some().then(|| {
+        let weak = Arc::downgrade(&app);
+        tokio::spawn(async move {
+            use futures::FutureExt;
+            loop {
+                let Some(app) = weak.upgrade() else {
+                    return;
+                };
+                let Some(publisher) = app.outbox.clone() else {
+                    return;
+                };
+                drop(app);
+                let pass = std::panic::AssertUnwindSafe(publisher.run_once())
+                    .catch_unwind()
+                    .await;
+                match pass {
+                    Ok(report) if report.claimed > 0 => {
+                        tracing::debug!(?report, "outbox pass");
+                    }
+                    Ok(_) => publisher.wait().await,
+                    Err(_) => {
+                        tracing::error!("outbox publisher pass panicked; continuing");
+                        publisher.wait().await;
+                    }
+                }
+            }
+        })
+    });
     // Inline invocation outputs past their retention become digests
     // (`[store] output_retention_seconds`), and idempotency keys past theirs
     // are purged (`[store] idempotency_retention_seconds`).
@@ -305,6 +342,9 @@ pub async fn serve(
         .with_graceful_shutdown(async move {
             shutdown.await;
             tracing::info!("shutdown requested; cancelling in-flight invocations");
+            if let Some(service) = &draining.invoke_async {
+                service.stop_accepting();
+            }
             draining.invoke.shutdown_all(Duration::from_secs(10)).await;
             // A pooled environment must never outlive this process: its
             // bridge session dies with us and nothing could reclaim it.
@@ -327,6 +367,9 @@ pub async fn serve(
     }
     if let Some(object_gc) = object_gc {
         object_gc.abort();
+    }
+    if let Some(outbox) = outbox {
+        outbox.abort();
     }
     // Nothing of this process is in flight any more: another gateway on the
     // same data_dir may take over whatever is left at once.

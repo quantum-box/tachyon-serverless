@@ -13,7 +13,8 @@
 #                        which is what the firecracker provider ships into the microVM
 # - durable-queue:       pinned nats-server (checksum-verified, local process) + scripts/queue/verify.sh:
 #                        auth refusal, kill -9 persistence, capacity, max_age, JetStream contract,
-#                        object store (PLT-4638)
+#                        object store (PLT-4638); scripts/queue/async-e2e.sh: invokeAsync + outbox
+#                        crash/outage convergence (PLT-4639)
 # - scripts:             bash -n + shellcheck + helper self-tests for scripts/
 # - ci-gate:             aggregate status
 #
@@ -104,6 +105,11 @@ jobs:
 
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The test-only failpoints (PLT-4639) compile only into the async E2E gateway; keep them
+      # warning-free too.
+      - name: clippy (feature failpoints)
+        run: cargo clippy -p tachyon-serverless-gateway -p tachyon-serverless-application --all-targets --features tachyon-serverless-application/failpoints -- -D warnings
 
       - name: test (unit / property / integration, all crates)
         run: cargo test --workspace
@@ -235,6 +241,13 @@ jobs:
       # (TACHYON_NATS_REQUIRED=1: a missing server fails instead of skipping) and the object store.
       - name: scripts/queue/verify.sh
         run: scripts/queue/verify.sh --evidence "$RUNNER_TEMP/queue-evidence"
+
+      # PLT-4639: invokeAsync against the real nats-server and object store, with a gateway built
+      # with the test-only `failpoints` feature: SIGKILL at four failpoints + restart, a stopped
+      # nats-server (outbox fills, 503 queue_unavailable, drains after restart), orphan GC, and
+      # every accepted invocation found exactly once logically in JetStream.
+      - name: scripts/queue/async-e2e.sh
+        run: scripts/queue/async-e2e.sh --evidence "$RUNNER_TEMP/queue-evidence/async-e2e"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

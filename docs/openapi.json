@@ -59,7 +59,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Why admission refused or gave up on the request (PLT-4634):\n`capacity` | `quota` | `queue_full` | `queue_deadline` |\n`circuit_open` | `placement`. Absent for every other error.",
+            "description": "Why admission refused or gave up on the request (PLT-4634):\n`capacity` | `quota` | `queue_full` | `queue_deadline` |\n`circuit_open` | `placement`; or why an asynchronous invocation was\nrefused (PLT-4639): `backlog` | `queue_full` | `queue_unavailable` |\n`object_store_unavailable` | `object_quota` | `input_too_large` |\n`not_configured`. Absent for every other error.",
             "type": [
               "string",
               "null"
@@ -492,7 +492,8 @@
           "platform_error",
           "provider_unavailable",
           "config_unavailable",
-          "control_plane_unavailable"
+          "control_plane_unavailable",
+          "async_unavailable"
         ],
         "type": "string"
       },
@@ -716,6 +717,72 @@
           "input_size_bytes",
           "accepted_at",
           "deadlines"
+        ],
+        "type": "object"
+      },
+      "InvokeAsyncResponse": {
+        "description": "`202 Accepted` of `POST /v1/functions/{id}:invokeAsync` (PLT-4639). Sent\nonly after the invocation, its input and its outbox event committed.",
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "function_id": {
+            "type": "string"
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "input_size_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "input_storage": {
+            "description": "`inline` (kept in the ledger) | `object` (kept in the object store).",
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": "string"
+          },
+          "replayed": {
+            "description": "True when an `Idempotency-Key` matched an earlier acceptance.",
+            "type": "boolean"
+          },
+          "revision_id": {
+            "description": "The revision fixed at acceptance. Every later delivery and retry of\nthis invocation runs it, whatever the alias points at by then.",
+            "type": "string"
+          },
+          "status": {
+            "description": "`accepted` (recorded, not yet in the queue) | `queued` (published) |\nlater states when an idempotent replay finds it further along.",
+            "type": "string"
+          },
+          "status_url": {
+            "description": "`GET` this for the invocation (also in the `Location` header).",
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "invocation_id",
+          "function_id",
+          "revision_id",
+          "status",
+          "status_url",
+          "input_digest",
+          "input_size_bytes",
+          "input_storage",
+          "replayed",
+          "trace_id",
+          "accepted_at"
         ],
         "type": "object"
       },
@@ -2582,6 +2649,155 @@
               }
             },
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invoke"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/invokeAsync": {
+      "post": {
+        "operationId": "invoke_async",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "alias to resolve at acceptance (default prod)",
+            "in": "query",
+            "name": "alias",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "pin a revision instead of resolving an alias",
+            "in": "query",
+            "name": "revision_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "same key + same input answers the same invocation; another input is 409",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "trace id (at most 256 bytes)",
+            "in": "header",
+            "name": "x-tachyon-trace-id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "JSON event payload",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvokeAsyncResponse"
+                }
+              }
+            },
+            "description": "accepted and committed (invocation, input and outbox event in one transaction); `Location` and `x-tachyon-invocation-id` headers"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "idempotency key reused with another input or bound to a synchronous invocation; function deleted; revision not ready"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "input over the payload limit, or `reason` = `input_too_large` (over the inline limit without an object store, or over the object size limit)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`reason` = `backlog` | `queue_full` | `object_quota`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`reason` = `queue_unavailable` | `object_store_unavailable` | `not_configured`, or the ledger / configuration is unavailable (`error_type`)"
           }
         },
         "security": [

@@ -8,6 +8,7 @@ pub mod dispatcher;
 pub mod function;
 pub mod history;
 pub mod invoke;
+pub mod invoke_async;
 pub mod pool;
 pub mod provider;
 pub mod reconcile;

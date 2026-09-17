@@ -31,6 +31,7 @@ mod legacy;
 mod logs;
 mod memory;
 pub mod objects;
+pub mod outbox;
 pub mod restart;
 pub mod slot;
 pub mod sqlite;
@@ -45,6 +46,10 @@ pub use config::{
 };
 pub use memory::InMemoryStore;
 pub use objects::{CollectDecision, CollectReason, ObjectReferenceRepository};
+pub use outbox::{
+    AsyncAcceptOutcome, AsyncInput, AsyncInputBody, AsyncInvocationRepository, BacklogLimits,
+    OutboxEvent, OutboxStats,
+};
 pub use restart::{HOST_LEASE_EXPIRED, HOST_RESTARTED};
 pub use slot::{
     AcquireOutcome, CompletionOutcome, DispatcherRecord, HeartbeatOutcome, ReclaimReport,

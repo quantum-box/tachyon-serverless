@@ -14,6 +14,7 @@ pub mod control;
 pub mod durable;
 pub mod entrypoint;
 pub mod error;
+pub mod failpoints;
 pub mod local_ports;
 pub mod repository;
 pub mod services;

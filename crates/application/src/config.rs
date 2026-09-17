@@ -814,6 +814,10 @@ pub struct GatewayConfig {
     /// `[objects]` (PLT-4638). Off by default.
     #[serde(default)]
     pub objects: crate::durable::ObjectsConfig,
+    /// `[invoke_async]` (PLT-4639): input storage, outbox bounds and the
+    /// publisher. Used only when `[queue]` selects a queue.
+    #[serde(default)]
+    pub invoke_async: crate::services::invoke_async::InvokeAsyncConfig,
 }
 
 fn default_listen() -> String {
@@ -1119,6 +1123,7 @@ impl GatewayConfig {
             self.profile == Profile::Production,
         )
         .map_err(ConfigError::Invalid)?;
+        self.invoke_async.validate().map_err(ConfigError::Invalid)?;
         if self.pool.enabled {
             if self.pool.max_idle_per_revision == 0 {
                 return Err(ConfigError::Invalid(

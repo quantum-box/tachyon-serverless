@@ -50,7 +50,8 @@ impl ExitCode {
             ErrorCode::PlatformError
             | ErrorCode::ProviderUnavailable
             | ErrorCode::ConfigUnavailable
-            | ErrorCode::ControlPlaneUnavailable => Self::Platform,
+            | ErrorCode::ControlPlaneUnavailable
+            | ErrorCode::AsyncUnavailable => Self::Platform,
         }
     }
 

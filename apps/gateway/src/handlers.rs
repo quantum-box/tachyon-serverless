@@ -13,11 +13,12 @@ use serde::Deserialize;
 use tachyon_serverless_api_types::{
     AliasResponse, ApiErrorBody, ArtifactUploadResponse, AttemptResponse, CapacityInfo,
     CreateFunctionRequest, CreateRevisionRequest, DeadlinesResponse, FunctionResponse,
-    InvocationErrorResponse, InvocationResponse, InvokeQuery, ListResponse, LogEntryResponse,
-    LogsResponse, ProviderInfo, RevisionResponse, TimingsResponse, UpdateAliasRequest,
-    UsageSummaryResponse, headers,
+    InvocationErrorResponse, InvocationResponse, InvokeAsyncResponse, InvokeQuery, ListResponse,
+    LogEntryResponse, LogsResponse, ProviderInfo, RevisionResponse, TimingsResponse,
+    UpdateAliasRequest, UsageSummaryResponse, headers,
 };
 use tachyon_serverless_application::services::invoke::inline_output;
+use tachyon_serverless_application::services::invoke_async::{AsyncRefusal, InvokeAsyncRequest};
 use tachyon_serverless_application::{AppError, InvocationDetail, InvokeOutcome, InvokeRequest};
 use tachyon_serverless_domain::{
     AliasName, AttemptStatus, EventKind, FunctionId, InvocationId, InvocationMode,
@@ -635,8 +636,8 @@ pub async fn invoke_json(
     run_json_invoke(state, ctx, id, query, req).await
 }
 
-/// `POST /v1/functions/{function_id}:invoke` (colon form). Any other suffix
-/// is a 404.
+/// `POST /v1/functions/{function_id}:invoke` and `:invokeAsync` (colon
+/// forms). Any other suffix is a 404.
 pub async fn invoke_colon(
     State(state): State<AppState>,
     ctx: Ctx,
@@ -644,6 +645,10 @@ pub async fn invoke_colon(
     Query(query): Query<InvokeQuery>,
     req: Request,
 ) -> ApiResult<Response> {
+    if let Some(function_id) = raw.strip_suffix(":invokeAsync") {
+        let id = parse_function_id(function_id, &ctx.request_id)?;
+        return run_invoke_async(state, ctx, id, query, req).await;
+    }
     let Some(function_id) = raw.strip_suffix(":invoke") else {
         return Err(GatewayError::new(
             AppError::NotFound(format!("no route for POST /v1/functions/{raw}")),
@@ -652,6 +657,112 @@ pub async fn invoke_colon(
     };
     let id = parse_function_id(function_id, &ctx.request_id)?;
     run_json_invoke(state, ctx, id, query, req).await
+}
+
+async fn run_invoke_async(
+    state: AppState,
+    ctx: Ctx,
+    function_id: FunctionId,
+    query: InvokeQuery,
+    req: Request,
+) -> ApiResult<Response> {
+    let headers = req.headers().clone();
+    let max = state.limits.max_payload_bytes;
+    let body = read_body(req, max).await.ctx(&ctx.request_id)?;
+    let payload: serde_json::Value = if body.is_empty() {
+        serde_json::Value::Object(Default::default())
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|e| AppError::InvalidRequest(format!("body is not valid JSON: {e}")))
+            .ctx(&ctx.request_id)?
+    };
+    let sync = invoke_request_from(
+        &ctx,
+        function_id,
+        &query,
+        &headers,
+        EventKind::Json,
+        payload,
+    )?;
+    let Some(service) = state.invoke_async.clone() else {
+        return Err(GatewayError::new(
+            AppError::AsyncRefused {
+                reason: AsyncRefusal::NotConfigured,
+                message: "asynchronous invoke needs [queue] and the durable ledger \
+                          ([store] backend = \"sqlite\")"
+                    .into(),
+            },
+            Some(ctx.request_id),
+        ));
+    };
+    let accepted = service
+        .accept(InvokeAsyncRequest {
+            principal: sync.principal,
+            function_id: sync.function_id,
+            alias: sync.alias,
+            revision_id: sync.revision_id,
+            payload: sync.payload,
+            idempotency_key: sync.idempotency_key,
+            trace_id: sync.trace_id,
+        })
+        .await
+        .ctx(&ctx.request_id)?;
+    let inv = &accepted.invocation;
+    let status_url = format!("/v1/invocations/{}", inv.id);
+    let body = InvokeAsyncResponse {
+        invocation_id: inv.id.to_string(),
+        function_id: inv.function_id.to_string(),
+        revision_id: inv.revision_id.to_string(),
+        alias: inv.alias.as_ref().map(ToString::to_string),
+        status: inv.status.name().to_string(),
+        status_url: status_url.clone(),
+        input_digest: inv.input_digest.to_string(),
+        input_size_bytes: inv.input_size_bytes,
+        input_storage: accepted.input_storage.to_string(),
+        replayed: accepted.replayed,
+        trace_id: inv.trace_id.clone(),
+        accepted_at: inv.accepted_at,
+    };
+    let mut res = (StatusCode::ACCEPTED, Json(body)).into_response();
+    let h = res.headers_mut();
+    for (name, value) in [
+        (headers::INVOCATION_ID, inv.id.as_str()),
+        (headers::TRACE_ID, inv.trace_id.as_str()),
+        ("location", status_url.as_str()),
+    ] {
+        if let Ok(v) = HeaderValue::from_str(value) {
+            h.insert(HeaderName::from_static(name), v);
+        }
+    }
+    Ok(res)
+}
+
+#[utoipa::path(post, path = "/v1/functions/{function_id}/invokeAsync", tag = "invoke", security(("bearer" = [])),
+    params(
+        ("function_id" = String, Path, description = "function id"),
+        ("alias" = Option<String>, Query, description = "alias to resolve at acceptance (default prod)"),
+        ("revision_id" = Option<String>, Query, description = "pin a revision instead of resolving an alias"),
+        ("idempotency-key" = Option<String>, Header, description = "same key + same input answers the same invocation; another input is 409"),
+        ("x-tachyon-trace-id" = Option<String>, Header, description = "trace id (at most 256 bytes)")
+    ),
+    request_body(content = Object, description = "JSON event payload"),
+    responses(
+        (status = 202, description = "accepted and committed (invocation, input and outbox event in one transaction); `Location` and `x-tachyon-invocation-id` headers", body = InvokeAsyncResponse),
+        (status = 400, body = ApiErrorBody), (status = 404, body = ApiErrorBody),
+        (status = 409, description = "idempotency key reused with another input or bound to a synchronous invocation; function deleted; revision not ready", body = ApiErrorBody),
+        (status = 413, description = "input over the payload limit, or `reason` = `input_too_large` (over the inline limit without an object store, or over the object size limit)", body = ApiErrorBody),
+        (status = 429, description = "`reason` = `backlog` | `queue_full` | `object_quota`", body = ApiErrorBody),
+        (status = 503, description = "`reason` = `queue_unavailable` | `object_store_unavailable` | `not_configured`, or the ledger / configuration is unavailable (`error_type`)", body = ApiErrorBody)
+    ))]
+pub async fn invoke_async(
+    State(state): State<AppState>,
+    ctx: Ctx,
+    Path(function_id): Path<String>,
+    Query(query): Query<InvokeQuery>,
+    req: Request,
+) -> ApiResult<Response> {
+    let id = parse_function_id(&function_id, &ctx.request_id)?;
+    run_invoke_async(state, ctx, id, query, req).await
 }
 
 // ---------------------------------------------------------------------------
