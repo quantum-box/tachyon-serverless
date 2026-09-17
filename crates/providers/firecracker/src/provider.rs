@@ -49,8 +49,8 @@ use tachyon_serverless_domain::{
 };
 use tachyon_serverless_provider_port::{
     ArtifactLocation, Capabilities, EnvironmentHandle, EnvironmentObservation, EnvironmentSpec,
-    ExecutionProvider, IsolationLevel, PreflightReport, ProviderError, Support, TerminateReason,
-    TerminateReport,
+    EnvironmentStats, ExecutionProvider, IsolationLevel, PreflightReport, ProviderError, Support,
+    TerminateReason, TerminateReport,
 };
 
 use crate::api::ApiClient;
@@ -1580,6 +1580,30 @@ impl ExecutionProvider for FirecrackerProvider {
             "microVM resumed"
         );
         Ok(())
+    }
+
+    /// The VMM cgroup's `cpu.stat` / `memory.current` / `memory.peak`
+    /// (guest + VMM). `None` without host cgroups or for an environment this
+    /// provider does not run (PLT-4637; read-only).
+    async fn environment_stats(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<Option<EnvironmentStats>, ProviderError> {
+        let Some(cgroups) = &self.cgroups else {
+            return Ok(None);
+        };
+        if !self.running.lock().await.contains_key(environment_id) {
+            return Ok(None);
+        }
+        let path = cgroups.env_dir(environment_id.as_str());
+        Ok(
+            crate::cgroup::usage(&path).map(|(cpu, current, peak)| EnvironmentStats {
+                cpu_seconds: cpu,
+                memory_current_bytes: current,
+                memory_peak_bytes: peak,
+                scope: "cgroup_v2".into(),
+            }),
+        )
     }
 
     async fn observe_environment(

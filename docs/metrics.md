@@ -1,0 +1,247 @@
+# 再利用・スケールの metrics と負荷シナリオ（PLT-4637）
+
+- 対象: `GET /metrics`（`crates/application/src/metrics/`、`apps/gateway`）、`GET /v1/capacity` の `reuse`、`deploy/prometheus/alerts.yml`、負荷ハーネス `apps/load`（`tsls-load`）と `scripts/load/scenarios.sh`
+- 決定の記録: [adr/0011-reuse-and-scaling-metrics.md](adr/0011-reuse-and-scaling-metrics.md)
+- 関連: [adr/0006](adr/0006-autoscaling-and-admission.md)（admission）、[adr/0009](adr/0009-scale-to-zero-and-drain.md)（zero-scale / drain）、[adr/0007](adr/0007-config-distribution-and-auth-leases.md)（設定 cache）、[api.md](api.md)、[acceptance.md](acceptance.md) §PLT-4637
+- **数値はすべて 1 回の実行・1 台の観測値で、SLA ではない。**
+
+## 1. 何を観測するか
+
+再利用（warm pool）と自動増減（admission / zero-scale）が実際に成立しているかを、回帰として検出できる形で出す。
+
+| 問い | 見る metric / 仕組み |
+|---|---|
+| 0 → 負荷増 → 上限 → 減少 → 0 → 再起動 が起きたか | `tsls_environments{state}`・`tsls_node_in_flight`・`tsls_queue_length` の時系列（負荷ハーネスの `samples.jsonl` と `timeline.svg`） |
+| 同じ環境を再利用したか | `tsls_boot_identity_checks_total{result}`（boot id）、`tsls_attempts_total{start_kind}`、`GET /v1/capacity` の `reuse` |
+| 再利用しない profile か | `tsls_environment_reuse_mode{mode="every_invocation_boots"} 1`、`reuse.mode` |
+| 起動予約の超過 | `tsls_node_reserved_*` と `tsls_node_capacity_*`、`tsls_node_in_flight` と `tsls_node_max_concurrency`、revision / tenant の cap（§5 overshoot） |
+| starvation | `tsls_tenant_queue_oldest_age_seconds` と他 tenant の `tsls_tenant_grants_total`（§5 starvation） |
+| idle 中の想定外の資源利用 | `tsls_idle_environment_cpu_ratio_max`、`tsls_environment_cpu_seconds_total{state="idle"}`（§5 idle CPU） |
+| 起動の合流・失敗 | `tsls_admission_coalesced_waits_total`、`tsls_admission_starts_avoided_total`、`tsls_environment_starts_total{result}`、`tsls_circuit_breaker_opens_total` |
+
+## 2. `GET /metrics`
+
+- Prometheus text exposition 0.0.4（`Content-Type: text/plain; version=0.0.4; charset=utf-8`、`Cache-Control: no-store`）。依存を増やさない手書きの registry（`crates/application/src/metrics/`）。
+- **認証**: `[metrics] bearer_token`（16 bytes 以上、定数時間比較）を `Authorization: Bearer` で渡す。
+  - 未設定なら route は存在しない（404）。
+  - tenant の token（`[[identity.tokens]]`、operator role を含む）は 401。設定検証で tenant の token や `[control_plane] internal_token` と同じ値は拒否する。
+  - 理由: metrics には全 tenant の tenant id・revision id・待ち時間が載る。tenant ごとの認証（operator role は自 tenant に閉じる、`docs/threat-model.md` §7）では扱えないので、platform operator 専用の credential を別に持つ。別 listener にはしていない（listen は gateway と同じ。外部に出す場合は reverse proxy で `/metrics` を塞ぐか token を運用する。T34）。
+- **cardinality**: tenant / revision / environment の label は operator 向けの endpoint にだけ出し、件数に上限を持つ。
+  - `[metrics] max_revision_series`（既定 64）: 環境数 + 待機数の多い順に残し、残りは `tenant="_other",revision="_other"` の 1 系列に合算（breaker は最も悪い状態）。
+  - `[metrics] max_tenant_series`（既定 32）: 待機数・in-flight・grant 数の多い順。残りは `tenant="_other"`（合計、最古の待ちは最大値）。
+  - `[metrics] max_environment_series`（既定 128）: 環境ごとの host 使用量の系列。idle CPU の計算は全環境で行う。
+  - 畳んだ件数は `tsls_metrics_series_truncated{dimension}`。
+- **scrape が sample を取る**: 1 回の scrape で、この dispatcher が持つ live 環境（最大 1024）ごとに provider の `environment_stats` を 1 回読む。idle CPU は前回の scrape との差分で出す（scrape 間隔が測定窓）。
+- `GET /v1/capacity`（tenant の token）は従来どおり自 tenant の revision だけを返し、node 全体の `reuse` だけを足す（§4）。
+
+```sh
+curl -H "authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:8080/metrics
+```
+
+```toml
+[metrics]
+bearer_token = "load-metrics-operator-token"   # 16 bytes 以上。tenant token と別の値
+max_revision_series = 64
+max_tenant_series = 32
+max_environment_series = 128
+```
+
+Prometheus の scrape 設定例:
+
+```yaml
+scrape_configs:
+  - job_name: tachyon-serverless
+    scrape_interval: 5s
+    authorization:
+      credentials_file: /etc/prometheus/tsls-metrics.token
+    static_configs:
+      - targets: ["127.0.0.1:8080"]
+rule_files:
+  - deploy/prometheus/alerts.yml
+```
+
+## 3. metric catalog
+
+単位は名前に入れる（`_seconds`、`_bytes`、`_millicores`、`_total`）。一覧の正は `crates/application/src/metrics/catalog.rs::FAMILIES` で、ここに載っていない family があると `metrics::tests::every_metric_family_is_documented` が失敗する。
+
+### 3.1 build / provider / pool
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_build_info` | gauge | `version` | 常に 1 |
+| `tsls_environment_reuse_mode` | gauge | `provider`, `mode` | 有効な mode が 1: `warm_reuse`（pool の環境を再利用）/ `every_invocation_boots`（warm の段階が無く、毎回起動。process provider は常にこれ） |
+| `tsls_pool_reuse_enabled` | gauge | | provider の idle capability と `[pool] enabled` が再利用を許すとき 1 |
+| `tsls_pool_held_environments` | gauge | | pool が bridge session を持つ環境（idle と quiesce 中） |
+| `tsls_pool_quiescing_environments` | gauge | | pool に入る途中（quiesce 中） |
+
+### 3.2 node・予約・環境の状態
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_node_info` | gauge | `node` | 常に 1 |
+| `tsls_node_capacity_cpu_millicores` | gauge | | `[capacity.node] cpu_millis`。無制限なら系列なし |
+| `tsls_node_capacity_memory_bytes` | gauge | | 同 memory。無制限なら系列なし |
+| `tsls_node_capacity_ephemeral_storage_bytes` | gauge | | 同 ephemeral storage |
+| `tsls_node_reserved_cpu_millicores` | gauge | | 予約の合計（starting・busy・parking・idle・draining、overhead 込み） |
+| `tsls_node_reserved_memory_bytes` | gauge | | 同 memory |
+| `tsls_node_reserved_ephemeral_storage_bytes` | gauge | | 同 storage |
+| `tsls_node_environment_overhead_memory_bytes` | gauge | | 1 環境の VMM + bridge の overhead（推定値、ADR-0006） |
+| `tsls_node_max_concurrency` | gauge | | `[capacity] max_concurrency` |
+| `tsls_node_in_flight` | gauge | | promised + starting + busy |
+| `tsls_environments` | gauge | `state` | node 全体の状態別の環境数（`promised` `starting` `busy` `parking` `idle` `draining`）。**Ready（すぐ使える）は `idle`**（ADR-0009 §10） |
+| `tsls_revision_environments` | gauge | `tenant`, `revision`, `state` | revision ごとの状態別 |
+| `tsls_revision_desired_environments` | gauge | `tenant`, `revision` | autoscaler の desired |
+| `tsls_revision_max_environments` | gauge | `tenant`, `revision` | revision の `max_concurrency` |
+| `tsls_revision_min_ready` | gauge | `tenant`, `revision` | `min_ready` |
+| `tsls_revision_queue_length` | gauge | `tenant`, `revision` | revision の待機数 |
+| `tsls_revision_circuit_breaker_state` | gauge | `tenant`, `revision` | 0 closed / 1 half_open / 2 open |
+
+revision の系列は admission が revision を覚えている間だけ出る（0 になり到着率が減衰すると忘れる。ADR-0006）。counter は忘れない（§3.4）。
+
+### 3.3 queue・tenant
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_queue_length` | gauge | | 待機数 |
+| `tsls_queue_bytes` | gauge | | 待機中の payload bytes |
+| `tsls_queue_max_length` | gauge | | `[capacity] max_queue` |
+| `tsls_queue_max_bytes` | gauge | | `[capacity] max_queue_bytes` |
+| `tsls_queue_oldest_age_seconds` | gauge | | 最古の待機者の待ち時間（空なら 0） |
+| `tsls_tenant_queue_length` | gauge | `tenant` | tenant の待機数 |
+| `tsls_tenant_queue_oldest_age_seconds` | gauge | `tenant` | tenant の最古の待ち（無ければ 0） |
+| `tsls_tenant_in_flight` | gauge | `tenant` | tenant の promised + starting + busy |
+| `tsls_tenant_max_concurrency` | gauge | `tenant` | tenant quota。無制限なら系列なし |
+| `tsls_tenant_grants_total` | counter | `tenant` | tenant への grant（cold / warm）の累計 |
+| `tsls_start_rate_tokens` | gauge | | cold start の token の残り |
+
+### 3.4 admission・scale の event
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_admission_arrivals_total` | counter | | 初回の到着（再キューは数えない。即時拒否も数える） |
+| `tsls_admission_grants_total` | counter | `kind` | `cold`（新しい環境を予約）/ `warm`（pool の環境を約束） |
+| `tsls_admission_rejections_total` | counter | `reason` | `queue_full` `quota` `capacity` `queue_deadline` `circuit_open` `placement` `function_deleted`（すべて 0 から出す） |
+| `tsls_admission_coalesced_waits_total` | counter | | autoscaler の gate（起動中・ready の環境が desired を満たす）で待たされた後に grant された数 |
+| `tsls_admission_starts_avoided_total` | counter | | そのうち既存環境（warm）で処理され、起動を 1 回省いた数 |
+| `tsls_environment_starts_total` | counter | `result` | breaker に報告された cold start の結果（`success` / `failure`） |
+| `tsls_circuit_breaker_opens_total` | counter | | breaker が open になった回数 |
+| `tsls_scale_events_total` | counter | `kind`, `reason` | `activation` `scale_up` `prestart` `scale_down` `scale_to_zero` `drain` と理由（`backlog`、`idle_ttl`、`min_ready`、`alias_switch` など）。まだ無い kind は `reason="none"` で 0 |
+| `tsls_gate_refusals_total` | counter | `error_type` | invoke gate（設定 cache・認可 lease・control plane 停止時の起動拒否、PLT-4636）が拒否した受付・cold start（`Host.ConfigExpired` など）。無ければ `error_type="none"` で 0 |
+
+### 3.5 attempt・boot identity
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_attempts_total` | counter | `start_kind`, `status` | 終わった attempt（`cold` / `warm` / `restored`、`succeeded` / `failed` / `outcome_unknown`）。warm dispatch が届かず cold でやり直した分の warm attempt は数えない |
+| `tsls_attempt_phase_seconds` | histogram | `phase`, `start_kind` | host が測った時間。`queue_wait` `boot` `init` `resume` `handler` `total`。`boot` と `init` は起動した attempt（cold / restored）だけ（warm の 0 で分布を歪めない）。bucket: 5 ms 〜 300 s |
+| `tsls_boot_identity_checks_total` | counter | `result` | §4 |
+
+cold / warm 率は `tsls_attempts_total` から出す: `sum(rate(tsls_attempts_total{start_kind="warm"}[5m])) / sum(rate(tsls_attempts_total[5m]))`。
+
+### 3.6 host 使用量（provider の `environment_stats`）
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_environment_cpu_seconds_total` | counter | `environment`, `tenant`, `revision`, `state`, `scope` | その環境の host CPU 時間 |
+| `tsls_environment_memory_bytes` | gauge | 同上 | 現在の memory |
+| `tsls_environment_memory_peak_bytes` | gauge | 同上 | memory の peak |
+| `tsls_environment_stats` | gauge | `result` | この scrape で使用量が取れた（`available`）/ 取れなかった（`unavailable`）live 環境の数 |
+| `tsls_idle_environment_cpu_seconds_total` | counter | | 2 回続けて idle だった環境の、その間の CPU 時間の累計 |
+| `tsls_idle_environment_cpu_ratio_max` | gauge | | 前回と今回の scrape でともに idle だった環境の「CPU 秒 / 経過秒」の最大（無ければ 0） |
+| `tsls_idle_environments_sampled` | gauge | | 上の計算に使えた環境の数 |
+
+`scope` が何を測ったかを示す。provider ごとに比べられない:
+
+| provider | scope | 中身 |
+|---|---|---|
+| firecracker | `cgroup_v2` | VMM の cgroup（`cpu.stat` の `usage_usec`、`memory.current`、`memory.peak`）= guest + VMM。host cgroup が無い構成（`mode = "off"` など）では取れない（`unavailable`）。**KVM 上では未検証** |
+| process（Linux） | `procfs` | bridge プロセス自身の `/proc/<pid>/stat` utime + stime、`VmRSS` / `VmHWM`。子プロセス（user の handler）は含まない（下限値） |
+| process（macOS） | `proc_pid_rusage` | bridge プロセス自身の CPU 時間と phys footprint / lifetime max。子プロセスは含まない |
+| fake | `fake` | テストが設定した値 |
+
+process provider は idle の段階が無い（destroy-after-invoke）ので、idle CPU は常に測定対象 0 件（`tsls_idle_environments_sampled 0`）。
+
+### 3.7 dispatcher・設定 cache・非同期 outbox
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_dispatcher_fenced` | gauge | | lease を失い新しい仕事を取らないとき 1 |
+| `tsls_dispatcher_heartbeats_total` | counter | `result` | `renewed` / `fenced` / `error` |
+| `tsls_dispatcher_slot_lease_renewals_total` | counter | | heartbeat が更新した slot lease の数 |
+| `tsls_config_generation` | gauge | | 適用済みの最大 generation |
+| `tsls_config_synced` | gauge | | 一度でも配信を受けたら 1 |
+| `tsls_config_consecutive_failures` | gauge | | 最後の成功以降の refresh 失敗数（> 0 は control plane 不達） |
+| `tsls_config_valid_remaining_seconds` | gauge | | 設定の有効期限までの秒数（負は期限切れ） |
+| `tsls_auth_lease_remaining_seconds` | gauge | | 認可 lease の残り秒数 |
+| `tsls_config_reconnects_total` | counter | | 失敗の後に成功した refresh |
+| `tsls_config_entries` | gauge | | cache の entry 数 |
+| `tsls_async_outbox_pending_events` | gauge | | 未 publish の outbox event（PLT-4639。outbox を持つ gateway だけ） |
+| `tsls_async_outbox_oldest_pending_age_seconds` | gauge | | 最古の未 publish event の滞留時間 |
+| `tsls_async_outbox_sent_retained_events` | gauge | | publish 済みで保持中の event |
+| `tsls_async_queue_condition` | gauge | `condition` | publisher が最後に見た queue の状態（`healthy` / `full` / `unavailable`）が 1 |
+| `tsls_metrics_series_truncated` | gauge | `dimension` | cardinality 上限で `_other` に畳んだ数（`revision` / `tenant` / `environment`） |
+
+## 4. boot identity（再利用の証跡）
+
+- guest bridge は Hello で `/proc/sys/kernel/random/boot_id` を報告し、環境の `BootEvidence.guest_boot_id` に残る（PLT-4630）。attempt の API（`attempts[].boot_evidence`）にも出る。
+- attempt が終わるたびに、その環境で最初に見た boot id（最大 4096 環境、古い順に忘れる）と比べる:
+  - `first_boot`: その環境の最初の attempt。
+  - `same_boot`: 同じ環境の後続の attempt が同じ boot id を報告した = 同じ guest で処理した（warm 再利用の証跡）。
+  - `boot_changed`: 同じ環境 id で boot id が変わった。**0 のままでなければならない**（ERROR log と alert `TslsBootIdentityChanged`）。
+  - `unreported`: boot id が無い（guest kernel の無い process provider）。
+- `GET /v1/capacity` の `reuse`（node 全体、tenant の情報は無し）:
+
+```json
+"reuse": {
+  "provider": "process",
+  "mode": "every_invocation_boots",
+  "reason": "provider `process` reports idle_quiesce as unsupported",
+  "first_boots": 0, "same_boot_reuses": 0, "boot_id_changed": 0, "boot_id_unreported": 36
+}
+```
+
+- 未対応 profile（process provider、`[pool] enabled = false`、idle capability が `Supported` でない provider）は `mode = "every_invocation_boots"` で「毎回起動」と表示する。負荷ハーネスは invocation を読み戻し、attempt 数と環境数が一致すること（`every_attempt_booted_its_own_environment`）で確かめる。
+- 限界: boot id は起動時の Hello でだけ報告される。warm の attempt が比べるのは「その環境の記録にある boot id」で、guest が dispatch のたびに boot id を読み直しているわけではない。guest が再起動すれば bridge の接続が切れて環境は失われる（同じ環境 id で黙って別 guest に dispatch する経路は無い）ので、この比較は台帳・pool の取り違え（別環境の session に dispatch する回帰）を検出するためのもの。handler 自身が boot id を返す形の検査は未実装（Firecracker 実測の際に追加する）。
+- warm 再利用の boot identity は fake provider で証明している（`crates/application/tests/scaling.rs::metrics_show_zero_to_cap_to_zero_and_boot_identity_proves_warm_reuse`）。Firecracker（warm pool 有効）での実測は **未検証**。
+
+## 5. detector と alert
+
+同じ条件を 2 か所に置く。
+
+- 負荷ハーネス: `apps/load/src/detect.rs`。scenario が記録した `samples.jsonl`（`/metrics` の flatten）に対して実行し、`summary.json` の `detectors` に findings と coverage（見る対象があったか）を書く。Prometheus は不要。
+- Prometheus: `deploy/prometheus/alerts.yml`。`apps/load/tests/alerts.rs` が YAML として parse し、式が catalog にある family だけを参照し、4 種の detector すべてに rule があることを確認する（promtool は CI に無い。手元にあれば `promtool check rules deploy/prometheus/alerts.yml`）。
+
+| detector | harness の条件（sample ごと） | alert |
+|---|---|---|
+| reservation overshoot | reserved CPU / memory / storage > node capacity、`tsls_node_in_flight` > `tsls_node_max_concurrency`、revision の starting + busy + promised > `tsls_revision_max_environments`、tenant の in-flight > quota | `TslsReservedMemoryOverCapacity` `TslsReservedCpuOverCapacity` `TslsInFlightOverMaxConcurrency` `TslsRevisionOverMaxEnvironments` `TslsTenantOverQuota` |
+| starvation | tenant の最古の待ち > 5 s（`--starvation-seconds`）で、その待ちが始まった時点の sample から今までに他 tenant の grant が 1 以上増えた（tenant ごとに 1 回報告） | `TslsTenantStarved`（1 分窓で近似） |
+| idle 中の資源利用 | `tsls_idle_environments_sampled` > 0 かつ `tsls_idle_environment_cpu_ratio_max` > 0.05（`--idle-cpu-ratio`） | `TslsIdleEnvironmentCpu`、`TslsIdleCpuAccumulating` |
+| boot identity | `tsls_boot_identity_checks_total{result="boot_changed"}` の増加 | `TslsBootIdentityChanged` |
+
+ほかに `TslsCircuitBreakerOpen`、`TslsDispatcherFenced`、`TslsConfigurationExpired`。閾値は prototype の出発点で SLO ではない。
+
+gateway が応答しない sample（再起動中）は detector が無視する。gateway の再起動で counter は 0 に戻る（boot identity の比較は再起動の前後を跨がない）。
+
+## 6. 負荷シナリオ（`scripts/load/scenarios.sh`）
+
+```sh
+scripts/load/scenarios.sh                       # 全シナリオ、process provider
+scripts/load/scenarios.sh lifecycle             # 受入のグラフ
+TSLS_LOAD_SEED=42 scripts/load/scenarios.sh burst mixed
+```
+
+| シナリオ | 内容 | 期待（`summary.json` の `checks`） |
+|---|---|---|
+| `single` | 0.2 s の単発を 2 s 間隔で 3 回 | zero_before, rose, zero_after, all_succeeded, no_findings, reuse mode |
+| `burst` | 1 → 2 → 8 並列 × 24 件（revision の cap 3 を超える）→ 1 → 0 まで idle | + cap(3), queue, decreased |
+| `idle-to-zero` | burst → 0 まで idle → 5 s idle のまま → 再アクセス → 0 | zero_after ほか |
+| `mixed` | tenant A: 2 s × 12 件を 6 並列、tenant B: 0.1 s × 16 件を 2 並列、同時（node 4、tenant quota 3） | two_tenants_served, cap(4), no_findings（starvation detector） |
+| `restart` | 負荷 → 0 → idle 中に gateway を SIGTERM・再起動 → 負荷 → 0 | restart, active_after_restart, zero_after_restart |
+| `lifecycle` | 0 → 1 → 2 → 8 並列（cap 3）→ 1 → 0 → idle → 再起動 → 2 並列 → 0 | 上のすべて。**受入の 0→増→上限→減→0→再起動のグラフ** |
+
+- **宣言した上限**: `TSLS_LOAD_MAX_CONCURRENCY`（既定 12）、`TSLS_LOAD_MAX_REQUESTS`（既定 150、シナリオ全体）、`TSLS_LOAD_MAX_DURATION_SECONDS`（既定 240）。`tsls-load` は計画がこれを超えると 1 件も送らずに exit 2、実行中は期限の 0.5 s 前から送らない。上限そのものにも compile 時の天井がある（64 並列・2000 件・1800 s）。`summary.json` の `limits_observed` が実際の最大同時数・件数・最終応答時刻と `respected` を記録する（上限超過は `ok = false`）。
+- **送り先の制限**: `127.0.0.1`・`::1`・`localhost` だけ。ほかは `--lab-host`（`TSLS_LOAD_LAB_HOST`）で明示した host だけで、名前解決はしない。redirect は追わない。本番・外部 host には送らない（`limits::tests::only_loopback_or_an_explicit_lab_host_is_a_load_target`）。
+- **再現性の記録**: `run.json` に commit・tracked file の未 commit 変更数・provider・seed・sample 間隔・上限・gateway 設定（token は伏せる）とその SHA-256・host（`uname`）・rustc・revision の設定。jitter は seed から決まる（splitmix64 + xorshift64*）。
+- **出力**（`docs/evidence/load-<scenario>-<UTC>-<provider>/`）: `run.json`、`gateway.toml`、`samples.jsonl`（`t_ms`・`up`・`/metrics` の counter / gauge・tenant A の `/v1/capacity` の要約）、`requests.jsonl`、`invocations.jsonl`（start kind・環境・boot id）、`phases.jsonl`、`summary.json`（requests の p50 / p95 / max・lifecycle・reuse・detectors・checks・`ok`）、`timeline.svg`（環境の状態と queue の折れ線、phase の帯、gateway 停止の灰色帯）、`timeline.txt`（端末用）、`report.txt`、`gateway.log`。
+- **provider 非依存**: `TSLS_GATEWAY_CONFIG` と `TSLS_API_URL`・`TSLS_TOKEN_A`・`TSLS_TOKEN_B`・`TSLS_METRICS_TOKEN`・`TSLS_GUEST_DIR`・`TSLS_PROVIDER` を渡せば任意の provider の gateway で同じシナリオを回せる。reuse の期待は gateway の報告（`reuse.mode`）で決まり、warm pool 有効なら `warm_reuse`（boot id が変わらず、2 回以上使われた環境がある）を確認する。**Firecracker での実行は未検証**（検証 VM を benchmark 作業が使用中のため実行していない）。
+- `scripts/e2e/` ではなく `scripts/load/` に置く（`scripts/e2e/*` の変更は KVM gate を要求する。`docs/ci.md` §3）。helper は `scripts/e2e/lib.sh` を読み込むだけで変更しない。

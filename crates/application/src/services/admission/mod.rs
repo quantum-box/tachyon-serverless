@@ -48,8 +48,9 @@ pub use config::{
 };
 pub use resources::{NodeCapacity, Resources};
 pub use state::{
-    AdmissionSettings, AdmissionState, BlockReason, DrainReason, GrantKind, KeepReason,
-    PrestartSkip, RejectReason, Rejection, ReservationId, ScaleDown, Ticket, WaiterId,
+    AdmissionCounters, AdmissionMetrics, AdmissionSettings, AdmissionState, BlockReason,
+    DrainReason, GrantKind, KeepReason, PrestartSkip, RejectReason, Rejection, ReservationId,
+    RevisionMetrics, ScaleDown, TenantMetrics, Ticket, WaiterId,
 };
 
 use crate::config::CapacityConfig;
@@ -149,6 +150,9 @@ pub struct AdmissionController {
     ticking: AtomicBool,
     evictor: Mutex<Option<Evictor>>,
     scale: Mutex<ScaleDefaults>,
+    /// Event metrics of everything that holds this controller: the invoke
+    /// driver, the pool and the gateway (PLT-4637).
+    metrics: Arc<crate::metrics::Metrics>,
 }
 
 impl std::fmt::Debug for AdmissionController {
@@ -170,7 +174,19 @@ impl AdmissionController {
             ticking: AtomicBool::new(false),
             evictor: Mutex::new(None),
             scale: Mutex::new(ScaleDefaults::default()),
+            metrics: Arc::new(crate::metrics::Metrics::default()),
         })
+    }
+
+    /// The event metrics registry (PLT-4637).
+    pub fn metrics(&self) -> &Arc<crate::metrics::Metrics> {
+        &self.metrics
+    }
+
+    /// Admission gauges and counters of every tenant and revision, for
+    /// `GET /metrics` only (PLT-4637).
+    pub fn metrics_view(self: &Arc<Self>) -> AdmissionMetrics {
+        self.with_state(|inner, now| inner.state.metrics(now))
     }
 
     /// Set the scale defaults and the scaling report (PLT-4635).

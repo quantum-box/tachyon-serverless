@@ -192,6 +192,26 @@ pub enum EnvironmentObservation {
     NotFound,
 }
 
+/// Host-side resource usage of one environment (PLT-4637), for metrics only.
+///
+/// Every field is optional: a provider reports what its host can measure and
+/// nothing else. `scope` says what was measured, because the numbers of
+/// different providers are not comparable (a Firecracker VMM cgroup includes
+/// the guest and the VMM; a process provider sees one host process).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct EnvironmentStats {
+    /// Cumulative host CPU time (user + system) in seconds.
+    pub cpu_seconds: Option<f64>,
+    /// Memory currently charged to the environment, bytes.
+    pub memory_current_bytes: Option<u64>,
+    /// Highest memory charged to the environment so far, bytes.
+    pub memory_peak_bytes: Option<u64>,
+    /// What was measured: `cgroup_v2` (the VMM's cgroup: guest + VMM),
+    /// `procfs` / `proc_pid_rusage` (the bridge process only, not its
+    /// children), `fake` (tests).
+    pub scope: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreflightCheck {
     pub name: String,
@@ -313,6 +333,18 @@ pub trait ExecutionProvider: Send + Sync {
         &self,
         environment_id: &EnvironmentId,
     ) -> Result<EnvironmentObservation, ProviderError>;
+
+    /// Host-side CPU and memory usage of a live environment (PLT-4637).
+    /// Read-only: it never changes the environment. `Ok(None)` when the
+    /// provider (or this host) cannot measure it — the default, so metrics
+    /// show "unavailable" instead of a made-up zero.
+    async fn environment_stats(
+        &self,
+        environment_id: &EnvironmentId,
+    ) -> Result<Option<EnvironmentStats>, ProviderError> {
+        let _ = environment_id;
+        Ok(None)
+    }
 
     /// Environments this provider still tracks; used for orphan reconciliation.
     async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError>;

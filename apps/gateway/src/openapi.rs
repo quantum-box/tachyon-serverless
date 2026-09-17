@@ -29,6 +29,7 @@ impl utoipa::Modify for SecurityAddon {
     paths(
         handlers::healthz,
         handlers::readyz,
+        handlers::metrics,
         handlers::openapi_json,
         handlers::provider_info,
         handlers::capacity_info,
@@ -69,6 +70,7 @@ impl utoipa::Modify for SecurityAddon {
         api::RevisionCapacityInfo,
         api::ScaleEventInfo,
         api::ScalingInfo,
+        api::EnvironmentReuseReport,
         api::ArtifactUploadResponse,
         api::CreateFunctionRequest,
         api::FunctionResponse,

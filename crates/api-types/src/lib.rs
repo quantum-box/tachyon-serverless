@@ -399,6 +399,35 @@ pub struct CapacityInfo {
     pub revisions: Vec<RevisionCapacityInfo>,
     #[serde(default)]
     pub scaling: ScalingInfo,
+    /// Whether environments are reused on this node, and the boot identity
+    /// check behind it (PLT-4637). Node-wide; no tenant data.
+    #[serde(default)]
+    pub reuse: EnvironmentReuseReport,
+}
+
+/// Environment reuse on this node (PLT-4637, docs/metrics.md §boot identity).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+pub struct EnvironmentReuseReport {
+    pub provider: String,
+    /// `warm_reuse`: pooled environments serve later invocations.
+    /// `every_invocation_boots`: the provider or configuration has no warm
+    /// stage, so every invocation boots its own environment (the process
+    /// provider always).
+    pub mode: String,
+    /// The gate that decided the mode.
+    pub reason: String,
+    /// Attempts that were the first dispatch into their environment and
+    /// reported a guest boot id.
+    pub first_boots: u64,
+    /// Later attempts in the same environment that reported the boot id it
+    /// booted with: reuse of the same guest.
+    pub same_boot_reuses: u64,
+    /// Later attempts that reported a different boot id for the same
+    /// environment. Must stay 0.
+    pub boot_id_changed: u64,
+    /// Attempts without a guest boot id (no guest kernel, e.g. the process
+    /// provider).
+    pub boot_id_unreported: u64,
 }
 
 // ---------------------------------------------------------------------------

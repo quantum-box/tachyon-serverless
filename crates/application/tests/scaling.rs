@@ -989,3 +989,186 @@ async fn an_outage_holds_routes_and_a_reconnect_storm_does_not_flap() {
     assert!(dp_fake.terminated().is_empty(), "nothing was drained");
     assert!(source.fetches.load(Ordering::SeqCst) > 12);
 }
+
+// ---------------------------------------------------------------------------
+// metrics (PLT-4637)
+// ---------------------------------------------------------------------------
+
+/// The value of the sample of `family` whose labels contain every `label`
+/// (`key="value"` fragments). `None` when no line matches.
+fn metric(text: &str, family: &str, labels: &[&str]) -> Option<f64> {
+    text.lines()
+        .filter(|l| !l.starts_with('#'))
+        .filter(|l| {
+            l.strip_prefix(family)
+                .is_some_and(|rest| rest.starts_with('{') || rest.starts_with(' '))
+        })
+        .find(|l| labels.iter().all(|want| l.contains(want)))
+        .and_then(|l| l.rsplit_once(' '))
+        .and_then(|(_, v)| v.parse().ok())
+}
+
+fn fake_stats(cpu: f64) -> tachyon_serverless_provider_port::EnvironmentStats {
+    tachyon_serverless_provider_port::EnvironmentStats {
+        cpu_seconds: Some(cpu),
+        memory_current_bytes: Some(64 << 20),
+        memory_peak_bytes: Some(128 << 20),
+        scope: "fake".into(),
+    }
+}
+
+/// Acceptance 1 and 2 through the pipeline: a revision goes 0 -> burst ->
+/// its cap -> idle -> 0 and `GET /metrics` shows each step; the warm pool's
+/// reuse is proven by boot identity (every warm attempt reports the boot id
+/// its environment booted with, none changes); an idle environment that burns
+/// CPU is visible to the idle CPU detector.
+#[tokio::test]
+async fn metrics_show_zero_to_cap_to_zero_and_boot_identity_proves_warm_reuse() {
+    let h = harness(POOL);
+    let (f, rev) = h
+        .deploy("metrics", |r| r.execution.max_concurrency = 2)
+        .await;
+    let rev_label = format!("revision=\"{}\"", rev.id);
+
+    let text = h.app.render_metrics().await;
+    assert_eq!(metric(&text, "tsls_node_in_flight", &[]), Some(0.0));
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_environment_reuse_mode",
+            &["mode=\"warm_reuse\""]
+        ),
+        Some(1.0)
+    );
+
+    // Burst of 6 on a cap of 2, sampled while it runs.
+    let calls: Vec<_> = (0..6)
+        .map(|i| h.spawn_invoke(h.request(&f, serde_json::json!({"sleep_ms": 120, "i": i}))))
+        .collect();
+    let mut max_provisioned = 0.0f64;
+    let mut max_queue = 0.0f64;
+    for _ in 0..40 {
+        let text = h.app.render_metrics().await;
+        let provisioned: f64 = ["starting", "busy", "promised"]
+            .iter()
+            .filter_map(|s| {
+                metric(
+                    &text,
+                    "tsls_revision_environments",
+                    &[&rev_label, &format!("state=\"{s}\"")],
+                )
+            })
+            .sum();
+        max_provisioned = max_provisioned.max(provisioned);
+        max_queue = max_queue.max(metric(&text, "tsls_queue_length", &[]).unwrap_or(0.0));
+        tokio::time::sleep(Duration::from_millis(15)).await;
+    }
+    let mut kinds = Vec::new();
+    for c in calls {
+        let out = c.await.unwrap().unwrap();
+        assert!(out.succeeded(), "{:?}", out.invocation().status);
+        kinds.push(attempt(&out).start_kind);
+    }
+    h.app.pool.settle().await;
+    assert!(
+        max_provisioned <= 2.0,
+        "never above the cap: {max_provisioned}"
+    );
+    assert!(
+        max_provisioned >= 1.0 && max_queue >= 1.0,
+        "the burst was seen"
+    );
+    let created = h.fake.created().len();
+    assert!(created <= 2, "created {created}");
+
+    // Boot identity: first boots = environments, the rest reused the same guest.
+    let text = h.app.render_metrics().await;
+    let warm = kinds.iter().filter(|k| **k == StartKind::Warm).count();
+    assert_eq!(warm, 6 - created);
+    let check = |r: &str| {
+        metric(
+            &text,
+            "tsls_boot_identity_checks_total",
+            &[&format!("result=\"{r}\"")],
+        )
+    };
+    assert_eq!(check("first_boot"), Some(created as f64));
+    assert_eq!(check("same_boot"), Some(warm as f64));
+    assert_eq!(check("boot_changed"), Some(0.0));
+    let report = h.app.reuse_report();
+    assert_eq!(report.mode, "warm_reuse");
+    assert_eq!(report.same_boot_reuses, warm as u64);
+    assert_eq!(report.boot_id_changed, 0);
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_attempts_total",
+            &["start_kind=\"warm\"", "status=\"succeeded\""]
+        ),
+        Some(warm as f64)
+    );
+    assert_eq!(
+        metric(&text, "tsls_admission_grants_total", &["kind=\"warm\""]),
+        Some(warm as f64)
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_revision_environments",
+            &[&rev_label, "state=\"idle\""]
+        ),
+        Some(created as f64)
+    );
+
+    // Idle CPU: a quiesced environment that keeps burning CPU is measured.
+    let idle_envs = h.fake.running();
+    for id in &idle_envs {
+        h.fake.set_environment_stats(id, fake_stats(1.0));
+    }
+    let _ = h.app.render_metrics().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    for id in &idle_envs {
+        h.fake.set_environment_stats(id, fake_stats(1.05));
+    }
+    let text = h.app.render_metrics().await;
+    let ratio = metric(&text, "tsls_idle_environment_cpu_ratio_max", &[]).unwrap();
+    assert!(ratio > 0.1, "50 ms of CPU in ~100 ms idle: {ratio}");
+    assert_eq!(
+        metric(&text, "tsls_idle_environments_sampled", &[]),
+        Some(idle_envs.len() as f64)
+    );
+    assert!(
+        metric(
+            &text,
+            "tsls_environment_memory_peak_bytes",
+            &["state=\"idle\""]
+        )
+        .is_some()
+    );
+
+    // Idle past the TTL and cooldown: back to 0.
+    h.advance(120_000);
+    h.app.reconcile_scaling().await;
+    let text = h.app.render_metrics().await;
+    assert_eq!(metric(&text, "tsls_node_in_flight", &[]), Some(0.0));
+    assert_eq!(
+        metric(&text, "tsls_environments", &["state=\"idle\""]),
+        Some(0.0)
+    );
+    assert_eq!(
+        metric(&text, "tsls_node_reserved_memory_bytes", &[]),
+        Some(0.0)
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_scale_events_total",
+            &["kind=\"scale_to_zero\"", "reason=\"idle_ttl\""]
+        ),
+        Some(1.0)
+    );
+    assert_eq!(
+        metric(&text, "tsls_scale_events_total", &["kind=\"activation\""]),
+        Some(1.0)
+    );
+}

@@ -85,6 +85,47 @@ pub struct SinceQuery {
     pub since: Option<u64>,
 }
 
+/// `GET /metrics` (PLT-4637, docs/metrics.md). Every tenant's revisions,
+/// queues and environments are on it, so only the `[metrics] bearer_token`
+/// operator credential is accepted — never a tenant token — and without one
+/// configured the route does not exist (404).
+#[utoipa::path(get, path = "/metrics", tag = "meta", security(("bearer" = [])),
+    responses(
+        (status = 200, description = "Prometheus text exposition 0.0.4 (catalog: docs/metrics.md)", content_type = "text/plain", body = String),
+        (status = 401, description = "missing or wrong operator credential (tenant tokens are refused)", body = ApiErrorBody),
+        (status = 404, description = "`[metrics] bearer_token` is not configured", body = ApiErrorBody)
+    ))]
+pub async fn metrics(State(state): State<AppState>, req: Request) -> Response {
+    use tachyon_serverless_application::control::constant_time_eq;
+    use tachyon_serverless_application::metrics::render::CONTENT_TYPE;
+    let request_id = req.extensions().get::<RequestId>().map(|r| r.0.clone());
+    let Some(expected) = state.config.metrics.bearer_token.as_ref() else {
+        return GatewayError::new(
+            AppError::NotFound(format!("no route for GET {}", req.uri().path())),
+            request_id,
+        )
+        .into_response();
+    };
+    let presented = crate::middleware::bearer_token(&req).unwrap_or_default();
+    if !constant_time_eq(presented.as_bytes(), expected.expose().as_bytes()) {
+        return GatewayError::new(
+            AppError::Unauthorized("the metrics operator credential is required".into()),
+            request_id,
+        )
+        .into_response();
+    }
+    let body = state.render_metrics().await;
+    (
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, CONTENT_TYPE),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// `GET /v1/internal/config?since=<generation>` (PLT-4636): the generation
 /// stamped configuration for data planes. Authenticated with the internal
 /// credential (`[control_plane] internal_token`) as a bearer token, never with
@@ -171,7 +212,9 @@ pub async fn provider_info(
     (status = 401, body = ApiErrorBody)
 ))]
 pub async fn capacity_info(State(state): State<AppState>, ctx: Ctx) -> Json<CapacityInfo> {
-    Json(state.admission.snapshot(&ctx.principal.tenant_id))
+    let mut info = state.admission.snapshot(&ctx.principal.tenant_id);
+    info.reuse = state.reuse_report();
+    Json(info)
 }
 
 // ---------------------------------------------------------------------------
