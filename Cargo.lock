@@ -1727,6 +1727,7 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "libc",
  "parking_lot",
  "rusqlite",
  "serde",

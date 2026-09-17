@@ -313,7 +313,7 @@ async fn happy_path_records_timings_evidence_secrets_and_cleanup() {
     else {
         panic!("guest did not receive HelloAck");
     };
-    assert_eq!(epoch, 1);
+    assert_eq!(epoch, 1, "the epoch the first attempt runs at");
     assert!(env.contains(&("GREETING".to_string(), "hello".to_string())));
     assert!(env.contains(&("DEMO_SECRET".to_string(), "demo-secret-value-a".to_string())));
     assert!(env.contains(&("TACHYON_UNISOLATED".to_string(), "1".to_string())));
@@ -820,8 +820,24 @@ async fn idempotency_replay_and_conflict() {
 
     req.payload = serde_json::json!({"x": 2});
     let err = h.app.invoke.invoke(req).await.err().unwrap();
-    assert!(matches!(err, AppError::Conflict(_)), "{err}");
+    match &err {
+        AppError::IdempotencyConflict { key, invocation_id } => {
+            assert_eq!(key, "key-1");
+            assert_eq!(invocation_id, &first.invocation().id);
+        }
+        other => panic!("expected an idempotency conflict, got {other}"),
+    }
     assert_eq!(err.http_status(), 409);
+    let body = err.to_api_body(None);
+    assert_eq!(
+        body.error.invocation_id.as_deref(),
+        Some(first.invocation().id.as_str())
+    );
+    assert_eq!(
+        body.error.error_type.as_deref(),
+        Some("Host.IdempotencyKeyReused")
+    );
+    assert_eq!(h.fake.created().len(), 1, "a conflict runs nothing");
 }
 
 #[tokio::test]
@@ -2638,7 +2654,14 @@ async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invo
             .all(|(_, r)| *r == TerminateReason::Completed)
     );
     assert!(h.fake.running().is_empty(), "nothing is left running");
-    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert!(
+        h.app
+            .repos
+            .slots
+            .list_idle(Some(h.app.dispatcher.id()))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(h.app.pool.held(), 0);
 
     // Unsupported: the default fake, and what firecracker / process report.
@@ -2662,9 +2685,12 @@ async fn a_provider_without_supported_idle_capabilities_keeps_destroy_after_invo
 }
 
 /// Acceptance 3: a pooled environment cannot survive a restart, because the
-/// session that drives it dies with the process. The ledger settles it as
-/// `Lost`, and the startup reconcile reclaims the host process behind it
-/// instead of letting a new invocation be handed something it cannot drive.
+/// session that drives it dies with the process. The restarted gateway
+/// proves its previous incarnation gone (same instance, same host, the old
+/// dispatcher handle dropped), fences the environment, and the startup
+/// reconcile terminates it and only then settles it as `Lost`
+/// (PLT-4631), instead of letting a new invocation be handed something it
+/// cannot drive.
 #[tokio::test]
 async fn a_pooled_environment_is_reclaimed_after_a_restart() {
     use tachyon_serverless_domain::StartKind;
@@ -2677,6 +2703,9 @@ async fn a_pooled_environment_is_reclaimed_after_a_restart() {
     assert_eq!(environment_state(&h, &pooled), EnvironmentState::Idle);
     assert_eq!(h.fake.running(), vec![pooled.clone()]);
     h.app.store.flush().unwrap();
+    let previous = h.app.dispatcher.id().clone();
+    // The previous process is gone: its application (and dispatcher) dropped.
+    drop(h.app);
 
     // Restart on the same data_dir. The host (the fake) still runs the
     // environment; the new process holds no session to it.
@@ -2690,26 +2719,45 @@ async fn a_pooled_environment_is_reclaimed_after_a_restart() {
         },
     )
     .unwrap();
+    let fenced = restarted.repos.environments.get(&pooled).unwrap().unwrap();
     assert!(
-        matches!(
-            restarted
-                .repos
-                .environments
-                .get(&pooled)
-                .unwrap()
-                .unwrap()
-                .state,
-            EnvironmentState::Lost { .. }
-        ),
-        "a pooled environment does not survive the process that held its session"
+        fenced.is_fenced() && fenced.state == EnvironmentState::Draining,
+        "a pooled environment does not survive the process that held its session: {:?}",
+        fenced.state
+    );
+    assert_eq!(fenced.owner.as_ref(), Some(&previous));
+    assert!(
+        restarted
+            .repos
+            .slots
+            .claim_for_reuse(&fenced.reuse_key, Some(&previous), restarted.clock.now())
+            .unwrap()
+            .is_none(),
+        "a fenced environment is never handed out"
     );
     assert!(
-        restarted.repos.environments.list_idle().unwrap().is_empty(),
+        restarted
+            .repos
+            .slots
+            .list_idle(Some(restarted.dispatcher.id()))
+            .unwrap()
+            .is_empty(),
         "nothing stale is left in the pool"
     );
 
     let report = restarted.reconcile_on_startup().await.unwrap();
-    assert_eq!((report.found, report.adopted, report.terminated), (1, 0, 1));
+    assert_eq!(report.reclaim.terminated, 1, "{report:?}");
+    assert_eq!((report.adopted, report.terminated), (0, 0), "{report:?}");
+    assert!(matches!(
+        restarted
+            .repos
+            .environments
+            .get(&pooled)
+            .unwrap()
+            .unwrap()
+            .state,
+        EnvironmentState::Lost { .. }
+    ));
     assert!(
         h.fake
             .terminated()
@@ -2942,7 +2990,14 @@ async fn an_environment_that_cannot_be_quiesced_is_terminated_instead_of_pooled(
         vec![(env.clone(), TerminateReason::Completed)],
         "the pause did not take, so its guest was still running and was ended the ordinary way"
     );
-    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert!(
+        h.app
+            .repos
+            .slots
+            .list_idle(Some(h.app.dispatcher.id()))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(h.app.pool.held(), 0);
     assert_eq!(h.app.pool.quiescing(), 0);
     assert!(h.fake.running().is_empty());
@@ -3144,7 +3199,14 @@ async fn a_slow_quiesce_does_not_hold_up_the_callers_response() {
     let env = attempt_of(&out).environment_id.clone();
     assert_eq!(environment_state(&h, &env), EnvironmentState::Busy);
     assert_eq!(h.app.pool.quiescing(), 1);
-    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert!(
+        h.app
+            .repos
+            .slots
+            .list_idle(Some(h.app.dispatcher.id()))
+            .unwrap()
+            .is_empty()
+    );
 
     // And it does land, once the pause really finished.
     h.app.pool.settle().await;
@@ -3322,7 +3384,12 @@ async fn an_environment_whose_guest_crashed_is_never_pooled() {
     assert_eq!(failed_error(&out).class, ErrorClass::Crash);
     let env = attempt_of(&out).environment_id.clone();
     assert!(
-        h.app.repos.environments.list_idle().unwrap().is_empty(),
+        h.app
+            .repos
+            .slots
+            .list_idle(Some(h.app.dispatcher.id()))
+            .unwrap()
+            .is_empty(),
         "a crashed guest must not be pooled"
     );
     assert_eq!(environment_state(&h, &env), EnvironmentState::Stopped);
@@ -3379,7 +3446,14 @@ async fn a_guest_that_exited_after_answering_is_not_pooled() {
         EnvironmentState::Idle,
         "a guest that exited must never go back into the pool"
     );
-    assert!(h.app.repos.environments.list_idle().unwrap().is_empty());
+    assert!(
+        h.app
+            .repos
+            .slots
+            .list_idle(Some(h.app.dispatcher.id()))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(h.app.pool.held(), 0);
     assert_eq!(h.fake.terminated().len(), 1);
 
@@ -3820,7 +3894,12 @@ async fn an_environment_the_driver_ends_reports_its_whole_life() {
     assert_eq!(attempt_of(&second).start_kind, StartKind::Warm);
     assert_eq!(attempt_of(&second).environment_id, env);
     assert!(
-        h.app.repos.environments.list_idle().unwrap().is_empty(),
+        h.app
+            .repos
+            .slots
+            .list_idle(Some(h.app.dispatcher.id()))
+            .unwrap()
+            .is_empty(),
         "a crashed guest is not pooled again"
     );
 

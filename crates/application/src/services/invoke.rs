@@ -7,6 +7,16 @@
 //! events. The caller only awaits a completion signal, so a client that
 //! disconnects does not abort the invocation: the driver keeps tracking it
 //! until its deadlines and records the outcome.
+//!
+//! Ownership and fencing (PLT-4631): every invocation is accepted under this
+//! process's [`Dispatcher`]; the slot an attempt runs on is taken with one
+//! atomic [`crate::repository::SlotStore::acquire`] (epoch bump, owned lease,
+//! attempt, `Running`) and its result is written with one fenced
+//! [`crate::repository::SlotStore::complete`], which the store refuses when
+//! the lease was reclaimed in the meantime. A dispatched attempt is never
+//! retried: a failure after dispatch is `Failed` / `OutcomeUnknown`, and
+//! external side effects of the handler are at-least-once-or-unknown, never
+//! exactly-once (docs/threat-model.md §9, §10).
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
@@ -39,7 +49,11 @@ use crate::bridge_session::{
 use crate::config::{CapacityConfig, InvokeConfig};
 use crate::entrypoint::EntrypointPolicy;
 use crate::error::AppError;
-use crate::repository::{IdempotencyBinding, IdempotencyOutcome, Repositories};
+use crate::repository::{
+    AcquireOutcome, CompletionOutcome, IdempotencyBinding, IdempotencyOutcome, Repositories,
+    SlotAcquire, SlotCompletion,
+};
+use crate::services::Dispatcher;
 use crate::services::history::{HistoryService, InvocationDetail};
 use crate::services::pool::{
     EnvironmentPool, WarmEnvironment, WarmStartTimings, environment_lifetime_ms, reuse_key_for,
@@ -55,6 +69,9 @@ pub const MAX_TRACE_ID_BYTES: usize = 256;
 /// How long to keep reading after a failed `Invoke` write, for frames the
 /// guest queued before it closed the connection.
 const UNDELIVERED_DRAIN: Duration = Duration::from_millis(200);
+
+/// How often a replay of an invocation another process drives re-reads it.
+const LEDGER_POLL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone)]
 pub struct InvokeRequest {
@@ -161,6 +178,9 @@ pub struct InvokeService {
     /// idle capabilities and `[pool] enabled` allow reuse, so with the shipped
     /// providers every invocation stays cold and destroy-after-invoke.
     pool: Arc<EnvironmentPool>,
+    /// This process's dispatcher: owner of every invocation, environment and
+    /// lease it creates.
+    dispatcher: Arc<Dispatcher>,
     global_slots: Arc<Semaphore>,
     revision_slots: Mutex<HashMap<RevisionId, Arc<Semaphore>>>,
     queued: Arc<AtomicUsize>,
@@ -182,6 +202,7 @@ pub struct InvokeServiceDeps {
     pub invoke: InvokeConfig,
     pub entrypoints: EntrypointPolicy,
     pub pool: Arc<EnvironmentPool>,
+    pub dispatcher: Arc<Dispatcher>,
 }
 
 impl InvokeService {
@@ -201,6 +222,7 @@ impl InvokeService {
             invoke_cfg: deps.invoke,
             entrypoints: deps.entrypoints,
             pool: deps.pool,
+            dispatcher: deps.dispatcher,
             revision_slots: Mutex::new(HashMap::new()),
             queued: Arc::new(AtomicUsize::new(0)),
             in_flight: Mutex::new(HashMap::new()),
@@ -219,6 +241,13 @@ impl InvokeService {
         if self.draining.load(Ordering::SeqCst) {
             return Err(AppError::ProviderUnavailable(
                 "gateway is shutting down".into(),
+            ));
+        }
+        // A dispatcher that lost its lease may already have had its work
+        // reclaimed by another one: it takes nothing new (PLT-4631).
+        if self.dispatcher.is_fenced() {
+            return Err(AppError::ProviderUnavailable(
+                "this gateway lost its dispatcher lease; retry against a live gateway".into(),
             ));
         }
         let function = self.owned_function(&req.principal, &req.function_id)?;
@@ -295,6 +324,7 @@ impl InvokeService {
             trace_id.clone(),
             now,
         )?;
+        invocation.dispatcher_id = Some(self.dispatcher.id().clone());
 
         // 3. Idempotency: a key bound to an existing invocation replays it,
         // even when capacity is exhausted.
@@ -411,6 +441,23 @@ impl InvokeService {
                 let _ = tokio::time::timeout(wait, Self::await_done(done)).await;
             }
             None => {
+                // Driven by another live gateway on the same store: only that
+                // one can stop the handler, so settling the ledger here would
+                // report a cancel that did not happen (PLT-4631).
+                if let Some(owner) = &inv.dispatcher_id
+                    && owner != self.dispatcher.id()
+                    && self
+                        .repos
+                        .slots
+                        .get_dispatcher(owner)?
+                        .is_some_and(|d| d.is_live())
+                {
+                    return Err(AppError::Conflict(format!(
+                        "invocation {} is driven by another gateway (dispatcher {owner}); \
+                         cancel it there",
+                        inv.id
+                    )));
+                }
                 // No driver (e.g. recovered from disk): settle the ledger directly.
                 let mut inv = self.load(invocation_id)?;
                 if !inv.status.is_terminal() {
@@ -456,6 +503,7 @@ impl InvokeService {
                 &req.principal.tenant_id,
                 &req.function_id,
                 key,
+                self.clock.now(),
             )?),
             None => Ok(None),
         }
@@ -470,19 +518,27 @@ impl InvokeService {
         binding: IdempotencyBinding,
     ) -> Result<InvokeOutcome, AppError> {
         if &binding.input_digest != input_digest {
-            return Err(AppError::Conflict(format!(
-                "idempotency key `{}` was used with a different input",
-                req.idempotency_key.as_deref().unwrap_or_default()
-            )));
+            return Err(AppError::IdempotencyConflict {
+                key: req.idempotency_key.clone().unwrap_or_default(),
+                invocation_id: binding.invocation_id,
+            });
         }
         self.replay(&binding.invocation_id).await
     }
 
+    /// Same key, same input: the bound invocation. In flight in this process,
+    /// the replay waits for its driver; in flight in *another* process (a
+    /// second gateway on the same store), it follows the ledger until the
+    /// invocation is terminal or its client deadline passes. Never a second
+    /// execution.
     async fn replay(&self, existing: &InvocationId) -> Result<InvokeOutcome, AppError> {
         let done = self.in_flight.lock().get(existing).map(|e| e.done.clone());
         let result = match done {
             Some(rx) => Self::await_done(rx).await,
-            None => None,
+            None => {
+                self.follow_ledger(existing).await?;
+                None
+            }
         };
         let inv = self.load(existing)?;
         let output = result
@@ -493,6 +549,25 @@ impl InvokeService {
             output,
             replayed: true,
         })
+    }
+
+    /// Poll the ledger until `id` is terminal or its client deadline passed.
+    async fn follow_ledger(&self, id: &InvocationId) -> Result<(), AppError> {
+        let inv = self.load(id)?;
+        if inv.status.is_terminal() {
+            return Ok(());
+        }
+        let wait = (inv.deadlines.client_deadline - self.clock.now())
+            .to_std()
+            .unwrap_or(Duration::ZERO);
+        let started = Instant::now();
+        while started.elapsed() < wait {
+            tokio::time::sleep(LEDGER_POLL.min(wait.saturating_sub(started.elapsed()))).await;
+            if self.load(id)?.status.is_terminal() {
+                break;
+            }
+        }
+        Ok(())
     }
 
     async fn await_done(
@@ -888,10 +963,14 @@ impl Driver {
         }
         let now = self.now();
         if let Some(lease_id) = self.lease_id.take()
-            && let Ok(Some(mut lease)) = svc.repos.environments.get_lease(&lease_id)
+            && let Some(attempt_id) = &self.attempt_id
         {
-            let _ = lease.release(now);
-            let _ = svc.repos.environments.update_lease(lease);
+            // Fenced like every completion: a lease another dispatcher
+            // reclaimed stays reclaimed.
+            let _ = svc
+                .repos
+                .slots
+                .release_lease(&lease_id, attempt_id, self.epoch, now);
         }
         if let Some(attempt_id) = self.attempt_id.take()
             && let Ok(Some(mut attempt)) = svc.repos.invocations.get_attempt(&attempt_id)
@@ -1274,25 +1353,36 @@ impl Driver {
         let execution_wait = (execution_deadline_ts - now)
             .to_std()
             .unwrap_or(Duration::ZERO);
+        // The slot: assigned at the next epoch, together with its lease, its
+        // attempt and the invocation's `Running`, in one store transaction.
+        let expected_epoch = env.epoch;
+        let mut assigned = env.clone();
+        if let Err(e) = assigned.assign(now) {
+            tracing::warn!(error = %e, environment_id = %env_id, "environment cannot be assigned");
+        }
         let mut attempt = InvocationAttempt::dispatch(
             attempt_id.clone(),
             self.invocation_id.clone(),
             tenant.clone(),
             number,
             env_id.clone(),
-            env.epoch,
+            assigned.epoch,
             start_kind,
             now,
         );
         let lease_id = LeaseId::from_ulid(svc.ids.next_ulid());
-        let mut lease = ExecutionLease::acquire(
+        let lease = ExecutionLease::acquire(
             lease_id.clone(),
             env_id.clone(),
             attempt_id.clone(),
             tenant.clone(),
-            env.epoch,
+            assigned.epoch,
             execution_deadline_ts,
             now,
+        )
+        .owned_by(
+            svc.dispatcher.id().clone(),
+            svc.dispatcher.lease_expiry(now),
         );
         let running = match number {
             1 => inv.mark_running(
@@ -1308,13 +1398,55 @@ impl Driver {
         if let Err(e) = running {
             tracing::warn!(error = %e, "cannot record the invocation as running");
         }
-        let _ = env.mark_busy(now);
-        let _ = svc.repos.invocations.insert_attempt(attempt.clone());
-        let _ = svc.repos.environments.insert_lease(lease.clone());
+        let acquired = svc.repos.slots.acquire(SlotAcquire {
+            env: assigned.clone(),
+            expected_epoch,
+            lease: lease.clone(),
+            attempt: attempt.clone(),
+            invocation: Some(inv),
+        });
+        match acquired {
+            Ok(AcquireOutcome::Acquired) => {}
+            outcome => {
+                let reason = match outcome {
+                    Ok(AcquireOutcome::Lost(reason)) => reason,
+                    Err(e) => e.to_string(),
+                    Ok(AcquireOutcome::Acquired) => unreachable!(),
+                };
+                // Nothing was dispatched: the handler provably did not start.
+                tracing::warn!(
+                    environment_id = %env_id,
+                    invocation_id = %self.invocation_id,
+                    reason = %reason,
+                    "slot acquisition lost; the handler was not started"
+                );
+                logs.platform(
+                    LogPhase::Init,
+                    None,
+                    &format!(
+                        "execution slot could not be acquired ({reason}); not starting the handler"
+                    ),
+                );
+                let _ = session.shutdown("slot lost").await;
+                let _ = svc
+                    .provider
+                    .terminate_environment(&env_id, TerminateReason::Crashed)
+                    .await;
+                let _ = env.mark_failed("slot acquisition lost", self.now());
+                self.save_env(&env);
+                self.fail_invocation(InvocationError::new(
+                    ErrorClass::PlatformError,
+                    "Host.SlotLost",
+                    format!("the execution slot could not be acquired: {reason}"),
+                ));
+                self.env_id = None;
+                return Attempted::Done(None);
+            }
+        }
+        env = assigned;
+        self.epoch = env.epoch;
         self.attempt_id = Some(attempt_id.clone());
-        self.lease_id = Some(lease_id);
-        self.save_invocation(inv);
-        self.save_env(&env);
+        self.lease_id = Some(lease_id.clone());
 
         let deadline_ms = execution_deadline_ts.timestamp_millis().max(0) as u64;
         // What the guest actually computes its own deadline from. An absolute
@@ -1360,7 +1492,7 @@ impl Driver {
                     &mut env,
                     &mut session,
                     attempt,
-                    lease,
+                    lease_id.clone(),
                     &logs,
                     queue_wait_ms,
                     warm,
@@ -1563,8 +1695,6 @@ impl Driver {
 
         // 10. record, release, terminate ----------------------------------
         let now = self.now();
-        let _ = lease.release(now);
-        let _ = svc.repos.environments.update_lease(lease);
         let response_ms = finish_started.elapsed().as_millis() as u64;
         attempt.timings = tachyon_serverless_domain::AttemptTimings {
             queue_wait_ms: Some(queue_wait_ms),
@@ -1590,8 +1720,7 @@ impl Driver {
                 let _ = attempt.fail(e.clone(), now);
             }
         }
-        let _ = svc.repos.invocations.update_attempt(attempt.clone());
-        if let Some(mut inv) = self.load_invocation() {
+        let settled_invocation = self.load_invocation().map(|mut inv| {
             let r = match &result {
                 Ok((output, http_status)) => inv.mark_succeeded(output.clone(), *http_status, now),
                 Err(e) => match e.class {
@@ -1603,15 +1732,50 @@ impl Driver {
             if let Err(err) = r {
                 tracing::warn!(error = %err, invocation_id = %inv.id, "cannot record invocation outcome");
             }
+            inv
+        });
+        let status = settled_invocation
+            .as_ref()
+            .map(|inv| inv.status.name())
+            .unwrap_or("missing");
+        // The fenced callback: accepted only while this lease is still the
+        // slot's current lease at this epoch.
+        let completion = svc.repos.slots.complete(SlotCompletion {
+            lease_id: lease_id.clone(),
+            attempt: attempt.clone(),
+            invocation: settled_invocation,
+            now,
+        });
+        let completed = match completion {
+            Ok(CompletionOutcome::Accepted) => true,
+            Ok(CompletionOutcome::Stale(reason)) => {
+                tracing::warn!(
+                    invocation_id = %self.invocation_id,
+                    attempt_id = %attempt_id,
+                    epoch = env.epoch,
+                    reason = %reason,
+                    "stale completion refused: another dispatcher reclaimed this slot"
+                );
+                false
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, invocation_id = %self.invocation_id, "cannot record the attempt outcome");
+                false
+            }
+        };
+        if completed {
             tracing::info!(
-                invocation_id = %inv.id,
-                status = inv.status.name(),
+                invocation_id = %self.invocation_id,
+                status,
                 handler_ms,
                 environment_boot_ms,
                 runtime_init_ms,
                 "invocation finished"
             );
-            self.save_invocation(inv);
+        } else {
+            // The ledger is the answer now (a reclaimer settled it); never
+            // hand out a result the store refused.
+            output_value = None;
         }
         if handler_started {
             self.seq += 1;
@@ -1643,6 +1807,7 @@ impl Driver {
             Err(e) => e.class == ErrorClass::UserError,
         };
         let may_reuse = outcome_allows_reuse
+            && completed
             && env_end.failure.is_none()
             && env_end.reason == TerminateReason::Completed
             && !svc.draining.load(Ordering::SeqCst);
@@ -1801,14 +1966,17 @@ impl Driver {
                 max_line_bytes: self.svc.limits.max_log_line_bytes,
             },
         );
-        // Re-point the session at this attempt. The new epoch is what fences
-        // the previous attempt out: a frame it left behind no longer matches
-        // the lease and is counted as stale (docs/threat-model.md T05).
-        session.rearm(environment.epoch, logs.clone());
+        // Re-point the session at this attempt. The claim only reserved the
+        // environment; the acquire before dispatch moves it to the next epoch,
+        // which is what fences the previous attempt out: a frame it left
+        // behind no longer matches the lease and is counted as stale
+        // (docs/threat-model.md T05).
+        let next_epoch = environment.epoch + 1;
+        session.rearm(next_epoch, logs.clone());
         // The pool has handed the environment over, so from here a panic must
         // terminate it exactly as it would a cold one.
         self.env_id = Some(environment.id.clone());
-        self.epoch = environment.epoch;
+        self.epoch = next_epoch;
         // Continue the environment's own usage count instead of starting a
         // second one on the same environment.
         self.seq = sequence;
@@ -1817,12 +1985,12 @@ impl Driver {
             None,
             &format!(
                 "reusing pooled environment {} at epoch {} (resume {} ms, readiness check {} ms)",
-                environment.id, environment.epoch, timings.resume_ms, timings.readiness_ms
+                environment.id, next_epoch, timings.resume_ms, timings.readiness_ms
             ),
         );
         tracing::debug!(
             environment_id = %environment.id,
-            epoch = environment.epoch,
+            epoch = next_epoch,
             resume_ms = timings.resume_ms,
             readiness_ms = timings.readiness_ms,
             "warm start"
@@ -1863,7 +2031,7 @@ impl Driver {
         env: &mut ExecutionEnvironment,
         session: &mut BridgeSession,
         mut attempt: InvocationAttempt,
-        mut lease: ExecutionLease,
+        lease_id: LeaseId,
         logs: &LogForwarder,
         queue_wait_ms: u64,
         warm: Option<WarmStartTimings>,
@@ -1892,8 +2060,6 @@ impl Driver {
                 error.error_type
             ),
         );
-        let _ = lease.release(now);
-        let _ = svc.repos.environments.update_lease(lease);
         attempt.timings = tachyon_serverless_domain::AttemptTimings {
             queue_wait_ms: Some(queue_wait_ms),
             environment_boot_ms: Some(0),
@@ -1906,7 +2072,15 @@ impl Driver {
             ..tachyon_serverless_domain::AttemptTimings::default()
         };
         let _ = attempt.fail(error, now);
-        let _ = svc.repos.invocations.update_attempt(attempt);
+        // The invocation stays `Running`: the cold retry dispatches it again.
+        if let Ok(CompletionOutcome::Stale(reason)) = svc.repos.slots.complete(SlotCompletion {
+            lease_id,
+            attempt,
+            invocation: None,
+            now,
+        }) {
+            tracing::warn!(environment_id = %env_id, reason = %reason, "stale completion refused");
+        }
         let _ = session.shutdown("reused environment is gone").await;
         if let Err(e) = svc
             .provider
@@ -1959,7 +2133,8 @@ impl Driver {
             svc.provider.kind(),
             reuse_key,
             self.now(),
-        );
+        )
+        .owned_by(svc.dispatcher.id().clone());
         if let Err(e) = svc.repos.environments.insert(env.clone()) {
             self.fail_invocation(InvocationError::new(
                 ErrorClass::PlatformError,
@@ -2113,10 +2288,12 @@ impl Driver {
         // 7. handshake + ready ---------------------------------------------
         let handshake_timeout = svc.invoke_cfg.handshake_timeout();
         let handshake_wait = handshake_timeout.min(self.client_remaining());
+        // The guest learns the epoch its first attempt runs at: the acquire
+        // before dispatch moves the booted environment (epoch 0) to it.
         let handshake = BridgeSession::handshake(
             handle.stream,
             &env_id,
-            env.epoch,
+            env.epoch + 1,
             hello_ack,
             logs.clone(),
             handshake_wait,

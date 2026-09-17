@@ -18,12 +18,12 @@ pub mod services;
 
 pub use app::{Application, BootstrapOptions, ProviderFactory};
 pub use config::{
-    GatewayConfig, PoolConfig, Profile, ProviderConfig, ProviderKindConfig, ReconcileConfig,
-    StoreBackend, StoreConfig,
+    DispatcherConfig, GatewayConfig, PoolConfig, Profile, ProviderConfig, ProviderKindConfig,
+    ReconcileConfig, StoreBackend, StoreConfig,
 };
 pub use error::AppError;
 pub use services::{
-    AliasService, ArtifactService, EnvironmentPool, FunctionService, HistoryService,
+    AliasService, ArtifactService, Dispatcher, EnvironmentPool, FunctionService, HistoryService,
     InvocationDetail, InvokeOutcome, InvokeRequest, InvokeService, LogService, PoolPolicy,
     PoolSweep, ProviderService, ReconcileReport, ReconcileService, ReuseDisabled, RevisionService,
     UsageSummary,

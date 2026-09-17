@@ -62,8 +62,8 @@ use serde::Serialize;
 
 use tachyon_serverless_api_types::ReuseInfo;
 use tachyon_serverless_domain::{
-    Clock, EnvironmentId, EvidenceQuality, ExecutionEnvironment, FunctionRevision, ReuseKey,
-    Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType,
+    Clock, DispatcherId, EnvironmentId, EvidenceQuality, ExecutionEnvironment, FunctionRevision,
+    ReuseKey, Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType,
 };
 use tachyon_serverless_provider_port::{
     Capabilities, ExecutionProvider, Support, TerminateReason, UsageSink,
@@ -509,6 +509,11 @@ pub struct EnvironmentPool {
     usage: Arc<dyn UsageSink>,
     clock: Arc<dyn Clock>,
     policy: PoolPolicy,
+    /// The dispatcher whose sessions this pool holds (PLT-4631). The pool only
+    /// ever claims and sweeps environments of this owner: another gateway on
+    /// the same store holds the sessions of its own, and a claim here would
+    /// find no session and terminate a healthy environment.
+    owner: Option<DispatcherId>,
     /// Live guest connections of the pooled environments. Never persisted.
     sessions: Mutex<HashMap<EnvironmentId, PooledSession>>,
     /// Environments this process took out of the pool but could not terminate.
@@ -550,10 +555,17 @@ impl EnvironmentPool {
             usage,
             clock,
             policy,
+            owner: None,
             sessions: Mutex::new(HashMap::new()),
             pending_termination: Mutex::new(Vec::new()),
             quiescing: tokio::sync::watch::Sender::new(0),
         }
+    }
+
+    /// Bind the pool to the dispatcher that holds its sessions.
+    pub fn owned_by(mut self, owner: DispatcherId) -> Self {
+        self.owner = Some(owner);
+        self
     }
 
     pub fn policy(&self) -> &PoolPolicy {
@@ -600,11 +612,11 @@ impl EnvironmentPool {
             return None;
         }
         loop {
-            let environment = match self
-                .repos
-                .environments
-                .claim_for_reuse(key, self.clock.now())
-            {
+            let environment = match self.repos.slots.claim_for_reuse(
+                key,
+                self.owner.as_ref(),
+                self.clock.now(),
+            ) {
                 Ok(Some(env)) => env,
                 Ok(None) => return None,
                 Err(e) => {
@@ -814,7 +826,7 @@ impl EnvironmentPool {
             let mut sessions = self.sessions.lock();
             match self
                 .repos
-                .environments
+                .slots
                 .release_to_pool(&env, self.policy.limits, now)
             {
                 Ok(Some(pooled)) => {
@@ -922,7 +934,7 @@ impl EnvironmentPool {
                 report.failed += 1;
             }
         }
-        let idle = match self.repos.environments.list_idle() {
+        let idle = match self.repos.slots.list_idle(self.owner.as_ref()) {
             Ok(v) => v,
             Err(e) => {
                 tracing::warn!(error = %e, "cannot list idle environments");
@@ -936,11 +948,7 @@ impl EnvironmentPool {
             }
             // Take it out of the pool before terminating anything: an
             // environment the sweeper owns must never reach an attempt.
-            match self
-                .repos
-                .environments
-                .take_idle_for_termination(&env.id, now)
-            {
+            match self.repos.slots.take_idle_for_termination(&env.id, now) {
                 Ok(true) => {}
                 Ok(false) => {
                     report.raced += 1;
@@ -1153,9 +1161,13 @@ mod tests {
     use tokio_util::codec::{FramedRead, FramedWrite};
 
     use crate::bridge_session::{HelloAckParams, LogContext, LogForwarder};
-    use crate::repository::{EnvironmentRepository, InMemoryStore, RepoError};
+    use crate::repository::{
+        AcquireOutcome, CompletionOutcome, DispatcherRecord, EnvironmentRepository,
+        HeartbeatOutcome, InMemoryStore, ReclaimReport, ReclaimRequest, RepoError, SlotAcquire,
+        SlotCompletion, SlotStore,
+    };
     use tachyon_serverless_domain::{
-        Architecture, BootEvidence, EnvironmentState, ExecutionLease, LeaseId, Limits,
+        Architecture, AttemptId, BootEvidence, EnvironmentState, ExecutionLease, LeaseId, Limits,
         ProviderKind, RevisionId, SystemClock,
     };
     use tachyon_serverless_protocol::{
@@ -1625,28 +1637,40 @@ mod tests {
         after_release: Box<dyn Fn() + Send + Sync>,
     }
 
-    impl EnvironmentRepository for ReleaseHook {
-        fn insert(&self, env: ExecutionEnvironment) -> Result<(), RepoError> {
-            EnvironmentRepository::insert(&*self.inner, env)
+    impl SlotStore for ReleaseHook {
+        fn register_dispatcher(&self, record: DispatcherRecord) -> Result<(), RepoError> {
+            self.inner.register_dispatcher(record)
         }
-        fn get(&self, id: &EnvironmentId) -> Result<Option<ExecutionEnvironment>, RepoError> {
-            EnvironmentRepository::get(&*self.inner, id)
+        fn get_dispatcher(&self, id: &DispatcherId) -> Result<Option<DispatcherRecord>, RepoError> {
+            self.inner.get_dispatcher(id)
         }
-        fn update(&self, env: ExecutionEnvironment) -> Result<(), RepoError> {
-            EnvironmentRepository::update(&*self.inner, env)
+        fn list_dispatchers(&self) -> Result<Vec<DispatcherRecord>, RepoError> {
+            self.inner.list_dispatchers()
         }
-        fn list_active(&self) -> Result<Vec<ExecutionEnvironment>, RepoError> {
-            self.inner.list_active()
+        fn heartbeat(
+            &self,
+            id: &DispatcherId,
+            ttl: chrono::Duration,
+            now: Timestamp,
+        ) -> Result<HeartbeatOutcome, RepoError> {
+            self.inner.heartbeat(id, ttl, now)
         }
-        fn list_idle(&self) -> Result<Vec<ExecutionEnvironment>, RepoError> {
-            self.inner.list_idle()
+        fn stop_dispatcher(&self, id: &DispatcherId, now: Timestamp) -> Result<(), RepoError> {
+            self.inner.stop_dispatcher(id, now)
+        }
+        fn list_idle(
+            &self,
+            owner: Option<&DispatcherId>,
+        ) -> Result<Vec<ExecutionEnvironment>, RepoError> {
+            self.inner.list_idle(owner)
         }
         fn claim_for_reuse(
             &self,
             key: &ReuseKey,
+            owner: Option<&DispatcherId>,
             now: Timestamp,
         ) -> Result<Option<ExecutionEnvironment>, RepoError> {
-            self.inner.claim_for_reuse(key, now)
+            self.inner.claim_for_reuse(key, owner, now)
         }
         fn release_to_pool(
             &self,
@@ -1665,14 +1689,47 @@ mod tests {
         ) -> Result<bool, RepoError> {
             self.inner.take_idle_for_termination(id, now)
         }
-        fn insert_lease(&self, lease: ExecutionLease) -> Result<(), RepoError> {
-            self.inner.insert_lease(lease)
+        fn acquire(&self, request: SlotAcquire) -> Result<AcquireOutcome, RepoError> {
+            self.inner.acquire(request)
         }
         fn get_lease(&self, id: &LeaseId) -> Result<Option<ExecutionLease>, RepoError> {
             self.inner.get_lease(id)
         }
-        fn update_lease(&self, lease: ExecutionLease) -> Result<(), RepoError> {
-            self.inner.update_lease(lease)
+        fn renew_lease(
+            &self,
+            id: &LeaseId,
+            owner: &DispatcherId,
+            epoch: u64,
+            ttl: chrono::Duration,
+            now: Timestamp,
+        ) -> Result<bool, RepoError> {
+            self.inner.renew_lease(id, owner, epoch, ttl, now)
+        }
+        fn complete(&self, completion: SlotCompletion) -> Result<CompletionOutcome, RepoError> {
+            self.inner.complete(completion)
+        }
+        fn release_lease(
+            &self,
+            id: &LeaseId,
+            attempt: &AttemptId,
+            epoch: u64,
+            now: Timestamp,
+        ) -> Result<bool, RepoError> {
+            self.inner.release_lease(id, attempt, epoch, now)
+        }
+        fn reclaim_expired(&self, request: ReclaimRequest) -> Result<ReclaimReport, RepoError> {
+            self.inner.reclaim_expired(request)
+        }
+        fn list_fenced(&self) -> Result<Vec<ExecutionEnvironment>, RepoError> {
+            self.inner.list_fenced()
+        }
+        fn confirm_terminated(
+            &self,
+            id: &EnvironmentId,
+            epoch: u64,
+            now: Timestamp,
+        ) -> Result<bool, RepoError> {
+            self.inner.confirm_terminated(id, epoch, now)
         }
     }
 
@@ -1846,7 +1903,7 @@ mod tests {
         // The hook is shared, so the receiver needs a lock around it.
         let done_rx = Mutex::new(done_rx);
         let mut repos = Repositories::in_memory(store.clone());
-        repos.environments = Arc::new(ReleaseHook {
+        repos.slots = Arc::new(ReleaseHook {
             inner: store.clone(),
             after_release: Box::new(move || {
                 let _ = go_tx.send(());
@@ -1891,7 +1948,11 @@ mod tests {
             Some(env.id.clone()),
             "the claimer got the pooled environment together with its session"
         );
-        assert_eq!(claimed_epoch, Some(env.epoch + 1));
+        assert_eq!(
+            claimed_epoch,
+            Some(env.epoch),
+            "a claim reserves the environment; the acquire before dispatch moves the epoch"
+        );
         assert!(
             provider.terminated().is_empty(),
             "a healthy environment was terminated by a claim that saw the row without its session"
@@ -1996,7 +2057,7 @@ mod tests {
             "nothing was paused, so nothing is resumed"
         );
         assert!(
-            store.list_idle().unwrap().is_empty(),
+            store.list_idle(None).unwrap().is_empty(),
             "the row never became claimable"
         );
         assert_eq!(pool.held(), 0);
@@ -2272,7 +2333,7 @@ mod tests {
             "nothing stopped, so nothing is metered"
         );
         assert!(
-            store.list_idle().unwrap().is_empty(),
+            store.list_idle(None).unwrap().is_empty(),
             "and it is out of the pool either way"
         );
 
@@ -2340,7 +2401,7 @@ mod tests {
             "the row stays in the active set, so the startup reconcile still sees an owner"
         );
         assert!(
-            store.list_idle().unwrap().is_empty(),
+            store.list_idle(None).unwrap().is_empty(),
             "and it is out of the pool either way"
         );
         assert!(

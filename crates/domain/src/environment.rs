@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::clock::Timestamp;
 use crate::error::DomainError;
-use crate::ids::{AttemptId, EnvironmentId, LeaseId, RevisionId, TenantId};
+use crate::ids::{AttemptId, DispatcherId, EnvironmentId, LeaseId, RevisionId, TenantId};
 
 /// Which provider realised the environment. The domain only records the name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -113,9 +113,24 @@ pub struct ExecutionEnvironment {
     pub provider: ProviderKind,
     pub state: EnvironmentState,
     pub reuse_key: ReuseKey,
-    /// Incremented whenever the environment is (re)assigned. Results carrying
-    /// an older epoch are rejected.
+    /// Incremented whenever the environment is assigned to an attempt
+    /// ([`Self::assign`]) and when it is fenced ([`Self::fence`]). `0` means
+    /// "booted, never assigned": the first attempt runs at epoch 1. Results
+    /// carrying another epoch are rejected.
     pub epoch: u64,
+    /// The dispatcher that created the environment and holds its bridge
+    /// session (PLT-4631). A session lives in one process only, so ownership
+    /// never moves: another dispatcher may fence and terminate the
+    /// environment, but never dispatch into it. `None` for rows written
+    /// before dispatchers existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<DispatcherId>,
+    /// Set when the environment was fenced because its owner's lease expired
+    /// (PLT-4631). A fenced environment is `Draining` and stays out of every
+    /// pool and every capacity count until a provider terminate confirms it
+    /// is gone: lease expiry alone never makes it reusable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fenced_at: Option<Timestamp>,
     pub evidence: BootEvidence,
     pub created_at: Timestamp,
     pub ready_at: Option<Timestamp>,
@@ -144,7 +159,9 @@ impl ExecutionEnvironment {
             provider,
             state: EnvironmentState::Requested,
             reuse_key,
-            epoch: 1,
+            epoch: 0,
+            owner: None,
+            fenced_at: None,
             evidence: BootEvidence::default(),
             created_at: now,
             ready_at: None,
@@ -152,6 +169,12 @@ impl ExecutionEnvironment {
             stopped_at: None,
             updated_at: now,
         }
+    }
+
+    /// Record the dispatcher that creates (and will drive) the environment.
+    pub fn owned_by(mut self, owner: DispatcherId) -> Self {
+        self.owner = Some(owner);
+        self
     }
 
     fn transition(&mut self, to: EnvironmentState, now: Timestamp) -> Result<(), DomainError> {
@@ -259,26 +282,78 @@ impl ExecutionEnvironment {
     /// dispatched to an environment before it is ready, and for `Busy`, so a
     /// running attempt is never handed out a second time.
     pub fn is_reusable(&self) -> bool {
-        matches!(self.state, EnvironmentState::Ready | EnvironmentState::Idle)
+        self.fenced_at.is_none()
+            && matches!(self.state, EnvironmentState::Ready | EnvironmentState::Idle)
     }
 
-    /// Take a pooled environment for a new attempt.
+    /// Take a pooled (`Idle`) environment out of the pool for its owner,
+    /// without assigning it yet: it becomes `Ready` at the same epoch, so no
+    /// other claim can take it and nothing has been dispatched. The epoch
+    /// advances in [`Self::assign`], together with the lease.
+    pub fn reserve(&mut self, now: Timestamp) -> Result<(), DomainError> {
+        if !matches!(self.state, EnvironmentState::Idle) || self.fenced_at.is_some() {
+            return Err(DomainError::IllegalTransition {
+                entity: "ExecutionEnvironment",
+                from: self.state.name().into(),
+                to: "ready".into(),
+            });
+        }
+        self.mark_ready(now)
+    }
+
+    /// Assign the environment to one attempt: `Ready` (or `Idle`, resumed
+    /// through `Ready`) becomes `Busy` and the epoch advances by one.
     ///
-    /// An `Idle` environment is resumed through `Ready` first, so the state a
-    /// dispatch happens from is always `Ready`. The epoch advances by one on
-    /// every reassignment: that is what fences the previous attempt out, since
+    /// Every assignment advances the epoch, the first one included (0 -> 1).
+    /// That is what fences the previous attempt out, since
     /// [`ExecutionLease::accepts`] only takes `(attempt_id, epoch)` pairs of
     /// the current lease and the old attempt now carries a stale epoch.
     ///
     /// Fails (leaving the environment untouched) for anything that is not
-    /// `Ready` or `Idle`.
-    pub fn reassign(&mut self, now: Timestamp) -> Result<u64, DomainError> {
+    /// `Ready` or `Idle`, and for a fenced environment.
+    pub fn assign(&mut self, now: Timestamp) -> Result<u64, DomainError> {
+        if !self.is_reusable() {
+            return Err(DomainError::IllegalTransition {
+                entity: "ExecutionEnvironment",
+                from: match self.fenced_at {
+                    Some(_) => "fenced".into(),
+                    None => self.state.name().into(),
+                },
+                to: "busy".into(),
+            });
+        }
         if matches!(self.state, EnvironmentState::Idle) {
             self.mark_ready(now)?;
         }
         self.mark_busy(now)?;
         self.epoch += 1;
         Ok(self.epoch)
+    }
+
+    /// Fence the environment after its owner lost its lease (PLT-4631): it
+    /// moves to `Draining` from any non-terminal state, the epoch advances so
+    /// every frame and completion of the previous assignment is stale, and it
+    /// stays out of every pool until a terminate is confirmed
+    /// ([`Self::mark_lost`] / [`Self::mark_stopped`]).
+    pub fn fence(&mut self, now: Timestamp) -> Result<u64, DomainError> {
+        if self.state.is_terminal() {
+            return Err(DomainError::Terminal {
+                entity: "ExecutionEnvironment",
+                state: self.state.name().into(),
+            });
+        }
+        self.state = EnvironmentState::Draining;
+        self.idle_since = None;
+        self.epoch += 1;
+        if self.fenced_at.is_none() {
+            self.fenced_at = Some(now);
+        }
+        self.updated_at = now;
+        Ok(self.epoch)
+    }
+
+    pub fn is_fenced(&self) -> bool {
+        self.fenced_at.is_some()
     }
 
     /// True when the environment has been idle for at least `ttl`. Always
@@ -306,6 +381,15 @@ pub struct ExecutionLease {
     /// Hard deadline after which the host terminates the environment.
     pub deadline: Timestamp,
     pub released_at: Option<Timestamp>,
+    /// The dispatcher holding the slot (PLT-4631).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<DispatcherId>,
+    /// Ownership expiry. The owner renews it while it is alive
+    /// ([`Self::renew`]); once it has passed, another dispatcher may reclaim
+    /// the slot exactly once. `None` for leases written before PLT-4631,
+    /// which only carry the execution deadline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<Timestamp>,
 }
 
 impl ExecutionLease {
@@ -327,11 +411,59 @@ impl ExecutionLease {
             acquired_at: now,
             deadline,
             released_at: None,
+            owner: None,
+            expires_at: None,
         }
     }
 
+    /// Bind the lease to its owner with an initial ownership expiry.
+    pub fn owned_by(mut self, owner: DispatcherId, expires_at: Timestamp) -> Self {
+        self.owner = Some(owner);
+        self.expires_at = Some(expires_at);
+        self
+    }
+
+    /// Unreleased and not past its ownership expiry (or, for a lease without
+    /// one, its execution deadline).
     pub fn is_active(&self, now: Timestamp) -> bool {
-        self.released_at.is_none() && now < self.deadline
+        self.released_at.is_none()
+            && match self.expires_at {
+                Some(expires) => now < expires,
+                None => now < self.deadline,
+            }
+    }
+
+    /// True when another dispatcher may reclaim the lease: unreleased, and
+    /// `now` is past the ownership expiry by at least `skew`, the clock
+    /// difference tolerated between dispatchers. A lease without an ownership
+    /// expiry never expires this way.
+    pub fn is_expired(&self, now: Timestamp, skew: chrono::Duration) -> bool {
+        self.released_at.is_none() && self.expires_at.is_some_and(|e| now >= e + skew)
+    }
+
+    /// Extend the ownership expiry to `now + ttl`. Only an unreleased lease
+    /// that has not expired yet can be renewed: a renewal never revives a
+    /// lease, because by then another dispatcher may already have reclaimed
+    /// its slot. The expiry never moves backwards.
+    pub fn renew(&mut self, now: Timestamp, ttl: chrono::Duration) -> Result<(), DomainError> {
+        if self.released_at.is_some() {
+            return Err(DomainError::Terminal {
+                entity: "ExecutionLease",
+                state: "released".into(),
+            });
+        }
+        if !self.is_active(now) {
+            return Err(DomainError::IllegalTransition {
+                entity: "ExecutionLease",
+                from: "expired".into(),
+                to: "renewed".into(),
+            });
+        }
+        let next = now + ttl;
+        if self.expires_at.is_none_or(|e| next > e) {
+            self.expires_at = Some(next);
+        }
+        Ok(())
     }
 
     pub fn release(&mut self, now: Timestamp) -> Result<(), DomainError> {
@@ -467,8 +599,10 @@ mod tests {
         let r = RevisionId::generate();
         let mut e = ready(&t, &r);
 
-        // The first (cold) assignment keeps epoch 1.
-        e.mark_busy(now()).unwrap();
+        // A booted environment was never assigned: epoch 0. The first (cold)
+        // assignment takes it to 1.
+        assert_eq!(e.epoch, 0);
+        assert_eq!(e.assign(now()).unwrap(), 1);
         assert_eq!(e.epoch, 1);
         let first = AttemptId::generate();
         let first_lease = ExecutionLease::acquire(
@@ -484,7 +618,7 @@ mod tests {
         // Back into the pool, then handed out again.
         e.mark_idle(now()).unwrap();
         assert!(e.is_reusable());
-        assert_eq!(e.reassign(now()).unwrap(), 2);
+        assert_eq!(e.assign(now()).unwrap(), 2);
         assert_eq!(e.epoch, 2);
         assert_eq!(e.state, EnvironmentState::Busy);
         assert!(
@@ -535,11 +669,11 @@ mod tests {
         let mut requested = fresh();
         assert!(!requested.is_reusable());
         assert!(
-            requested.reassign(now()).is_err(),
+            requested.assign(now()).is_err(),
             "nothing is dispatched before Ready"
         );
         assert_eq!(
-            requested.epoch, 1,
+            requested.epoch, 0,
             "a refused reassignment does not move the epoch"
         );
 
@@ -549,20 +683,20 @@ mod tests {
             .mark_initializing(BootEvidence::default(), now())
             .unwrap();
         assert!(!initializing.is_reusable());
-        assert!(initializing.reassign(now()).is_err());
+        assert!(initializing.assign(now()).is_err());
 
         let mut busy = ready(&t, &r);
-        busy.mark_busy(now()).unwrap();
+        busy.assign(now()).unwrap();
         assert!(!busy.is_reusable());
         assert!(
-            busy.reassign(now()).is_err(),
+            busy.assign(now()).is_err(),
             "a busy environment is never handed out"
         );
         assert_eq!(busy.epoch, 1);
 
         busy.mark_stopped(now()).unwrap();
         assert!(!busy.is_reusable());
-        assert!(busy.reassign(now()).is_err());
+        assert!(busy.assign(now()).is_err());
     }
 
     #[test]
@@ -583,7 +717,108 @@ mod tests {
         assert!(!e.idle_expired(now() + Duration::seconds(59), ttl));
         assert!(e.idle_expired(now() + Duration::seconds(60), ttl));
 
-        e.reassign(now()).unwrap();
+        e.assign(now()).unwrap();
         assert_eq!(e.idle_since, None, "leaving the pool clears the TTL clock");
+    }
+    #[test]
+    fn reserving_takes_an_idle_environment_out_of_the_pool_without_assigning_it() {
+        let t = TenantId::generate();
+        let r = RevisionId::generate();
+        let mut e = ready(&t, &r);
+        assert!(
+            e.reserve(now()).is_err(),
+            "only an idle environment is reserved"
+        );
+        e.assign(now()).unwrap();
+        e.mark_idle(now()).unwrap();
+        e.reserve(now()).unwrap();
+        assert_eq!(e.state, EnvironmentState::Ready);
+        assert_eq!(e.epoch, 1, "a reservation does not advance the epoch");
+        assert_eq!(e.idle_since, None);
+        assert_eq!(e.assign(now()).unwrap(), 2);
+    }
+
+    /// PLT-4631: an environment whose owner lost its lease is fenced from any
+    /// non-terminal state, moves its epoch past every earlier assignment and
+    /// is never handed out again, not even from `Draining` back to the pool.
+    #[test]
+    fn a_fenced_environment_is_never_reusable_and_its_old_epoch_is_stale() {
+        let t = TenantId::generate();
+        let r = RevisionId::generate();
+        let mut e = ready(&t, &r);
+        let epoch = e.assign(now()).unwrap();
+        let att = AttemptId::generate();
+        let lease = ExecutionLease::acquire(
+            LeaseId::generate(),
+            e.id.clone(),
+            att.clone(),
+            t.clone(),
+            epoch,
+            now() + Duration::seconds(30),
+            now(),
+        );
+        let fenced = e.fence(now()).unwrap();
+        assert_eq!(fenced, epoch + 1);
+        assert!(e.is_fenced());
+        assert_eq!(e.state, EnvironmentState::Draining);
+        assert!(!e.is_reusable());
+        assert!(e.assign(now()).is_err());
+        assert!(e.reserve(now()).is_err());
+        assert!(
+            !lease.accepts(&att, fenced),
+            "the fenced epoch never matches the old lease"
+        );
+        // Only a confirmed termination ends it.
+        e.mark_lost("terminate confirmed", now()).unwrap();
+        assert!(
+            e.fence(now()).is_err(),
+            "a terminal environment is not fenced"
+        );
+
+        let mut booting = ExecutionEnvironment::request(
+            EnvironmentId::generate(),
+            t.clone(),
+            r.clone(),
+            ProviderKind::Fake,
+            key(&t, &r),
+            now(),
+        );
+        booting.mark_provisioning(now()).unwrap();
+        assert_eq!(booting.fence(now()).unwrap(), 1);
+        assert_eq!(booting.state, EnvironmentState::Draining);
+    }
+
+    #[test]
+    fn a_lease_is_renewed_only_while_unexpired_and_expires_past_the_skew() {
+        let owner = DispatcherId::generate();
+        let mut l = ExecutionLease::acquire(
+            LeaseId::generate(),
+            EnvironmentId::generate(),
+            AttemptId::generate(),
+            TenantId::generate(),
+            1,
+            now() + Duration::seconds(600),
+            now(),
+        )
+        .owned_by(owner.clone(), now() + Duration::seconds(10));
+        let skew = Duration::seconds(2);
+        assert!(l.is_active(now() + Duration::seconds(9)));
+        l.renew(now() + Duration::seconds(9), Duration::seconds(10))
+            .unwrap();
+        assert_eq!(l.expires_at, Some(now() + Duration::seconds(19)));
+        assert!(
+            !l.is_expired(now() + Duration::seconds(20), skew),
+            "within the skew"
+        );
+        assert!(l.is_expired(now() + Duration::seconds(21), skew));
+        assert!(
+            l.renew(now() + Duration::seconds(19), Duration::seconds(10))
+                .is_err(),
+            "an expired lease is never revived"
+        );
+        assert_eq!(l.expires_at, Some(now() + Duration::seconds(19)));
+        l.release(now()).unwrap();
+        assert!(!l.is_expired(now() + Duration::days(1), skew));
+        assert!(l.renew(now(), Duration::seconds(10)).is_err());
     }
 }

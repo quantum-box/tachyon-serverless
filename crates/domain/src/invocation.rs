@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::clock::Timestamp;
 use crate::error::DomainError;
 use crate::ids::{
-    AliasName, AttemptId, EnvironmentId, FunctionId, InvocationId, RevisionId, Sha256Digest,
-    TenantId,
+    AliasName, AttemptId, DispatcherId, EnvironmentId, FunctionId, InvocationId, RevisionId,
+    Sha256Digest, TenantId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -200,6 +200,12 @@ pub struct Invocation {
     pub started_at: Option<Timestamp>,
     pub finished_at: Option<Timestamp>,
     pub attempt_ids: Vec<AttemptId>,
+    /// The dispatcher that accepted the invocation and drives it (PLT-4631).
+    /// Only that dispatcher settles it, unless its lease expired and another
+    /// dispatcher reclaimed it. `None` for rows written before dispatchers
+    /// existed (settled by the restart rules when a store opens).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatcher_id: Option<DispatcherId>,
 }
 
 impl Invocation {
@@ -253,6 +259,7 @@ impl Invocation {
             started_at: None,
             finished_at: None,
             attempt_ids: Vec::new(),
+            dispatcher_id: None,
         })
     }
 

@@ -372,6 +372,27 @@ async fn full_api_roundtrip() {
     );
     assert_eq!(api.fake.created().len(), 1);
 
+    // the same key with another input is a 409 naming the bound invocation
+    // (PLT-4631, docs/api.md §2)
+    let reused = call(
+        r,
+        req(
+            Method::POST,
+            &format!("/v1/functions/{function_id}/invoke"),
+            Some(TOKEN_A),
+        )
+        .header("idempotency-key", "k1")
+        .body(json_body(serde_json::json!({"name": "someone else"})))
+        .unwrap(),
+    )
+    .await;
+    assert_eq!(reused.status, StatusCode::CONFLICT);
+    let body = reused.json();
+    assert_eq!(body["error"]["code"], "conflict");
+    assert_eq!(body["error"]["invocation_id"], invocation_id.as_str());
+    assert_eq!(body["error"]["error_type"], "Host.IdempotencyKeyReused");
+    assert_eq!(api.fake.created().len(), 1, "a conflict runs nothing");
+
     // invoke (colon form) with a pinned revision
     let inv2 = call(
         r,

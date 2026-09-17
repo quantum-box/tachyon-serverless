@@ -1,18 +1,22 @@
 //! The repository contract, run against both stores (docs/adr/0003 A9,
 //! PLT-4618): creation, restore, state transitions, terminal rows that
 //! cannot be rewritten, alias CAS races, tenant boundaries, duplicate ids,
-//! revision tampering, bounded bodies and the environment pool.
+//! revision tampering, bounded bodies, the environment pool and the slot
+//! store (acquire CAS, fenced completion, lease renewal and expiry with clock
+//! skew, reclaim and fencing, idempotency expiry; PLT-4631).
 //!
 //! Every test is a function over `&Arc<dyn StateStore>`; `contract!` runs it
 //! once on [`InMemoryStore`] and once on a volatile [`SqliteStore`].
 
 use std::sync::Arc;
 
+use chrono::Duration;
 use tachyon_serverless_domain::{
-    AttemptStatus, BootEvidence, EnvironmentState, ErrorClass, ExecutionEnvironment,
-    ExecutionLease, FunctionAlias, FunctionRevision, Invocation, InvocationError, InvocationId,
-    InvocationStatus, LeaseId, Limits, LogPhase, LogRecord, LogStream, PayloadRef, ReuseKey,
-    RevisionId, RevisionStatus, Sha256Digest, TenantId,
+    AttemptStatus, BootEvidence, DispatcherId, EnvironmentState, ErrorClass, ExecutionEnvironment,
+    ExecutionLease, FunctionAlias, FunctionRevision, Invocation, InvocationAttempt,
+    InvocationError, InvocationId, InvocationStatus, LeaseId, Limits, LogPhase, LogRecord,
+    LogStream, PayloadRef, ReuseKey, RevisionId, RevisionStatus, Sha256Digest, StartKind, TenantId,
+    Timestamp,
 };
 
 use super::*;
@@ -152,6 +156,25 @@ pub(crate) mod fx {
         env
     }
 
+    /// A registered dispatcher whose lease expires `ttl_s` seconds after
+    /// `now()`.
+    pub fn dispatcher(s: &dyn super::SlotStore, instance: &str, ttl_s: i64) -> DispatcherId {
+        let id = DispatcherId::generate();
+        s.register_dispatcher(super::DispatcherRecord {
+            id: id.clone(),
+            instance: instance.into(),
+            hostname: "contract-host".into(),
+            pid: u32::MAX,
+            started_at: now(),
+            heartbeat_at: now(),
+            lease_expires_at: now() + chrono::Duration::seconds(ttl_s),
+            stopped_at: None,
+            reclaimed_at: None,
+        })
+        .unwrap();
+        id
+    }
+
     pub fn inline(bytes: &[u8]) -> PayloadRef {
         use base64::Engine as _;
         PayloadRef::Inline {
@@ -200,6 +223,14 @@ contract!(
     idempotency_key_is_bound_with_its_invocation,
     logs_are_bounded_per_invocation,
     artifact_ownership_is_per_tenant,
+    acquire_is_a_cas_with_exactly_one_winner_per_epoch,
+    a_completion_with_a_stale_epoch_never_overwrites_state,
+    leases_renew_only_while_unexpired_and_expire_past_the_clock_skew,
+    reclaim_happens_once_fences_and_only_a_confirmed_terminate_settles,
+    a_live_dispatcher_is_never_reclaimed_and_a_stopped_one_is_at_once,
+    a_fenced_dispatcher_can_neither_renew_nor_acquire,
+    idempotency_bindings_expire_after_their_invocation_finished,
+    the_pool_only_hands_out_and_sweeps_its_owners_environments,
     only_an_exactly_matching_reuse_key_is_reused,
     nothing_is_dispatched_before_ready_and_busy_is_never_handed_out,
     concurrent_claims_never_hand_the_same_environment_to_two_callers,
@@ -222,6 +253,71 @@ fn invs(s: &Store) -> &dyn InvocationRepository {
 }
 fn envs(s: &Store) -> &dyn EnvironmentRepository {
     &**s
+}
+fn slots(s: &Store) -> &dyn SlotStore {
+    &**s
+}
+
+/// Everything an acquire of `env` (as stored, `Ready`/`Idle`) by `owner`
+/// for `inv` writes, with its lease expiring `ttl_s` after `at`.
+fn slot_request(
+    env: &ExecutionEnvironment,
+    inv: &Invocation,
+    owner: &DispatcherId,
+    at: Timestamp,
+    ttl_s: i64,
+) -> SlotAcquire {
+    let mut assigned = env.clone();
+    assigned.assign(at).unwrap();
+    let attempt = InvocationAttempt::dispatch(
+        tachyon_serverless_domain::AttemptId::generate(),
+        inv.id.clone(),
+        inv.tenant_id.clone(),
+        (inv.attempt_ids.len() + 1) as u32,
+        env.id.clone(),
+        assigned.epoch,
+        StartKind::Cold,
+        at,
+    );
+    let lease = ExecutionLease::acquire(
+        LeaseId::generate(),
+        env.id.clone(),
+        attempt.id.clone(),
+        env.tenant_id.clone(),
+        assigned.epoch,
+        at + Duration::seconds(600),
+        at,
+    )
+    .owned_by(owner.clone(), at + Duration::seconds(ttl_s));
+    let mut running = inv.clone();
+    match running.status {
+        InvocationStatus::Running => running
+            .mark_retry(attempt.id.clone(), at + Duration::seconds(600), at)
+            .unwrap(),
+        _ => running
+            .mark_running(attempt.id.clone(), at + Duration::seconds(600), at, at)
+            .unwrap(),
+    }
+    SlotAcquire {
+        env: assigned,
+        expected_epoch: env.epoch,
+        lease,
+        attempt,
+        invocation: Some(running),
+    }
+}
+
+/// A `Ready` environment of `owner` in the store, with an accepted
+/// invocation of the same tenant to run on it.
+fn ready_slot(s: &Store, owner: &DispatcherId) -> (ExecutionEnvironment, Invocation) {
+    let t = TenantId::generate();
+    let key = fx::key(&t, &RevisionId::generate());
+    let env = fx::ready_environment(&key).owned_by(owner.clone());
+    envs(s).insert(env.clone()).unwrap();
+    let mut inv = fx::invocation(&t, &FunctionId::generate(), None);
+    inv.dispatcher_id = Some(owner.clone());
+    invs(s).insert(inv.clone()).unwrap();
+    (env, inv)
 }
 
 fn is_refused<T: std::fmt::Debug>(r: Result<T, RepoError>) -> bool {
@@ -309,17 +405,16 @@ fn duplicate_ids_are_refused_for_every_entity(make: fn(Limits) -> Store) {
         "attempt id"
     );
 
-    let lease = ExecutionLease::acquire(
-        LeaseId::generate(),
-        env.id.clone(),
-        att.id.clone(),
-        t.clone(),
-        1,
-        now(),
-        now(),
-    );
-    envs(&s).insert_lease(lease.clone()).unwrap();
-    assert!(is_conflict(envs(&s).insert_lease(lease)), "lease id");
+    // A lease id taken by one acquire cannot be reused by another.
+    let owner = fx::dispatcher(slots(&s), "dup", 30);
+    let (first_env, first_inv) = ready_slot(&s, &owner);
+    let first = slot_request(&first_env, &first_inv, &owner, now(), 30);
+    let lease_id = first.lease.id.clone();
+    assert_eq!(slots(&s).acquire(first).unwrap(), AcquireOutcome::Acquired);
+    let (second_env, second_inv) = ready_slot(&s, &owner);
+    let mut second = slot_request(&second_env, &second_inv, &owner, now(), 30);
+    second.lease.id = lease_id;
+    assert!(is_conflict(slots(&s).acquire(second)), "lease id");
 }
 
 fn revision_numbers_are_allocated_and_unique_per_function(make: fn(Limits) -> Store) {
@@ -554,30 +649,73 @@ fn attempts_and_leases_are_final_once_settled(make: fn(Limits) -> Store) {
     assert!(is_refused(invs(&s).update_attempt(re_epoched)));
     assert_eq!(invs(&s).attempts_of(&inv.id).unwrap(), vec![att.clone()]);
 
-    let mut lease =
-        ExecutionLease::acquire(LeaseId::generate(), env, att.id.clone(), t, 1, now(), now());
-    envs(&s).insert_lease(lease.clone()).unwrap();
-    let held = lease.clone();
-    lease.release(now()).unwrap();
-    envs(&s).update_lease(lease.clone()).unwrap();
+    let _ = (env, t);
+
+    // A released lease is final: it cannot be released, renewed or completed
+    // again, and it accepts nothing any more.
+    let owner = fx::dispatcher(slots(&s), "final", 30);
+    let (slot_env, slot_inv) = ready_slot(&s, &owner);
+    let req = slot_request(&slot_env, &slot_inv, &owner, now(), 30);
+    let (lease, attempt) = (req.lease.clone(), req.attempt.clone());
+    slots(&s).acquire(req).unwrap();
     assert!(
-        is_refused(envs(&s).update_lease(held)),
+        slots(&s)
+            .release_lease(&lease.id, &attempt.id, lease.epoch, now())
+            .unwrap()
+    );
+    assert!(
+        !slots(&s)
+            .release_lease(&lease.id, &attempt.id, lease.epoch, now())
+            .unwrap(),
+        "a released lease is never released twice"
+    );
+    assert!(
+        !slots(&s)
+            .renew_lease(&lease.id, &owner, lease.epoch, Duration::seconds(30), now())
+            .unwrap(),
         "a released lease is never revived"
     );
-    assert_eq!(envs(&s).get_lease(&lease.id).unwrap().unwrap(), lease);
-    assert!(!lease.accepts(&att.id, 1));
+    let stored = slots(&s).get_lease(&lease.id).unwrap().unwrap();
+    assert_eq!(stored.released_at, Some(now()));
+    assert!(!stored.accepts(&attempt.id, lease.epoch));
 }
 
 fn an_environment_copy_from_another_epoch_is_refused(make: fn(Limits) -> Store) {
     let s = make(Limits::default());
     let key = fx::key(&TenantId::generate(), &RevisionId::generate());
-    let mut env = fx::ready_environment(&key);
-    env.mark_busy(now()).unwrap();
+    let owner = fx::dispatcher(slots(&s), "epoch", 30);
+    let mut env = fx::ready_environment(&key).owned_by(owner.clone());
+    env.assign(now()).unwrap();
     env.mark_idle(now()).unwrap();
     envs(&s).insert(env.clone()).unwrap();
     let before_claim = env.clone();
 
-    let claimed = envs(&s).claim_for_reuse(&key, now()).unwrap().unwrap();
+    let reserved = slots(&s)
+        .claim_for_reuse(&key, Some(&owner), now())
+        .unwrap()
+        .unwrap();
+    assert_eq!(reserved.epoch, 1, "a claim reserves; it does not assign");
+    let mut inv = fx::invocation(&key.tenant_id, &FunctionId::generate(), None);
+    inv.dispatcher_id = Some(owner.clone());
+    invs(&s).insert(inv.clone()).unwrap();
+    let req = slot_request(&reserved, &inv, &owner, now(), 30);
+    let lease = req.lease.clone();
+    let attempt = req.attempt.clone();
+    assert_eq!(slots(&s).acquire(req).unwrap(), AcquireOutcome::Acquired);
+    let mut done = attempt.clone();
+    done.succeed(now()).unwrap();
+    assert_eq!(
+        slots(&s)
+            .complete(SlotCompletion {
+                lease_id: lease.id.clone(),
+                attempt: done,
+                invocation: None,
+                now: now(),
+            })
+            .unwrap(),
+        CompletionOutcome::Accepted
+    );
+    let claimed = envs(&s).get(&reserved.id).unwrap().unwrap();
     assert_eq!(claimed.epoch, 2);
     let mut stale = before_claim;
     stale.mark_draining(now()).unwrap();
@@ -601,6 +739,16 @@ fn an_environment_copy_from_another_epoch_is_refused(make: fn(Limits) -> Store) 
     );
     assert_eq!(envs(&s).get(&stopped.id).unwrap().unwrap(), stopped);
     assert!(envs(&s).list_active().unwrap().is_empty());
+
+    // Only an acquire makes an environment busy.
+    let fresh = fx::ready_environment(&key).owned_by(owner.clone());
+    envs(&s).insert(fresh.clone()).unwrap();
+    let mut sneaked = fresh;
+    sneaked.mark_busy(now()).unwrap();
+    assert!(
+        is_refused(envs(&s).update(sneaked)),
+        "a plain update cannot assign an environment without a lease"
+    );
 }
 
 fn rows_never_cross_a_tenant(make: fn(Limits) -> Store) {
@@ -685,18 +833,15 @@ fn rows_never_cross_a_tenant(make: fn(Limits) -> Store) {
         is_refused(envs(&s).insert(env)),
         "reuse key naming another tenant"
     );
-    let env_b = fx::environment(&fx::key(&b, &rb.id));
+    let owner = fx::dispatcher(slots(&s), "tenants", 30);
+    let env_b = fx::ready_environment(&fx::key(&b, &rb.id)).owned_by(owner.clone());
     envs(&s).insert(env_b.clone()).unwrap();
-    let lease = ExecutionLease::acquire(
-        LeaseId::generate(),
-        env_b.id.clone(),
-        AttemptId::generate(),
-        a.clone(),
-        1,
-        now(),
-        now(),
-    );
-    assert!(is_refused(envs(&s).insert_lease(lease)), "lease");
+    let mut inv_for_b = fx::invocation(&b, &fb.id, None);
+    inv_for_b.dispatcher_id = Some(owner.clone());
+    invs(&s).insert(inv_for_b.clone()).unwrap();
+    let mut foreign_lease = slot_request(&env_b, &inv_for_b, &owner, now(), 30);
+    foreign_lease.lease.tenant_id = a.clone();
+    assert!(is_refused(slots(&s).acquire(foreign_lease)), "lease");
 
     // Nothing leaked into tenant a.
     assert_eq!(fns(&s).list(&a).unwrap(), vec![fa.clone()]);
@@ -863,15 +1008,16 @@ fn idempotency_key_is_bound_with_its_invocation(make: fn(Limits) -> Store) {
     let s = make(Limits::default());
     let t = TenantId::generate();
     let f = FunctionId::generate();
-    assert_eq!(s.lookup(&t, &f, "k").unwrap(), None);
+    assert_eq!(s.lookup(&t, &f, "k", now()).unwrap(), None);
     let first = fx::invocation(&t, &f, Some("k"));
     let first_id = first.id.clone();
     assert_eq!(s.insert_bound(first).unwrap(), IdempotencyOutcome::Inserted);
     let binding = IdempotencyBinding {
         invocation_id: first_id.clone(),
         input_digest: Sha256Digest::of_bytes(b"{}"),
+        expires_at: None,
     };
-    assert_eq!(s.lookup(&t, &f, "k").unwrap(), Some(binding.clone()));
+    assert_eq!(s.lookup(&t, &f, "k", now()).unwrap(), Some(binding.clone()));
     assert!(invs(&s).get(&first_id).unwrap().is_some());
 
     // A second invocation with the same key is not inserted.
@@ -951,7 +1097,7 @@ const POOL: PoolLimits = PoolLimits {
 /// the pool.
 fn pooled(s: &Store, key: &ReuseKey) -> EnvironmentId {
     let mut env = fx::ready_environment(key);
-    env.mark_busy(now()).unwrap();
+    env.assign(now()).unwrap();
     env.mark_idle(now()).unwrap();
     let id = env.id.clone();
     envs(s).insert(env).unwrap();
@@ -989,21 +1135,30 @@ fn only_an_exactly_matching_reuse_key_is_reused(make: fn(Limits) -> Store) {
         change(&mut other);
         assert_ne!(other, key, "{name} must actually differ");
         assert!(
-            envs(&s).claim_for_reuse(&other, now()).unwrap().is_none(),
+            slots(&s)
+                .claim_for_reuse(&other, None, now())
+                .unwrap()
+                .is_none(),
             "a differing {name} must never reuse the environment"
         );
     }
     // Nothing above touched the pooled environment.
-    assert_eq!(envs(&s).list_idle().unwrap().len(), 1);
-    let claimed = envs(&s)
-        .claim_for_reuse(&key, now())
+    assert_eq!(slots(&s).list_idle(None).unwrap().len(), 1);
+    let claimed = slots(&s)
+        .claim_for_reuse(&key, None, now())
         .unwrap()
         .expect("the exact key hits");
     assert_eq!(claimed.id, id);
-    assert_eq!(claimed.state, EnvironmentState::Busy);
-    assert_eq!(claimed.epoch, 2, "a reassignment advances the epoch");
+    assert_eq!(claimed.state, EnvironmentState::Ready);
+    assert_eq!(
+        claimed.epoch, 1,
+        "a claim reserves the environment; the acquire advances the epoch"
+    );
     assert!(
-        envs(&s).claim_for_reuse(&key, now()).unwrap().is_none(),
+        slots(&s)
+            .claim_for_reuse(&key, None, now())
+            .unwrap()
+            .is_none(),
         "it was handed out once"
     );
 }
@@ -1022,10 +1177,10 @@ fn nothing_is_dispatched_before_ready_and_busy_is_never_handed_out(make: fn(Limi
         .mark_initializing(BootEvidence::default(), now())
         .unwrap();
     let mut busy = fx::ready_environment(&key);
-    busy.mark_busy(now()).unwrap();
+    busy.assign(now()).unwrap();
     let busy_id = busy.id.clone();
     let mut draining = fx::ready_environment(&key);
-    draining.mark_busy(now()).unwrap();
+    draining.assign(now()).unwrap();
     draining.mark_idle(now()).unwrap();
     draining.mark_draining(now()).unwrap();
     let mut stopped = fx::ready_environment(&key);
@@ -1035,7 +1190,10 @@ fn nothing_is_dispatched_before_ready_and_busy_is_never_handed_out(make: fn(Limi
         envs(&s).insert(env).unwrap();
     }
     assert!(
-        envs(&s).claim_for_reuse(&key, now()).unwrap().is_none(),
+        slots(&s)
+            .claim_for_reuse(&key, None, now())
+            .unwrap()
+            .is_none(),
         "only an environment that reported ready and is free may be handed out"
     );
     assert_eq!(
@@ -1043,12 +1201,15 @@ fn nothing_is_dispatched_before_ready_and_busy_is_never_handed_out(make: fn(Limi
         1,
         "a refused claim never advances an epoch"
     );
-    assert!(envs(&s).list_idle().unwrap().is_empty());
+    assert!(slots(&s).list_idle(None).unwrap().is_empty());
 
     // The same key hits as soon as one is actually pooled.
     let id = pooled(&s, &key);
     assert_eq!(
-        envs(&s).claim_for_reuse(&key, now()).unwrap().map(|e| e.id),
+        slots(&s)
+            .claim_for_reuse(&key, None, now())
+            .unwrap()
+            .map(|e| e.id),
         Some(id)
     );
 }
@@ -1071,7 +1232,7 @@ fn concurrent_claims_never_hand_the_same_environment_to_two_callers(make: fn(Lim
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
                     barrier.wait();
-                    envs(&s).claim_for_reuse(&key, now()).unwrap()
+                    slots(&s).claim_for_reuse(&key, None, now()).unwrap()
                 })
             })
             .collect();
@@ -1091,11 +1252,11 @@ fn concurrent_claims_never_hand_the_same_environment_to_two_callers(make: fn(Lim
             "{case}: an environment was handed out twice"
         );
         for w in &winners {
-            assert_eq!(w.state, EnvironmentState::Busy, "{case}");
-            assert_eq!(w.epoch, 2, "{case}: every reassignment advances the epoch");
+            assert_eq!(w.state, EnvironmentState::Ready, "{case}: reserved");
+            assert_eq!(w.epoch, 1, "{case}: a reservation does not assign");
         }
         assert_eq!(
-            envs(&s).list_idle().unwrap().len(),
+            slots(&s).list_idle(None).unwrap().len(),
             idle.saturating_sub(claimers),
             "{case}: the losers' environments stay pooled"
         );
@@ -1116,19 +1277,19 @@ fn releasing_respects_the_pool_caps_and_refuses_a_stale_copy(make: fn(Limits) ->
         busy.push(env);
     }
     assert!(
-        envs(&s)
+        slots(&s)
             .release_to_pool(&busy[0], POOL, now())
             .unwrap()
             .is_some()
     );
     assert!(
-        envs(&s)
+        slots(&s)
             .release_to_pool(&busy[1], POOL, now())
             .unwrap()
             .is_some()
     );
     assert!(
-        envs(&s)
+        slots(&s)
             .release_to_pool(&busy[2], POOL, now())
             .unwrap()
             .is_none(),
@@ -1143,7 +1304,7 @@ fn releasing_respects_the_pool_caps_and_refuses_a_stale_copy(make: fn(Limits) ->
     // A stale copy (the row moved on since) is refused.
     let pooled_row = envs(&s).get(&busy[0].id).unwrap().unwrap();
     assert!(
-        envs(&s)
+        slots(&s)
             .release_to_pool(&busy[0], POOL, now())
             .unwrap()
             .is_none(),
@@ -1152,7 +1313,7 @@ fn releasing_respects_the_pool_caps_and_refuses_a_stale_copy(make: fn(Limits) ->
     let mut wrong_epoch = busy[2].clone();
     wrong_epoch.epoch = 99;
     assert!(
-        envs(&s)
+        slots(&s)
             .release_to_pool(&wrong_epoch, POOL, now())
             .unwrap()
             .is_none(),
@@ -1167,7 +1328,7 @@ fn releasing_respects_the_pool_caps_and_refuses_a_stale_copy(make: fn(Limits) ->
         env.mark_busy(now()).unwrap();
         envs(&s).insert(env.clone()).unwrap();
         assert!(
-            envs(&s)
+            slots(&s)
                 .release_to_pool(&env, POOL, now())
                 .unwrap()
                 .is_some()
@@ -1177,13 +1338,13 @@ fn releasing_respects_the_pool_caps_and_refuses_a_stale_copy(make: fn(Limits) ->
     env.mark_busy(now()).unwrap();
     envs(&s).insert(env.clone()).unwrap();
     assert!(
-        envs(&s)
+        slots(&s)
             .release_to_pool(&env, POOL, now())
             .unwrap()
             .is_none(),
         "max_total_idle is enforced across keys"
     );
-    assert_eq!(envs(&s).list_idle().unwrap().len(), 4);
+    assert_eq!(slots(&s).list_idle(None).unwrap().len(), 4);
 }
 
 /// Regression (PLT-4632 review F1): pool membership is `Idle` only.
@@ -1195,23 +1356,29 @@ fn a_ready_environment_is_not_in_the_pool_and_is_never_claimed(make: fn(Limits) 
     envs(&s).insert(ready).unwrap();
 
     assert!(
-        envs(&s).list_idle().unwrap().is_empty(),
+        slots(&s).list_idle(None).unwrap().is_empty(),
         "a Ready environment is not pool membership"
     );
     assert!(
-        envs(&s).claim_for_reuse(&key, now()).unwrap().is_none(),
+        slots(&s)
+            .claim_for_reuse(&key, None, now())
+            .unwrap()
+            .is_none(),
         "an environment that was never released to the pool is never claimed"
     );
     let untouched = envs(&s).get(&ready_id).unwrap().unwrap();
     assert_eq!(untouched.state, EnvironmentState::Ready);
     assert_eq!(
-        untouched.epoch, 1,
+        untouched.epoch, 0,
         "a refused claim never advances an epoch"
     );
 
     let pooled_id = pooled(&s, &key);
     assert_eq!(
-        envs(&s).claim_for_reuse(&key, now()).unwrap().map(|e| e.id),
+        slots(&s)
+            .claim_for_reuse(&key, None, now())
+            .unwrap()
+            .map(|e| e.id),
         Some(pooled_id)
     );
 }
@@ -1221,13 +1388,16 @@ fn taking_an_idle_environment_for_termination_excludes_a_claim(make: fn(Limits) 
     let key = fx::key(&TenantId::generate(), &RevisionId::generate());
     let id = pooled(&s, &key);
 
-    assert!(envs(&s).take_idle_for_termination(&id, now()).unwrap());
+    assert!(slots(&s).take_idle_for_termination(&id, now()).unwrap());
     assert!(
-        !envs(&s).take_idle_for_termination(&id, now()).unwrap(),
+        !slots(&s).take_idle_for_termination(&id, now()).unwrap(),
         "the second caller loses"
     );
     assert!(
-        envs(&s).claim_for_reuse(&key, now()).unwrap().is_none(),
+        slots(&s)
+            .claim_for_reuse(&key, None, now())
+            .unwrap()
+            .is_none(),
         "an environment the sweeper owns is never handed to an attempt"
     );
     assert_eq!(
@@ -1237,6 +1407,677 @@ fn taking_an_idle_environment_for_termination_excludes_a_claim(make: fn(Limits) 
 
     // The other way round: a claimed environment cannot be swept.
     let claimed = pooled(&s, &key);
-    assert!(envs(&s).claim_for_reuse(&key, now()).unwrap().is_some());
-    assert!(!envs(&s).take_idle_for_termination(&claimed, now()).unwrap());
+    assert!(
+        slots(&s)
+            .claim_for_reuse(&key, None, now())
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        !slots(&s)
+            .take_idle_for_termination(&claimed, now())
+            .unwrap()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// slot store: acquire, fencing, leases, reclaim (PLT-4631)
+// ---------------------------------------------------------------------------
+
+fn at(seconds: i64) -> Timestamp {
+    now() + Duration::seconds(seconds)
+}
+
+fn reclaim(s: &Store, reclaimer: &DispatcherId, when: Timestamp) -> ReclaimReport {
+    slots(s)
+        .reclaim_expired(ReclaimRequest {
+            reclaimer: reclaimer.clone(),
+            now: when,
+            skew: Duration::seconds(2),
+            presumed_dead: Vec::new(),
+        })
+        .unwrap()
+}
+
+fn terminal_attempt(attempt: &InvocationAttempt, when: Timestamp) -> InvocationAttempt {
+    let mut done = attempt.clone();
+    done.succeed(when).unwrap();
+    done
+}
+
+fn succeeded(inv: &Invocation, when: Timestamp) -> Invocation {
+    let mut done = invs_get(inv);
+    done.mark_succeeded(Some(fx::inline(b"{}")), None, when)
+        .unwrap();
+    done
+}
+
+fn invs_get(inv: &Invocation) -> Invocation {
+    inv.clone()
+}
+
+/// Property: however many callers race for the same slot at the same epoch —
+/// each with its own attempt, lease and invocation — exactly one acquire is
+/// written, the slot moves exactly one epoch, and nothing of a loser (lease,
+/// attempt, `Running`) exists. Repeated over several rounds of release and
+/// reuse, so the property holds at every epoch.
+fn acquire_is_a_cas_with_exactly_one_winner_per_epoch(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let owner = fx::dispatcher(slots(&s), "race", 3600);
+    let (env, _) = ready_slot(&s, &owner);
+    let big = PoolLimits {
+        max_idle_per_key: 100,
+        max_total_idle: 100,
+    };
+    for (round, racers) in [2usize, 8, 16, 4].into_iter().enumerate() {
+        let stored = envs(&s).get(&env.id).unwrap().unwrap();
+        let requests: Vec<SlotAcquire> = (0..racers)
+            .map(|_| {
+                let mut inv = fx::invocation(&env.tenant_id, &FunctionId::generate(), None);
+                inv.dispatcher_id = Some(owner.clone());
+                invs(&s).insert(inv.clone()).unwrap();
+                slot_request(&stored, &inv, &owner, now(), 30)
+            })
+            .collect();
+        let barrier = Arc::new(std::sync::Barrier::new(racers));
+        let handles: Vec<_> = requests
+            .clone()
+            .into_iter()
+            .map(|req| {
+                let s = s.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    slots(&s).acquire(req).unwrap()
+                })
+            })
+            .collect();
+        let outcomes: Vec<AcquireOutcome> =
+            handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let case = format!("round {round}, {racers} racers");
+        let winners: Vec<usize> = outcomes
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| **o == AcquireOutcome::Acquired)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(winners.len(), 1, "{case}: {outcomes:?}");
+        let after = envs(&s).get(&env.id).unwrap().unwrap();
+        assert_eq!(after.epoch, stored.epoch + 1, "{case}");
+        assert_eq!(after.state, EnvironmentState::Busy, "{case}");
+        for (i, req) in requests.iter().enumerate() {
+            let lease = slots(&s).get_lease(&req.lease.id).unwrap();
+            let attempt = invs(&s).get_attempt(&req.attempt.id).unwrap();
+            let inv = invs(&s)
+                .get(&req.invocation.as_ref().unwrap().id)
+                .unwrap()
+                .unwrap();
+            if i == winners[0] {
+                assert!(lease.is_some_and(|l| l.released_at.is_none()), "{case}");
+                assert!(attempt.is_some(), "{case}");
+                assert_eq!(inv.status, InvocationStatus::Running, "{case}");
+            } else {
+                assert!(lease.is_none(), "{case}: a loser's lease was written");
+                assert!(attempt.is_none(), "{case}: a loser's attempt was written");
+                assert_eq!(inv.status, InvocationStatus::Accepted, "{case}");
+            }
+        }
+        // Finish the winner and pool the environment for the next round.
+        let win = &requests[winners[0]];
+        assert_eq!(
+            slots(&s)
+                .complete(SlotCompletion {
+                    lease_id: win.lease.id.clone(),
+                    attempt: terminal_attempt(&win.attempt, now()),
+                    invocation: Some(succeeded(win.invocation.as_ref().unwrap(), now())),
+                    now: now(),
+                })
+                .unwrap(),
+            CompletionOutcome::Accepted
+        );
+        assert!(
+            slots(&s)
+                .release_to_pool(&after, big, now())
+                .unwrap()
+                .is_some(),
+            "{case}"
+        );
+    }
+
+    // Losing preconditions, one at a time.
+    let stored = envs(&s).get(&env.id).unwrap().unwrap();
+    let mut inv = fx::invocation(&env.tenant_id, &FunctionId::generate(), None);
+    inv.dispatcher_id = Some(owner.clone());
+    invs(&s).insert(inv.clone()).unwrap();
+    let mut wrong_epoch = slot_request(&stored, &inv, &owner, now(), 30);
+    wrong_epoch.expected_epoch -= 1;
+    wrong_epoch.env.epoch -= 1;
+    wrong_epoch.lease.epoch -= 1;
+    wrong_epoch.attempt.epoch -= 1;
+    assert!(matches!(
+        slots(&s).acquire(wrong_epoch).unwrap(),
+        AcquireOutcome::Lost(_)
+    ));
+    let stranger = fx::dispatcher(slots(&s), "stranger", 3600);
+    let foreign = slot_request(&stored, &inv, &stranger, now(), 30);
+    assert!(
+        matches!(slots(&s).acquire(foreign), Ok(AcquireOutcome::Lost(_))),
+        "only the owner of an environment (the holder of its session) acquires it"
+    );
+    let mut malformed = slot_request(&stored, &inv, &owner, now(), 30);
+    malformed.lease.epoch += 1;
+    assert!(matches!(
+        slots(&s).acquire(malformed),
+        Err(RepoError::Refused(_))
+    ));
+    assert_eq!(
+        envs(&s).get(&env.id).unwrap().unwrap(),
+        stored,
+        "nothing of a refused or lost acquire is written"
+    );
+}
+
+/// PLT-4631 acceptance 1: a late completion carrying an older epoch (a
+/// delayed callback of an earlier assignment, or of a reclaimed lease) never
+/// overwrites what the current assignment or the reclaim recorded.
+fn a_completion_with_a_stale_epoch_never_overwrites_state(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let owner = fx::dispatcher(slots(&s), "late", 3600);
+    let (env, first_inv) = ready_slot(&s, &owner);
+    let first = slot_request(&env, &first_inv, &owner, now(), 30);
+    slots(&s).acquire(first.clone()).unwrap();
+    // The first attempt finishes, the environment is pooled and reassigned.
+    assert_eq!(
+        slots(&s)
+            .complete(SlotCompletion {
+                lease_id: first.lease.id.clone(),
+                attempt: terminal_attempt(&first.attempt, now()),
+                invocation: Some(succeeded(first.invocation.as_ref().unwrap(), now())),
+                now: now(),
+            })
+            .unwrap(),
+        CompletionOutcome::Accepted
+    );
+    let busy = envs(&s).get(&env.id).unwrap().unwrap();
+    let limits = PoolLimits {
+        max_idle_per_key: 4,
+        max_total_idle: 4,
+    };
+    slots(&s)
+        .release_to_pool(&busy, limits, now())
+        .unwrap()
+        .unwrap();
+    let reserved = slots(&s)
+        .claim_for_reuse(&env.reuse_key, Some(&owner), now())
+        .unwrap()
+        .unwrap();
+    let mut second_inv = fx::invocation(&env.tenant_id, &FunctionId::generate(), None);
+    second_inv.dispatcher_id = Some(owner.clone());
+    invs(&s).insert(second_inv.clone()).unwrap();
+    let second = slot_request(&reserved, &second_inv, &owner, now(), 30);
+    slots(&s).acquire(second.clone()).unwrap();
+    assert_eq!(second.attempt.epoch, 2);
+
+    // A delayed callback of the first assignment, replayed.
+    let mut replayed = first.attempt.clone();
+    replayed
+        .fail(
+            InvocationError::new(ErrorClass::Crash, "Late", "late frame"),
+            now(),
+        )
+        .unwrap();
+    assert!(matches!(
+        slots(&s)
+            .complete(SlotCompletion {
+                lease_id: first.lease.id.clone(),
+                attempt: replayed,
+                invocation: None,
+                now: now(),
+            })
+            .unwrap(),
+        CompletionOutcome::Stale(_)
+    ));
+    // The current lease, but a result stamped with the previous epoch.
+    let mut stale_epoch = terminal_attempt(&second.attempt, now());
+    stale_epoch.epoch = 1;
+    assert!(matches!(
+        slots(&s)
+            .complete(SlotCompletion {
+                lease_id: second.lease.id.clone(),
+                attempt: stale_epoch,
+                invocation: Some(succeeded(second.invocation.as_ref().unwrap(), now())),
+                now: now(),
+            })
+            .unwrap(),
+        CompletionOutcome::Stale(_)
+    ));
+    assert!(
+        !slots(&s)
+            .release_lease(&second.lease.id, &first.attempt.id, 1, now())
+            .unwrap(),
+        "a stale release is refused too"
+    );
+    // Nothing moved.
+    let lease = slots(&s).get_lease(&second.lease.id).unwrap().unwrap();
+    assert!(lease.released_at.is_none());
+    assert_eq!(
+        invs(&s).get(&second_inv.id).unwrap().unwrap().status,
+        InvocationStatus::Running
+    );
+    assert_eq!(
+        invs(&s).get(&first_inv.id).unwrap().unwrap().status,
+        InvocationStatus::Succeeded
+    );
+    assert_eq!(envs(&s).get(&env.id).unwrap().unwrap().epoch, 2);
+
+    // A completion that arrives after the lease was reclaimed is refused and
+    // leaves the reclaim's `OutcomeUnknown` in place.
+    let reclaimer = fx::dispatcher(slots(&s), "reclaimer", 3600);
+    let report = reclaim(&s, &reclaimer, at(40));
+    assert_eq!(report.leases, 1);
+    let late = slots(&s)
+        .complete(SlotCompletion {
+            lease_id: second.lease.id.clone(),
+            attempt: terminal_attempt(&second.attempt, at(41)),
+            invocation: Some(succeeded(second.invocation.as_ref().unwrap(), at(41))),
+            now: at(41),
+        })
+        .unwrap();
+    assert!(matches!(late, CompletionOutcome::Stale(_)), "{late:?}");
+    let settled = invs(&s).get(&second_inv.id).unwrap().unwrap();
+    match settled.status {
+        InvocationStatus::OutcomeUnknown { error } => {
+            assert_eq!(error.error_type, HOST_LEASE_EXPIRED)
+        }
+        other => panic!("the reclaim's outcome was overwritten: {other:?}"),
+    }
+}
+
+/// Renewal only extends a live lease; expiry is judged with the reclaimer's
+/// clock minus the tolerated skew, and the reclaim happens exactly once.
+fn leases_renew_only_while_unexpired_and_expire_past_the_clock_skew(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let owner = fx::dispatcher(slots(&s), "renew", 30);
+    let (env, inv) = ready_slot(&s, &owner);
+    let req = slot_request(&env, &inv, &owner, now(), 10);
+    let lease_id = req.lease.id.clone();
+    slots(&s).acquire(req.clone()).unwrap();
+    let ttl = Duration::seconds(10);
+
+    assert!(
+        slots(&s)
+            .renew_lease(&lease_id, &owner, req.lease.epoch, ttl, at(5))
+            .unwrap()
+    );
+    assert_eq!(
+        slots(&s).get_lease(&lease_id).unwrap().unwrap().expires_at,
+        Some(at(15))
+    );
+    let other = fx::dispatcher(slots(&s), "other", 3600);
+    assert!(
+        !slots(&s)
+            .renew_lease(&lease_id, &other, req.lease.epoch, ttl, at(6))
+            .unwrap(),
+        "only the owner renews"
+    );
+    assert!(
+        !slots(&s)
+            .renew_lease(&lease_id, &owner, req.lease.epoch + 1, ttl, at(6))
+            .unwrap(),
+        "only at the lease's epoch"
+    );
+
+    // A reclaimer whose clock reads 16 s (1 s past expiry, inside the 2 s
+    // skew) must not reclaim: the owner's clock may be behind.
+    assert!(reclaim(&s, &other, at(16)).is_empty());
+    // The owner's own renewal at 16 s is too late: an expired lease is never
+    // revived, even though nobody reclaimed it yet.
+    assert!(
+        !slots(&s)
+            .renew_lease(&lease_id, &owner, req.lease.epoch, ttl, at(16))
+            .unwrap()
+    );
+    assert_eq!(
+        slots(&s).heartbeat(&owner, ttl, at(16)).unwrap(),
+        HeartbeatOutcome::Renewed { leases: 0 },
+        "the dispatcher itself is still live; its expired slot lease is not renewed"
+    );
+
+    // Past expiry + skew: reclaimed, once.
+    let first = reclaim(&s, &other, at(17));
+    assert_eq!(first.leases, 1);
+    assert_eq!(first.fenced.len(), 1);
+    assert!(
+        first.dispatchers.is_empty(),
+        "the owner's own lease is fine"
+    );
+    assert!(reclaim(&s, &other, at(18)).is_empty(), "exactly once");
+    let lease = slots(&s).get_lease(&lease_id).unwrap().unwrap();
+    assert_eq!(lease.released_at, Some(at(17)));
+}
+
+fn reclaim_happens_once_fences_and_only_a_confirmed_terminate_settles(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let dead = fx::dispatcher(slots(&s), "dead", 10);
+    let (busy_env, running_inv) = ready_slot(&s, &dead);
+    let req = slot_request(&busy_env, &running_inv, &dead, now(), 10);
+    slots(&s).acquire(req.clone()).unwrap();
+    // An accepted invocation that never reached a slot, and a pooled one.
+    let mut queued = fx::invocation(&busy_env.tenant_id, &FunctionId::generate(), None);
+    queued.dispatcher_id = Some(dead.clone());
+    invs(&s).insert(queued.clone()).unwrap();
+    let key = fx::key(&TenantId::generate(), &RevisionId::generate());
+    let mut idle = fx::ready_environment(&key).owned_by(dead.clone());
+    idle.assign(now()).unwrap();
+    idle.mark_idle(now()).unwrap();
+    envs(&s).insert(idle.clone()).unwrap();
+
+    let reclaimer = fx::dispatcher(slots(&s), "reclaimer", 3600);
+    assert!(
+        reclaim(&s, &reclaimer, at(5)).is_empty(),
+        "nothing expired yet"
+    );
+    let report = reclaim(&s, &reclaimer, at(13));
+    assert_eq!(report.dispatchers, vec![dead.clone()]);
+    assert_eq!(report.leases, 1);
+    assert_eq!(report.invocations, 2);
+    assert_eq!(report.attempts, 1);
+    assert_eq!(report.fenced.len(), 2);
+    assert!(reclaim(&s, &reclaimer, at(14)).is_empty(), "exactly once");
+
+    match invs(&s).get(&running_inv.id).unwrap().unwrap().status {
+        InvocationStatus::OutcomeUnknown { error } => {
+            assert_eq!(error.error_type, HOST_LEASE_EXPIRED)
+        }
+        other => panic!("{other:?}"),
+    }
+    match invs(&s).get(&queued.id).unwrap().unwrap().status {
+        InvocationStatus::Failed { error } => {
+            assert_eq!(error.class, ErrorClass::PlatformError);
+            assert_eq!(error.error_type, HOST_LEASE_EXPIRED);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(
+        invs(&s)
+            .get_attempt(&req.attempt.id)
+            .unwrap()
+            .unwrap()
+            .status,
+        AttemptStatus::OutcomeUnknown { .. }
+    ));
+
+    // Fenced: draining, one epoch further, out of every pool, not acquirable.
+    let fenced = envs(&s).get(&busy_env.id).unwrap().unwrap();
+    assert!(fenced.is_fenced());
+    assert_eq!(fenced.state, EnvironmentState::Draining);
+    assert_eq!(fenced.epoch, req.env.epoch + 1);
+    let fenced_idle = envs(&s).get(&idle.id).unwrap().unwrap();
+    assert!(fenced_idle.is_fenced());
+    assert_eq!(fenced_idle.epoch, 2);
+    assert!(slots(&s).list_idle(Some(&dead)).unwrap().is_empty());
+    assert!(
+        slots(&s)
+            .claim_for_reuse(&key, Some(&dead), at(15))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(slots(&s).list_fenced().unwrap().len(), 2);
+    let mut again = fx::invocation(&busy_env.tenant_id, &FunctionId::generate(), None);
+    again.dispatcher_id = Some(dead.clone());
+    invs(&s).insert(again.clone()).unwrap();
+    let mut reuse = fenced.clone();
+    reuse.fenced_at = None;
+    reuse.state = EnvironmentState::Ready;
+    let request = slot_request(&reuse, &again, &dead, at(15), 10);
+    assert!(
+        matches!(
+            slots(&s).acquire(request),
+            Err(RepoError::Refused(_)) | Ok(AcquireOutcome::Lost(_))
+        ),
+        "expiry alone never makes a fenced environment acquirable"
+    );
+
+    // Only a confirmed terminate, at the fenced epoch, settles it.
+    assert!(
+        !slots(&s)
+            .confirm_terminated(&busy_env.id, fenced.epoch - 1, at(16))
+            .unwrap()
+    );
+    assert!(
+        slots(&s)
+            .confirm_terminated(&busy_env.id, fenced.epoch, at(16))
+            .unwrap()
+    );
+    assert!(
+        !slots(&s)
+            .confirm_terminated(&busy_env.id, fenced.epoch, at(16))
+            .unwrap(),
+        "settled once"
+    );
+    assert!(matches!(
+        envs(&s).get(&busy_env.id).unwrap().unwrap().state,
+        EnvironmentState::Lost { .. }
+    ));
+    assert_eq!(slots(&s).list_fenced().unwrap().len(), 1);
+}
+
+fn a_live_dispatcher_is_never_reclaimed_and_a_stopped_one_is_at_once(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let live = fx::dispatcher(slots(&s), "live", 30);
+    let (env, inv) = ready_slot(&s, &live);
+    slots(&s)
+        .acquire(slot_request(&env, &inv, &live, now(), 30))
+        .unwrap();
+    let second = fx::dispatcher(slots(&s), "second", 30);
+    // A second gateway on the same store, well within the first one's lease.
+    assert!(reclaim(&s, &second, at(20)).is_empty());
+    assert_eq!(
+        invs(&s).get(&inv.id).unwrap().unwrap().status,
+        InvocationStatus::Running
+    );
+    assert_eq!(
+        envs(&s).get(&env.id).unwrap().unwrap().state,
+        EnvironmentState::Busy
+    );
+    // The reclaimer never reclaims itself, however late its own lease is.
+    let (own_env, own_inv) = ready_slot(&s, &second);
+    slots(&s)
+        .acquire(slot_request(&own_env, &own_inv, &second, now(), 1))
+        .unwrap();
+    assert!(reclaim(&s, &second, at(25)).is_empty());
+
+    // A proven-dead previous incarnation is reclaimed without waiting.
+    let report = slots(&s)
+        .reclaim_expired(ReclaimRequest {
+            reclaimer: second.clone(),
+            now: at(21),
+            skew: Duration::seconds(2),
+            presumed_dead: vec![live.clone()],
+        })
+        .unwrap();
+    assert_eq!(report.dispatchers, vec![live.clone()]);
+    match invs(&s).get(&inv.id).unwrap().unwrap().status {
+        InvocationStatus::OutcomeUnknown { error } => {
+            assert_eq!(error.error_type, HOST_RESTARTED)
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // A dispatcher that stopped gracefully: at once.
+    let stopped = fx::dispatcher(slots(&s), "stopped", 3600);
+    let mut left = fx::invocation(&TenantId::generate(), &FunctionId::generate(), None);
+    left.dispatcher_id = Some(stopped.clone());
+    invs(&s).insert(left.clone()).unwrap();
+    slots(&s).stop_dispatcher(&stopped, at(1)).unwrap();
+    let third = fx::dispatcher(slots(&s), "third", 3600);
+    let report = reclaim(&s, &third, at(1));
+    assert!(report.dispatchers.contains(&stopped));
+    assert!(
+        invs(&s)
+            .get(&left.id)
+            .unwrap()
+            .unwrap()
+            .status
+            .is_terminal()
+    );
+}
+
+fn a_fenced_dispatcher_can_neither_renew_nor_acquire(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let ttl = Duration::seconds(10);
+    let owner = fx::dispatcher(slots(&s), "fenced", 10);
+    assert_eq!(
+        slots(&s).heartbeat(&owner, ttl, at(5)).unwrap(),
+        HeartbeatOutcome::Renewed { leases: 0 }
+    );
+    let reclaimer = fx::dispatcher(slots(&s), "reclaimer", 3600);
+    // Renewed at 5 s to 15 s; past that plus the 2 s skew it is reclaimed.
+    assert_eq!(
+        reclaim(&s, &reclaimer, at(18)).dispatchers,
+        vec![owner.clone()]
+    );
+    assert_eq!(
+        slots(&s).heartbeat(&owner, ttl, at(14)).unwrap(),
+        HeartbeatOutcome::Fenced,
+        "a reclaimed dispatcher is fenced even if its own clock is behind"
+    );
+    let (env, inv) = ready_slot(&s, &owner);
+    assert!(matches!(
+        slots(&s)
+            .acquire(slot_request(&env, &inv, &owner, at(14), 10))
+            .unwrap(),
+        AcquireOutcome::Lost(_)
+    ));
+
+    // Expired but not reclaimed yet: still no renewal.
+    let late = fx::dispatcher(slots(&s), "late", 10);
+    assert_eq!(
+        slots(&s).heartbeat(&late, ttl, at(10)).unwrap(),
+        HeartbeatOutcome::Fenced
+    );
+    assert_eq!(
+        slots(&s)
+            .get_dispatcher(&late)
+            .unwrap()
+            .unwrap()
+            .lease_expires_at,
+        at(10)
+    );
+}
+
+fn idempotency_bindings_expire_after_their_invocation_finished(make: fn(Limits) -> Store) {
+    let retention = Some(Duration::hours(1));
+    let s: Store = match make(Limits::default()).backend() {
+        "memory" => {
+            Arc::new(InMemoryStore::new(Limits::default()).with_idempotency_retention(retention))
+        }
+        _ => Arc::new(
+            SqliteStore::open_volatile(
+                Limits::default(),
+                SqliteOptions {
+                    idempotency_retention: retention,
+                    ..SqliteOptions::default()
+                },
+            )
+            .unwrap(),
+        ),
+    };
+    let t = TenantId::generate();
+    let f = FunctionId::generate();
+    let inv = fx::invocation(&t, &f, Some("key"));
+    assert_eq!(
+        s.insert_bound(inv.clone()).unwrap(),
+        IdempotencyOutcome::Inserted
+    );
+
+    // In flight, a binding never expires.
+    let in_flight = s.lookup(&t, &f, "key", at(7200)).unwrap().unwrap();
+    assert_eq!(in_flight.expires_at, None);
+    assert_eq!(s.purge_expired_idempotency(at(7200)).unwrap(), 0);
+
+    // Finished at +10 min: it answers for one more hour.
+    let mut done = inv.clone();
+    done.mark_running(
+        tachyon_serverless_domain::AttemptId::generate(),
+        at(900),
+        at(0),
+        at(0),
+    )
+    .unwrap();
+    done.mark_succeeded(None, None, at(600)).unwrap();
+    invs(&s).update(done).unwrap();
+    let binding = s.lookup(&t, &f, "key", at(1800)).unwrap().unwrap();
+    assert_eq!(binding.invocation_id, inv.id);
+    assert_eq!(binding.input_digest, inv.input_digest);
+    assert_eq!(binding.expires_at, Some(at(4200)));
+    assert_eq!(s.lookup(&t, &f, "key", at(4200)).unwrap(), None);
+
+    // A new request with the key after expiry is a new invocation.
+    let mut fresh = fx::invocation(&t, &f, Some("key"));
+    fresh.accepted_at = at(4300);
+    assert_eq!(
+        s.insert_bound(fresh.clone()).unwrap(),
+        IdempotencyOutcome::Inserted
+    );
+    assert_eq!(
+        s.lookup(&t, &f, "key", at(4300))
+            .unwrap()
+            .unwrap()
+            .invocation_id,
+        fresh.id
+    );
+
+    // Expired bindings are purged; live ones are not.
+    let other = fx::invocation(&t, &f, Some("other"));
+    s.insert_bound(other.clone()).unwrap();
+    let mut other_done = other.clone();
+    other_done
+        .mark_running(
+            tachyon_serverless_domain::AttemptId::generate(),
+            at(900),
+            at(0),
+            at(0),
+        )
+        .unwrap();
+    other_done
+        .mark_failed(
+            InvocationError::new(ErrorClass::UserError, "E", "no"),
+            at(0),
+        )
+        .unwrap();
+    invs(&s).update(other_done).unwrap();
+    assert_eq!(s.purge_expired_idempotency(at(3599)).unwrap(), 0);
+    assert_eq!(s.purge_expired_idempotency(at(3600)).unwrap(), 1);
+    assert_eq!(s.lookup(&t, &f, "other", at(0)).unwrap(), None);
+    assert!(s.lookup(&t, &f, "key", at(4300)).unwrap().is_some());
+}
+
+fn the_pool_only_hands_out_and_sweeps_its_owners_environments(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let a = fx::dispatcher(slots(&s), "a", 3600);
+    let b = fx::dispatcher(slots(&s), "b", 3600);
+    let key = fx::key(&TenantId::generate(), &RevisionId::generate());
+    let mut env = fx::ready_environment(&key).owned_by(a.clone());
+    env.assign(now()).unwrap();
+    env.mark_idle(now()).unwrap();
+    envs(&s).insert(env.clone()).unwrap();
+
+    assert!(slots(&s).list_idle(Some(&b)).unwrap().is_empty());
+    assert!(slots(&s).list_idle(None).unwrap().is_empty());
+    assert!(
+        slots(&s)
+            .claim_for_reuse(&key, Some(&b), now())
+            .unwrap()
+            .is_none(),
+        "another dispatcher holds no session for it"
+    );
+    assert_eq!(slots(&s).list_idle(Some(&a)).unwrap().len(), 1);
+    assert_eq!(
+        slots(&s)
+            .claim_for_reuse(&key, Some(&a), now())
+            .unwrap()
+            .map(|e| e.id),
+        Some(env.id)
+    );
 }

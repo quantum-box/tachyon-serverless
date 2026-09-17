@@ -165,7 +165,8 @@ pub async fn serve(
         })
     });
     // Inline invocation outputs past their retention become digests
-    // (`[store] output_retention_seconds`).
+    // (`[store] output_retention_seconds`), and idempotency keys past theirs
+    // are purged (`[store] idempotency_retention_seconds`).
     let retention = {
         let app = app.clone();
         tokio::spawn(async move {
@@ -180,6 +181,30 @@ pub async fn serve(
                         "expired invocation outputs replaced by their digest"
                     );
                 }
+                let keys = app.purge_expired_idempotency();
+                if keys > 0 {
+                    tracing::info!(purged = keys, "expired idempotency keys purged");
+                }
+            }
+        })
+    };
+    // The dispatcher lease (PLT-4631): renew this process's lease and the
+    // slot leases of its in-flight attempts, then reclaim the work of
+    // dispatchers that lost theirs and terminate what that fenced. Holds only
+    // a weak reference, so the loop never keeps the application alive.
+    let heartbeat = {
+        let weak = Arc::downgrade(&app);
+        let every = app.config.dispatcher.heartbeat_interval();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(every);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                let Some(app) = weak.upgrade() else {
+                    return;
+                };
+                app.heartbeat();
+                app.reclaim_expired().await;
             }
         })
     };
@@ -204,6 +229,10 @@ pub async fn serve(
         sweeper.abort();
     }
     retention.abort();
+    heartbeat.abort();
+    // Nothing of this process is in flight any more: another gateway on the
+    // same data_dir may take over whatever is left at once.
+    app.stop_dispatcher();
     if let Err(e) = app.store.flush() {
         tracing::warn!(error = %e, "final state checkpoint failed");
     }

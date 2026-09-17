@@ -45,7 +45,10 @@ pub async fn healthz() -> &'static str {
 ))]
 pub async fn readyz(State(state): State<AppState>) -> Response {
     let report = state.provider_service.preflight().await;
-    let status = if report.ok {
+    // A dispatcher that lost its lease takes no new work (PLT-4631).
+    let fenced = state.dispatcher.is_fenced();
+    let ready = report.ok && !fenced;
+    let status = if ready {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -53,7 +56,12 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
     (
         status,
         Json(serde_json::json!({
-            "ready": report.ok,
+            "ready": ready,
+            "dispatcher": {
+                "id": state.dispatcher.id().as_str(),
+                "instance": state.dispatcher.instance(),
+                "fenced": fenced,
+            },
             "preflight": report,
             // `null` until the startup reconcile ran (or when it is off).
             "reconcile": state.reconcile.last_report(),

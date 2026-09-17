@@ -18,6 +18,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
+libc = { workspace = true }
 parking_lot = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
