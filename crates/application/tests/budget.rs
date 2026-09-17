@@ -561,18 +561,36 @@ async fn a_queued_invocation_rechecks_the_budget_when_it_is_granted() {
     let h = harness("[capacity]\nmax_concurrency = 1\n");
     let a = principal(TENANT_A);
     let (f, rev) = deploy(&h, &a, "queued", 5).await;
-    let max = max_of(&h, &rev, &serde_json::json!({"sleep_ms": 700}));
+    let max = max_of(&h, &rev, &serde_json::json!({"sleep_ms": 3000}));
     h.set_budgets(&budgets(&format!("hard_limit_micros = {}", 10 * max), ""));
 
+    // Wait on admission state rather than fixed sleeps: on a loaded CI runner
+    // the first invocation can take longer than 150 ms to be admitted, and the
+    // second then was not queued yet when the assertion ran.
+    async fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !f() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {what}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
     let app = h.app.clone();
-    let req = request(&a, &f, serde_json::json!({"sleep_ms": 700}));
+    let req = request(&a, &f, serde_json::json!({"sleep_ms": 3000}));
     let first = tokio::spawn(async move { app.invoke.invoke(req).await });
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    wait_until("the first invocation to be in flight", || {
+        h.app.admission.metrics_view().in_flight == 1
+    })
+    .await;
     let app = h.app.clone();
     let req = request(&a, &f, serde_json::json!({}));
     let second = tokio::spawn(async move { app.invoke.invoke(req).await });
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    assert_eq!(h.app.admission.metrics_view().queue_length, 1);
+    wait_until("the second invocation to be queued", || {
+        h.app.admission.metrics_view().queue_length == 1
+    })
+    .await;
     // Lowered below the two reservations while the second waits.
     h.set_budgets(&budgets(&format!("hard_limit_micros = {}", max), ""));
     let _ = h.app.budget.report(&a, None).await;
