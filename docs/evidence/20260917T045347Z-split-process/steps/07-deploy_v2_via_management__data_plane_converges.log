@@ -1,0 +1,6 @@
+uploading /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a27f5b94059720f62/target/debug/example-hello (3517888 bytes, arch aarch64)
+artifact sha256:9190de5404cb8f5e6694be542bc8e3cde9d5a644e69d95dbdb886f365349c202
+revision rev_01m2pvdh9dd36hbfragrhjc324 (#2) created: pending
+revision rev_01m2pvdh9dd36hbfragrhjc324 is preparing
+revision rev_01m2pvdh9dd36hbfragrhjc324 is ready
+[e2e] data plane served v2 900 ms after the deploy returned

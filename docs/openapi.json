@@ -367,7 +367,9 @@
           "cancelled",
           "outcome_unknown",
           "platform_error",
-          "provider_unavailable"
+          "provider_unavailable",
+          "config_unavailable",
+          "control_plane_unavailable"
         ],
         "type": "string"
       },
@@ -1287,7 +1289,7 @@
                 }
               }
             },
-            "description": "provider preflight ok"
+            "description": "provider preflight ok and new invocations are accepted"
           },
           "503": {
             "content": {
@@ -1297,7 +1299,7 @@
                 }
               }
             },
-            "description": "provider not ready"
+            "description": "provider not ready, dispatcher fenced, or new invocations refused (see `control_plane`)"
           }
         },
         "tags": [
@@ -2203,6 +2205,75 @@
         ]
       }
     },
+    "/v1/internal/config": {
+      "get": {
+        "operationId": "internal_config",
+        "parameters": [
+          {
+            "description": "return entries with a generation above this (default 0: everything)",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "configuration delivery (`ConfigDelivery`: generation, since, TTL caps, entries with tombstones)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "the ledger store is unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "`GET /v1/internal/config?since=<generation>` (PLT-4636): the generation\nstamped configuration for data planes. Authenticated with the internal\ncredential (`[control_plane] internal_token`) as a bearer token, never with\na tenant token; served only by a `combined` gateway that has one\nconfigured (404 otherwise).",
+        "tags": [
+          "internal"
+        ]
+      }
+    },
     "/v1/invocations/{invocation_id}": {
       "get": {
         "operationId": "get_invocation",
@@ -2414,6 +2485,9 @@
     },
     {
       "name": "usage"
+    },
+    {
+      "name": "internal"
     }
   ]
 }

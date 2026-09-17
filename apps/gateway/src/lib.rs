@@ -13,6 +13,7 @@
 //! - The HTTP adapter is mounted at `/v1/functions/{function_id}/http`,
 //!   `/http/` and `/http/{*path}` for any method.
 
+pub mod config_client;
 pub mod error;
 pub mod handlers;
 pub mod middleware;
@@ -29,12 +30,16 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{any, get, post, put};
 use tokio::net::TcpListener;
 
-use tachyon_serverless_application::{Application, GatewayConfig};
+use tachyon_serverless_application::control::ConfigSource;
+use tachyon_serverless_application::{Application, BootstrapOptions, GatewayConfig, GatewayRole};
 
 /// Shared state handed to every handler.
 pub type AppState = Arc<Application>;
 
-/// Build the API router. Authentication applies to everything under `/v1`.
+/// Build the API router. Authentication applies to everything under `/v1`:
+/// the management API against the control plane's identity provider, invoke
+/// and invocation reads against the configuration cache (PLT-4636), and
+/// `/v1/internal/config` against the internal credential.
 pub fn router(state: AppState) -> Router {
     let limits = state.limits.clone();
     let artifact_limit = usize::try_from(limits.max_artifact_bytes).unwrap_or(usize::MAX);
@@ -64,8 +69,25 @@ pub fn router(state: AppState) -> Router {
         )
         .layer(DefaultBodyLimit::max(payload_limit));
 
-    let management = Router::new()
+    // Invocation reads and the provider view are data-plane endpoints: they
+    // read this cell's ledger and this host's provider, not the management
+    // store, and are authenticated like invoke.
+    let data = Router::new()
         .route("/v1/provider", get(handlers::provider_info))
+        .route(
+            "/v1/invocations/{invocation_id}",
+            get(handlers::get_invocation).post(handlers::cancel_colon),
+        )
+        .route(
+            "/v1/invocations/{invocation_id}/cancel",
+            post(handlers::cancel_invocation),
+        )
+        .route(
+            "/v1/invocations/{invocation_id}/logs",
+            get(handlers::invocation_logs),
+        );
+
+    let management = Router::new()
         .route(
             "/v1/functions",
             post(handlers::create_function).get(handlers::list_functions),
@@ -94,30 +116,33 @@ pub fn router(state: AppState) -> Router {
             "/v1/functions/{function_id}/invocations",
             get(handlers::list_invocations),
         )
-        .route("/v1/functions/{function_id}/usage", get(handlers::usage))
-        .route(
-            "/v1/invocations/{invocation_id}",
-            get(handlers::get_invocation).post(handlers::cancel_colon),
-        )
-        .route(
-            "/v1/invocations/{invocation_id}/cancel",
-            post(handlers::cancel_invocation),
-        )
-        .route(
-            "/v1/invocations/{invocation_id}/logs",
-            get(handlers::invocation_logs),
-        );
+        .route("/v1/functions/{function_id}/usage", get(handlers::usage));
 
-    let authenticated = Router::new()
+    // Layers run outermost-last: the management gate answers a data plane's
+    // 503 before any credential is looked at.
+    let management = Router::new()
         .merge(artifacts)
-        .merge(invoke)
         .merge(management)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::authenticate,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::management_gate,
         ));
+    let data_plane =
+        Router::new()
+            .merge(invoke)
+            .merge(data)
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                middleware::authenticate_invoke,
+            ));
+    let authenticated = Router::new().merge(management).merge(data_plane);
 
     Router::new()
+        .route("/v1/internal/config", get(handlers::internal_config))
         .route("/healthz", get(handlers::healthz))
         .route("/readyz", get(handlers::readyz))
         .route("/openapi.json", get(handlers::openapi_json))
@@ -137,10 +162,48 @@ pub async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
     let provider = providers::build_provider(&config)?;
-    let app = Application::bootstrap(config, provider)?;
+    let config_source: Option<Arc<dyn ConfigSource>> = match config.control_plane.role {
+        GatewayRole::Combined => None,
+        GatewayRole::DataPlane => {
+            let cp = &config.control_plane;
+            Some(Arc::new(config_client::HttpConfigSource::new(
+                cp.url.as_deref().unwrap_or_default(),
+                cp.internal_token
+                    .as_ref()
+                    .map(|t| t.expose())
+                    .unwrap_or_default(),
+                cp.fetch_timeout(),
+            )?))
+        }
+    };
+    let app = Application::bootstrap_with(
+        config,
+        provider,
+        BootstrapOptions {
+            config_source,
+            ..BootstrapOptions::default()
+        },
+    )?;
     // Reclaim environments a previous process left behind before the listener
     // accepts, so an orphan cannot outlive a crash or a kill.
     app.reconcile_on_startup().await;
+    // A data plane takes its first configuration before it accepts. A control
+    // plane that does not answer yet is not fatal: the gateway starts, answers
+    // 503 Host.ConfigNotDelivered, and the refresh loop keeps trying.
+    let config_refresh = (app.config.control_plane.role == GatewayRole::DataPlane).then(|| {
+        let weak = Arc::downgrade(&app);
+        tokio::spawn(async move {
+            loop {
+                let Some(app) = weak.upgrade() else {
+                    return;
+                };
+                let _ = app.refresh_config().await;
+                let delay = app.config_cache.next_delay();
+                drop(app);
+                tokio::time::sleep(delay).await;
+            }
+        })
+    });
     let listener = TcpListener::bind(&app.config.listen).await?;
     let addr = listener.local_addr()?;
     tracing::info!(
@@ -230,6 +293,9 @@ pub async fn serve(
     }
     retention.abort();
     heartbeat.abort();
+    if let Some(task) = config_refresh {
+        task.abort();
+    }
     // Nothing of this process is in flight any more: another gateway on the
     // same data_dir may take over whatever is left at once.
     app.stop_dispatcher();

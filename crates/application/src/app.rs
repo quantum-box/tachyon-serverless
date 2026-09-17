@@ -8,7 +8,11 @@ use tachyon_serverless_provider_port::{
     ArtifactStore, ExecutionProvider, IdentityProvider, SecretProvider, UsageSink,
 };
 
-use crate::config::{GatewayConfig, Profile, ProviderConfig, StoreBackend};
+use crate::config::{GatewayConfig, GatewayRole, Profile, ProviderConfig, StoreBackend};
+use crate::control::{
+    CacheSettings, ConfigCache, ConfigChangeSignal, ConfigSource, InvokeGate, LedgerConfigSource,
+    RefreshReport, SignalingConfigRepos, SourceError, grant_secret,
+};
 use crate::entrypoint::EntrypointPolicy;
 use crate::error::AppError;
 use crate::local_ports::{
@@ -61,6 +65,16 @@ pub struct Application {
     pub pool: Arc<EnvironmentPool>,
     /// This process's dispatcher identity and lease (PLT-4631).
     pub dispatcher: Arc<Dispatcher>,
+    /// The configuration invoke reads: functions, routes, revisions,
+    /// authorization grants and policy, with generations and expiry
+    /// (PLT-4636).
+    pub config_cache: Arc<ConfigCache>,
+    /// What this gateway still accepts and starts given its cache, control
+    /// plane and provider (PLT-4636).
+    pub invoke_gate: Arc<InvokeGate>,
+    /// The publication a `combined` gateway serves on
+    /// `GET /v1/internal/config`. `None` on a data plane.
+    pub config_publisher: Option<Arc<LedgerConfigSource>>,
 }
 
 impl std::fmt::Debug for Application {
@@ -85,6 +99,10 @@ pub struct BootstrapOptions {
     /// `[[secrets.bindings]]`. Tests use it to rotate a value at runtime and
     /// observe that the reuse key's secret generation follows.
     pub secrets: Option<Arc<dyn SecretProvider>>,
+    /// Where a `data_plane` gateway takes its configuration from (the gateway
+    /// passes an HTTP client of the management gateway; tests a fake). Must be
+    /// `None` for a `combined` gateway, which publishes from its own ledger.
+    pub config_source: Option<Arc<dyn ConfigSource>>,
 }
 
 impl Default for BootstrapOptions {
@@ -94,6 +112,7 @@ impl Default for BootstrapOptions {
             ids: Arc::new(UlidGenerator),
             persist_state: true,
             secrets: None,
+            config_source: None,
         }
     }
 }
@@ -173,7 +192,20 @@ impl Application {
                         .with_idempotency_retention(config.store.idempotency_retention()),
                 )
             };
-        let repos = Repositories::from_store(store.clone());
+        // Every function / revision / alias write this process makes tells
+        // the in-process configuration cache to refresh before it answers
+        // (PLT-4636).
+        let config_signal = Arc::new(ConfigChangeSignal::default());
+        let mut repos = Repositories::from_store(store.clone());
+        {
+            let signaling = Arc::new(SignalingConfigRepos::new(
+                store.clone(),
+                config_signal.clone(),
+            ));
+            repos.functions = signaling.clone();
+            repos.revisions = signaling.clone();
+            repos.aliases = signaling;
+        }
         // A new dispatcher incarnation for this process, then the ledger half
         // of the reclaim: only the work of dispatchers that lost their lease,
         // stopped, or whose previous incarnation is gone is settled. A second
@@ -258,6 +290,49 @@ impl Application {
             )
             .owned_by(dispatcher.id().clone()),
         );
+        // Configuration distribution (PLT-4636, docs/adr/0007). A combined
+        // gateway publishes from its ledger and reads its own publication in
+        // process; a data plane reads what its control plane delivered.
+        let control = &config.control_plane;
+        let config_publisher = (control.role == GatewayRole::Combined).then(|| {
+            Arc::new(LedgerConfigSource::new(
+                store.clone(),
+                config_signal.clone(),
+                &config.identity.tokens,
+                control,
+                dispatcher.instance().to_string(),
+            ))
+        });
+        let config_source: Arc<dyn ConfigSource> = match (control.role, &options.config_source) {
+            (GatewayRole::Combined, None) => config_publisher
+                .clone()
+                .expect("a combined gateway always has a publisher"),
+            (GatewayRole::DataPlane, Some(source)) => source.clone(),
+            (GatewayRole::Combined, Some(_)) => {
+                return Err(AppError::InvalidRequest(
+                    "a combined gateway publishes its own configuration; a config source is \
+                     only for role = \"data_plane\""
+                        .into(),
+                ));
+            }
+            (GatewayRole::DataPlane, None) => {
+                return Err(AppError::InvalidRequest(
+                    "role = \"data_plane\" needs a configuration source".into(),
+                ));
+            }
+        };
+        let config_cache = Arc::new(ConfigCache::new(
+            config_source,
+            clock.clone(),
+            CacheSettings::from_config(control),
+            grant_secret(control),
+        ));
+        let invoke_gate = Arc::new(InvokeGate::new(
+            config_cache.clone(),
+            provider_service.clone(),
+            control.role,
+            config.control_plane_outage.allow_cold_start,
+        ));
         let invoke = InvokeService::new(InvokeServiceDeps {
             repos: repos.clone(),
             artifacts: artifacts.clone(),
@@ -273,6 +348,7 @@ impl Application {
             entrypoints,
             pool: pool.clone(),
             dispatcher: dispatcher.clone(),
+            gate: invoke_gate.clone(),
         });
         // Reuse is visible at startup, on or off, with the gate that decided
         // it and the two capabilities behind it (PLT-4633 acceptance 4). The
@@ -325,7 +401,46 @@ impl Application {
             reconcile,
             pool,
             dispatcher,
+            config_cache,
+            invoke_gate,
+            config_publisher,
         }))
+    }
+
+    /// One refresh of the configuration cache (PLT-4636). When it ends an
+    /// outage, the dispatcher lease is re-validated at once instead of on the
+    /// next heartbeat tick: a dispatcher that was fenced while the gateway
+    /// could not reach its control plane keeps refusing new work
+    /// (docs/adr/0007 §dispatcher). The gateway runs this in a loop with
+    /// [`ConfigCache::next_delay`]; tests call it directly.
+    pub async fn refresh_config(&self) -> Result<RefreshReport, SourceError> {
+        let result = self.config_cache.refresh().await;
+        match &result {
+            Ok(report) if report.reconnected => {
+                let lease = self.heartbeat();
+                tracing::info!(
+                    generation = report.generation,
+                    applied = report.apply.applied,
+                    dispatcher_id = %self.dispatcher.id(),
+                    dispatcher_lease = ?lease,
+                    fenced = self.dispatcher.is_fenced(),
+                    "control plane reachable again; configuration converging, dispatcher lease \
+                     re-validated"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                let status = self.config_cache.status();
+                tracing::warn!(
+                    error = %e,
+                    consecutive_failures = status.consecutive_failures,
+                    config_valid_until = ?status.config_valid_until,
+                    auth_valid_until = ?status.auth_valid_until,
+                    "configuration refresh failed; serving from the cache until it expires"
+                );
+            }
+        }
+        result
     }
 
     /// Renew this dispatcher's lease and the slot leases of its in-flight

@@ -28,6 +28,12 @@ tenant_authz tachyon-serverless-gateway test:gateway_integration operator_role_i
 tenant_authz tachyon-serverless-gateway test:gateway_integration foreign_artifact_digest_is_indistinguishable_from_a_missing_one
 tenant_authz tachyon-serverless-cli test:mock_gateway cross_tenant_resource_is_404_exit_2
 tenant_authz tachyon-serverless-cli test:mock_gateway wrong_token_is_exit_2
+# PLT-4636: a data plane authorizes only from delivered grants under an auth lease
+tenant_authz tachyon-serverless-application test:config_cache new_work_is_refused_exactly_at_valid_until_with_the_matching_reason
+tenant_authz tachyon-serverless-application test:config_cache unknown_tenants_and_undelivered_revisions_are_refused
+tenant_authz tachyon-serverless-application test:config_cache a_revoked_token_stops_working_within_one_refresh_or_one_auth_lease
+tenant_authz tachyon-serverless-application lib control::wire::tests::grant_key_is_hmac_sha256
+tenant_authz tachyon-serverless-gateway test:gateway_integration a_data_plane_gateway_serves_invokes_from_delivered_configuration
 
 # --- environment reuse key: an environment is only reused for an exactly matching key ---------
 reuse_key tachyon-serverless-application lib repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused
@@ -59,6 +65,11 @@ lease_epoch tachyon-serverless-application lib repository::sqlite::tests::separa
 lease_epoch tachyon-serverless-application test:leases two_gateways_on_one_data_dir_never_settle_each_others_work
 lease_epoch tachyon-serverless-application test:leases a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced
 lease_epoch tachyon-serverless-application test:leases a_fenced_environment_stays_fenced_until_its_terminate_succeeds
+# PLT-4636: an older configuration generation never rolls a newer one back; a dispatcher fenced
+# during a control-plane outage stays fenced after the reconnect
+lease_epoch tachyon-serverless-application test:config_cache older_generations_never_roll_back_a_newer_configuration
+lease_epoch tachyon-serverless-application lib repository::config::tests::stamps_changes_ignores_stale_values_and_tombstones_removals
+lease_epoch tachyon-serverless-application test:config_cache a_dispatcher_fenced_during_the_outage_stays_fenced_after_the_reconnect
 
 # --- deadline enforcement: the host enforces deadlines, clients can only shorten them ---------
 deadline tachyon-serverless-domain lib invocation::tests::queue_timeout_fails_from_queued

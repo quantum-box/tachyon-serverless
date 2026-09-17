@@ -10,6 +10,7 @@ pub mod app;
 pub mod authz;
 pub mod bridge_session;
 pub mod config;
+pub mod control;
 pub mod entrypoint;
 pub mod error;
 pub mod local_ports;
@@ -18,8 +19,9 @@ pub mod services;
 
 pub use app::{Application, BootstrapOptions, ProviderFactory};
 pub use config::{
-    DispatcherConfig, GatewayConfig, PoolConfig, Profile, ProviderConfig, ProviderKindConfig,
-    ReconcileConfig, StoreBackend, StoreConfig,
+    ControlPlaneConfig, ControlPlaneOutageConfig, DispatcherConfig, GatewayConfig, GatewayRole,
+    PoolConfig, Profile, ProviderConfig, ProviderKindConfig, ReconcileConfig, StoreBackend,
+    StoreConfig,
 };
 pub use error::AppError;
 pub use services::{

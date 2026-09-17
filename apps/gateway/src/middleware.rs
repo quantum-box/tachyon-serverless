@@ -7,7 +7,8 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use tachyon_serverless_api_types::headers;
-use tachyon_serverless_application::AppError;
+use tachyon_serverless_application::control::ControlError;
+use tachyon_serverless_application::{AppError, GatewayRole};
 use tachyon_serverless_domain::TenantId;
 use tachyon_serverless_provider_port::{Credential, Principal};
 
@@ -35,12 +36,9 @@ pub async fn request_id(State(state): State<AppState>, mut req: Request, next: N
     res
 }
 
-/// `Authorization: Bearer <token>` -> [`Principal`]; the optional
-/// `x-tachyon-tenant-id` header must match the token's tenant.
-pub async fn authenticate(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
-    let request_id = req.extensions().get::<RequestId>().map(|r| r.0.clone());
-    let token = req
-        .headers()
+/// The bearer token of `Authorization: Bearer <token>`, if well formed.
+pub fn bearer_token(req: &Request) -> Option<String> {
+    req.headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| {
@@ -50,13 +48,17 @@ pub async fn authenticate(State(state): State<AppState>, mut req: Request, next:
             } else {
                 None
             }
-        });
-    let Some(token) = token.filter(|t| !t.is_empty()) else {
-        return GatewayError::new(
-            AppError::Unauthorized("missing or malformed Authorization: Bearer header".into()),
-            request_id,
-        )
-        .into_response();
+        })
+        .filter(|t| !t.is_empty())
+}
+
+/// Management API: `Authorization: Bearer <token>` -> [`Principal`] from the
+/// control plane's own identity provider (`[[identity.tokens]]`); the
+/// optional `x-tachyon-tenant-id` header must match the token's tenant.
+pub async fn authenticate(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let request_id = req.extensions().get::<RequestId>().map(|r| r.0.clone());
+    let Some(token) = bearer_token(&req) else {
+        return missing_bearer(request_id);
     };
     let Some(principal) = state.identity.authenticate(&Credential(token)).await else {
         return GatewayError::new(
@@ -65,6 +67,68 @@ pub async fn authenticate(State(state): State<AppState>, mut req: Request, next:
         )
         .into_response();
     };
+    admit(principal, request_id, req, next).await
+}
+
+/// Invoke and invocation reads: the principal comes from the configuration
+/// cache (delivered grants under an auth lease, PLT-4636), never from the
+/// management store. An expired lease or an unknown tenant is refused with
+/// its own `error_type`.
+pub async fn authenticate_invoke(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let request_id = req.extensions().get::<RequestId>().map(|r| r.0.clone());
+    let Some(token) = bearer_token(&req) else {
+        return missing_bearer(request_id);
+    };
+    match state.config_cache.authenticate(&Credential(token)).await {
+        Ok(principal) => admit(principal, request_id, req, next).await,
+        Err(e) => GatewayError::new(e, request_id).into_response(),
+    }
+}
+
+/// The management API is served by the control plane only: a data-plane
+/// gateway answers 503 with `Host.ControlPlaneUnavailable` (PLT-4636).
+pub async fn management_gate(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    if state.config.control_plane.role == GatewayRole::DataPlane {
+        let request_id = req.extensions().get::<RequestId>().map(|r| r.0.clone());
+        return GatewayError::new(
+            AppError::control(
+                ControlError::ControlPlaneUnavailable,
+                format!(
+                    "this gateway is a data plane; the management API is served by the control \
+                     plane at {}",
+                    state
+                        .config
+                        .control_plane
+                        .url
+                        .as_deref()
+                        .unwrap_or("(unset)")
+                ),
+            ),
+            request_id,
+        )
+        .into_response();
+    }
+    next.run(req).await
+}
+
+fn missing_bearer(request_id: Option<String>) -> Response {
+    GatewayError::new(
+        AppError::Unauthorized("missing or malformed Authorization: Bearer header".into()),
+        request_id,
+    )
+    .into_response()
+}
+
+async fn admit(
+    principal: Principal,
+    request_id: Option<String>,
+    mut req: Request,
+    next: Next,
+) -> Response {
     if let Some(claimed) = req
         .headers()
         .get(headers::TENANT_ID)

@@ -152,8 +152,8 @@ fn migrations_upgrade_a_database_at_an_older_version() {
         now(),
     )
     .unwrap();
-    assert_eq!(store.open_report().migrations_applied, vec![2, 3]);
-    assert_eq!(store.open_report().schema_version, 3);
+    assert_eq!(store.open_report().migrations_applied, vec![2, 3, 4]);
+    assert_eq!(store.open_report().schema_version, 4);
     assert_eq!(FunctionRepository::get(&store, &f.id).unwrap(), Some(f));
     assert_eq!(
         InvocationRepository::get(&store, &inv.id).unwrap(),

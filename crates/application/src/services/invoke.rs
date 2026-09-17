@@ -47,6 +47,7 @@ use crate::bridge_session::{
     BridgeSession, HelloAckParams, InvokeParams, LogContext, LogForwarder, Outcome, SessionError,
 };
 use crate::config::{CapacityConfig, InvokeConfig};
+use crate::control::{InvokeGate, Resolved};
 use crate::entrypoint::EntrypointPolicy;
 use crate::error::AppError;
 use crate::repository::{
@@ -59,7 +60,6 @@ use crate::services::pool::{
     EnvironmentPool, WarmEnvironment, WarmStartTimings, environment_lifetime_ms, reuse_key_for,
     secret_binding_generation,
 };
-use crate::services::revision::ensure_ready;
 
 /// Upper bound of a caller-supplied trace id. Together with the fixed-size
 /// ids it keeps the `Invoke` envelope within
@@ -181,6 +181,8 @@ pub struct InvokeService {
     /// This process's dispatcher: owner of every invocation, environment and
     /// lease it creates.
     dispatcher: Arc<Dispatcher>,
+    /// Configuration cache and start restrictions (PLT-4636).
+    gate: Arc<InvokeGate>,
     global_slots: Arc<Semaphore>,
     revision_slots: Mutex<HashMap<RevisionId, Arc<Semaphore>>>,
     queued: Arc<AtomicUsize>,
@@ -203,6 +205,7 @@ pub struct InvokeServiceDeps {
     pub entrypoints: EntrypointPolicy,
     pub pool: Arc<EnvironmentPool>,
     pub dispatcher: Arc<Dispatcher>,
+    pub gate: Arc<InvokeGate>,
 }
 
 impl InvokeService {
@@ -223,6 +226,7 @@ impl InvokeService {
             entrypoints: deps.entrypoints,
             pool: deps.pool,
             dispatcher: deps.dispatcher,
+            gate: deps.gate,
             revision_slots: Mutex::new(HashMap::new()),
             queued: Arc::new(AtomicUsize::new(0)),
             in_flight: Mutex::new(HashMap::new()),
@@ -250,14 +254,22 @@ impl InvokeService {
                 "this gateway lost its dispatcher lease; retry against a live gateway".into(),
             ));
         }
-        let function = self.owned_function(&req.principal, &req.function_id)?;
-        if function.is_deleted() {
-            return Err(AppError::FunctionDeleted(format!(
-                "function {} is deleted",
-                function.id
-            )));
-        }
-        let (revision, alias) = self.resolve_revision(&req, &function)?;
+        // 2. Function, route, revision and policy come from the configuration
+        // cache only, never from the management store (PLT-4636).
+        let Resolved {
+            function,
+            revision,
+            alias,
+        } = self
+            .gate
+            .resolve(
+                &req.principal,
+                &req.function_id,
+                req.alias.as_ref(),
+                req.revision_id.as_ref(),
+                self.pool.policy().reuse_enabled(),
+            )
+            .await?;
 
         let payload_bytes = serde_json::to_vec(&req.payload)
             .map_err(|e| AppError::InvalidRequest(format!("payload is not JSON: {e}")))?;
@@ -585,49 +597,6 @@ impl InvokeService {
             .invocations
             .get(id)?
             .ok_or_else(|| AppError::not_found("invocation not found"))
-    }
-
-    fn owned_function(
-        &self,
-        principal: &Principal,
-        function_id: &FunctionId,
-    ) -> Result<Function, AppError> {
-        let function = self
-            .repos
-            .functions
-            .get(function_id)?
-            .ok_or_else(|| AppError::not_found("function not found"))?;
-        ensure_tenant(principal, &function.tenant_id, "function")?;
-        Ok(function)
-    }
-
-    /// Resolve the revision at acceptance; it is pinned from here on.
-    fn resolve_revision(
-        &self,
-        req: &InvokeRequest,
-        function: &Function,
-    ) -> Result<(FunctionRevision, Option<AliasName>), AppError> {
-        let lookup = |id: &RevisionId| -> Result<FunctionRevision, AppError> {
-            self.repos
-                .revisions
-                .get(id)?
-                .filter(|r| r.function_id == function.id && r.tenant_id == function.tenant_id)
-                .ok_or_else(|| AppError::not_found("revision not found"))
-        };
-        if let Some(pinned) = &req.revision_id {
-            let rev = lookup(pinned)?;
-            ensure_ready(&rev)?;
-            return Ok((rev, None));
-        }
-        let name = req.alias.clone().unwrap_or_else(AliasName::default_alias);
-        let alias = self
-            .repos
-            .aliases
-            .get(&function.id, &name)?
-            .ok_or_else(|| AppError::not_found(format!("alias `{name}` not found")))?;
-        let rev = lookup(&alias.revision_id)?;
-        ensure_ready(&rev)?;
-        Ok((rev, Some(name)))
     }
 
     /// Try to take both capacity permits without waiting. When at least one
@@ -1300,6 +1269,22 @@ impl Driver {
         let prepared = match warm {
             Some(warm) => self.prepare_warm(warm),
             None => {
+                // A new environment needs the revision and the tenant's
+                // authorization to still be valid, a provider whose control
+                // API answers and, during a control-plane outage, the outage
+                // policy's consent (PLT-4636). Nothing is booted otherwise.
+                if let Err((kind, message)) = svc
+                    .gate
+                    .permit_cold_start(&self.revision, &self.function.tenant_id)
+                {
+                    tracing::warn!(
+                        invocation_id = %self.invocation_id,
+                        error_type = kind.error_type(),
+                        "cold start refused"
+                    );
+                    self.fail_invocation(InvokeGate::invocation_error(kind, message));
+                    return Attempted::Done(None);
+                }
                 match self
                     .prepare_cold(prospective_env_id, reuse_key, secret_env, init_timeout)
                     .await

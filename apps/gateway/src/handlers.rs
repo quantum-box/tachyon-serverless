@@ -40,14 +40,21 @@ pub async fn healthz() -> &'static str {
 }
 
 #[utoipa::path(get, path = "/readyz", tag = "meta", responses(
-    (status = 200, description = "provider preflight ok", body = Object),
-    (status = 503, description = "provider not ready", body = Object)
+    (status = 200, description = "provider preflight ok and new invocations are accepted", body = Object),
+    (status = 503, description = "provider not ready, dispatcher fenced, or new invocations refused (see `control_plane`)", body = Object)
 ))]
 pub async fn readyz(State(state): State<AppState>) -> Response {
     let report = state.provider_service.preflight().await;
     // A dispatcher that lost its lease takes no new work (PLT-4631).
     let fenced = state.dispatcher.is_fenced();
-    let ready = report.ok && !fenced;
+    // What the configuration cache and the control plane still allow
+    // (PLT-4636): running executions always continue; new invocations and new
+    // cold starts are reported separately, each with its refusal.
+    let control = state
+        .invoke_gate
+        .view(state.pool.policy().reuse_enabled())
+        .await;
+    let ready = report.ok && !fenced && control.new_invocations == "accepted";
     let status = if ready {
         StatusCode::OK
     } else {
@@ -63,11 +70,65 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
                 "fenced": fenced,
             },
             "preflight": report,
+            "control_plane": control,
             // `null` until the startup reconcile ran (or when it is off).
             "reconcile": state.reconcile.last_report(),
         })),
     )
         .into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct SinceQuery {
+    pub since: Option<u64>,
+}
+
+/// `GET /v1/internal/config?since=<generation>` (PLT-4636): the generation
+/// stamped configuration for data planes. Authenticated with the internal
+/// credential (`[control_plane] internal_token`) as a bearer token, never with
+/// a tenant token; served only by a `combined` gateway that has one
+/// configured (404 otherwise).
+#[utoipa::path(get, path = "/v1/internal/config", tag = "internal", security(("bearer" = [])),
+    params(("since" = Option<u64>, Query, description = "return entries with a generation above this (default 0: everything)")),
+    responses(
+        (status = 200, description = "configuration delivery (`ConfigDelivery`: generation, since, TTL caps, entries with tombstones)", body = Object),
+        (status = 401, body = ApiErrorBody),
+        (status = 404, body = ApiErrorBody),
+        (status = 503, description = "the ledger store is unavailable", body = ApiErrorBody)
+    ))]
+pub async fn internal_config(
+    State(state): State<AppState>,
+    Query(query): Query<SinceQuery>,
+    req: Request,
+) -> Response {
+    use tachyon_serverless_application::control::{ControlError, constant_time_eq};
+    let request_id = req.extensions().get::<RequestId>().map(|r| r.0.clone());
+    let (Some(publisher), Some(expected)) = (
+        state.config_publisher.as_ref(),
+        state.config.control_plane.internal_token.as_ref(),
+    ) else {
+        return GatewayError::new(
+            AppError::NotFound(format!("no route for GET {}", req.uri().path())),
+            request_id,
+        )
+        .into_response();
+    };
+    let presented = crate::middleware::bearer_token(&req).unwrap_or_default();
+    if !constant_time_eq(presented.as_bytes(), expected.expose().as_bytes()) {
+        return GatewayError::new(
+            AppError::Unauthorized("the internal credential is required".into()),
+            request_id,
+        )
+        .into_response();
+    }
+    match publisher.publish(query.since.unwrap_or(0)) {
+        Ok(delivery) => (StatusCode::OK, Json(delivery)).into_response(),
+        Err(e) => GatewayError::new(
+            AppError::control(ControlError::StoreUnavailable, format!("ledger: {e}")),
+            request_id,
+        )
+        .into_response(),
+    }
 }
 
 #[utoipa::path(get, path = "/openapi.json", tag = "meta", responses((status = 200, description = "OpenAPI document", body = Object)))]

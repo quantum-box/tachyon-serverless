@@ -48,6 +48,8 @@ struct State {
     artifact_owners: BTreeMap<Sha256Digest, BTreeSet<TenantId>>,
     leases: BTreeMap<LeaseId, ExecutionLease>,
     dispatchers: BTreeMap<DispatcherId, DispatcherRecord>,
+    publication: BTreeMap<String, super::config::PublishedRow>,
+    publication_generation: u64,
 }
 
 /// Single-process volatile store. Cheap to clone via `Arc`.
@@ -84,6 +86,34 @@ impl InMemoryStore {
 impl StateStore for InMemoryStore {
     fn backend(&self) -> &'static str {
         "memory"
+    }
+}
+
+impl super::config::ConfigPublicationRepository for InMemoryStore {
+    fn stamp_config(
+        &self,
+        observe: super::config::Observe<'_>,
+        since: u64,
+    ) -> Result<super::config::StampedConfig, RepoError> {
+        // The write lock plays the role of the SQLite transaction: the read
+        // of the rows and the stamp cannot interleave with another stamp.
+        let mut s = self.state.write();
+        let rows = super::config::ConfigRows {
+            functions: s.functions.values().cloned().collect(),
+            aliases: s.aliases.values().cloned().collect(),
+            revisions: s.revisions.values().cloned().collect(),
+        };
+        let observed = observe(rows)?;
+        let State {
+            publication,
+            publication_generation,
+            ..
+        } = &mut *s;
+        super::config::stamp(publication, publication_generation, observed);
+        Ok(super::config::StampedConfig {
+            generation: *publication_generation,
+            entries: super::config::above(publication, since),
+        })
     }
 }
 

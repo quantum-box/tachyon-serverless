@@ -1732,6 +1732,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tachyon-serverless-api-types",
  "tachyon-serverless-domain",
  "tachyon-serverless-protocol",
@@ -1783,6 +1784,7 @@ name = "tachyon-serverless-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "base64",
  "bytes",
@@ -1790,6 +1792,7 @@ dependencies = [
  "futures",
  "http",
  "http-body-util",
+ "reqwest",
  "serde",
  "serde_json",
  "tachyon-serverless-api-types",
