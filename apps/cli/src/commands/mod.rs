@@ -9,6 +9,7 @@ pub mod invoke;
 pub mod logs;
 pub mod provider;
 pub mod rollback;
+pub mod usage;
 
 use std::time::Duration;
 
@@ -111,6 +112,10 @@ pub async fn dispatch(cli: Cli, p: &mut Printer<'_>) -> Result<(), CliError> {
         Command::Health => {
             let client = ApiClient::new(cfg)?;
             provider::health(&client, p).await
+        }
+        Command::Usage(args) => {
+            let client = ApiClient::new(cfg)?;
+            usage::usage(&client, &args, p).await
         }
         Command::Dev(args) => dev::run(&args, &cfg, p).await,
     }

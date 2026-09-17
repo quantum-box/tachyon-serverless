@@ -341,6 +341,72 @@ pub const FAMILIES: &[(&str, &str, &str)] = &[
         "gauge",
         "1 for the queue condition the outbox publisher last saw (healthy, full, unavailable).",
     ),
+    // usage metering (PLT-4642)
+    (
+        "tsls_usage_journal_healthy",
+        "gauge",
+        "1 when the usage journal can be read and written (PLT-4642).",
+    ),
+    (
+        "tsls_usage_journal_admitting",
+        "gauge",
+        "1 when the usage journal has more than its admission headroom left: new invocations are admitted metered.",
+    ),
+    (
+        "tsls_usage_journal_pending_events",
+        "gauge",
+        "Usage events written to the journal and not yet delivered to the usage ledger.",
+    ),
+    (
+        "tsls_usage_journal_pending_bytes",
+        "gauge",
+        "Bytes of the pending usage events.",
+    ),
+    (
+        "tsls_usage_journal_max_events",
+        "gauge",
+        "[usage] journal_max_events.",
+    ),
+    (
+        "tsls_usage_journal_max_bytes",
+        "gauge",
+        "[usage] journal_max_bytes.",
+    ),
+    (
+        "tsls_usage_unjournaled_events_total",
+        "counter",
+        "Usage events the journal refused (full or unavailable): unmetered, never estimated.",
+    ),
+    (
+        "tsls_usage_collector_runs_total",
+        "counter",
+        "Usage collector runs of this process.",
+    ),
+    (
+        "tsls_usage_collector_failing",
+        "gauge",
+        "1 when the last usage collector run failed (ledger unavailable, journal integrity).",
+    ),
+    (
+        "tsls_usage_collector_last_success_age_seconds",
+        "gauge",
+        "Seconds since the usage collector last delivered successfully (collector lag). Absent before the first success.",
+    ),
+    (
+        "tsls_usage_collector_delivered_events_total",
+        "counter",
+        "Journal entries this process's collector delivered to the ledger (re-deliveries included).",
+    ),
+    (
+        "tsls_usage_ledger_events",
+        "gauge",
+        "Distinct usage events in the usage ledger.",
+    ),
+    (
+        "tsls_usage_ledger_duplicates_ignored_total",
+        "counter",
+        "Deliveries the usage ledger dropped because it already had the event id.",
+    ),
     (
         "tsls_metrics_series_truncated",
         "gauge",

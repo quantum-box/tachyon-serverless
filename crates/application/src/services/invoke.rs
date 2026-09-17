@@ -30,16 +30,17 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 
 use tachyon_serverless_domain::{
-    AliasName, AttemptId, Clock, Deadlines, EnvironmentId, ErrorClass, EventKind, EvidenceQuality,
+    AliasName, AttemptId, AttemptKind, Clock, Deadlines, EnvironmentId, ErrorClass, EventKind,
     ExecutionEnvironment, ExecutionLease, Function, FunctionId, FunctionRevision, IdGenerator,
     Invocation, InvocationAttempt, InvocationError, InvocationId, InvocationMode, LeaseId, Limits,
-    LogPhase, PayloadRef, ReuseKey, RevisionId, Sha256Digest, StartKind, Timestamp, UsageEvent,
-    UsageEventType,
+    LogPhase, Metered, PayloadRef, ResourceProfile, ReuseKey, RevisionId, Sha256Digest, StartKind,
+    Timestamp, UsageBytes, UsageEvent, UsageEventType, UsageOutcome, UsageResources, UsageSegments,
 };
 use tachyon_serverless_protocol::GuestErrorKind;
 use tachyon_serverless_provider_port::{
-    ArtifactLocation, ArtifactStore, EnvironmentSpec, ExecutionProvider, Principal, ProviderError,
-    SecretDeliveryContext, SecretError, SecretProvider, TerminateReason, UsageSink,
+    ArtifactLocation, ArtifactStore, EnvironmentSpec, EnvironmentStats, ExecutionProvider,
+    Principal, ProviderError, SecretDeliveryContext, SecretError, SecretProvider, TerminateReason,
+    UsageSink,
 };
 
 use crate::authz::{ensure_tenant, require_invoke};
@@ -64,6 +65,8 @@ use crate::services::pool::{
     EnvironmentPool, WarmEnvironment, WarmStartTimings, environment_lifetime_ms, reuse_key_for,
     secret_binding_generation,
 };
+use crate::usage::rating::ceil_ms;
+use crate::usage::{MeteringAdmission, UsageMeter};
 
 /// Upper bound of a caller-supplied trace id. Together with the fixed-size
 /// ids it keeps the `Invoke` envelope within
@@ -223,6 +226,9 @@ pub struct InvokeService {
     /// Capacity ledger, fair queue, quotas, autoscaler gate, start-rate
     /// limiter and circuit breakers (PLT-4634).
     admission: Arc<AdmissionController>,
+    /// Usage journal admission (PLT-4642): no new invocation starts that
+    /// could not be metered, unless the dev-only policy says otherwise.
+    meter: Arc<UsageMeter>,
     in_flight: Mutex<HashMap<InvocationId, InFlight>>,
     draining: AtomicBool,
 }
@@ -244,6 +250,7 @@ pub struct InvokeServiceDeps {
     pub dispatcher: Arc<Dispatcher>,
     pub gate: Arc<InvokeGate>,
     pub admission: Arc<AdmissionController>,
+    pub meter: Arc<UsageMeter>,
 }
 
 impl InvokeService {
@@ -265,6 +272,7 @@ impl InvokeService {
             dispatcher: deps.dispatcher,
             gate: deps.gate,
             admission: deps.admission,
+            meter: deps.meter,
             in_flight: Mutex::new(HashMap::new()),
             draining: AtomicBool::new(false),
         })
@@ -336,6 +344,10 @@ impl InvokeService {
         if self.draining.load(Ordering::SeqCst) || self.dispatcher.is_fenced() {
             return Err("the gateway is shutting down or lost its dispatcher lease".into());
         }
+        // A pre-start costs what it costs: it is not started unmetered.
+        if !matches!(self.meter.admit(), Ok(MeteringAdmission::Metered)) {
+            return Err("the usage journal cannot meter a pre-start".into());
+        }
         let id = InvocationId::from_ulid(self.ids.next_ulid());
         let (cancel_tx, cancel_rx) = watch::channel(None);
         let (done_tx, done_rx) = watch::channel(None);
@@ -374,6 +386,7 @@ impl InvokeService {
             seq: 0,
             epoch: 1,
             warmup: true,
+            meter: AttemptMeter::default(),
         };
         let result = match AssertUnwindSafe(driver.prewarm()).catch_unwind().await {
             Ok(r) => r,
@@ -506,6 +519,14 @@ impl InvokeService {
             return self.replay_binding(&req, &input_digest, binding).await;
         }
 
+        // Metering (PLT-4642): nothing starts that the usage journal could not
+        // record. Refused before anything is recorded, like admission; a
+        // replay above still answers.
+        let unmetered = match self.meter.admit()? {
+            MeteringAdmission::Metered => None,
+            MeteringAdmission::Unmetered(refusal) => Some(refusal),
+        };
+
         // 5 (first half). Admission is asked before anything is recorded so
         // that a refusal (full queue, quota, placement, open breaker) answers
         // without a ledger entry and without binding the idempotency key.
@@ -586,6 +607,10 @@ impl InvokeService {
             seq: 0,
             epoch: 1,
             warmup: false,
+            meter: AttemptMeter {
+                unmetered: unmetered.is_some(),
+                ..AttemptMeter::default()
+            },
         };
         tokio::spawn(driver.run(done_tx));
 
@@ -982,6 +1007,97 @@ struct Driver {
     /// `invocation_id`, which is never stored and never put on a log line or
     /// a usage event.
     warmup: bool,
+    /// Host-measured segments of the current attempt (PLT-4642).
+    meter: AttemptMeter,
+}
+
+/// What the driver measured of the attempt it is on, for `AttemptSettled`
+/// (PLT-4642). Durations come from the host's monotonic clock only; a
+/// segment that was not measured stays `None` and is reported as unknown.
+#[derive(Debug, Clone, Default)]
+struct AttemptMeter {
+    queue_wait: Option<Duration>,
+    /// Cold: provider create to bridge connected. Warm: resume + readiness.
+    vm_base_boot: Option<Duration>,
+    /// Cold: bridge connected to `Ready`. Warm: zero.
+    user_init: Option<Duration>,
+    /// Idle time in the pool before a warm claim (zero for a cold start).
+    idle_pooled_ms: Option<u64>,
+    guest_init_ms: Option<u64>,
+    boot_id: Option<String>,
+    /// Admitted while the journal refused, under the dev-only
+    /// `accept_unmetered` policy.
+    unmetered: bool,
+}
+
+impl AttemptMeter {
+    /// A new environment: forget everything but the queue wait.
+    fn environment_changed(&mut self) {
+        *self = Self {
+            queue_wait: self.queue_wait,
+            unmetered: self.unmetered,
+            ..Self::default()
+        };
+    }
+}
+
+/// Requested resources of a revision plus what the host observed, as usage
+/// resources (PLT-4642).
+pub(crate) fn usage_resources(
+    resources: &ResourceProfile,
+    host: Option<&EnvironmentStats>,
+) -> UsageResources {
+    // Only a sample that covers the whole environment is a host resource
+    // quantity: the VMM's cgroup (guest + VMM). The process provider's
+    // procfs / rusage sample covers the bridge process only, not the user
+    // process it runs, so it would undercount; it stays unknown.
+    let whole = host.filter(|s| matches!(s.scope.as_str(), "cgroup_v2" | "fake"));
+    let cpu_usec = whole
+        .and_then(|s| s.cpu_seconds)
+        .filter(|s| s.is_finite() && *s >= 0.0)
+        .map(|s| (s * 1_000_000.0).round() as u64);
+    UsageResources {
+        requested_cpu_millis: resources.cpu_millis,
+        requested_memory_mib: resources.memory_mib,
+        requested_storage_mib: resources.ephemeral_storage_mib,
+        cgroup_cpu_usec: cpu_usec.map_or_else(Metered::unknown, Metered::provider),
+        cgroup_memory_peak_bytes: whole
+            .and_then(|s| s.memory_peak_bytes)
+            .map_or_else(Metered::unknown, Metered::provider),
+    }
+}
+
+/// The provider's host sample of an environment, read just before it is
+/// terminated (PLT-4637 `ExecutionProvider::environment_stats`, the same
+/// source `GET /metrics` uses). `None` when the provider cannot measure it.
+pub(crate) async fn sample_before_terminate(
+    provider: &dyn ExecutionProvider,
+    environment_id: &EnvironmentId,
+) -> Option<EnvironmentStats> {
+    match provider.environment_stats(environment_id).await {
+        Ok(stats) => stats,
+        Err(e) => {
+            tracing::debug!(error = %e, environment_id = %environment_id, "no host usage sample before terminate");
+            None
+        }
+    }
+}
+
+/// How an attempt's result reads as a usage outcome.
+fn usage_outcome<T>(result: &Result<T, InvocationError>, completed: bool) -> UsageOutcome {
+    if !completed {
+        // Another dispatcher settled it: what this one saw is not the answer.
+        return UsageOutcome::OutcomeUnknown;
+    }
+    match result {
+        Ok(_) => UsageOutcome::Succeeded,
+        Err(e) => match e.class {
+            ErrorClass::Timeout => UsageOutcome::Timeout,
+            ErrorClass::Cancelled => UsageOutcome::Cancelled,
+            ErrorClass::OutcomeUnknown => UsageOutcome::OutcomeUnknown,
+            _ => UsageOutcome::Failed,
+        },
+    }
 }
 
 async fn wait_cancel(rx: &mut watch::Receiver<Option<CancelKind>>) -> CancelKind {
@@ -1195,29 +1311,152 @@ impl Driver {
         bytes_in: u64,
         bytes_out: u64,
     ) {
-        let event = UsageEvent {
-            // Unique per (environment, assignment, event). The epoch advances
-            // on every reassignment, so the events of a warm attempt never
-            // collide with those of the invocation that ran on the same
-            // environment before it — while re-sending the *same* event keeps
-            // the same id, so the sink still de-duplicates it.
-            event_id: format!("{env}:{}:{sequence}", self.epoch),
-            tenant_id: self.function.tenant_id.clone(),
-            environment_id: env.clone(),
-            invocation_id: (!self.warmup).then(|| self.invocation_id.clone()),
-            attempt_id: attempt.cloned(),
+        let mut event = self.usage_event(env, attempt, event_type, sequence);
+        event.monotonic_duration_ms = duration_ms;
+        event.bytes_in = bytes_in;
+        event.bytes_out = bytes_out;
+        match event_type {
+            UsageEventType::EnvironmentStarted => {
+                event.segments.vm_base_boot_ms =
+                    Metered::host_opt(self.meter.vm_base_boot.map(ceil_ms));
+            }
+            UsageEventType::HandlerFinished => {
+                event.segments.handler_ms = Metered::host_opt(duration_ms);
+            }
+            _ => {}
+        }
+        self.record_usage(event).await;
+    }
+
+    /// A v2 usage event of this driver's function, revision and invocation
+    /// (PLT-4642), with the requested resources and nothing measured yet.
+    fn usage_event(
+        &self,
+        env: &EnvironmentId,
+        attempt: Option<&AttemptId>,
+        event_type: UsageEventType,
+        sequence: u64,
+    ) -> UsageEvent {
+        // Unique per (environment, assignment, event). The epoch advances
+        // on every reassignment, so the events of a warm attempt never
+        // collide with those of the invocation that ran on the same
+        // environment before it — while re-sending the *same* event keeps
+        // the same id, so the sink still de-duplicates it.
+        let mut event = UsageEvent::new(
+            format!("{env}:{}:{sequence}", self.epoch),
+            self.function.tenant_id.clone(),
+            env.clone(),
             event_type,
             sequence,
-            observed_at: self.now(),
-            monotonic_duration_ms: duration_ms,
-            memory_mib: self.revision.spec.resources.memory_mib,
-            cpu_millis: self.revision.spec.resources.cpu_millis,
-            bytes_in,
-            bytes_out,
-            meter_version: 1,
-            evidence_quality: EvidenceQuality::HostObserved,
-        };
+            self.now(),
+        );
+        let resources = &self.revision.spec.resources;
+        event.invocation_id = (!self.warmup).then(|| self.invocation_id.clone());
+        event.attempt_id = attempt.cloned();
+        event.memory_mib = resources.memory_mib;
+        event.cpu_millis = resources.cpu_millis;
+        event.function_id = Some(self.function.id.clone());
+        event.revision_id = Some(self.revision.id.clone());
+        event.epoch = self.epoch;
+        event.boot_id = self.meter.boot_id.clone();
+        event.resources = usage_resources(resources, None);
+        event
+    }
+
+    async fn record_usage(&self, mut event: UsageEvent) {
+        if self.meter.unmetered {
+            // Admitted under `accept_unmetered` while the journal refused:
+            // every quantity is unknown, so nothing of it is ever rated.
+            event.segments = UsageSegments::default();
+            event.bytes = UsageBytes::default();
+            event.resources.cgroup_cpu_usec = Metered::unknown();
+            event.resources.cgroup_memory_peak_bytes = Metered::unknown();
+            event.evidence_quality = tachyon_serverless_domain::EvidenceQuality::Unknown;
+        }
         self.svc.usage.record(event).await;
+    }
+
+    /// `AttemptSettled`: the attempt's outcome and every segment the host
+    /// measured of it (PLT-4642). `handler` is `None` when the `Invoke` frame
+    /// never reached the guest: the handler provably did not run (zero).
+    #[allow(clippy::too_many_arguments)]
+    async fn emit_attempt_settled(
+        &mut self,
+        env: &EnvironmentId,
+        attempt_id: &AttemptId,
+        number: u32,
+        outcome: UsageOutcome,
+        handler: Option<Duration>,
+        teardown: Option<Duration>,
+        bytes_out: u64,
+        guest_handler_ms: Option<u64>,
+    ) {
+        self.seq += 1;
+        let mut event = self.usage_event(
+            env,
+            Some(attempt_id),
+            UsageEventType::AttemptSettled,
+            self.seq,
+        );
+        event.attempt_number = Some(number);
+        event.attempt_kind = Some(AttemptKind::from_number(number));
+        event.outcome = Some(outcome);
+        event.segments = UsageSegments {
+            queue_wait_ms: Metered::host_opt(self.meter.queue_wait.map(ceil_ms)),
+            vm_base_boot_ms: Metered::host_opt(self.meter.vm_base_boot.map(ceil_ms)),
+            user_init_ms: Metered::host_opt(self.meter.user_init.map(ceil_ms)),
+            handler_ms: Metered::host(handler.map_or(0, ceil_ms)),
+            teardown_ms: Metered::host_opt(teardown.map(ceil_ms)),
+            idle_pooled_ms: Metered::host_opt(self.meter.idle_pooled_ms),
+        };
+        event.bytes = UsageBytes {
+            request_bytes: Metered::host(self.input_size),
+            response_bytes: Metered::host(bytes_out),
+        };
+        event.bytes_in = self.input_size;
+        event.bytes_out = bytes_out;
+        event.guest_reported.guest_handler_ms = guest_handler_ms;
+        event.guest_reported.guest_init_ms = self.meter.guest_init_ms;
+        self.record_usage(event).await;
+    }
+
+    /// An environment this driver booted ended before any attempt was
+    /// dispatched onto it (a boot, handshake or init failure, a cancel or a
+    /// client deadline during initialization). Its single
+    /// `EnvironmentStopped` carries what was measured of the boot and the
+    /// initialization, with the invocation's outcome and no attempt
+    /// (PLT-4642). Nothing when no environment is left to account for.
+    async fn emit_environment_abandoned(&mut self) {
+        let Some(env_id) = self.env_id.take() else {
+            return;
+        };
+        use tachyon_serverless_domain::InvocationStatus as S;
+        let now = self.now();
+        let row = self.svc.repos.environments.get(&env_id).ok().flatten();
+        let outcome = match self.load_invocation().map(|inv| inv.status) {
+            Some(S::Cancelled) => UsageOutcome::Cancelled,
+            Some(S::Failed { error }) if error.class == ErrorClass::Timeout => {
+                UsageOutcome::Timeout
+            }
+            Some(S::OutcomeUnknown { .. }) => UsageOutcome::OutcomeUnknown,
+            _ => UsageOutcome::Failed,
+        };
+        self.seq += 1;
+        let mut event =
+            self.usage_event(&env_id, None, UsageEventType::EnvironmentStopped, self.seq);
+        event.monotonic_duration_ms = row.as_ref().map(|env| environment_lifetime_ms(env, now));
+        event.outcome = Some(outcome);
+        event.segments = UsageSegments {
+            queue_wait_ms: Metered::host_opt(self.meter.queue_wait.map(ceil_ms)),
+            vm_base_boot_ms: Metered::host_opt(self.meter.vm_base_boot.map(ceil_ms)),
+            user_init_ms: Metered::host_opt(self.meter.user_init.map(ceil_ms)),
+            handler_ms: Metered::host(0),
+            // These paths terminate without timing it.
+            teardown_ms: Metered::unknown(),
+            idle_pooled_ms: Metered::host(0),
+        };
+        event.guest_reported.guest_init_ms = self.meter.guest_init_ms;
+        self.record_usage(event).await;
     }
 
     /// Record why admission ended this invocation while it was queued.
@@ -1361,7 +1600,9 @@ impl Driver {
                 return None;
             }
         }
-        let queue_wait_ms = self.accepted_at.elapsed().as_millis() as u64;
+        let queue_wait = self.accepted_at.elapsed();
+        self.meter.queue_wait = Some(queue_wait);
+        let queue_wait_ms = queue_wait.as_millis() as u64;
         if self.client_deadline_elapsed() {
             self.fail_invocation(InvocationError::new(
                 ErrorClass::Timeout,
@@ -1478,7 +1719,12 @@ impl Driver {
                     .await
                 {
                     Some(prepared) => prepared,
-                    None => return Attempted::Done(None),
+                    None => {
+                        // Whatever booted and failed before a dispatch is
+                        // still accounted for, once (PLT-4642).
+                        self.emit_environment_abandoned().await;
+                        return Attempted::Done(None);
+                    }
                 }
             }
         };
@@ -1498,6 +1744,7 @@ impl Driver {
         if self.client_deadline_elapsed() {
             self.stop_for_client_deadline(Some(&mut session), &mut env, &logs)
                 .await;
+            self.emit_environment_abandoned().await;
             return Attempted::Done(None);
         }
         // Nor for a function whose deletion landed while the environment was
@@ -1544,7 +1791,7 @@ impl Driver {
                 .provider
                 .terminate_environment(&env_id, TerminateReason::Crashed)
                 .await;
-            self.env_id = None;
+            self.emit_environment_abandoned().await;
             return Attempted::Done(None);
         };
         let timeout = Duration::from_secs(u64::from(self.revision.spec.execution.timeout_seconds));
@@ -1645,7 +1892,7 @@ impl Driver {
                     "Host.SlotLost",
                     format!("the execution slot could not be acquired: {reason}"),
                 ));
-                self.env_id = None;
+                self.emit_environment_abandoned().await;
                 return Attempted::Done(None);
             }
         }
@@ -1737,7 +1984,8 @@ impl Driver {
             }
         };
         let handler_started = !matches!(dispatch, Dispatch::NotDelivered { .. });
-        let handler_ms = dispatched_at.elapsed().as_millis() as u64;
+        let handler_elapsed = dispatched_at.elapsed();
+        let handler_ms = handler_elapsed.as_millis() as u64;
         if handler_started {
             svc.admission
                 .observe_duration(&self.revision.id, dispatched_at.elapsed());
@@ -1749,11 +1997,14 @@ impl Driver {
         let inline_max = svc.invoke_cfg.inline_output_max_bytes;
         let mut output_value = None;
         let mut bytes_out = 0u64;
+        // Guest-reported, kept apart from the host's `handler_ms` (PLT-4642).
+        let mut guest_reported_handler_ms = None;
         let (result, env_end): Classified = match dispatch {
             Dispatch::Finished(Outcome::Response {
                 payload,
                 guest_handler_ms,
             }) => {
+                guest_reported_handler_ms = guest_handler_ms;
                 if let Some(ms) = guest_handler_ms {
                     env.evidence
                         .details
@@ -1809,6 +2060,7 @@ impl Driver {
                 stack_trace,
                 guest_handler_ms,
             }) => {
+                guest_reported_handler_ms = guest_handler_ms;
                 if let Some(ms) = guest_handler_ms {
                     env.evidence
                         .details
@@ -2042,6 +2294,9 @@ impl Driver {
         // attempt: take it here, under this attempt's log context, before the
         // session can carry another one. An `Exited` frame or an EOF makes the
         // session unusable, and `release` then refuses to pool it.
+        let teardown_started = Instant::now();
+        let outcome = usage_outcome(&result, completed);
+        let handler = handler_started.then_some(handler_elapsed);
         if may_reuse {
             session.drain_stale().await;
         }
@@ -2056,10 +2311,13 @@ impl Driver {
             // from here: it publishes the row only once the guest really is
             // quiesced, and if it cannot be, the pool terminates and meters it
             // instead. Either way this driver is done with it.
+            //
+            // The count handed over already includes this attempt's
+            // `AttemptSettled`, emitted right after (PLT-4642).
             svc.pool.clone().release_for(
                 &env,
                 session,
-                self.seq,
+                self.seq + 1,
                 &mut self.grant,
                 self.revision.spec.execution.min_ready,
             )
@@ -2079,6 +2337,17 @@ impl Driver {
                 // The pool owns the environment and its session now: it is not
                 // terminated, it did not stop (so no `EnvironmentStopped`), and
                 // a later panic cleanup must not reclaim it.
+                self.emit_attempt_settled(
+                    &env_id,
+                    &attempt_id,
+                    number,
+                    outcome,
+                    handler,
+                    Some(teardown_started.elapsed()),
+                    bytes_out,
+                    guest_reported_handler_ms,
+                )
+                .await;
                 self.env_id = None;
                 self.attempt_id = None;
                 self.lease_id = None;
@@ -2086,6 +2355,7 @@ impl Driver {
             }
             Err(session) => *session,
         };
+        let host_sample = sample_before_terminate(svc.provider.as_ref(), &env_id).await;
         let _ = session
             .shutdown(match env_end.reason {
                 TerminateReason::Completed => "completed",
@@ -2107,6 +2377,19 @@ impl Driver {
         // The environment is gone (or its terminate failed and the startup
         // reconcile owns it): its reservation goes back to the node.
         self.grant = None;
+        // Teardown is known only when the terminate succeeded (PLT-4642).
+        let teardown = terminated.is_ok().then(|| teardown_started.elapsed());
+        self.emit_attempt_settled(
+            &env_id,
+            &attempt_id,
+            number,
+            outcome,
+            handler,
+            teardown,
+            bytes_out,
+            guest_reported_handler_ms,
+        )
+        .await;
         match terminated {
             Ok(report) => logs.platform(
                 LogPhase::Shutdown,
@@ -2128,18 +2411,19 @@ impl Driver {
         };
         self.save_env(&env);
         self.seq += 1;
-        self.emit_usage(
+        let mut stopped = self.usage_event(
             &env_id,
             Some(&attempt_id),
             UsageEventType::EnvironmentStopped,
             self.seq,
-            // The environment's whole life, not this attempt's share of it:
-            // the same quantity the pool reports for one it ends itself.
-            Some(environment_lifetime_ms(&env, now)),
-            0,
-            0,
-        )
-        .await;
+        );
+        // The environment's whole life, not this attempt's share of it:
+        // the same quantity the pool reports for one it ends itself.
+        stopped.monotonic_duration_ms = Some(environment_lifetime_ms(&env, now));
+        stopped.segments.teardown_ms = Metered::host_opt(teardown.map(ceil_ms));
+        stopped.segments.idle_pooled_ms = Metered::host(0);
+        stopped.resources = usage_resources(&self.revision.spec.resources, host_sample.as_ref());
+        self.record_usage(stopped).await;
         // Everything is recorded and terminated: nothing left for a panic
         // cleanup to do.
         self.env_id = None;
@@ -2199,7 +2483,7 @@ impl Driver {
             .await
         else {
             self.grant = None;
-            self.env_id = None;
+            self.emit_environment_abandoned().await;
             return Err("the environment did not become ready".into());
         };
         let Prepared {
@@ -2300,7 +2584,17 @@ impl Driver {
             timings,
             // Taken over by `attempt` before this is called.
             reservation: _,
+            idle_ms,
         } = warm;
+        // Nothing booted: the host work of a warm start is the resume and the
+        // readiness check (PLT-4642 `vm_base_boot_ms`), and no initialization.
+        self.meter.environment_changed();
+        self.meter.vm_base_boot = Some(Duration::from_millis(
+            timings.resume_ms.saturating_add(timings.readiness_ms),
+        ));
+        self.meter.user_init = Some(Duration::ZERO);
+        self.meter.idle_pooled_ms = Some(idle_ms);
+        self.meter.boot_id = environment.evidence.guest_boot_id.clone();
         let logs = LogForwarder::new(
             self.svc.repos.logs.clone(),
             self.svc.clock.clone(),
@@ -2416,6 +2710,7 @@ impl Driver {
             total_ms: Some(self.accepted_at.elapsed().as_millis() as u64),
             ..tachyon_serverless_domain::AttemptTimings::default()
         };
+        let settled_number = attempt.number;
         let _ = attempt.fail(error, now);
         // The invocation stays `Running`: the cold retry dispatches it again.
         if let Ok(CompletionOutcome::Stale(reason)) = svc.repos.slots.complete(SlotCompletion {
@@ -2426,14 +2721,30 @@ impl Driver {
         }) {
             tracing::warn!(environment_id = %env_id, reason = %reason, "stale completion refused");
         }
+        let host_sample = sample_before_terminate(svc.provider.as_ref(), &env_id).await;
+        let teardown_started = Instant::now();
         let _ = session.shutdown("reused environment is gone").await;
-        if let Err(e) = svc
+        let terminated = svc
             .provider
             .terminate_environment(&env_id, env_end.reason)
-            .await
-        {
+            .await;
+        if let Err(e) = &terminated {
             tracing::warn!(error = %e, environment_id = %env_id, "terminate of a gone environment failed");
         }
+        let teardown = terminated.is_ok().then(|| teardown_started.elapsed());
+        // The handler never started: zero, host-measured, and the attempt
+        // failed (PLT-4642). The cold retry settles its own attempt.
+        self.emit_attempt_settled(
+            &env_id,
+            &attempt_id,
+            settled_number,
+            UsageOutcome::Failed,
+            None,
+            teardown,
+            0,
+            None,
+        )
+        .await;
         // Released with the environment; the cold retry reserves anew.
         self.grant = None;
         let _ = match env_end.failure {
@@ -2443,16 +2754,17 @@ impl Driver {
         self.save_env(env);
         let lifetime = environment_lifetime_ms(env, now);
         self.seq += 1;
-        self.emit_usage(
+        let mut stopped = self.usage_event(
             &env_id,
             Some(&attempt_id),
             UsageEventType::EnvironmentStopped,
             self.seq,
-            Some(lifetime),
-            0,
-            0,
-        )
-        .await;
+        );
+        stopped.monotonic_duration_ms = Some(lifetime);
+        stopped.segments.teardown_ms = Metered::host_opt(teardown.map(ceil_ms));
+        stopped.segments.idle_pooled_ms = Metered::host(0);
+        stopped.resources = usage_resources(&self.revision.spec.resources, host_sample.as_ref());
+        self.record_usage(stopped).await;
         // Terminated exactly once, here: the retry starts from nothing and a
         // later panic cleanup has nothing of this environment left to reclaim.
         self.env_id = None;
@@ -2495,6 +2807,8 @@ impl Driver {
         self.epoch = env.epoch;
         // A newly booted environment starts its own usage count.
         self.seq = 0;
+        self.meter.environment_changed();
+        self.meter.idle_pooled_ms = Some(0);
         let _ = env.mark_provisioning(self.now());
         self.save_env(&env);
 
@@ -2611,6 +2925,11 @@ impl Driver {
             .saturating_duration_since(handle.created_at)
             .as_millis() as u64;
         let connected_at = handle.connected_at;
+        self.meter.vm_base_boot = Some(
+            handle
+                .connected_at
+                .saturating_duration_since(handle.created_at),
+        );
         let _ = env.mark_initializing(handle.evidence.clone(), self.now());
         self.save_env(&env);
         self.seq += 1;
@@ -2671,6 +2990,7 @@ impl Driver {
         };
         if let Some(boot_id) = &hello.guest_boot_id {
             env.record_guest_boot_id(boot_id.clone());
+            self.meter.boot_id = Some(boot_id.clone());
         }
         env.evidence
             .details
@@ -2737,7 +3057,10 @@ impl Driver {
                 return None;
             }
         };
-        let runtime_init_ms = connected_at.elapsed().as_millis() as u64;
+        let user_init = connected_at.elapsed();
+        self.meter.user_init = Some(user_init);
+        self.meter.guest_init_ms = Some(ready.guest_init_ms);
+        let runtime_init_ms = user_init.as_millis() as u64;
         let _ = env.mark_ready(self.now());
         // Starting -> Busy in the ledger, and a successful boot for the
         // revision's circuit breaker.

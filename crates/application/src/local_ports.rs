@@ -288,7 +288,9 @@ impl InMemoryUsageSink {
                 UsageEventType::EnvironmentStopped => {
                     t.environment_ms_total += e.monotonic_duration_ms.unwrap_or(0);
                 }
-                UsageEventType::EnvironmentStarted | UsageEventType::HandlerStarted => {}
+                UsageEventType::EnvironmentStarted
+                | UsageEventType::HandlerStarted
+                | UsageEventType::AttemptSettled => {}
             }
         }
         t
@@ -390,22 +392,24 @@ mod tests {
     async fn usage_sink_dedups_and_sums() {
         let sink = InMemoryUsageSink::new();
         let inv = InvocationId::generate();
-        let ev = |id: &str, t: UsageEventType, ms: u64| UsageEvent {
-            event_id: id.into(),
-            tenant_id: TenantId::generate(),
-            environment_id: EnvironmentId::generate(),
-            invocation_id: Some(inv.clone()),
-            attempt_id: Some(AttemptId::generate()),
-            event_type: t,
-            sequence: 1,
-            observed_at: Utc::now(),
-            monotonic_duration_ms: Some(ms),
-            memory_mib: 256,
-            cpu_millis: 500,
-            bytes_in: 10,
-            bytes_out: 20,
-            meter_version: 1,
-            evidence_quality: EvidenceQuality::HostObserved,
+        let ev = |id: &str, t: UsageEventType, ms: u64| {
+            let mut e = UsageEvent::new(
+                id.into(),
+                TenantId::generate(),
+                EnvironmentId::generate(),
+                t,
+                1,
+                Utc::now(),
+            );
+            e.invocation_id = Some(inv.clone());
+            e.attempt_id = Some(AttemptId::generate());
+            e.monotonic_duration_ms = Some(ms);
+            e.memory_mib = 256;
+            e.cpu_millis = 500;
+            e.bytes_in = 10;
+            e.bytes_out = 20;
+            e.evidence_quality = EvidenceQuality::HostObserved;
+            e
         };
         sink.record(ev("1", UsageEventType::HandlerFinished, 5))
             .await;

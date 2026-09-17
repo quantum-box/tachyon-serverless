@@ -51,7 +51,8 @@ impl ExitCode {
             | ErrorCode::ProviderUnavailable
             | ErrorCode::ConfigUnavailable
             | ErrorCode::ControlPlaneUnavailable
-            | ErrorCode::AsyncUnavailable => Self::Platform,
+            | ErrorCode::AsyncUnavailable
+            | ErrorCode::UsageJournalFull => Self::Platform,
         }
     }
 

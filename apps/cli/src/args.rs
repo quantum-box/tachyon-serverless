@@ -59,6 +59,9 @@ pub enum Command {
     Capacity,
     /// Check /healthz and /readyz.
     Health,
+    /// Provisional usage report of the tenant (not an invoice; billing is
+    /// disabled).
+    Usage(UsageArgs),
     /// Run a binary end to end on a throwaway local gateway (process provider, no isolation).
     Dev(DevArgs),
 }
@@ -289,6 +292,23 @@ pub struct LogsArgs {
     /// Number of recent invocations to include with `--function`.
     #[arg(long, default_value_t = 5)]
     pub limit: u32,
+}
+
+/// `tsls usage` (PLT-4642).
+#[derive(Debug, Args, Clone)]
+pub struct UsageArgs {
+    /// Inclusive start: RFC 3339 or YYYY-MM-DD (default: 31 days before `--to`).
+    #[arg(long)]
+    pub from: Option<String>,
+    /// Exclusive end: RFC 3339 or YYYY-MM-DD (default: now).
+    #[arg(long)]
+    pub to: Option<String>,
+    /// `function`, `day`, `function,day` (default) or `none`.
+    #[arg(long)]
+    pub group_by: Option<String>,
+    /// Only this function (name or fn_ id).
+    #[arg(long)]
+    pub function: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]

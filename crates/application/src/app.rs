@@ -57,6 +57,9 @@ pub struct Application {
     pub identity: Arc<dyn IdentityProvider>,
     pub secrets: Arc<dyn SecretProvider>,
     pub usage: Arc<InMemoryUsageSink>,
+    /// Usage journal, collector, ledger and provisional rating (PLT-4642).
+    /// The driver and the pool emit through it; `usage` is the in-memory view.
+    pub usage_meter: Arc<crate::usage::UsageMeter>,
     pub provider: Arc<dyn ExecutionProvider>,
     pub functions: Arc<FunctionService>,
     pub revisions: Arc<RevisionService>,
@@ -275,6 +278,20 @@ impl Application {
             Arc::new(StaticSecretProvider::from_config(&config.secrets.bindings))
         });
         let usage = Arc::new(InMemoryUsageSink::new());
+        // The usage journal and ledger live next to the ledger store: on disk
+        // when the state is persisted, in memory otherwise (PLT-4642).
+        let usage_meter = crate::usage::UsageMeter::open(
+            &config.usage,
+            (options.persist_state && config.store.backend == StoreBackend::Sqlite)
+                .then_some(config.data_dir.as_path()),
+            options.clock.clone(),
+            config.profile,
+        )
+        .map_err(|e| AppError::InvalidRequest(format!("[usage]: {e}")))?;
+        let metered_sink: Arc<dyn UsageSink> = Arc::new(crate::usage::JournalingUsageSink::new(
+            usage_meter.clone(),
+            usage.clone(),
+        ));
         let provider_workdir: PathBuf = config
             .provider
             .workdir()
@@ -325,7 +342,7 @@ impl Application {
             EnvironmentPool::new(
                 repos.clone(),
                 provider.clone(),
-                usage.clone() as Arc<dyn UsageSink>,
+                metered_sink.clone(),
                 clock.clone(),
                 policy,
             )
@@ -415,7 +432,7 @@ impl Application {
             repos: repos.clone(),
             artifacts: artifacts.clone(),
             secrets: secrets.clone(),
-            usage: usage.clone(),
+            usage: metered_sink.clone(),
             provider: provider.clone(),
             history: history.clone(),
             clock: clock.clone(),
@@ -428,6 +445,7 @@ impl Application {
             dispatcher: dispatcher.clone(),
             gate: invoke_gate.clone(),
             admission: admission.clone(),
+            meter: usage_meter.clone(),
         });
         let scaling = ScaleController::new(
             admission.clone(),
@@ -538,6 +556,7 @@ impl Application {
             identity,
             secrets,
             usage,
+            usage_meter,
             provider,
             functions,
             revisions,
@@ -632,6 +651,13 @@ impl Application {
             delivery,
         )
         .await
+    }
+
+    /// Deliver the usage journal to the usage ledger (PLT-4642). The gateway
+    /// runs this every `[usage] collect_interval_ms` and once more on
+    /// shutdown; tests call it directly.
+    pub fn collect_usage(&self) -> Result<crate::usage::CollectReport, String> {
+        self.usage_meter.collect()
     }
 
     /// Renew this dispatcher's lease and the slot leases of its in-flight
@@ -741,7 +767,28 @@ impl Application {
                 environments: m.max_environment_series,
             },
             outbox,
+            usage: Some(self.usage_metrics()),
         })
+    }
+
+    /// The usage pipeline's state for `GET /metrics` (PLT-4642).
+    fn usage_metrics(&self) -> crate::metrics::render::UsageMetrics {
+        let s = self.usage_meter.status();
+        crate::metrics::render::UsageMetrics {
+            journal_healthy: s.journal.healthy,
+            journal_admitting: s.metered,
+            journal_pending_events: s.journal.pending_events,
+            journal_pending_bytes: s.journal.pending_bytes,
+            journal_max_events: s.journal.limits.max_events,
+            journal_max_bytes: s.journal.limits.max_bytes,
+            unjournaled_events: s.journal.unjournaled_events,
+            collector_runs: s.collector.runs,
+            collector_failing: s.collector.last_error.is_some(),
+            collector_last_success_at: s.collector.last_success_at,
+            collector_delivered: s.collector.delivered,
+            ledger_events: s.ledger.map(|l| l.events),
+            ledger_duplicates_ignored: s.ledger.map(|l| l.duplicates_ignored),
+        }
     }
 
     /// Whether this gateway reuses environments, and what the boot identity

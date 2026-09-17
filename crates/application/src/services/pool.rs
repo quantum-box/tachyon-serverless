@@ -62,8 +62,8 @@ use serde::Serialize;
 
 use tachyon_serverless_api_types::ReuseInfo;
 use tachyon_serverless_domain::{
-    Clock, DispatcherId, EnvironmentId, EvidenceQuality, ExecutionEnvironment, FunctionRevision,
-    ReuseKey, RevisionId, Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType,
+    Clock, DispatcherId, EnvironmentId, ExecutionEnvironment, FunctionRevision, Metered, ReuseKey,
+    RevisionId, Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType, UsageSegments,
 };
 use tachyon_serverless_provider_port::{
     Capabilities, ExecutionProvider, Support, TerminateReason, UsageSink,
@@ -451,6 +451,9 @@ pub struct WarmEnvironment {
     /// The environment's admission reservation, which the claimer takes over
     /// (PLT-4634). `None` for a pool built without admission.
     pub reservation: Option<Grant>,
+    /// Host-measured time it spent idle in the pool before this claim, ms
+    /// rounded up (PLT-4642 `idle_pooled_ms`).
+    pub idle_ms: u64,
 }
 
 /// What the pool holds for one idle environment: the live guest connection,
@@ -459,6 +462,8 @@ pub struct WarmEnvironment {
 struct PooledSession {
     session: BridgeSession,
     sequence: u64,
+    /// When it became idle (host monotonic clock), for `idle_pooled_ms`.
+    pooled_at: Instant,
 }
 
 impl std::fmt::Debug for WarmEnvironment {
@@ -511,6 +516,10 @@ struct Termination {
     /// (PLT-4633 review F3). Every environment the pool holds is in this state
     /// — being quiesced is what being in the pool means.
     quiesced: bool,
+    /// Idle time already measured for it, when its session is gone by the
+    /// time it is terminated (`Some(0)`: it was never idle). `None` and no
+    /// pooled session: unknown.
+    idle_ms: Option<u64>,
 }
 
 pub struct EnvironmentPool {
@@ -702,7 +711,9 @@ impl EnvironmentPool {
                 Some(PooledSession {
                     mut session,
                     sequence,
+                    pooled_at,
                 }) => {
+                    let idle_ms = ceil_ms(pooled_at.elapsed());
                     // The environment was quiesced on its way into the pool,
                     // so nothing can run in it until the provider says it is
                     // back. A resume that was not confirmed is never dispatched
@@ -767,6 +778,7 @@ impl EnvironmentPool {
                             session,
                             sequence,
                             reservation,
+                            idle_ms,
                             timings: WarmStartTimings {
                                 resume_ms,
                                 readiness_ms,
@@ -954,7 +966,14 @@ impl EnvironmentPool {
                         epoch = pooled.epoch,
                         "environment returned to the pool"
                     );
-                    sessions.insert(pooled.id.clone(), PooledSession { session, sequence });
+                    sessions.insert(
+                        pooled.id.clone(),
+                        PooledSession {
+                            session,
+                            sequence,
+                            pooled_at: Instant::now(),
+                        },
+                    );
                     None
                 }
                 Ok(None) => Some(session),
@@ -1016,6 +1035,8 @@ impl EnvironmentPool {
             failure: None,
             sequence,
             quiesced,
+            // It never became idle.
+            idle_ms: Some(0),
         })
         .await;
     }
@@ -1131,6 +1152,7 @@ impl EnvironmentPool {
                 failure: None,
                 sequence: 0,
                 quiesced: true,
+                idle_ms: None,
             };
             if self.terminate_and_settle(&termination).await {
                 report.reaped += 1;
@@ -1202,6 +1224,7 @@ impl EnvironmentPool {
                 failure: None,
                 sequence: 0,
                 quiesced: true,
+                idle_ms: None,
             };
             if self.terminate_and_settle(&termination).await {
                 tracing::info!(environment_id = %env.id, "idle environment evicted for capacity");
@@ -1233,6 +1256,10 @@ impl EnvironmentPool {
         // pooled; once that is gone (a retry, or a row this process never
         // held) the termination carries it.
         let sequence = pooled.as_ref().map_or(t.sequence, |p| p.sequence);
+        let idle_ms = pooled
+            .as_ref()
+            .map(|p| ceil_ms(p.pooled_at.elapsed()))
+            .or(t.idle_ms);
         if let Some(mut pooled) = pooled {
             // A quiesced guest is not being scheduled: nothing in it would
             // ever read the `Shutdown` frame, so it is not sent one and the
@@ -1247,23 +1274,35 @@ impl EnvironmentPool {
                 let _ = pooled.session.shutdown(t.why).await;
             }
         }
-        if let Err(e) = self
+        let host_sample =
+            crate::services::invoke::sample_before_terminate(self.provider.as_ref(), &t.id).await;
+        let teardown_started = Instant::now();
+        match self
             .provider
             .terminate_environment(&t.id, t.terminate)
             .await
         {
-            tracing::warn!(
-                error = %e,
-                environment_id = %t.id,
-                reason = t.why,
-                "terminating a pooled environment failed; it stays draining for the next sweep"
-            );
-            self.pending_termination.lock().push(Termination {
-                sequence,
-                ..t.clone()
-            });
-            return false;
-        }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    environment_id = %t.id,
+                    reason = t.why,
+                    "terminating a pooled environment failed; it stays draining for the next sweep"
+                );
+                self.pending_termination.lock().push(Termination {
+                    sequence,
+                    idle_ms,
+                    ..t.clone()
+                });
+                return false;
+            }
+        };
+        let segments = UsageSegments {
+            idle_pooled_ms: Metered::host_opt(idle_ms),
+            teardown_ms: Metered::host(ceil_ms(teardown_started.elapsed())),
+            ..UsageSegments::default()
+        };
         // Gone from the host: its reservation goes back to the node.
         let reservation = self.reservations.lock().remove(&t.id);
         drop(reservation);
@@ -1279,7 +1318,8 @@ impl EnvironmentPool {
                 {
                     tracing::warn!(error = %e, environment_id = %t.id, "cannot record a reaped environment");
                 }
-                self.emit_stopped(&env, now, sequence).await;
+                self.emit_stopped(&env, now, sequence, segments, host_sample.as_ref())
+                    .await;
             }
             Ok(None) => {
                 tracing::warn!(environment_id = %t.id, "terminated an environment the ledger no longer has")
@@ -1327,6 +1367,7 @@ impl EnvironmentPool {
             failure: Some(reason),
             sequence,
             quiesced,
+            idle_ms: None,
         })
         .await;
     }
@@ -1345,34 +1386,37 @@ impl EnvironmentPool {
     /// `<environment>:<epoch>:pool-stopped`, which never collides with the
     /// driver's `<environment>:<epoch>:<sequence>` (a sequence is a number) and
     /// is stable, so a re-send of the same event still de-duplicates.
-    async fn emit_stopped(&self, env: &ExecutionEnvironment, now: Timestamp, sequence: u64) {
-        let resources = self
-            .repos
-            .revisions
-            .get(&env.revision_id)
-            .ok()
-            .flatten()
+    async fn emit_stopped(
+        &self,
+        env: &ExecutionEnvironment,
+        now: Timestamp,
+        sequence: u64,
+        segments: UsageSegments,
+        host_sample: Option<&tachyon_serverless_provider_port::EnvironmentStats>,
+    ) {
+        let revision = self.repos.revisions.get(&env.revision_id).ok().flatten();
+        let resources = revision
+            .as_ref()
             .map(|r| r.spec.resources)
             .unwrap_or_default();
-        self.usage
-            .record(UsageEvent {
-                event_id: format!("{}:{}:pool-stopped", env.id, env.epoch),
-                tenant_id: env.tenant_id.clone(),
-                environment_id: env.id.clone(),
-                invocation_id: None,
-                attempt_id: None,
-                event_type: UsageEventType::EnvironmentStopped,
-                sequence: sequence + 1,
-                observed_at: now,
-                monotonic_duration_ms: Some(environment_lifetime_ms(env, now)),
-                memory_mib: resources.memory_mib,
-                cpu_millis: resources.cpu_millis,
-                bytes_in: 0,
-                bytes_out: 0,
-                meter_version: 1,
-                evidence_quality: EvidenceQuality::HostObserved,
-            })
-            .await;
+        let mut event = UsageEvent::new(
+            format!("{}:{}:pool-stopped", env.id, env.epoch),
+            env.tenant_id.clone(),
+            env.id.clone(),
+            UsageEventType::EnvironmentStopped,
+            sequence + 1,
+            now,
+        );
+        event.monotonic_duration_ms = Some(environment_lifetime_ms(env, now));
+        event.memory_mib = resources.memory_mib;
+        event.cpu_millis = resources.cpu_millis;
+        event.function_id = revision.as_ref().map(|r| r.function_id.clone());
+        event.revision_id = Some(env.revision_id.clone());
+        event.epoch = env.epoch;
+        event.boot_id = env.evidence.guest_boot_id.clone();
+        event.segments = segments;
+        event.resources = crate::services::invoke::usage_resources(&resources, host_sample);
+        self.usage.record(event).await;
     }
 }
 

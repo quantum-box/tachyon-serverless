@@ -77,7 +77,19 @@ pub enum AppError {
     /// store (PLT-4636). `kind` gives the `error_type`.
     #[error("{}: {message}", kind.error_type())]
     Control { kind: ControlError, message: String },
+    /// Refused because usage cannot be metered: the usage journal is full or
+    /// unavailable (PLT-4642, docs/adr/0012 §2). Fail closed: 503.
+    #[error("{}: {message}", refusal.as_str())]
+    UsageJournal {
+        refusal: crate::usage::JournalRefusal,
+        message: String,
+    },
 }
+
+/// `error_type` of a refusal because the usage journal is full (PLT-4642).
+pub const USAGE_JOURNAL_FULL: &str = "Host.UsageJournalFull";
+/// `error_type` of a refusal because the usage journal is unavailable.
+pub const USAGE_JOURNAL_UNAVAILABLE: &str = "Host.UsageJournalUnavailable";
 
 impl AppError {
     pub fn platform(msg: impl Into<String>) -> Self {
@@ -137,6 +149,7 @@ impl AppError {
             Self::ProviderUnavailable(_) => ErrorCode::ProviderUnavailable,
             Self::Platform(_) => ErrorCode::PlatformError,
             Self::Control { kind, .. } => kind.code(),
+            Self::UsageJournal { .. } => ErrorCode::UsageJournalFull,
         }
     }
 
@@ -159,6 +172,16 @@ impl AppError {
                 Some(IDEMPOTENCY_KEY_REUSED.to_string()),
             ),
             Self::Control { kind, .. } => (None, Some(kind.error_type().to_string())),
+            Self::UsageJournal { refusal, .. } => (
+                None,
+                Some(
+                    match refusal {
+                        crate::usage::JournalRefusal::Full => USAGE_JOURNAL_FULL,
+                        crate::usage::JournalRefusal::Unavailable => USAGE_JOURNAL_UNAVAILABLE,
+                    }
+                    .to_string(),
+                ),
+            ),
             Self::FunctionDeleted(_)
             | Self::Admission {
                 reason: RejectReason::FunctionDeleted,
@@ -175,6 +198,7 @@ impl AppError {
             Self::Invocation { error, .. } => {
                 reason_for_error_type(&error.error_type).map(|r| r.as_str().to_string())
             }
+            Self::UsageJournal { refusal, .. } => Some(refusal.as_str().to_string()),
             _ => None,
         };
         ApiErrorBody {

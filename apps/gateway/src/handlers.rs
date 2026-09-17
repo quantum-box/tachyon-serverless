@@ -15,7 +15,7 @@ use tachyon_serverless_api_types::{
     CreateFunctionRequest, CreateRevisionRequest, DeadlinesResponse, FunctionResponse,
     InvocationErrorResponse, InvocationResponse, InvokeAsyncResponse, InvokeQuery, ListResponse,
     LogEntryResponse, LogsResponse, ProviderInfo, RevisionResponse, TimingsResponse,
-    UpdateAliasRequest, UsageSummaryResponse, headers,
+    UpdateAliasRequest, UsageReportResponse, UsageSummaryResponse, headers,
 };
 use tachyon_serverless_application::services::invoke::inline_output;
 use tachyon_serverless_application::services::invoke_async::{AsyncRefusal, InvokeAsyncRequest};
@@ -56,7 +56,10 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
         .invoke_gate
         .view(state.pool.policy().reuse_enabled())
         .await;
-    let ready = report.ok && !fenced && control.new_invocations == "accepted";
+    // Metering (PLT-4642): a journal that is full or unavailable refuses new
+    // invocations under the default policy, so the gateway is not ready.
+    let usage = state.usage_meter.status();
+    let ready = report.ok && !fenced && control.new_invocations == "accepted" && usage.accepting;
     let status = if ready {
         StatusCode::OK
     } else {
@@ -75,6 +78,9 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
             "control_plane": control,
             // `null` until the startup reconcile ran (or when it is off).
             "reconcile": state.reconcile.last_report(),
+            // Operator facts of the usage journal, collector and ledger: no
+            // tenant data (PLT-4642).
+            "usage": usage,
         })),
     )
         .into_response()
@@ -1101,6 +1107,54 @@ pub async fn usage(
         bytes_out_total: s.bytes_out_total,
         not_billable: true,
     }))
+}
+
+/// `GET /v1/usage` parameters (PLT-4642).
+#[derive(Debug, Default, Deserialize)]
+pub struct UsageReportQuery {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub group_by: Option<String>,
+    pub function_id: Option<String>,
+}
+
+/// The caller's **provisional** usage report (PLT-4642): metered quantities,
+/// host cost facts and provisional charges from a versioned price table.
+/// Tenant-scoped (the token's tenant only). Not an invoice; billing is
+/// disabled.
+#[utoipa::path(get, path = "/v1/usage", tag = "usage", security(("bearer" = [])),
+    params(
+        ("from" = Option<String>, Query, description = "inclusive start, RFC 3339 or YYYY-MM-DD (default: `to` minus 31 days; not before the price table's effective_from)"),
+        ("to" = Option<String>, Query, description = "exclusive end, RFC 3339 or YYYY-MM-DD (default: now)"),
+        ("group_by" = Option<String>, Query, description = "`function`, `day`, `function,day` (default) or `none`"),
+        ("function_id" = Option<String>, Query, description = "only this function of the caller's tenant")
+    ),
+    responses(
+        (status = 200, description = "provisional usage report, not an invoice", body = UsageReportResponse),
+        (status = 400, body = ApiErrorBody),
+        (status = 401, body = ApiErrorBody),
+        (status = 403, body = ApiErrorBody)
+    ))]
+pub async fn usage_report(
+    State(state): State<AppState>,
+    ctx: Ctx,
+    Query(q): Query<UsageReportQuery>,
+) -> ApiResult<Json<UsageReportResponse>> {
+    use tachyon_serverless_application::usage::parse_report_time;
+    let query = tachyon_serverless_application::usage::UsageQuery {
+        from: parse_report_time(q.from.as_deref(), "from").ctx(&ctx.request_id)?,
+        to: parse_report_time(q.to.as_deref(), "to").ctx(&ctx.request_id)?,
+        group_by: q.group_by,
+        function_id: match q.function_id.as_deref().filter(|f| !f.is_empty()) {
+            Some(raw) => Some(parse_function_id(raw, &ctx.request_id)?),
+            None => None,
+        },
+    };
+    let report = state
+        .usage_meter
+        .report(&ctx.principal, &query)
+        .ctx(&ctx.request_id)?;
+    Ok(Json(report))
 }
 
 #[cfg(test)]

@@ -207,3 +207,12 @@ resource_limits tachyon-serverless-load lib plan::tests::phases_parse_and_plans_
 resource_limits tachyon-serverless-load lib detect::tests::overshoot_is_detected_on_resources_concurrency_revision_and_tenant_caps
 resource_limits tachyon-serverless-load lib detect::tests::starvation_needs_a_long_wait_while_others_are_granted
 reuse_key tachyon-serverless-application lib metrics::tests::boot_identity_is_checked_per_environment_and_warm_starts_skip_boot_phases
+# --- usage metering (PLT-4642): tenant-scoped usage, fail-closed journal, billing hard-disabled -
+tenant_authz tachyon-serverless-application test:usage usage_reports_are_tenant_scoped
+tenant_authz tachyon-serverless-application lib usage::tests::the_ledger_only_answers_for_the_callers_tenant
+tenant_authz tachyon-serverless-gateway test:gateway_integration usage_report_is_provisional_tenant_scoped_and_fails_closed
+resource_limits tachyon-serverless-application test:usage a_full_journal_refuses_new_invocations_fail_closed
+resource_limits tachyon-serverless-application test:usage an_unavailable_journal_refuses_new_invocations
+resource_limits tachyon-serverless-application lib usage::tests::the_journal_bound_refuses_appends_and_counts_them_per_tenant
+resource_limits tachyon-serverless-application lib usage::tests::admission_keeps_headroom_for_work_already_admitted
+resource_limits tachyon-serverless-application lib usage::tests::billing_cannot_be_enabled_and_accept_unmetered_is_dev_only
