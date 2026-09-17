@@ -1,0 +1,4 @@
+process  473977 /firecracker --id env-01m2r9srwnaaqe3wwp1hq8v3sa --start-time-us 58470065721 --start-time-cpu-us 93 --parent-cpu-time-us 2637 --api-sock /fc.sock --log-path /fc.log --level Warning
+jail /srv/jailer/firecracker/env-01m2r9srwnaaqe3wwp1hq8v3sa
+cgroup /sys/fs/cgroup/tachyon/env_01m2r9srwnaaqe3wwp1hq8v3sa
+env_dir /home/takanorifukuyama.guest/w/tsls-chaos.JVJ1yp/data/fc/env_01m2r9srwnaaqe3wwp1hq8v3sa

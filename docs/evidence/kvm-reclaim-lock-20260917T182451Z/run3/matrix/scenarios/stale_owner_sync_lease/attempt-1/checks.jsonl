@@ -1,0 +1,27 @@
+{"name":"setup.a_owns_the_running_invocation","ok":true,"detail":"invocation=inv_01m2ra97h8n9qf56bwxada1a51 owner=dsp_01m2ra8ryx72kxga2vcbxfknqg a=dsp_01m2ra8ryx72kxga2vcbxfknqg env=env_01m2ra97hfwztj1jevmk2vyq9m"}
+{"name":"reclaim.b_settles_as_outcome_unknown","ok":true,"detail":"status=outcome_unknown Host.LeaseExpired after 6813 ms"}
+{"name":"reclaim.not_before_lease_expiry_plus_skew","ok":true,"detail":"lease_expires_at+reclaimed_at=[2026-09-17T18:33:08.519743757Z 2026-09-17T18:33:09.076414302Z] reclaimed 556 ms after expiry (skew 500 ms); 6813 ms after SIGSTOP"}
+{"name":"reclaim.fenced_environment_terminated","ok":true,"detail":"env=env_01m2ra97hfwztj1jevmk2vyq9m state=lost processes=0"}
+{"name":"fencing.late_completion_does_not_overwrite","ok":true,"detail":"invocation outcome_unknown:1:2026-09-17T18:33:09.076414302Z:1123 -> outcome_unknown:1:2026-09-17T18:33:09.076414302Z:1123; attempts unchanged=yes"}
+{"name":"fencing.a_is_fenced","ok":true,"detail":"readyz=503 fenced=true"}
+{"name":"fencing.a_refuses_new_invocations","ok":true,"detail":"code=503 error_type=null"}
+{"name":"fencing.b_keeps_serving","ok":true,"detail":"code=200"}
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=1/1"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=3 refused=0"}
+{"name":"cv.accepted_never_lost","ok":true,"detail":"accepted=9 missing_rows=0"}
+{"name":"cv.accepted_all_terminal","ok":true,"detail":"accepted=9 not_terminal=0"}
+{"name":"cv.outcome_per_policy","ok":true,"detail":"unexpected_outcomes=0 expected_failures=0"}
+{"name":"cv.one_outcome_per_invocation","ok":true,"detail":"invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)"}
+{"name":"cv.side_effect_exactly_once","ok":true,"detail":"orders_not_applied_exactly_once=0 executions=7"}
+{"name":"cv.outbox_drained","ok":true,"detail":"unsent_outbox_rows=0"}
+{"name":"cv.ledger_all_terminal","ok":true,"detail":"invocations=19 non_terminal=0 by_status=outcome_unknown:1,succeeded:18"}
+{"name":"cv.jetstream_drained","ok":true,"detail":"pending=0 ack_pending=0 stream_messages=0 redelivered=0"}
+{"name":"cv.cron_each_time_once","ok":true,"detail":"fires=5 distinct_times=5"}
+{"name":"cv.usage_counted_once","ok":true,"detail":"journal_pending=0 ledger_events=84 distinct=84 attempts_settled_twice=0 duplicates_ignored=0"}
+{"name":"cv.every_terminal_environment_metered_once","ok":true,"detail":"terminal environments=12 without a stop event=0 environments with a stop=12 (pooled ones report when they stop, after this check)"}
+{"name":"cv.usage_from_cgroup_accounting_or_unknown","ok":true,"detail":"environment_stopped=12 provider_reported=11 unknown=1 other=0"}
+{"name":"cv.graceful_stop_exit_0","ok":true,"detail":"exit=0"}
+{"name":"cv.no_orphan_processes","ok":true,"detail":"bridge_or_user_processes=0 env_dirs=0"}
+{"name":"cv.no_open_environments","ok":true,"detail":"non_terminal_environment_rows=0"}
+{"name":"cv.no_secret_value_on_disk","ok":true,"detail":"files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.sG6dEa (data_dir, provider workdir with function/scratch drives, console and fc logs, snapshots) /srv/jailer (jails))"}
+{"name":"cv.no_vmm_jail_cgroup_tap_or_table_left","ok":true,"detail":"firecracker/jailer processes, /sys/fs/cgroup/tachyon/*, /srv/jailer/firecracker/*, tsls* taps, table inet tachyon_egress: 0"}

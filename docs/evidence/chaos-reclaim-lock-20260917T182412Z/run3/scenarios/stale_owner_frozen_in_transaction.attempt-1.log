@@ -1,0 +1,32 @@
+[chaos stale_owner_frozen_in_transaction] begin (gateway A stops itself (SIGSTOP) between BEGIN IMMEDIATE and COMMIT of a state.db write, past both leases; B on the same data_dir; SIGCONT A) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.DV32yM
+[chaos stale_owner_frozen_in_transaction]   ok   setup.a_owns_the_running_invocation invocation=inv_01m2ra70k6fh6cd4e1znpp580d a=dsp_01m2ra6xmqmktc2tw57132df48 env=env_01m2ra70k71adtg0bg6w4ncrk2
+[chaos stale_owner_frozen_in_transaction] fault injected
+[chaos stale_owner_frozen_in_transaction]   ok   fault.a_stopped_inside_a_write_transaction ps stat=T flag consumed=yes "site":"crates/application/src/repository/sqlite/triggers.rs:522"
+[chaos stale_owner_frozen_in_transaction]   ok   outage.nobody_reclaimed_while_the_store_was_locked reclaimed rows: 
+[chaos stale_owner_frozen_in_transaction] fault removed
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.invocation_settled_once status=succeeded -
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.b_reclaimed_a_not_the_other_way a.reclaimed_at=2026-09-17T18:32:02.058089000Z b.reclaimed_at=-
+[chaos stale_owner_frozen_in_transaction]   ok   lease.b_is_not_fenced b fenced=false reclaimed_at=- renewal log=1
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_is_fenced readyz=503 fenced=true stall log=1
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.fenced_environment_terminated env=env_01m2ra70k71adtg0bg6w4ncrk2 state=stopped
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.b_keeps_serving code=200
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_refuses_new_invocations code=503
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.settled_invocation_not_overwritten invocation succeeded:1:2026-09-17T18:32:02.014262000Z:1070 -> succeeded:1:2026-09-17T18:32:02.014262000Z:1070
+[chaos stale_owner_frozen_in_transaction] converged
+[chaos stale_owner_frozen_in_transaction]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos stale_owner_frozen_in_transaction]   ok   workload.async_accepted accepted=3 refused=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_never_lost accepted=9 missing_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_all_terminal accepted=9 not_terminal=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=6
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos stale_owner_frozen_in_transaction]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos stale_owner_frozen_in_transaction]   ok   cv.usage_counted_once journal_pending=0 ledger_events=76 distinct=76 attempts_settled_twice=0 duplicates_ignored=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.every_terminal_environment_metered_once terminal environments=16 without a stop event=0 environments with a stop=16 (pooled ones report when they stop, after this check)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.DV32yM)

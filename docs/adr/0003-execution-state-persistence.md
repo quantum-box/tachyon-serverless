@@ -236,7 +236,7 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 | Idempotency-Key | 結び付けに `expires_at` 列（Invocation が terminal になった時点で `finished_at + [store] idempotency_retention_seconds`、実行中は NULL）。`lookup` と `insert_bound` は失効した結び付きを無いものとして扱い、`purge_expired_idempotency` が削除する（起動時と 10 分ごと）。一意性は従来どおり主キー。別 gateway が実行中の invocation への replay は台帳を追って待つ。409 は `AppError::IdempotencyConflict`（`invocation_id` と `Host.IdempotencyKeyReused`） |
 | 受入条件 A1・A6（OS プロセス） | `repository/sqlite/tests.rs::separate_processes_racing_for_one_slot_or_one_key_have_one_winner`（テスト binary 自身を 6 プロセス起動し、全員の準備完了後に同時に acquire / bind）、スレッド版 `concurrent_acquires_on_separate_connections_have_one_winner_per_epoch`、`reclaim_and_key_binding_are_exactly_once_across_connections`、両 store の `contract_tests::acquire_is_a_cas_with_exactly_one_winner_per_epoch` |
 | 受入条件 A2（OS プロセス） | `repository/sqlite/tests.rs::a_lease_left_by_an_exited_process_is_reclaimed_once_and_only_after_expiry`（子プロセスが lease を取って release せず exit。別 instance は期限前・skew 内では回収できず、以後 1 回だけ回収、遅れた完了は `Stale`。同じ instance の再起動は pid の不在で即回収） |
-| 受入条件 A3 | `contract_tests::{leases_renew_only_while_unexpired_and_expire_past_the_clock_skew, a_fenced_dispatcher_can_neither_renew_nor_acquire}` |
+| 受入条件 A3 | `contract_tests::{leases_renew_only_while_unexpired_and_expire_past_the_clock_skew, a_fenced_dispatcher_can_neither_renew_nor_acquire}`（store が止まった間に期限を過ぎた lease の取り戻しは下の「実装メモ（PLT-4646 follow-up）」） |
 | 2 つの gateway が同じ data_dir | `crates/application/tests/leases.rs::{two_gateways_on_one_data_dir_never_settle_each_others_work, a_key_replayed_on_another_gateway_returns_the_same_invocation_and_never_runs_twice, a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced, renewal_keeps_the_lease_and_a_graceful_stop_hands_over_at_once, a_fenced_environment_stays_fenced_until_its_terminate_succeeds}` |
 
 ### 選んだこと（ADR に書いていなかった点）
@@ -245,7 +245,7 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 2. **renew は dispatcher 単位の heartbeat**（その dispatcher の全 lease を 1 トランザクションで延ばす）。driver ごとの renew は行わない。単体の `renew_lease` も port にある。
 3. **時計のずれの許容**: 他者の期限は `expires_at + max_clock_skew_ms`（既定 2 s）を自分の時計で過ぎてから。
 4. **期限を待たずに回収できる例外**: graceful shutdown で `stopped` になった dispatcher と、**同じ host 名・同じ instance 名**で pid が存在しない（または同じプロセス内で handle が drop 済みの）前の incarnation。A2 の「`expires_at` より前には回収できない」は、それ以外の dispatcher（別 instance）に対して成り立つ。instance の既定は `gateway@<listen>`。
-5. **lease を失った dispatcher は自ら fenced になる**: heartbeat が拒否されたら新しい invoke を 503 で断り、`/readyz` を 503 にする。reclaim された dispatcher は acquire もできない。再登録（新しい id での復帰）はせず、再起動を運用に任せる。
+5. **lease を失った dispatcher は自ら fenced になる**（2026-09-18 変更: 延長が store に届かなかっただけで誰にも回収されていなければ取り戻す。下の「store が止まった間の lease」）: heartbeat が拒否されたら新しい invoke を 503 で断り、`/readyz` を 503 にする。reclaim された dispatcher は acquire もできない。再登録（新しい id での復帰）はせず、再起動を運用に任せる。
 6. **acquire は attempt と invocation `Running` まで同じトランザクション**に含めた（「slot を取ったのに attempt が無い」状態を作らない）。
 7. **reclaim の分類**: dispatch 済み（lease あり）は `OutcomeUnknown`、dispatch 前は `Failed{platform_error}`。原因が期限切れなら `Host.LeaseExpired`、stopped / 前の incarnation なら `Host.Restarted`。自動再実行はしない。
 8. **別 gateway が駆動中の invocation の cancel は 409**（ledger だけを `Cancelled` にすると、handler が走り続けたまま「止めた」と報告することになるため）。
@@ -325,6 +325,54 @@ MySQL では実行していない。TiDB 版 migration は `ADD COLUMN IF NOT EX
 ## Addendum（2026-09-17、invocation log の永続化）
 
 決定 5 の「log は memory のまま」と「非対象」の「log の永続化」は **ADR-0018 で置き換えた**。invocation log は `state.db` ではなく別の SQLite `<data_dir>/logs/logs.db` に、上限付き queue と writer thread の batch commit で書く（台帳の writer lock を log が奪い合わない）。保持期限（`[logs] retention_seconds`、既定 7 日）と総量上限（`max_total_bytes`、既定 1 GiB）があり、log store が使えなくても invocation は止めない。`state.db` の schema と migration は変わらない。`[store] backend = "memory"` のときは従来どおり memory buffer。上の本文（決定時点と PLT-4618 / PLT-4631 の実装メモ）の「log は memory」「log は永続化しない」は書き換えていない。
+
+## 実装メモ（PLT-4646 follow-up、2026-09-18）: 書込み transaction の規律と、store が止まった間の lease
+
+KVM 最終検証の `stale_owner_sync_lease`（`docs/evidence/kvm-final-chaos-20260917T152228Z/` `run3-final/`、`docs/failure-matrix.md` §8）で、SIGSTOP した gateway A が `state.db` の書込み lock を持ったまま止まり、同じ file を使う gateway B が約 2.5 分書けず、最後は両方とも fence された。
+
+### 何が起きたか（証跡から言えること）
+
+`run3-final/matrix/scenarios/stale_owner_sync_lease/attempt-2/` の log と `result.json` から:
+
+1. SIGSTOP は 15:52:37.996Z。A の最後の log は 15:52:37.270Z、A の lease 期限は 15:52:42.938Z（最後の延長は 36.938、heartbeat は 1 秒ごとなので 37.9 の延長は commit されていない）。
+2. B の最初の lock 待ちの失敗は 15:52:43.404Z の `outbox: claiming failed: database is locked`（busy timeout 5 s なので、lock は 38.4 より前から他 process に取られている）。以後 SIGCONT（15:55:11.261Z）まで B の heartbeat・reclaim・outbox・GC・scheduler・config sync はすべて `database is locked` か `connection stayed busy for 5 s`。B は A を回収できず、自分の lease も期限を過ぎた。
+3. SIGCONT 直後の A の最初の log（15:55:11.267Z）は A 自身の thread の `connection stayed busy for 5 s`: A の connection mutex を**止まった A の thread が持っていた**（= A は store の呼び出しの中で止まっていた）。
+4. 15:55:11.283Z に **A が B を回収した**（`reclaimed the work of dispatchers ... [B]`）。A 自身の lease は 2.5 分前に切れていたが、B が書けなかったので A はまだ回収されておらず、`reclaim_expired` は回収する側の lease を確かめていなかった。15:55:11.508Z に A の heartbeat が拒否され A も fenced。B は回収されたので 503（`fencing.b_keeps_serving` = 503）。
+
+止まった瞬間にどの transaction の中だったかは、この証跡からは特定できない（transaction ごとの記録が無かった）。候補の監査（`crates/application/src/repository/sqlite/` のすべての `write`）では、transaction を `.await` や provider 呼び出しをまたいで持つ経路は無く（`SqliteStore::write` の closure は同期で、`Transaction` は外に出ない）、周期的に最も長く lock を持つのは **`stamp_config`**（config sync。`BEGIN IMMEDIATE` の中で全 function / alias / revision の JSON を parse し、各値を 2 回 serialize して SHA-256、budget file の `stat` / 読み込みと log を行う）だった。config sync は**他の gateway の commit ごと**（`PRAGMA data_version` の変化）に走るので、2 gateway 構成では 1 秒に数回になる。次に頻度が高いのが outbox の claim（200 ms ごと、空でも `BEGIN IMMEDIATE`）、scheduler lease（chaos 設定で 200 ms ごと、毎回 commit と fsync）、heartbeat（1 秒ごと、lease 数に比例）、reclaim（全 dispatcher 行を parse、行は消えない）。どれも `synchronous = FULL` の fsync を lock の中で行う。SIGSTOP はこれらの duty cycle のどこかに当たると lock を持ったまま止まる。
+
+頻度の裏付け: chaos `stale_owner_frozen_in_transaction`（「次の書込み transaction の中で止まる」failpoint）を process provider で 3 回実行すると、3 回とも A が止まったのは **`repository/sqlite/outbox.rs` の `claim_outbox`**（200 ms ごと、claim する行が無くても `BEGIN IMMEDIATE`）で、保持時間は 25.3〜25.4 s と記録された。gateway の書込み transaction の開始は idle 時でもこの poll が最多で、ランダムな SIGSTOP が当たる transaction としても最有力。
+
+### 入ったもの
+
+| 項目 | 実装 |
+|---|---|
+| 書込み transaction の規律 | `SqliteStore::write` の doc に規律を書いた: `BEGIN IMMEDIATE` から `COMMIT` の終わりまで、同じ file を使う全 process の writer が待つ。closure は同期（`.await` をまたがない）で、provider・network・他の store・sleep を呼ばず、lock が要らない仕事（parse、hash、file I/O）は外で行う |
+| 遅い transaction の検出 | `write` は `#[track_caller]` で呼び出し元の `file:line` を取り、`BEGIN IMMEDIATE` から `COMMIT` までの保持時間を測る。`SLOW_WRITE_TRANSACTION`（250 ms）以上は `state.db write transaction held the database write lock for long` を `site` と `held_ms` 付きで warn し数える（`StateStore::write_transaction_stats`: 件数、遅い件数、最長時間とその site）。process が transaction の中で止まった場合も再開後に全時間で記録されるので、次に同じことが起きたらどの transaction かが log に残る |
+| `stamp_config` を lock の外へ | 1 つの**読み取り** transaction（WAL では他 process の書込みを止めない）で source 行・publication・generation counter を読み、`observe`（parse・hash・budget file）と stamp を lock 無しで行い、**変化が無ければ書込み transaction を開かない**（定常状態）。変化があれば短い書込み transaction で counter を読み直し、読んだ時から動いていなければ変わった行だけを書く。動いていたら（他の gateway が stamp した）やり直し、3 回負けたら従来どおり lock の中で全部行う。`sqlite::tests::{an_unchanged_configuration_sync_takes_no_write_lock, a_stamp_that_lost_a_race_starts_again_from_the_new_publication}` |
+| idle な poll は書込み lock を取らない | `claim_outbox` は claim できる行があるかを先に読み取りで確かめ、無ければ書込み transaction を開かない（行があるときは従来どおり書込み transaction の中で同じ条件を再確認する）。cron scheduler の lease も、他の live な dispatcher が期限内に持っているなら読み取りだけで `false` を返す（保持者の延長と、期限切れ・stopped / reclaimed の owner からの引き継ぎは従来どおり書込み transaction）。`sqlite::tests::idle_outbox_and_scheduler_polls_take_no_write_lock` |
+| 自分の lease の無い reclaimer は回収しない | `SlotStore::reclaim_expired` は同じ transaction の最初に、回収する側が登録済み・live・`now < lease_expires_at` であることを確かめ、そうでなければ何もしない（sqlite / memory / TiDB）。止まっていた gateway が起きてすぐ、動き続けていた gateway を回収することは無くなった。`contract_tests::a_reclaimer_without_its_own_lease_reclaims_nothing` |
+| store が止まった間の lease | 下の節 |
+| 再現 | in-process: `tests/store_stall.rs::a_gateway_frozen_inside_a_write_transaction_does_not_cost_the_other_its_lease`（2 つの `Application` が 1 つの `data_dir`。A を store の write hook で `BEGIN IMMEDIATE` の中に止め、B の heartbeat が上限時間内に `RepoError::Store` で返り fence されないこと、両方の lease を過ぎてから A を再開すると（2 つの gateway が同じ test process なので A の停止を `Dispatcher::note_stalled` で記録）A は fence され誰も回収せず、B は lease と実行中の slot lease を取り戻し A を回収し、B の invocation は成功すること、A の止まった transaction が遅い transaction として記録されること）。OS process: `sqlite::tests::a_process_stopped_inside_a_write_transaction_holds_the_lock_until_it_continues`（子 process が `BEGIN IMMEDIATE` の中で自分に SIGSTOP → 親の書込みは上限時間内に `Store` エラー、読み取りは可能、SIGCONT で子が commit した後に親の書込みが通る）。chaos: `stale_owner_frozen_in_transaction`（`TSLS_STORE_FREEZE_FLAG` failpoint で gateway A を書込み transaction の中で SIGSTOP させる。failpoints build・dev profile のみ） |
+
+### store が止まった間の lease（PLT-4631「選んだこと」5 の変更）
+
+heartbeat の延長が期限までに store に届かなかった（他 process の書込み lock、connection の待ち上限、store 待ちで塞がった worker）間に lease が期限を過ぎても、**誰にも回収されておらず、その process が止まっていなかったなら**、store が答えた最初の延長で取り戻す（`SlotStore::renew_after_store_outage`）。dispatcher の lease と、その dispatcher の未 release の slot lease を延ばす（`ExecutionLease::revive`）。
+
+- **安全性**: 延長は「dispatcher が live（stopped でも reclaimed でもない）」の確認と同じ transaction で書く。回収は dispatcher に `reclaimed_at` を付け lease を release するのを 1 transaction で行う。store がこの 2 つを直列化するので、先に commit した方が勝ち、負けた方は何も変えない（延長が負ければ `Fenced`、回収が負ければ有効な lease を見て回収しない）。期限切れを見ただけで store に書かずに動く者はいない（環境の terminate は回収が store に書いた fence の後だけ）。
+- **誰が取り戻せるか**: 止まっていなかった process の dispatcher だけ。`Dispatcher::heartbeat` は通常の延長を試し、期限切れで拒否されたとき、最後の延長以降に process 自身が止まっていなければ `renew_after_store_outage` を試す。「止まっていない」は watchdog thread（250 ms ごと）が `PROCESS_STALL`（5 s）以上起きられなかったことを見ていないこと（SIGSTOP、VM の停止）。watchdog の最後の起床が 5 s より古い場合も止まっていたとみなす（再開直後に heartbeat が watchdog より先に走る場合）。延長が間に合わなかった理由は問わない: store の lock で失敗し続けた場合だけでなく、同期の store 呼び出しで async worker がすべて塞がり heartbeat が走れなかった場合（Firecracker の 4 vCPU の VM で実際に起きた: B は outage 中 1 回も heartbeat を試せず、最初の案「失敗を記録した dispatcher だけ」では fence された）も含む。安全性は store の直列化だけに依存し、どちらが勝つかの選択にだけ watchdog を使う。1 つの SQLite lock の後ろで 2 つの gateway が止まった場合、止まっていなかった方が lease を取り戻して止まっていた方を回収し、止まっていた方は自分を fence する（上の chaos シナリオ）。
+- **変わった挙動**: `db_locked_past_lease`（他 process が `state.db` を 12 s lock、lease 6 s）の gateway は、以前は自分を fence し再起動が要ったが、今は lock の解放後に lease を取り戻して再起動なしで返る（シナリオの期待を `serve` に変更）。`docs/failure-matrix.md` §6.2 の「store 停止が lease を超えると gateway は自分を fence する」はこの条件では解消。
+- **試験**: `contract_tests::a_dispatcher_renews_after_a_store_outage_only_while_nobody_reclaimed_it`（3 backend）、`tests/store_stall.rs`、既存の `a_fenced_dispatcher_can_neither_renew_nor_acquire`（通常の heartbeat は期限切れを延ばさない）はそのまま。
+
+### 残るもの
+
+| 項目 | 内容 |
+|---|---|
+| transaction の中で止まった process は lock を持ち続ける | SQLite の書込み lock は OS の file lock で、持ち主の process が止まっている限り他の誰も取れない（`a_process_stopped_inside_a_write_transaction_holds_the_lock_until_it_continues`）。lock を持つ時間を短くして当たる確率を下げることはできても、ゼロにはできない。その間、他の gateway は: 書込みの API は 1 回の store 呼び出しあたり最大約 10 s（connection の待ち 5 s + busy timeout 5 s）で 503 `Host.StoreUnavailable`、読み取りは動く、heartbeat は失敗しても fence しない、回収はできない。止まった process が再開する（または kill されて OS が lock を解放する）と: 再開した側は自分の期限切れ lease を拒否されて fence、動き続けた側は lease を取り戻して回収する。止まった process が戻らない場合は、運用が kill する（supervisor の liveness）まで store は書けない。1 つの SQLite file を複数 gateway で共有する構成の限界で、TiDB adapter（row lock、lock の持ち主の session が切れれば解放）で変わる |
+| 誰にも回収されないまま長く止まった store | 取り戻しは期限切れの長さを制限しない。止まっていた間の in-flight の handler は走り続けていてよい（誰も回収していないので二重実行は無い）が、client の deadline は過ぎているかもしれない |
+| 監査で残した lock の中の仕事 | `reclaim_expired` は全 `dispatchers` 行を parse する（行は削除されない）。`heartbeat` は lease 数に比例し、1 秒（chaos）〜10 秒（既定）ごとに必ず書く。scheduler lease の保持者は周期ごとに書く（chaos 設定 200 ms）。`purge_expired_outputs` は期限切れ output ごとに base64 decode と hash を lock の中で行う（既定 7 日で chaos では動かない）。どれも 250 ms の警告で見えるようにしたが、分割はしていない |
+| 監視 | 遅い transaction の数と最長時間は `StateStore::write_transaction_stats` と log だけで、`GET /metrics` には出していない |
+| TiDB | `renew_after_store_outage` と reclaimer の確認は TiDB adapter にも入れたが、TiDB での store 停止（region unavailable 等）では試していない |
 
 ## 参照
 

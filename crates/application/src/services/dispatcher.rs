@@ -8,8 +8,10 @@
 //! owned by it.
 //!
 //! - **Heartbeat.** [`Dispatcher::heartbeat`] renews the dispatcher lease and
-//!   all of its unexpired slot leases. A renewal never revives a lease that
-//!   already passed; a dispatcher whose heartbeat is refused is *fenced*: it
+//!   all of its unexpired slot leases. An ordinary renewal never revives a
+//!   lease that already passed (only the store-outage renewal below does, and
+//!   only for a process that kept running); a dispatcher whose heartbeat is
+//!   refused is *fenced*: it
 //!   refuses new invocations (`ProviderUnavailable`), and whatever it still
 //!   drives is refused at the store when it completes, because the reclaimer
 //!   released the lease and moved the environment's epoch.
@@ -19,7 +21,21 @@
 //!   of the same instance on the same host whose process is provably gone
 //!   (its pid is not alive, or it lived in this very process and its handle
 //!   was dropped). A live dispatcher's work is never touched, so two gateways
-//!   on one `data_dir` do not settle each other's invocations.
+//!   on one `data_dir` do not settle each other's invocations. A reclaimer
+//!   that no longer holds its own lease reclaims nothing.
+//! - **Store outage (PLT-4646).** A heartbeat the store could not answer
+//!   (another process holds the SQLite write lock, the connection stayed
+//!   busy) neither renews nor fences. When the store answers again and the
+//!   ordinary renewal is refused because the lease passed meanwhile, a
+//!   dispatcher whose process kept running renews through
+//!   [`SlotStore::renew_after_store_outage`], which succeeds as long as
+//!   nobody reclaimed it. "Kept running" means no stall of the process since
+//!   its last renewal: a watchdog thread notices when the process was not
+//!   scheduled for [`PROCESS_STALL`] or longer (SIGSTOP, a frozen VM). A
+//!   process that was itself frozen is fenced as before: of two gateways
+//!   stuck behind one frozen writer, the one that was running keeps its work
+//!   and reclaims the one that was not (docs/adr/0003 「store が止まった間の
+//!   lease」).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -34,6 +50,65 @@ use crate::error::AppError;
 use crate::repository::{
     DispatcherRecord, HeartbeatOutcome, ReclaimReport, ReclaimRequest, RepoError, SlotStore,
 };
+
+/// A wake-up of the watchdog this late means the whole process was not
+/// running (stopped, frozen, starved) for about that long.
+pub const PROCESS_STALL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// When the watchdog last noticed this process had stalled.
+static LAST_STALL: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// When the watchdog last woke up. A heartbeat that runs right after the
+/// process continued may come before the watchdog noticed the stall; a beat
+/// older than [`PROCESS_STALL`] is that stall.
+static LAST_BEAT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// Start (once per process) the thread that notices stalls of the process.
+fn watch_for_stalls() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let spawned = std::thread::Builder::new()
+            .name("tsls-stall-watchdog".into())
+            .spawn(|| {
+                let tick = std::time::Duration::from_millis(250);
+                let mut last = std::time::Instant::now();
+                loop {
+                    std::thread::sleep(tick);
+                    let now = std::time::Instant::now();
+                    *LAST_BEAT.lock() = Some(now);
+                    let late = now.saturating_duration_since(last).saturating_sub(tick);
+                    if late >= PROCESS_STALL {
+                        *LAST_STALL.lock() = Some(now);
+                        tracing::warn!(
+                            stalled_ms = late.as_millis() as u64,
+                            "this process was not running for a while (stopped, frozen or \
+                             starved): a lease that passed meanwhile is not taken back"
+                        );
+                    }
+                    last = now;
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "cannot start the stall watchdog; store outages always fence");
+            WATCHDOG_DOWN.store(true, Ordering::SeqCst);
+        }
+    });
+}
+
+/// Set when the watchdog could not be started: nothing proves the process
+/// kept running, so no lease is taken back.
+static WATCHDOG_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Whether the process stalled at or after `since`, or may be stalled right
+/// now without the watchdog having run since.
+fn stalled_since(since: std::time::Instant) -> bool {
+    if WATCHDOG_DOWN.load(Ordering::SeqCst) {
+        return true;
+    }
+    let beat_is_stale = LAST_BEAT
+        .lock()
+        .is_some_and(|beat| beat.elapsed() >= PROCESS_STALL);
+    beat_is_stale || LAST_STALL.lock().is_some_and(|at| at >= since)
+}
 
 /// Dispatchers alive in this process. A dispatcher that shares this process's
 /// pid but is not in the set was dropped: its incarnation is over.
@@ -90,6 +165,25 @@ pub struct Dispatcher {
     clock: Arc<dyn Clock>,
     config: DispatcherConfig,
     fenced: AtomicBool,
+    heartbeats: Mutex<HeartbeatTrack>,
+}
+
+/// What the heartbeat remembers between attempts (store outage handling).
+#[derive(Debug, Default)]
+struct HeartbeatTrack {
+    /// [`Dispatcher::note_stalled`] since the last renewal.
+    stalled: bool,
+    /// Set by an attempt the store could not answer; cleared by a renewal
+    /// or a refusal.
+    outage: Option<StoreOutage>,
+    /// The last renewal (or the registration), on the monotonic clock.
+    renewed: Option<std::time::Instant>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StoreOutage {
+    since: Timestamp,
+    failures: u32,
 }
 
 impl std::fmt::Debug for Dispatcher {
@@ -133,7 +227,12 @@ impl Dispatcher {
             clock,
             config,
             fenced: AtomicBool::new(false),
+            heartbeats: Mutex::new(HeartbeatTrack {
+                renewed: Some(std::time::Instant::now()),
+                ..HeartbeatTrack::default()
+            }),
         });
+        watch_for_stalls();
         dispatcher.slots.register_dispatcher(record)?;
         LIVE_IN_PROCESS.lock().insert(dispatcher.id.to_string());
         tracing::info!(
@@ -169,11 +268,76 @@ impl Dispatcher {
         self.fenced.load(Ordering::SeqCst)
     }
 
+    /// Record that this dispatcher's process was not running since `at`
+    /// (tests: two dispatchers share one process, so the process-wide stall
+    /// watchdog cannot tell which one a test meant to freeze).
+    #[doc(hidden)]
+    pub fn note_stalled(&self) {
+        self.heartbeats.lock().stalled = true;
+    }
+
     /// Renew this dispatcher's lease and the slot leases it holds.
+    ///
+    /// When the ordinary renewal is refused because the lease already passed
+    /// — its renewals could not reach the store in time (another process held
+    /// the write lock, the connection stayed busy, every async worker was
+    /// waiting on the store) — and this process did not stall itself since
+    /// its last renewal, the lease is taken back if nobody reclaimed it
+    /// ([`SlotStore::renew_after_store_outage`], module docs «Store outage»).
+    /// An error is the store's: nothing is renewed and nothing is fenced.
     pub fn heartbeat(&self) -> Result<HeartbeatOutcome, RepoError> {
-        let outcome = self
-            .slots
-            .heartbeat(&self.id, self.config.lease_ttl(), self.clock.now())?;
+        // The whole attempt is timed from here: a renewal whose transaction
+        // began before a stall (the frozen process's own heartbeat, which
+        // commits a stale expiry the moment it continues) must not count as
+        // evidence that the process was running afterwards.
+        let started = std::time::Instant::now();
+        let now = self.clock.now();
+        let ttl = self.config.lease_ttl();
+        let mut outcome = match self.slots.heartbeat(&self.id, ttl, now) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                if matches!(e, RepoError::Store(_) | RepoError::Io(_)) {
+                    let mut track = self.heartbeats.lock();
+                    let outage = track.outage.get_or_insert(StoreOutage {
+                        since: now,
+                        failures: 0,
+                    });
+                    outage.failures += 1;
+                }
+                return Err(e);
+            }
+        };
+        let mut revived = false;
+        if outcome == HeartbeatOutcome::Fenced && !self.is_fenced() {
+            let kept_running = {
+                let track = self.heartbeats.lock();
+                !track.stalled && track.renewed.is_some_and(|at| !stalled_since(at))
+            };
+            if kept_running {
+                outcome = self.slots.renew_after_store_outage(&self.id, ttl, now)?;
+                revived = matches!(outcome, HeartbeatOutcome::Renewed { .. });
+            }
+        }
+        let outage = {
+            let mut track = self.heartbeats.lock();
+            if matches!(outcome, HeartbeatOutcome::Renewed { .. }) {
+                track.renewed = Some(started);
+                track.stalled = track.stalled && stalled_since(started);
+            }
+            track.outage.take()
+        };
+        if (revived || outage.is_some())
+            && let HeartbeatOutcome::Renewed { leases } = &outcome
+        {
+            tracing::warn!(
+                dispatcher_id = %self.id,
+                outage_started_at = ?outage.map(|o| o.since),
+                failed_heartbeats = outage.map_or(0, |o| o.failures),
+                revived,
+                leases,
+                "dispatcher lease renewed after the store was unavailable"
+            );
+        }
         if outcome == HeartbeatOutcome::Fenced && !self.fenced.swap(true, Ordering::SeqCst) {
             tracing::error!(
                 dispatcher_id = %self.id,

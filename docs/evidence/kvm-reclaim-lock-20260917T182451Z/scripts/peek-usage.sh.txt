@@ -1,0 +1,16 @@
+#!/bin/bash
+# Inside the VM (as root): the stop events of a chaos ledger, by path and measurement.
+db="$1"
+python3 - "$db" <<'PY'
+import sqlite3, sys, json
+con = sqlite3.connect(sys.argv[1], timeout=30)
+rows = con.execute("SELECT body FROM function_usage_events WHERE event_type = 'environment_stopped'").fetchall()
+by = {}
+for (b,) in rows:
+    e = json.loads(b)
+    k = (e.get("stopped_by", "-"), e["resources"]["cgroup_cpu_usec"]["measurement"], e.get("lifetime_source", "-"))
+    by[k] = by.get(k, 0) + 1
+for k, v in sorted(by.items()):
+    print(k, v)
+print("total", len(rows))
+PY

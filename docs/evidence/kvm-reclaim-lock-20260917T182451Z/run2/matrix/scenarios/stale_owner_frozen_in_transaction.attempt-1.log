@@ -1,0 +1,34 @@
+[chaos stale_owner_frozen_in_transaction] begin (gateway A stops itself (SIGSTOP) between BEGIN IMMEDIATE and COMMIT of a state.db write, past both leases; B on the same data_dir; SIGCONT A) work=/home/takanorifukuyama.guest/w/tsls-chaos.c4r5oF
+[chaos stale_owner_frozen_in_transaction]   ok   setup.a_owns_the_running_invocation invocation=inv_01m2ra3ag5cybsarfh26w074zg a=dsp_01m2ra2wberh3jdhg7x2sz3vqz env=env_01m2ra3ag8tq24zya3etetebvc
+[chaos stale_owner_frozen_in_transaction] fault injected
+[chaos stale_owner_frozen_in_transaction]   ok   fault.a_stopped_inside_a_write_transaction ps stat=Tl flag consumed=yes "site":"crates/application/src/repository/sqlite/triggers.rs:522"
+[chaos stale_owner_frozen_in_transaction]   ok   outage.nobody_reclaimed_while_the_store_was_locked reclaimed rows: 
+[chaos stale_owner_frozen_in_transaction] fault removed
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.invocation_settled_once status=succeeded -
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.b_reclaimed_a_not_the_other_way a.reclaimed_at=2026-09-17T18:30:22.254948968Z b.reclaimed_at=-
+[chaos stale_owner_frozen_in_transaction]   ok   lease.b_is_not_fenced b fenced=false reclaimed_at=- renewal log=1
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_is_fenced readyz=503 fenced=true stall log=1
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.fenced_environment_terminated env=env_01m2ra3ag8tq24zya3etetebvc state=lost
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.b_keeps_serving code=200
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_refuses_new_invocations code=503
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.settled_invocation_not_overwritten invocation succeeded:1:2026-09-17T18:30:22.216950206Z:1091 -> succeeded:1:2026-09-17T18:30:22.216950206Z:1091
+[chaos stale_owner_frozen_in_transaction] converged
+[chaos stale_owner_frozen_in_transaction]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos stale_owner_frozen_in_transaction]   ok   workload.async_accepted accepted=3 refused=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_never_lost accepted=9 missing_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_all_terminal accepted=9 not_terminal=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=1 (re-executions, recorded)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=8
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.ledger_all_terminal invocations=19 non_terminal=0 by_status=succeeded:19
+[chaos stale_owner_frozen_in_transaction]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.cron_each_time_once fires=4 distinct_times=4
+[chaos stale_owner_frozen_in_transaction]   ok   cv.usage_counted_once journal_pending=0 ledger_events=96 distinct=96 attempts_settled_twice=0 duplicates_ignored=2
+[chaos stale_owner_frozen_in_transaction]   ok   cv.every_terminal_environment_metered_once terminal environments=14 without a stop event=0 environments with a stop=14 (pooled ones report when they stop, after this check)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.usage_from_cgroup_accounting_or_unknown environment_stopped=14 provider_reported=14 unknown=0 other=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.c4r5oF (data_dir, provider workdir with function/scratch drives, console and fc logs, snapshots) /srv/jailer (jails))
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_vmm_jail_cgroup_tap_or_table_left firecracker/jailer processes, /sys/fs/cgroup/tachyon/*, /srv/jailer/firecracker/*, tsls* taps, table inet tachyon_egress: 0

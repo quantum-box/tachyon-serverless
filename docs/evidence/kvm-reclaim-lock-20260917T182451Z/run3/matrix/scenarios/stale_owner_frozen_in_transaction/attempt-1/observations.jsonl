@@ -1,0 +1,13 @@
+{"key":"outage.b_sync_while_a_frozen","value":"code=000 error_type= after=19987ms (client max 20 s)"}
+{"key":"reclaim.invocation_settled_as","value":"succeeded -"}
+{"key":"lease.b_took_its_lease_back","value":"1 renewals after the outage"}
+{"key":"store.slow_write_transactions_a","value":"\"site\":\"crates/application/src/repository/sqlite/triggers.rs:522\",\"held_ms\":35417"}
+{"key":"client.a_answer_to_the_stale_invocation","value":"200"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":9}
+{"key":"usage.terminal_environments","value":11}
+{"key":"usage.environments_without_stop_event","value":0}
+{"key":"usage.environment_stopped_events","value":11}
+{"key":"usage.environment_stopped_with_cgroup_usage","value":10}
+{"key":"usage.environment_stopped_with_unknown_host_usage","value":1}
+{"key":"usage.environment_stopped_by","value":"owner:unknown=1,pool:provider_reported=6,reclaim:provider_reported=4"}

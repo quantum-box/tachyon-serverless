@@ -137,6 +137,9 @@ pub struct Settled {
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
+    /// Write-transaction discipline (PLT-4646): what [`Self::write`] measured.
+    writes: Mutex<super::WriteTransactionStats>,
+    write_hook: Mutex<Option<super::WriteHook>>,
     logs: LogBuffer,
     limits: Limits,
     options: SqliteOptions,
@@ -208,6 +211,8 @@ impl SqliteStore {
         let applied = migrations::migrate_to(&mut conn, migrations::LATEST, now)?;
         let mut store = Self {
             conn: Mutex::new(conn),
+            writes: Mutex::default(),
+            write_hook: Mutex::new(None),
             logs: LogBuffer::default(),
             limits,
             options,
@@ -238,6 +243,8 @@ impl SqliteStore {
         migrations::migrate_to(&mut conn, migrations::LATEST, chrono::Utc::now())?;
         Ok(Self {
             conn: Mutex::new(conn),
+            writes: Mutex::default(),
+            write_hook: Mutex::new(None),
             logs: LogBuffer::default(),
             limits,
             options,
@@ -271,15 +278,61 @@ impl SqliteStore {
     }
 
     /// One `BEGIN IMMEDIATE` transaction. An error rolls everything back.
+    ///
+    /// **Discipline** (docs/adr/0003 「書込み transaction の規律」, PLT-4646):
+    /// from `BEGIN IMMEDIATE` to the end of `COMMIT` every other writer of
+    /// `state.db` — in this process and in every gateway sharing the file —
+    /// waits. `f` is synchronous, so no transaction ever spans an `.await`;
+    /// it must also not call a provider, the network, another store, sleep,
+    /// or do work that does not need the lock (parse and hash outside, as
+    /// `stamp_config` does). A transaction held longer than
+    /// [`super::SLOW_WRITE_TRANSACTION`] is logged with its call site and
+    /// counted ([`super::StateStore::write_transaction_stats`]); a process
+    /// frozen inside one is reported with the full time when it resumes.
+    #[track_caller]
     fn write<R>(
         &self,
         f: impl FnOnce(&Connection) -> Result<R, RepoError>,
     ) -> Result<R, RepoError> {
+        let site = std::panic::Location::caller();
         let mut conn = self.connection()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let out = f(&tx)?;
-        tx.commit()?;
-        Ok(out)
+        let began = std::time::Instant::now();
+        let hook = self.write_hook.lock().clone();
+        if let Some(hook) = hook {
+            hook(site);
+        }
+        let out = f(&tx).and_then(|out| {
+            tx.commit()?;
+            Ok(out)
+        });
+        self.note_write(site, began.elapsed());
+        out
+    }
+
+    fn note_write(&self, site: &'static std::panic::Location<'static>, held: std::time::Duration) {
+        let held_ms = held.as_millis().min(u128::from(u64::MAX)) as u64;
+        let slow = held >= super::SLOW_WRITE_TRANSACTION;
+        {
+            let mut w = self.writes.lock();
+            w.transactions += 1;
+            if slow {
+                w.slow += 1;
+            }
+            if held_ms > w.max_held_ms || w.max_held_site.is_none() {
+                w.max_held_ms = held_ms;
+                w.max_held_site = Some(format!("{}:{}", site.file(), site.line()));
+            }
+        }
+        if slow {
+            tracing::warn!(
+                site = %format!("{}:{}", site.file(), site.line()),
+                held_ms,
+                threshold_ms = super::SLOW_WRITE_TRANSACTION.as_millis() as u64,
+                "state.db write transaction held the database write lock for long: every other \
+                 writer, in this process and in any gateway sharing the file, waited"
+            );
+        }
     }
 
     fn retention(&self) -> Retention {
@@ -977,6 +1030,14 @@ impl StateStore for SqliteStore {
 
     fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+
+    fn write_transaction_stats(&self) -> super::WriteTransactionStats {
+        self.writes.lock().clone()
+    }
+
+    fn set_write_hook(&self, hook: Option<super::WriteHook>) {
+        *self.write_hook.lock() = hook;
     }
 
     fn flush(&self) -> Result<(), RepoError> {

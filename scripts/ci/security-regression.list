@@ -70,6 +70,15 @@ lease_epoch tachyon-serverless-application test:leases a_fenced_environment_stay
 lease_epoch tachyon-serverless-application test:config_cache older_generations_never_roll_back_a_newer_configuration
 lease_epoch tachyon-serverless-application lib repository::config::tests::stamps_changes_ignores_stale_values_and_tombstones_removals
 lease_epoch tachyon-serverless-application test:config_cache a_dispatcher_fenced_during_the_outage_stays_fenced_after_the_reconnect
+# PLT-4646 follow-up: a lease that passed while the store was locked is taken back only when nobody
+# reclaimed it and only by a dispatcher that kept running; a reclaimer without its own lease reclaims
+# nothing; a process frozen inside a write transaction holds the lock and nothing else
+lease_epoch tachyon-serverless-application lib repository::contract_tests::memory::a_dispatcher_renews_after_a_store_outage_only_while_nobody_reclaimed_it
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::a_dispatcher_renews_after_a_store_outage_only_while_nobody_reclaimed_it
+lease_epoch tachyon-serverless-application lib repository::contract_tests::memory::a_reclaimer_without_its_own_lease_reclaims_nothing
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::a_reclaimer_without_its_own_lease_reclaims_nothing
+lease_epoch tachyon-serverless-application test:store_stall a_gateway_frozen_inside_a_write_transaction_does_not_cost_the_other_its_lease
+lease_epoch tachyon-serverless-application lib repository::sqlite::tests::a_process_stopped_inside_a_write_transaction_holds_the_lock_until_it_continues
 
 # --- deadline enforcement: the host enforces deadlines, clients can only shorten them ---------
 deadline tachyon-serverless-domain lib invocation::tests::queue_timeout_fails_from_queued
@@ -116,6 +125,13 @@ resource_limits tachyon-serverless-runtime-bridge lib runtime_api::tests::oversi
 resource_limits tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_error_report_settles_the_attempt
 resource_limits tachyon-serverless-provider-firecracker lib drive::tests::scratch_drive_is_exactly_the_requested_size
 resource_limits tachyon-serverless-provider-firecracker lib provider::tests::archive_is_pruned_to_keep_limit
+# PLT-4642 / ADR-0012 §9: every environment that ends, on whatever path, is metered exactly once
+# (host usage provider_reported when it could be sampled before the terminate, unknown otherwise)
+resource_limits tachyon-serverless-application test:reclaim_usage a_reclaimed_environment_is_metered_once_by_the_reclaimer
+resource_limits tachyon-serverless-application test:reclaim_usage a_fenced_environment_settled_late_by_its_old_owner_is_metered_once
+resource_limits tachyon-serverless-application test:reclaim_usage two_reporters_of_one_stop_collide_on_the_event_id
+resource_limits tachyon-serverless-application test:reclaim_usage the_startup_reconcile_meters_every_orphan_once
+resource_limits tachyon-serverless-application test:reclaim_usage a_boot_abandoned_by_a_shutdown_is_metered_once
 # PLT-4622: host cgroup v2 limits of the VMM (fail closed when required) and the jailer launch
 resource_limits tachyon-serverless-application lib config::tests::firecracker_cgroup_and_jailer_sections
 resource_limits tachyon-serverless-provider-firecracker lib cgroup::tests::limits_follow_cpu_millis_and_memory

@@ -607,6 +607,41 @@ fn cause_of(d: &DispatcherRecord, proven_dead: bool) -> Cause {
     }
 }
 
+impl InMemoryStore {
+    /// [`SlotStore::heartbeat`] (`revive = false`) and
+    /// [`SlotStore::renew_after_store_outage`] (`revive = true`).
+    fn renew_dispatcher(
+        &self,
+        id: &DispatcherId,
+        ttl: chrono::Duration,
+        now: Timestamp,
+        revive: bool,
+    ) -> HeartbeatOutcome {
+        let mut s = self.state.write();
+        let Some(d) = s.dispatchers.get_mut(id) else {
+            return HeartbeatOutcome::Fenced;
+        };
+        if !d.is_live() || (!revive && now >= d.lease_expires_at) {
+            return HeartbeatOutcome::Fenced;
+        }
+        d.heartbeat_at = now;
+        d.lease_expires_at = d.lease_expires_at.max(now + ttl);
+        let mut renewed = 0;
+        for lease in s.leases.values_mut() {
+            if lease.owner.as_ref() == Some(id) && lease.released_at.is_none() {
+                let ok = match revive {
+                    true => lease.revive(now, ttl).is_ok(),
+                    false => lease.renew(now, ttl).is_ok(),
+                };
+                if ok {
+                    renewed += 1;
+                }
+            }
+        }
+        HeartbeatOutcome::Renewed { leases: renewed }
+    }
+}
+
 impl SlotStore for InMemoryStore {
     fn register_dispatcher(&self, record: DispatcherRecord) -> Result<(), RepoError> {
         let mut s = self.state.write();
@@ -631,25 +666,16 @@ impl SlotStore for InMemoryStore {
         ttl: chrono::Duration,
         now: Timestamp,
     ) -> Result<HeartbeatOutcome, RepoError> {
-        let mut s = self.state.write();
-        let Some(d) = s.dispatchers.get_mut(id) else {
-            return Ok(HeartbeatOutcome::Fenced);
-        };
-        if !d.is_live() || now >= d.lease_expires_at {
-            return Ok(HeartbeatOutcome::Fenced);
-        }
-        d.heartbeat_at = now;
-        d.lease_expires_at = d.lease_expires_at.max(now + ttl);
-        let mut renewed = 0;
-        for lease in s.leases.values_mut() {
-            if lease.owner.as_ref() == Some(id)
-                && lease.released_at.is_none()
-                && lease.renew(now, ttl).is_ok()
-            {
-                renewed += 1;
-            }
-        }
-        Ok(HeartbeatOutcome::Renewed { leases: renewed })
+        Ok(self.renew_dispatcher(id, ttl, now, false))
+    }
+
+    fn renew_after_store_outage(
+        &self,
+        id: &DispatcherId,
+        ttl: chrono::Duration,
+        now: Timestamp,
+    ) -> Result<HeartbeatOutcome, RepoError> {
+        Ok(self.renew_dispatcher(id, ttl, now, true))
     }
 
     fn stop_dispatcher(&self, id: &DispatcherId, now: Timestamp) -> Result<(), RepoError> {
@@ -939,6 +965,14 @@ impl SlotStore for InMemoryStore {
         let retention = self.idempotency_retention;
         let mut s = self.state.write();
         let mut report = ReclaimReport::default();
+        // Only a reclaimer that still holds its own lease reclaims.
+        if !s
+            .dispatchers
+            .get(&reclaimer)
+            .is_some_and(|d| d.is_live() && now < d.lease_expires_at)
+        {
+            return Ok(report);
+        }
 
         let mut dead: BTreeMap<DispatcherId, Cause> = BTreeMap::new();
         for d in s.dispatchers.values_mut() {

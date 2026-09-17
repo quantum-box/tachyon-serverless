@@ -1,0 +1,33 @@
+[498969] 2026/09/18 03:32:05.565836 [INF] Starting nats-server
+[498969] 2026/09/18 03:32:05.565890 [INF]   Version:  2.14.7
+[498969] 2026/09/18 03:32:05.565892 [INF]   Git:      [8d8b69a]
+[498969] 2026/09/18 03:32:05.565893 [INF]   Name:     tachyon-queue-local
+[498969] 2026/09/18 03:32:05.565895 [INF]   Node:     OBUMwGpe
+[498969] 2026/09/18 03:32:05.565896 [INF]   ID:       NB5X2YL2QC4UCBPKE6LB7ARWVWRLPCYE23KL6FTM5ELGKPLIJP5G2MFD
+[498969] 2026/09/18 03:32:05.565900 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+[498969] 2026/09/18 03:32:05.565905 [INF] Using configuration file: /home/takanorifukuyama.guest/w/tsls-chaos.1XgzU0/nats/nats-server.conf (sha256:05b9002c677cb0a3491584647509380d0d3d982a05abd108f86585172c2ee2fd)
+[498969] 2026/09/18 03:32:05.566445 [INF] Starting http monitor on 127.0.0.1:34917
+[498969] 2026/09/18 03:32:05.566536 [INF] Starting JetStream
+[498969] 2026/09/18 03:32:05.566626 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+[498969] 2026/09/18 03:32:05.566629 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+[498969] 2026/09/18 03:32:05.566630 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+[498969] 2026/09/18 03:32:05.566631 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+[498969] 2026/09/18 03:32:05.566631 [INF] 
+[498969] 2026/09/18 03:32:05.566632 [INF]          https://docs.nats.io/jetstream
+[498969] 2026/09/18 03:32:05.566633 [INF] 
+[498969] 2026/09/18 03:32:05.566634 [INF] ---------------- JETSTREAM ----------------
+[498969] 2026/09/18 03:32:05.566635 [INF]   Strict:          true
+[498969] 2026/09/18 03:32:05.566639 [INF]   Max Memory:      64.00 MB
+[498969] 2026/09/18 03:32:05.566641 [INF]   Max Storage:     2.00 GB
+[498969] 2026/09/18 03:32:05.566642 [INF]   Store Directory: "/home/takanorifukuyama.guest/w/tsls-chaos.1XgzU0/nats/jetstream/jetstream"
+[498969] 2026/09/18 03:32:05.566648 [INF]   API Level:       4
+[498969] 2026/09/18 03:32:05.566649 [INF] -------------------------------------------
+[498969] 2026/09/18 03:32:05.567893 [WRN] Healthcheck failed: "failed to be ready for connections after 1ms: server"
+[498969] 2026/09/18 03:32:05.568431 [INF] Took 1.892213ms to start JetStream
+[498969] 2026/09/18 03:32:05.568493 [INF] Listening for client connections on 127.0.0.1:57589
+[498969] 2026/09/18 03:32:05.568498 [INF] Server is ready
+[498969] 2026/09/18 03:32:38.093367 [INF] Trapped "terminated" signal
+[498969] 2026/09/18 03:32:38.093429 [INF] Initiating Shutdown...
+[498969] 2026/09/18 03:32:38.093437 [INF] Initiating JetStream Shutdown...
+[498969] 2026/09/18 03:32:38.093534 [INF] JetStream Shutdown
+[498969] 2026/09/18 03:32:38.093579 [INF] Server Exiting..

@@ -183,6 +183,26 @@ pub trait SlotStore: Send + Sync {
         ttl: chrono::Duration,
         now: Timestamp,
     ) -> Result<HeartbeatOutcome, RepoError>;
+    /// [`Self::heartbeat`] for a dispatcher whose previous renewals failed
+    /// because the **store** did not answer (PLT-4646, docs/adr/0003
+    /// 「store が止まった間の lease」): its lease may have passed while it
+    /// kept trying. It is renewed anyway — together with every unreleased
+    /// slot lease it owns — as long as it is live, i.e. nobody stopped or
+    /// reclaimed it. That check and the renewal are one transaction, and a
+    /// reclaim marks the dispatcher and releases its leases in one
+    /// transaction too, so the two are serialized by the store: either the
+    /// reclaim committed first (this returns `Fenced`) or the renewal did (the
+    /// reclaim then sees a valid lease). Expiry alone never let anyone act.
+    ///
+    /// The caller decides when a failure was the store's
+    /// ([`crate::services::Dispatcher::heartbeat`]).
+    fn renew_after_store_outage(
+        &self,
+        id: &DispatcherId,
+        ttl: chrono::Duration,
+        now: Timestamp,
+    ) -> Result<HeartbeatOutcome, RepoError>;
+
     /// Graceful shutdown: whatever the dispatcher still owns may be reclaimed
     /// immediately.
     fn stop_dispatcher(&self, id: &DispatcherId, now: Timestamp) -> Result<(), RepoError>;
@@ -279,7 +299,11 @@ pub trait SlotStore: Send + Sync {
     /// - non-terminal invocations (and their attempts) and environments owned
     ///   by a reclaimed dispatcher are settled / fenced.
     ///
-    /// Nothing of the reclaimer itself is touched.
+    /// Nothing of the reclaimer itself is touched, and a reclaimer that can
+    /// no longer prove its own lease — stopped, reclaimed, not registered, or
+    /// its lease passed by its own clock — reclaims nothing (an empty report):
+    /// a gateway that was frozen past its lease must not wake up and reclaim
+    /// the dispatchers that kept running while it was away (PLT-4646).
     fn reclaim_expired(&self, request: ReclaimRequest) -> Result<ReclaimReport, RepoError>;
 
     /// Fenced environments that are not settled yet (their terminate is not

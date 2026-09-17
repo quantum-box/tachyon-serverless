@@ -1,0 +1,9 @@
+base-i1 inv_01m2ra5vf6ktpvaqt8mcxjj8cn inline
+base-o1 inv_01m2ra5vh2rmavqxv6ygq3tc4j object
+base-w1 inv_01m2ra5vjk3p21hzhf0j6h23hw webhook
+base-i2 inv_01m2ra5vsxb37t04h57bw4rfsh inline
+base-o2 inv_01m2ra5vw19g9v32ge7c83vk93 object
+base-w2 inv_01m2ra5vxr84nb937wxwzpv20d webhook
+base-i3 inv_01m2ra5w643sgk5vwhn8rr853j inline
+base-o3 inv_01m2ra5w81knzkg8nm7ek11kd7 object
+base-w3 inv_01m2ra5w9pppgzz4g346gsez5n webhook

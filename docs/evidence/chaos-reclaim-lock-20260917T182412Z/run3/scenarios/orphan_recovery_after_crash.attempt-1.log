@@ -1,0 +1,31 @@
+[chaos orphan_recovery_after_crash] begin (SIGKILL gateway holding busy environments (secret-bound workload), unsent outbox rows, the scheduler lease, an orphan object) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.Qw14cr
+[chaos orphan_recovery_after_crash]   ok   workload.sync_ok sync_200_with_secret=3/3
+[chaos orphan_recovery_after_crash]   ok   workload.async_accepted accepted=9 refused=0
+/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a78ed58917d03130c/scripts/chaos/lib.sh: line 392: 86988 Killed: 9               env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos orphan_recovery_after_crash]   ok   setup.state_to_recover orphan_objects=1 open_envs=2 worker_processes=2 unsent_outbox=5 scheduler_owner_is_a=yes
+[chaos orphan_recovery_after_crash] fault injected
+[chaos orphan_recovery_after_crash] fault removed
+[chaos orphan_recovery_after_crash] converged
+[chaos orphan_recovery_after_crash]   ok   recover.worker_processes_reclaimed before=2 after=0
+[chaos orphan_recovery_after_crash]   ok   recover.environments_settled open before=2 after=0 reconcile={"found":0,"adopted":0,"terminated":0,"lost":0,"foreign":0}
+[chaos orphan_recovery_after_crash]   ok   recover.outbox_claims_released_and_published unsent before=5 after=0
+[chaos orphan_recovery_after_crash]   ok   recover.scheduler_lease_taken_over old=dsp_01m2ra9wdrqate0ehq5ersf32g new=dsp_01m2raa4r2s62vmphjkvxa9pwy owner=dsp_01m2raa4r2s62vmphjkvxa9pwy
+[chaos orphan_recovery_after_crash]   ok   recover.orphan_objects_collected unreferenced=0 files=6
+[chaos orphan_recovery_after_crash]   ok   recover.no_secret_value_on_disk before=0 after=0
+[chaos orphan_recovery_after_crash]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos orphan_recovery_after_crash]   ok   workload.async_accepted accepted=3 refused=0
+[chaos orphan_recovery_after_crash]   ok   cv.accepted_never_lost accepted=15 missing_rows=0
+[chaos orphan_recovery_after_crash]   ok   cv.accepted_all_terminal accepted=15 not_terminal=0
+[chaos orphan_recovery_after_crash]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos orphan_recovery_after_crash]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos orphan_recovery_after_crash]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=11
+[chaos orphan_recovery_after_crash]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos orphan_recovery_after_crash]   ok   cv.ledger_all_terminal invocations=45 non_terminal=0 by_status=outcome_unknown:2,succeeded:43
+[chaos orphan_recovery_after_crash]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos orphan_recovery_after_crash]   ok   cv.cron_each_time_once fires=24 distinct_times=24
+[chaos orphan_recovery_after_crash]   ok   cv.usage_counted_once journal_pending=0 ledger_events=224 distinct=224 attempts_settled_twice=0 duplicates_ignored=0
+[chaos orphan_recovery_after_crash]   ok   cv.every_terminal_environment_metered_once terminal environments=48 without a stop event=0 environments with a stop=48 (pooled ones report when they stop, after this check)
+[chaos orphan_recovery_after_crash]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos orphan_recovery_after_crash]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos orphan_recovery_after_crash]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos orphan_recovery_after_crash]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.Qw14cr)

@@ -1,0 +1,11 @@
+{"key":"outage.requests","value":3}
+{"key":"outage.store_unavailable_503","value":1}
+{"key":"outage.slowest_request_ms","value":19939}
+{"key":"outage.answers","value":"async:202:-x1 mgmt:503:Host.StoreUnavailablex1 sync:200:-x1"}
+{"key":"outage.readyz","value":"200"}
+{"key":"recovery.first_sync_code","value":"200 -"}
+{"key":"recovery.readyz","value":"{\"ready\":true,\"dispatcher\":{\"fenced\":false,\"id\":\"dsp_01m2r9w0vpbg6ntwa26kc10w8b\",\"instance\":\"chaos-a\"}}"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":13}
+{"key":"usage.terminal_environments","value":23}
+{"key":"usage.environments_without_stop_event","value":0}

@@ -567,8 +567,14 @@ async fn a_dispatcher_fenced_during_the_outage_stays_fenced_after_the_reconnect(
     assert!(c.dp.refresh_config().await.is_err());
 
     // The data plane stalls past its dispatcher lease (30 s + 2 s skew) and
-    // the management gateway reclaims it.
-    c.mgmt_clock.advance(secs(40));
+    // the management gateway, which kept renewing its own lease (a reclaimer
+    // without one reclaims nothing), reclaims it.
+    c.mgmt_clock.advance(secs(20));
+    assert!(matches!(
+        c.mgmt.heartbeat(),
+        HeartbeatOutcome::Renewed { .. }
+    ));
+    c.mgmt_clock.advance(secs(20));
     let reclaimed = c.mgmt.dispatcher.reclaim_ledger().unwrap();
     assert_eq!(reclaimed.dispatchers, vec![c.dp.dispatcher.id().clone()]);
 

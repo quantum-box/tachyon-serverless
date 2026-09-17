@@ -1,0 +1,11 @@
+#!/bin/bash
+# Inside the Lima VM (as root): what is left of gateways, VMMs and their host state.
+echo "-- processes"; pgrep -a -f '(^|/)(firecracker|jailer|tachyon-serverless-gateway|nats-server)( |$)|effects-store.py|chaos/matrix.sh' | grep -v pgrep || echo none
+echo "-- cgroups"; find /sys/fs/cgroup/tachyon -mindepth 1 -maxdepth 1 -type d 2>/dev/null; echo "(end)"
+echo "-- jails"; find /srv/jailer -mindepth 2 -maxdepth 2 2>/dev/null; echo "(end)"
+echo "-- taps"; ip -br link | awk '$1 ~ /^(tsls|effx)/'; echo "(end)"
+echo "-- netns"; ip netns list; echo "(end)"
+echo "-- nft"; nft list tables
+echo "-- ip_forward=$(sysctl -n net.ipv4.ip_forward)"
+echo "-- scratch"; ls -d /home/takanorifukuyama.guest/w/tsls-chaos.* 2>/dev/null; echo "(end)"
+df -h / | tail -1

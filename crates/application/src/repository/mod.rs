@@ -304,7 +304,40 @@ pub trait StateStore:
     fn purge_expired_outputs(&self, _now: Timestamp) -> Result<usize, RepoError> {
         Ok(0)
     }
+
+    /// How long this store held the database write lock (PLT-4646,
+    /// docs/adr/0003 「書込み transaction の規律」). Empty for a store without
+    /// one.
+    fn write_transaction_stats(&self) -> WriteTransactionStats {
+        WriteTransactionStats::default()
+    }
+
+    /// Test hook: called inside every write transaction, after the write lock
+    /// was taken and before the transaction's work, with the call site. A
+    /// hook that blocks is a process frozen mid-transaction. Ignored by a
+    /// store without a write lock.
+    #[doc(hidden)]
+    fn set_write_hook(&self, _hook: Option<WriteHook>) {}
 }
+
+/// See [`StateStore::set_write_hook`].
+pub type WriteHook = Arc<dyn Fn(&'static std::panic::Location<'static>) + Send + Sync>;
+
+/// Write transactions of one store handle since it was opened.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct WriteTransactionStats {
+    pub transactions: u64,
+    /// Held longer than [`SLOW_WRITE_TRANSACTION`] (each one is logged).
+    pub slow: u64,
+    pub max_held_ms: u64,
+    /// `file:line` of the store call that held the lock longest.
+    pub max_held_site: Option<String>,
+}
+
+/// A write transaction held longer than this is logged with its call site
+/// and counted as slow: every other writer of the database, in this process
+/// and in every other one sharing the file, waited that long.
+pub const SLOW_WRITE_TRANSACTION: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// All repositories bundled; services take what they need.
 #[derive(Clone)]

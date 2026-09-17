@@ -1,0 +1,34 @@
+Reclaimed-environment metering and the frozen state.db writer — process provider (PLT-4642 / PLT-4646)
+
+host      macOS arm64 (Apple M4), debug gateway with the `failpoints` feature, process provider
+command   scripts/chaos/matrix.sh --only stale_owner_frozen_in_transaction,stale_owner_sync_lease,
+            db_locked_past_lease,db_locked_within_lease,sync_gateway_kill,orphan_recovery_after_crash,
+            baseline --retries 0 --evidence <run>
+tree      f588b4b (run*/profile.json), branch fix/reclaim-metering-and-lock-stall
+
+RESULTS: 3 runs x 7 scenarios = 21 scenario runs, all pass on the first attempt.
+
+(a) usage (PLT-4642, ADR-0012 §9): `cv.every_terminal_environment_metered_once` passed in all 21;
+    462 terminal environments in total, 0 without an `EnvironmentStopped` (the same check on the
+    KVM final batch would have counted 4 of 7, 6 of 14 and 4 of 11 without one). The process
+    provider's own host sample covers the bridge process only, so its cgroup quantities stay
+    `unknown` by design (ADR-0012 §1); Firecracker numbers are in
+    docs/evidence/kvm-reclaim-lock-20260917T182451Z/.
+
+(b) the frozen state.db writer (PLT-4646):
+  - `stale_owner_frozen_in_transaction` (new): gateway A stops itself inside a write transaction
+    (TSLS_STORE_FREEZE_FLAG failpoint, 20.6-35.4 s, site recorded as
+    crates/application/src/repository/sqlite/triggers.rs:522). Nobody reclaims anybody while the
+    lock is held; after SIGCONT B takes its lease back (1 renewal each run), is never fenced and
+    never reclaimed, and reclaims A; A notices its own stall, fences itself, refuses new invokes
+    with 503 and reclaims nobody; the invocation is settled exactly once and never overwritten.
+  - `db_locked_past_lease` (state.db locked for 12 s > lease 6 s + skew): the gateway now serves
+    again without a restart (`recovery.serves_without_restart`), where the 2026-09-17 runs
+    recorded `recovery.fenced_itself_after_losing_its_lease`.
+  - `stale_owner_sync_lease`, `sync_gateway_kill`, `orphan_recovery_after_crash`, `baseline`,
+    `db_locked_within_lease`: unchanged behaviour, all pass.
+
+RESIDUAL: a request that makes several store calls can still take longer than one store call's
+~10 s bound while the lock is held (`outage.b_sync_while_a_frozen`: 503 Host.StoreUnavailable
+after 5.3 s in two runs, no answer within the 20 s client timeout in the third) — the known
+limitation in docs/failure-matrix.md §6.2.

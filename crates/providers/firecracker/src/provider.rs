@@ -1631,10 +1631,15 @@ impl ExecutionProvider for FirecrackerProvider {
         let Some(cgroups) = &self.cgroups else {
             return Ok(None);
         };
-        if !self.running.lock().await.contains_key(environment_id) {
+        let path = cgroups.env_dir(environment_id.as_str());
+        // An environment this process did not start (the reclaim of a dead or
+        // fenced owner, the startup reconcile of the next incarnation) is
+        // still measurable while its VMM cgroup exists: the cgroup, not this
+        // process's bookkeeping, is what holds the usage, and terminate
+        // removes it. Without either there is nothing to read (docs/adr/0012).
+        if !self.running.lock().await.contains_key(environment_id) && !path.is_dir() {
             return Ok(None);
         }
-        let path = cgroups.env_dir(environment_id.as_str());
         Ok(
             crate::cgroup::usage(&path).map(|(cpu, current, peak)| EnvironmentStats {
                 cpu_seconds: cpu,

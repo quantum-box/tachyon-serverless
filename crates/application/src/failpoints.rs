@@ -220,6 +220,44 @@ fn kill_self() -> ! {
     std::process::abort()
 }
 
+/// Environment variable naming a flag file (PLT-4646 chaos
+/// `stale_owner_frozen_in_transaction`). Honoured only when failpoints are
+/// [`ENABLED`] and under `profile = "dev"`: when the file exists, the next
+/// `state.db` write transaction of this process removes it and stops the
+/// whole process with `SIGSTOP` **between `BEGIN IMMEDIATE` and `COMMIT`** —
+/// the SIGSTOP a test would otherwise have to land at the right microsecond.
+/// The process continues (and commits) on `SIGCONT`.
+pub const STORE_FREEZE_FLAG_ENV: &str = "TSLS_STORE_FREEZE_FLAG";
+
+/// Install the [`STORE_FREEZE_FLAG_ENV`] hook on `store`, when allowed.
+pub fn install_store_freeze(
+    store: &crate::repository::SqliteStore,
+    profile: crate::config::Profile,
+) {
+    use crate::repository::StateStore;
+    if !ENABLED || profile != crate::config::Profile::Dev {
+        return;
+    }
+    let Ok(flag) = std::env::var(STORE_FREEZE_FLAG_ENV) else {
+        return;
+    };
+    tracing::warn!(flag = %flag, "state.db freeze failpoint armed (failpoints build, dev profile, test only)");
+    let flag = std::path::PathBuf::from(flag);
+    store.set_write_hook(Some(std::sync::Arc::new(move |site| {
+        if flag.exists() && std::fs::remove_file(&flag).is_ok() {
+            tracing::error!(
+                site = %format!("{}:{}", site.file(), site.line()),
+                "failpoint: stopping this process inside a state.db write transaction"
+            );
+            #[cfg(unix)]
+            // SAFETY: raise(2) on this process; it continues on SIGCONT.
+            unsafe {
+                libc::raise(libc::SIGSTOP);
+            }
+        }
+    })));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
