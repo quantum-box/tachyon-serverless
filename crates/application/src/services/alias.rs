@@ -11,6 +11,9 @@ use crate::authz::{ensure_tenant, require_deploy, require_read};
 use crate::error::AppError;
 use crate::repository::Repositories;
 
+/// How often an unguarded alias write re-reads after losing a race.
+const ALIAS_WRITE_ATTEMPTS: usize = 16;
+
 pub struct AliasService {
     repos: Repositories,
     clock: Arc<dyn Clock>,
@@ -114,28 +117,49 @@ impl AliasService {
         revision_id: &RevisionId,
         expected_generation: Option<u64>,
     ) -> Result<FunctionAlias, AppError> {
-        let now = self.clock.now();
-        let result = self.repos.aliases.modify(&function.id, name, &mut |slot| {
-            match slot {
-                Some(alias) => alias.update(revision_id.clone(), expected_generation, now)?,
+        // Read, decide, then write with the generation that was read as the
+        // CAS guard (docs/adr/0003). Losing the race is a conflict for a
+        // guarded update; an unguarded publish re-reads and tries again.
+        for _ in 0..ALIAS_WRITE_ATTEMPTS {
+            let now = self.clock.now();
+            match self.repos.aliases.get(&function.id, name)? {
+                Some(mut alias) => {
+                    let seen = alias.generation;
+                    alias.update(revision_id.clone(), expected_generation, now)?;
+                    if self.repos.aliases.compare_and_set(alias.clone(), seen)? {
+                        return Ok(alias);
+                    }
+                    if expected_generation.is_some() {
+                        return Err(AppError::Conflict(format!(
+                            "alias `{name}` was updated concurrently"
+                        )));
+                    }
+                }
                 None => {
                     if let Some(expected) = expected_generation {
                         return Err(AppError::Conflict(format!(
                             "alias `{name}` does not exist (expected generation {expected})"
                         )));
                     }
-                    *slot = Some(FunctionAlias::new(
+                    let alias = FunctionAlias::new(
                         function.id.clone(),
                         function.tenant_id.clone(),
                         name.clone(),
                         revision_id.clone(),
                         now,
-                    ));
+                    );
+                    match self.repos.aliases.insert(alias.clone()) {
+                        Ok(()) => return Ok(alias),
+                        // Created concurrently: re-read and update it instead.
+                        Err(crate::repository::RepoError::Conflict(_)) => {}
+                        Err(e) => return Err(e.into()),
+                    }
                 }
             }
-            Ok(())
-        })?;
-        result.ok_or_else(|| AppError::platform("alias vanished during update"))
+        }
+        Err(AppError::Conflict(format!(
+            "alias `{name}` kept changing; retry"
+        )))
     }
 
     fn owned_function(

@@ -164,6 +164,25 @@ pub async fn serve(
             }
         })
     });
+    // Inline invocation outputs past their retention become digests
+    // (`[store] output_retention_seconds`).
+    let retention = {
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(600));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                let purged = app.purge_expired_outputs();
+                if purged > 0 {
+                    tracing::info!(
+                        purged,
+                        "expired invocation outputs replaced by their digest"
+                    );
+                }
+            }
+        })
+    };
     let draining = app.clone();
     axum::serve(listener, service)
         .with_graceful_shutdown(async move {
@@ -184,8 +203,9 @@ pub async fn serve(
     if let Some(sweeper) = sweeper {
         sweeper.abort();
     }
-    if let Err(e) = app.store.persist_now() {
-        tracing::warn!(error = %e, "final state flush failed");
+    retention.abort();
+    if let Err(e) = app.store.flush() {
+        tracing::warn!(error = %e, "final state checkpoint failed");
     }
     tracing::info!("gateway stopped");
     Ok(())

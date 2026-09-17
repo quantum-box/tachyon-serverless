@@ -1,0 +1,12 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.81s
+   Compiling tachyon-serverless-domain v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad41e983399d13874/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad41e983399d13874/crates/protocol)
+   Compiling tachyon-serverless-sdk v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad41e983399d13874/crates/sdk)
+   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad41e983399d13874/crates/runtime-bridge)
+   Compiling example-cpu-burn v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad41e983399d13874/examples/cpu-burn)
+   Compiling example-hello v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad41e983399d13874/examples/hello)
+   Compiling example-http-axum v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-ad41e983399d13874/examples/http-axum)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.46s

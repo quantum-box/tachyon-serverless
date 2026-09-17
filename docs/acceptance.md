@@ -37,6 +37,7 @@
 | `docs/evidence/20260915T125610Z-firecracker/` | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` の同じファイル群 | 上と同じ VM、`config/gateway.firecracker.toml`（`profile = "production"`） | 27/27 PASS |
 | `docs/evidence/20260915T171415Z-process/` | `scripts/e2e/demo.sh`（レビュー指摘修正の統合後、secret 値の検査ステップを含む 28 ステップ） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260915T171631Z-firecracker/` | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`（同上、commit `95af2ba`） | 上と同じ VM | 28/28 PASS |
+| `docs/evidence/20260917T020229Z-process/` | `scripts/e2e/demo.sh`（PLT-4618: 台帳が `state.db`。step 27 は `state.db` と `state.db-wal` も検査。port 8080 が使用中のため `config/gateway.dev.toml` の listen と data_dir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定） | macOS、process provider（隔離なし） | 28/28 PASS |
 
 本文の「E2E step NN」は各 E2E ディレクトリの `steps/NN-*.log`（例: step 23 = `steps/23-cross-tenant_get_invoke_-__404.log`）。特に断らない限り process と firecracker の両方で PASS している。
 
@@ -118,9 +119,31 @@ KVM の記録に共通する制約:
 | 2 | Function / Revision / Alias の状態遷移と不変性（`spec_digest`、generation CAS） | 実装済み | `crates/domain/src/revision.rs::{valid_spec_passes_and_digest_is_stable, invalid_specs_are_rejected, revision_lifecycle_and_terminal_rejection, failure_allowed_from_any_non_terminal_state}`、`crates/domain/src/alias.rs::cas_update_and_rollback_pointer` |
 | 3 | Invocation / Attempt の状態遷移（terminal 後の更新拒否、`OutcomeUnknown` は Running からのみ） | 実装済み | `crates/domain/src/invocation.rs::{happy_path, cannot_succeed_before_running, outcome_unknown_only_after_running, queue_timeout_fails_from_queued, attempt_terminal_once}` |
 | 4 | ExecutionEnvironment / Lease（状態遷移、`(attempt_id, epoch)` fencing） | 実装済み | `crates/domain/src/environment.rs::{lifecycle, failure_from_any_state_and_lost, lease_fencing}` |
-| 5 | repositories（in-memory）と `state.json` 永続化 | 実装済み | `crates/application/src/repository.rs::{function_name_unique_per_tenant, idempotency_key_is_bound_with_its_invocation, dangling_idempotency_entries_are_dropped_on_restart, artifact_ownership_is_per_tenant_and_persisted, state_without_artifact_owners_still_loads, logs_are_bounded_per_invocation, persistence_roundtrip_and_restart_reconcile, corrupt_state_file_is_refused_with_a_hint}` |
-| 6 | DB migration（TiDB） | 方針決定済み（`docs/adr/0003-execution-state-persistence.md`。P2 が要求する複数プロセス間の原子性と移行手順を決定） / 未着手（実装。P1 の永続化は in-memory + `state.json` のまま） | `docs/adr/0003-execution-state-persistence.md`、`docs/architecture.md` §5-12 |
+| 5 | repositories と永続化（`state.db`） | 実装済み | `crates/application/src/repository/contract_tests.rs` を `memory::*` と `sqlite::*` の両方で実行、`crates/application/src/repository/sqlite/tests.rs::{persistence_roundtrip_and_restart_reconcile, restart_separates_dispatched_work_from_work_that_never_started}`。P1 の `state.json` write-through は廃止（下の「PLT-4618 永続化（2026-09-17）」） |
+| 6 | DB migration | 実装済み（埋め込み SQLite、前進のみ） / 未着手（TiDB。ADR-0003 で SQLite を選び、TiDB は将来の adapter） | `crates/application/src/repository/sqlite/migrations/`、`docs/adr/0003-execution-state-persistence.md`「実装メモ」 |
 | 7 | `env_` prefix の tachyon-apps との衝突を解消する方針を決める | 方針決定済み（`docs/adr/0003-execution-state-persistence.md`） | `docs/inventory-tachyon-apps.md` §3.1, §7-1 |
+
+### PLT-4618 永続化（2026-09-17、`feat/plt-4618-sqlite`）
+
+ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyon-serverless-application --lib repository` で再現する。契約テスト（`contract_tests.rs`）は同じ関数を `repository::contract_tests::memory::<名前>` と `repository::contract_tests::sqlite::<名前>` の 2 回実行する。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 作成 / 復元 / 状態遷移の unit test | 実装済み | `contract_tests.rs::{an_invocation_is_created_restored_and_driven_to_a_final_state, a_revision_cannot_be_tampered_with_and_its_final_status_is_final, attempts_and_leases_are_final_once_settled, an_environment_copy_from_another_epoch_is_refused}`、`sqlite/tests.rs::persistence_roundtrip_and_restart_reconcile`（file を閉じて開き直した後の復元） |
+| 2 | terminal 再更新拒否の property test | 実装済み | `contract_tests.rs::terminal_rows_are_never_rewritten_property`（64 seed × 24 step の遷移と古い snapshot の再書き込み。外部 crate を使わない決定的な生成器）。invocation のみが property test で、attempt / environment / lease / revision は例示テスト |
+| 3 | alias 更新競合を拒否する | 実装済み | `contract_tests.rs::{alias_updates_are_compare_and_set, concurrent_alias_updates_have_exactly_one_winner}`、`sqlite/tests.rs::cas_holds_across_separate_connections_to_the_same_file`（同じ file に別 connection を持つスレッド）、`crates/application/tests/pipeline.rs` の alias 更新テスト（`expected_generation` 不一致で 409）。**OS プロセスを分けた競合テストは無い**（未検証、PLT-4631） |
+| 4 | tenant 越境を拒否する | 実装済み | `contract_tests.rs::{rows_never_cross_a_tenant, idempotency_key_is_bound_with_its_invocation, artifact_ownership_is_per_tenant}`（他 tenant の function の revision / invocation、他 tenant の revision を指す alias、他 tenant の invocation の attempt、他 tenant の revision の environment、reuse key の tenant 不一致、他 tenant の environment の lease、tenant の書き換え）。API 層の越境は既存の `pipeline.rs` / `gateway_integration.rs` |
+| 5 | ID 重複を拒否する | 実装済み | `contract_tests.rs::{duplicate_ids_are_refused_for_every_entity, revision_numbers_are_allocated_and_unique_per_function, function_name_unique_per_tenant}` |
+| 6 | revision 改変を拒否する | 実装済み | `contract_tests.rs::a_revision_cannot_be_tampered_with_and_its_final_status_is_final`（spec / spec_digest / number / function / tenant の変更、Ready 後の状態変更を拒否） |
+| 7 | 空 DB へ migration を適用できる | 実装済み | `sqlite/tests.rs::migrations_apply_to_an_empty_database`、E2E（`docs/evidence/20260917T020229Z-process/gateway.log` の `state store opened` `migrations_applied=[1, 2]`） |
+| 8 | 既存 DB（古い schema）へ migration を適用できる | 実装済み | `sqlite/tests.rs::{migrations_upgrade_a_database_at_an_older_version, a_database_newer_than_the_binary_is_refused, a_failing_migration_leaves_the_previous_schema_intact}` |
+| 9 | 既存の `state.json` 台帳を DB に移行できる | 実装済み | `sqlite/tests.rs::{a_p1_state_json_is_imported_once_and_moved_aside, an_interrupted_import_only_finishes_the_rename, a_state_json_next_to_a_populated_database_is_refused, corrupt_state_file_is_refused_with_a_hint, state_without_artifact_owners_still_loads}`。手動確認: 開発機の P1 `data/state.json`（210 KiB、function 3 / revision 27 / invocation 54 / attempt 36 / environment 54）の**コピー**を gateway で 2 回起動し、1 回目で全行を取り込み rename、2 回目は再 import しないことを確認（自動化していない） |
+| 10 | expand / contract と index 設計のレビュー | 実装済み（設計と規則の文書化、index 利用のテスト） / 未検証（第三者レビュー、10k 行での計測） | `sqlite/migrations/001_initial.sql` 冒頭の規則と各 index の用途コメント、`sqlite/migrations.rs` の expand → 切り替え → contract の規則、`002_output_retention.sql`（expand のみ）、`sqlite/tests.rs::pool_lookups_use_their_indexes`（`EXPLAIN QUERY PLAN`）。contract migration の実例はまだ無い |
+| 11 | 入出力本文を無制限に DB 保存しない（参照・digest・保持期限） | 実装済み | 入力は digest とサイズのみ。出力は `[invoke] inline_output_max_bytes` 以下だけ本文、store も `limits.max_response_bytes` 超を拒否（`contract_tests.rs::inline_output_is_bounded`）。`[store] output_retention_seconds`（既定 7 日）後に digest へ置換（`sqlite/tests.rs::inline_output_is_replaced_by_its_digest_after_retention`）。置換後は replay / 詳細 API が出力本文を返さない |
+| 12 | secret を DB に保存しない | 実装済み | domain の行に secret 値の field が無い。`pipeline.rs::happy_path_records_timings_evidence_secrets_and_cleanup`（`state.db` と `-wal` の bytes に secret 値が無い）、E2E step 27（`state.db` / `state.db-wal` を検査） |
+| 13 | DB file の権限 | 実装済み（新規作成時 0600） / 未検証（Linux 実機） | `sqlite/tests.rs::the_database_file_is_private_to_its_owner`（macOS で実行）、`docs/threat-model.md` §14-4 |
+| 14 | TiDB | 未着手 | ADR-0003 で単一 host は SQLite と決定。TiDB 互換は主張しない。変わる点は ADR-0003「TiDB（MySQL protocol）adapter にするときに変わるもの」 |
+| 15 | 同じ `data_dir` を複数 gateway が同時に使う / lease の期限評価（ADR-0003 A1〜A4, A6, A7） | 未着手 / 未検証 | 起動時 reconcile は P1 と同じく非 terminal をすべて settle するため、複数 gateway の同時使用は対象外。ADR-0003「決定・受入条件との差分」 |
 
 ## PLT-4619 関数管理 API・tenant 認可・execution role
 
@@ -332,7 +355,7 @@ KVM の記録に共通する制約:
 | baseline profile どおりの測定（N ≥ 20、中央値・p95、hello / http-axum / cpu-burn） | 未検証 | 記録は E2E 1 回分（11 attempt）と fc-smoke 2 回 |
 | 別開発者・別 host による追試 | 未着手 | 記録は 1 人・1 host |
 | self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未着手 | runner が未用意（workflow のコメント） |
-| TiDB 永続化と migration（PLT-4618） | 未着手 | P1 非対象 |
+| TiDB 永続化（PLT-4618） | 未着手 | ADR-0003 で単一 host は埋め込み SQLite（`state.db`、migration 実装済み）と決定。TiDB は将来の adapter |
 | egress 制御（restricted / public-web）と、cgroup 等による host 側の資源強制 | 未着手 | P1 は NIC を付けない egress none（M8 実測済み）、`machine-config` の vCPU / memory（M9 実測済み）、scratch drive の大きさによる ephemeral storage（PLT-4622 で実測済み）まで。VMM への host 側 cgroup、drive の `rate_limiter`、2 tenant 同居時の干渉は未着手 |
 | Kata / Cloud Hypervisor adapter | 未着手 | ADR-0001 で後続 adapter と決めた |
 | OCI image の pull・実行 | 未着手 | P1 非対象（参照の受理と理由付き `Failed` だけ） |

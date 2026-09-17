@@ -86,6 +86,20 @@ cancel_grace_ms = 100
     )
 }
 
+/// Everything the ledger holds on disk: `state.db` and its write-ahead log.
+/// Row bodies are stored as plain JSON text, so a value that reached the
+/// ledger shows up here.
+fn ledger_bytes(app: &Application) -> String {
+    let db = app.store.path().expect("a durable store").to_path_buf();
+    let mut bytes = Vec::new();
+    for suffix in ["", "-wal"] {
+        if let Ok(b) = std::fs::read(format!("{}{suffix}", db.display())) {
+            bytes.extend(b);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 struct Harness {
     app: Arc<Application>,
     fake: Arc<FakeExecutionProvider>,
@@ -341,7 +355,11 @@ async fn happy_path_records_timings_evidence_secrets_and_cleanup() {
     assert!(usage.bytes_out_total > 0);
 
     // secrets never reach the ledger on disk
-    let state = std::fs::read_to_string(h.app.store.persist_path().unwrap()).unwrap();
+    let state = ledger_bytes(&h.app);
+    assert!(
+        state.contains(function.id.as_str()),
+        "the ledger is readable"
+    );
     assert!(!state.contains("demo-secret-value-a"));
     assert_eq!(h.app.invoke.in_flight_count(), 0);
 }
@@ -1055,7 +1073,7 @@ async fn invalid_idempotency_key_and_trace_id_are_rejected_without_side_effects(
             .unwrap()
             .is_empty()
     );
-    let state = std::fs::read_to_string(h.app.store.persist_path().unwrap()).unwrap();
+    let state = ledger_bytes(&h.app);
     assert!(
         !state.contains(&long_key),
         "the rejected key was not stored"
@@ -1123,20 +1141,23 @@ async fn dangling_idempotency_key_is_healed_on_restart() {
     let (function, _) = deploy(&h, &h.a, "healed").await;
     let payload = serde_json::json!({"retry": true});
 
-    // A state file written by a version that bound keys before acceptance:
-    // the key points at an invocation that was never recorded.
-    let path = h.app.store.persist_path().unwrap().to_path_buf();
-    let mut state: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    state["idempotency"]
-        .as_array_mut()
-        .unwrap()
-        .push(serde_json::json!([
-            {"tenant_id": TENANT_A, "function_id": function.id.to_string(), "key": "stale"},
-            {"invocation_id": InvocationId::generate().to_string(),
-             "input_digest": Sha256Digest::of_bytes(&serde_json::to_vec(&payload).unwrap()).to_string()}
-        ]));
-    std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+    // A ledger written by a version that bound keys before acceptance: the
+    // key points at an invocation that was never recorded. (The store never
+    // writes such a row itself; it is planted directly in the database.)
+    let path = h.app.store.path().unwrap().to_path_buf();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute(
+        "INSERT INTO idempotency (tenant_id, function_id, idem_key, invocation_id, input_digest) \
+         VALUES (?1, ?2, 'stale', ?3, ?4)",
+        [
+            TENANT_A.to_string(),
+            function.id.to_string(),
+            InvocationId::generate().to_string(),
+            Sha256Digest::of_bytes(&serde_json::to_vec(&payload).unwrap()).to_string(),
+        ],
+    )
+    .unwrap();
+    drop(conn);
 
     // Restart on the same data_dir.
     let config = GatewayConfig::from_toml(&config_toml(h.dir.path(), "dev", "")).unwrap();
@@ -2653,7 +2674,7 @@ async fn a_pooled_environment_is_reclaimed_after_a_restart() {
     let pooled = attempt_of(&first).environment_id.clone();
     assert_eq!(environment_state(&h, &pooled), EnvironmentState::Idle);
     assert_eq!(h.fake.running(), vec![pooled.clone()]);
-    h.app.store.persist_now().unwrap();
+    h.app.store.flush().unwrap();
 
     // Restart on the same data_dir. The host (the fake) still runs the
     // environment; the new process holds no session to it.

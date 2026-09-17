@@ -547,10 +547,12 @@ secrets_not_leaked() {
   case "$data_dir" in /*) ;; *) data_dir="$REPO_ROOT/${data_dir#./}" ;; esac
   while IFS= read -r v; do
     [ -n "$v" ] || continue
-    for target in "$GATEWAY_LOG" "$EVIDENCE_DIR" "$data_dir/state.json"; do
+    # The ledger is state.db plus its write-ahead log (row bodies are plain
+    # JSON text inside the pages); state.json only exists before its import.
+    for target in "$GATEWAY_LOG" "$EVIDENCE_DIR" "$data_dir/state.db" "$data_dir/state.db-wal" "$data_dir/state.json"; do
       [ -e "$target" ] || continue
       checked=$((checked + 1))
-      if grep -rqF -- "$v" "$target"; then
+      if grep -arqF -- "$v" "$target"; then
         echo "a configured secret value was found in $target" >&2
         hits=$((hits + 1))
       fi

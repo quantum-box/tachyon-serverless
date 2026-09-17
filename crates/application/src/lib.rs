@@ -19,6 +19,7 @@ pub mod services;
 pub use app::{Application, BootstrapOptions, ProviderFactory};
 pub use config::{
     GatewayConfig, PoolConfig, Profile, ProviderConfig, ProviderKindConfig, ReconcileConfig,
+    StoreBackend, StoreConfig,
 };
 pub use error::AppError;
 pub use services::{

@@ -5,7 +5,7 @@
 
 listen = "127.0.0.1:8080"
 profile = "dev"                # dev | production
-data_dir = "./data"            # artifacts/ と state.json の置き場所
+data_dir = "./data"            # artifacts/ と state.db（台帳）の置き場所
 
 [provider]
 kind = "process"               # process | firecracker（fake は設定からは選べない）
@@ -50,6 +50,16 @@ value = "demo-secret-value-a"
 tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
 binding_ref = "demo-secret"
 value = "demo-secret-value-b"
+
+# 台帳（Function / Revision / Alias / Invocation / Attempt / Environment / Lease）。
+# 既定は <data_dir>/state.db（埋め込み SQLite、WAL、前進のみの migration）。
+# 旧版の <data_dir>/state.json があれば初回起動時に一度だけ取り込み、
+# state.json.imported-<UTC> に rename する（docs/adr/0003-execution-state-persistence.md）。
+# secret の値は台帳に書かない。invocation の入力は digest だけ、出力は
+# [invoke] inline_output_max_bytes 以下のときだけ本文を持ち、保持期限を過ぎると digest に置き換える。
+[store]
+backend = "sqlite"                 # sqlite | memory（memory は再起動で全て消える）
+output_retention_seconds = 604800  # インライン出力の保持期限（7 日）。0 は無期限
 
 # 起動時の後始末。既定は true で、台帳の収束と孤児環境の回収を listener を
 # 開ける前に行う（docs/architecture.md §4「起動時の後始末」）。
