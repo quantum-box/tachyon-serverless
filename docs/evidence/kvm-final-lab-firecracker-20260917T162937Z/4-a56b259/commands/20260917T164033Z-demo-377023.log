@@ -1,0 +1,321 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh --provider firecracker demo all
+# started:  2026-09-17T16:40:33Z
+# lab_dir:  /home/takanorifukuyama.guest/lab/.lab
+# lab_id:   lab-6c6786c8
+# host:     Linux 7.0.0-31-generic aarch64 user=takanorifukuyama
+# git:      a56b259d4f2cdc0120dced1040a155691d4951cf
+2026-09-17T16:40:33Z demo all: lab lab-6c6786c8 provider firecracker api http://127.0.0.1:58287 outputs /home/takanorifukuyama.guest/lab/.lab/demo/20260917T164033Z-all
+2026-09-17T16:40:33Z 
+2026-09-17T16:40:33Z == P1: register -> publish -> sync invoke -> logs -> rollback (provider firecracker) ==
+2026-09-17T16:40:33Z + tsls provider --json
+2026-09-17T16:40:33Z PASS  p1.provider_kind                                           kind=firecracker isolation=micro_vm dev_only=false
+2026-09-17T16:40:33Z PASS  p1.provider_is_microvm                                     isolation=micro_vm dev_only=false
+2026-09-17T16:40:33Z + tsls functions create --name hello --description lab demo (lab-6c6786c8) --json
+2026-09-17T16:40:33Z PASS  p1.function_registered                                     hello=fn_01m2r3vhmwhzxtp6d192sqv2wg
+2026-09-17T16:40:33Z + tsls functions deploy --function hello --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --json --env GREETING=v1 --secret DEMO_SECRET=demo-secret --description lab v1
+2026-09-17T16:40:33Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello (1432512 bytes, arch aarch64)
+2026-09-17T16:40:33Z artifact sha256:8f26f2d043c72c24be935f1fc9965b7cf7c5e9605296abc8918fa29ea4cdf076
+2026-09-17T16:40:33Z revision rev_01m2r3vhrrg3xhx593c0f55hyb (#1) created: pending
+2026-09-17T16:40:33Z revision rev_01m2r3vhrrg3xhx593c0f55hyb is preparing
+2026-09-17T16:40:34Z revision rev_01m2r3vhrrg3xhx593c0f55hyb is ready
+2026-09-17T16:40:34Z PASS  p1.publish_v1                                              revision=rev_01m2r3vhrrg3xhx593c0f55hyb (prod -> v1)
+2026-09-17T16:40:34Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T16:40:39Z invocation inv_01m2r3vj0zkd44jz793y82nrzf trace=inv_01m2r3vj0zkd44jz793y82nrzf
+2026-09-17T16:40:39Z PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+2026-09-17T16:40:39Z PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
+2026-09-17T16:40:39Z + tsls functions invocations hello --limit 1 --json
+2026-09-17T16:40:40Z + tsls functions logs --invocation inv_01m2r3vj0zkd44jz793y82nrzf
+2026-09-17T16:40:40Z PASS  p1.logs                                                    invocation=inv_01m2r3vj0zkd44jz793y82nrzf lines=7
+2026-09-17T16:40:40Z + tsls functions invocation inv_01m2r3vj0zkd44jz793y82nrzf --json
+2026-09-17T16:40:40Z PASS  p1.boot_evidence                                           host_pid=377205 guest_boot_id=020f4db5-b29c-4f82-aaa3-44de8b908623 handler_ms=104
+2026-09-17T16:40:40Z PASS  p1.guest_boot_id                                           a microVM reports its own boot id
+2026-09-17T16:40:40Z + tsls functions invoke hello --payload {"fail":true} --json
+2026-09-17T16:40:45Z error: user_error (HTTP 502): invocation inv_01m2r3vqtpn6wj4x68dxt1htee failed: Demo.Failure: fail requested [type=Demo.Failure] [invocation=inv_01m2r3vqtpn6wj4x68dxt1htee] [request=01m2r3vqtpn1hywqqfw62m2gp1]
+2026-09-17T16:40:45Z PASS  p1.user_error                                              exit=3 code=user_error
+2026-09-17T16:40:45Z + tsls functions create --name http-axum --description lab demo (lab-6c6786c8) --json
+2026-09-17T16:40:45Z + tsls functions deploy --function http-axum --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-http-axum --arch aarch64 --json --description lab http
+2026-09-17T16:40:45Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-http-axum (2007296 bytes, arch aarch64)
+2026-09-17T16:40:45Z artifact sha256:321bea7c92d630b6dcdd689d0c7c1b20c5effe56b4bd669a0c614930bc89d4c5
+2026-09-17T16:40:46Z revision rev_01m2r3vxp19vk68gf94kyyb7js (#1) created: pending
+2026-09-17T16:40:46Z revision rev_01m2r3vxp19vk68gf94kyyb7js is preparing
+2026-09-17T16:40:46Z revision rev_01m2r3vxp19vk68gf94kyyb7js is ready
+2026-09-17T16:40:46Z + tsls functions http http-axum --method GET --path / --json
+2026-09-17T16:40:52Z PASS  p1.http_adapter                                            status=200 body=ok
+2026-09-17T16:40:52Z + tsls functions create --name cpu-burn --description lab demo (lab-6c6786c8) --json
+2026-09-17T16:40:52Z + tsls functions deploy --function cpu-burn --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn --arch aarch64 --json --timeout-seconds 2 --no-publish --description lab timeout 2s
+2026-09-17T16:40:52Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+2026-09-17T16:40:52Z artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+2026-09-17T16:40:52Z revision rev_01m2r3w3vg5y1bm7kstj84dgqw (#1) created: pending
+2026-09-17T16:40:52Z revision rev_01m2r3w3vg5y1bm7kstj84dgqw is preparing
+2026-09-17T16:40:52Z revision rev_01m2r3w3vg5y1bm7kstj84dgqw is ready
+2026-09-17T16:40:52Z + tsls functions invoke cpu-burn --payload {"seconds":30,"ignore_sigterm":true} --revision-id rev_01m2r3w3vg5y1bm7kstj84dgqw --json
+2026-09-17T16:41:01Z error: timeout (HTTP 504): invocation inv_01m2r3w43pnz2vyymhvwb65b9m failed: Host.Timeout: handler did not finish within 2 s [type=Host.Timeout] [invocation=inv_01m2r3w43pnz2vyymhvwb65b9m] [request=01m2r3w43ph3by51gd46x8xs4q]
+2026-09-17T16:41:01Z PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
+2026-09-17T16:41:01Z + tsls functions deploy --function hello --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --json --env GREETING=v2 --secret DEMO_SECRET=demo-secret --description lab v2
+2026-09-17T16:41:01Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello (1432512 bytes, arch aarch64)
+2026-09-17T16:41:01Z artifact sha256:8f26f2d043c72c24be935f1fc9965b7cf7c5e9605296abc8918fa29ea4cdf076
+2026-09-17T16:41:01Z revision rev_01m2r3wcv12kvxsww7vednk8wk (#2) created: pending
+2026-09-17T16:41:01Z revision rev_01m2r3wcv12kvxsww7vednk8wk is preparing
+2026-09-17T16:41:01Z revision rev_01m2r3wcv12kvxsww7vednk8wk is ready
+2026-09-17T16:41:01Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T16:41:07Z invocation inv_01m2r3wd3agz1mbwjta1f025wk trace=inv_01m2r3wd3agz1mbwjta1f025wk
+2026-09-17T16:41:07Z PASS  p1.publish_v2                                              revision=rev_01m2r3wcv12kvxsww7vednk8wk greeting=v2
+2026-09-17T16:41:07Z + tsls functions rollback hello
+2026-09-17T16:41:07Z alias       prod
+2026-09-17T16:41:07Z function    fn_01m2r3vhmwhzxtp6d192sqv2wg
+2026-09-17T16:41:07Z from        rev_01m2r3wcv12kvxsww7vednk8wk
+2026-09-17T16:41:07Z to          rev_01m2r3vhrrg3xhx593c0f55hyb
+2026-09-17T16:41:07Z generation  2 -> 3
+2026-09-17T16:41:07Z + tsls functions aliases hello
+2026-09-17T16:41:07Z ALIAS  REVISION                        GENERATION  PREVIOUS                        UPDATED
+2026-09-17T16:41:07Z prod   rev_01m2r3vhrrg3xhx593c0f55hyb  3           rev_01m2r3wcv12kvxsww7vednk8wk  2026-09-17T16:41:07.500Z
+2026-09-17T16:41:07Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T16:41:13Z invocation inv_01m2r3wjnnrhy26ced8bfdw6tv trace=inv_01m2r3wjnnrhy26ced8bfdw6tv
+2026-09-17T16:41:13Z PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
+2026-09-17T16:41:13Z + tsls (tenant B) functions get fn_01m2r3vhmwhzxtp6d192sqv2wg --json
+2026-09-17T16:41:13Z error: not_found (HTTP 404): not found: function not found [request=01m2r3wrafmgy9xmp4yg0zcavx]
+2026-09-17T16:41:13Z PASS  p1.other_tenant_404                                        tenant B get fn_01m2r3vhmwhzxtp6d192sqv2wg: exit=2 code=not_found
+2026-09-17T16:41:13Z + tsls (tenant B) functions invoke fn_01m2r3vhmwhzxtp6d192sqv2wg --payload {} --json
+2026-09-17T16:41:13Z error: not_found (HTTP 404): not found: function not found [request=01m2r3wranfrzqb1193df52fjg]
+2026-09-17T16:41:13Z PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
+2026-09-17T16:41:14Z + tsls capacity --json
+2026-09-17T16:41:14Z PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+2026-09-17T16:41:14Z 
+2026-09-17T16:41:14Z == P2: burst -> scale to zero -> alias switch -> placement label -> metrics (provider firecracker) ==
+2026-09-17T16:41:14Z + tsls functions deploy --function cpu-burn --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn --arch aarch64 --json --max-concurrency 2 --description lab burst
+2026-09-17T16:41:14Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+2026-09-17T16:41:14Z artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+2026-09-17T16:41:14Z revision rev_01m2r3wsf61vq8rsqw8wyvsqwe (#2) created: pending
+2026-09-17T16:41:14Z revision rev_01m2r3wsf61vq8rsqw8wyvsqwe is preparing
+2026-09-17T16:41:14Z revision rev_01m2r3wsf61vq8rsqw8wyvsqwe is ready
+2026-09-17T16:41:14Z PASS  p2.revision_max_concurrency                                revision=rev_01m2r3wsf61vq8rsqw8wyvsqwe max_concurrency=2
+2026-09-17T16:41:14Z + 5 concurrent: tsls functions invoke cpu-burn --payload {"seconds":1} (revision max_concurrency 2)
+2026-09-17T16:41:34Z PASS  p2.burst_all_served                                        5/5 invocations exit 0 (the rest waited in the queue)
+2026-09-17T16:41:34Z PASS  p2.burst_bounded                                           max environments of the revision observed=2 (limit 2; samples in p2-capacity-samples.ndjson)
+2026-09-17T16:41:35Z + tsls capacity --json
+2026-09-17T16:41:35Z PASS  p2.scale_to_zero                                           environments of rev_01m2r3wsf61vq8rsqw8wyvsqwe=0; zero environments is not zero host cost: the gateway, its store and the node keep running
+2026-09-17T16:41:35Z + tsls functions invoke cpu-burn --payload {"seconds":0} --json
+2026-09-17T16:41:40Z invocation inv_01m2r3xdh4t9vfw7bxpg4gc8be trace=inv_01m2r3xdh4t9vfw7bxpg4gc8be
+2026-09-17T16:41:40Z PASS  p2.cold_reaccess                                           exit=0 (a new environment is started for the request)
+2026-09-17T16:41:40Z + tsls functions deploy --function hello --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --json --env GREETING=v3 --secret DEMO_SECRET=demo-secret --no-publish --description lab v3 (not published)
+2026-09-17T16:41:40Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello (1432512 bytes, arch aarch64)
+2026-09-17T16:41:40Z artifact sha256:8f26f2d043c72c24be935f1fc9965b7cf7c5e9605296abc8918fa29ea4cdf076
+2026-09-17T16:41:40Z revision rev_01m2r3xk5m2af5182msff268rq (#3) created: pending
+2026-09-17T16:41:40Z revision rev_01m2r3xk5m2af5182msff268rq is preparing
+2026-09-17T16:41:41Z revision rev_01m2r3xk5m2af5182msff268rq is ready
+2026-09-17T16:41:41Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T16:41:46Z invocation inv_01m2r3xkdr1vr39w96sy3vq87n trace=inv_01m2r3xkdr1vr39w96sy3vq87n
+2026-09-17T16:41:46Z + tsls functions aliases hello --json
+2026-09-17T16:41:46Z + tsls functions alias-set hello --alias prod --revision-id rev_01m2r3xk5m2af5182msff268rq --expected-generation 3
+2026-09-17T16:41:46Z alias       prod
+2026-09-17T16:41:46Z function    fn_01m2r3vhmwhzxtp6d192sqv2wg
+2026-09-17T16:41:46Z revision    rev_01m2r3xk5m2af5182msff268rq
+2026-09-17T16:41:46Z generation  4
+2026-09-17T16:41:46Z previous    rev_01m2r3vhrrg3xhx593c0f55hyb
+2026-09-17T16:41:46Z updated_at  2026-09-17T16:41:46.878Z
+2026-09-17T16:41:46Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T16:41:52Z invocation inv_01m2r3xs449etvzrw1hgq2h2cx trace=inv_01m2r3xs449etvzrw1hgq2h2cx
+2026-09-17T16:41:52Z PASS  p2.alias_switch                                            prod generation 3 -> v3: greeting before=v1 after=v3
+2026-09-17T16:41:52Z + tsls functions rollback hello
+2026-09-17T16:41:52Z alias       prod
+2026-09-17T16:41:52Z function    fn_01m2r3vhmwhzxtp6d192sqv2wg
+2026-09-17T16:41:52Z from        rev_01m2r3xk5m2af5182msff268rq
+2026-09-17T16:41:52Z to          rev_01m2r3vhrrg3xhx593c0f55hyb
+2026-09-17T16:41:52Z generation  4 -> 5
+2026-09-17T16:41:52Z + tsls functions invoke hello --payload {"name":"lab"} --json
+2026-09-17T16:41:58Z invocation inv_01m2r3xyt2tnad8a0nwb1zt4as trace=inv_01m2r3xyt2tnad8a0nwb1zt4as
+2026-09-17T16:41:58Z PASS  p2.alias_rollback                                          greeting=v1 (back to v1)
+2026-09-17T16:41:58Z + tsls functions deploy --function hello --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --json --region jp --no-publish --description lab region jp
+2026-09-17T16:41:58Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello (1432512 bytes, arch aarch64)
+2026-09-17T16:41:58Z artifact sha256:8f26f2d043c72c24be935f1fc9965b7cf7c5e9605296abc8918fa29ea4cdf076
+2026-09-17T16:41:58Z revision rev_01m2r3y4kjpknagzgy4hd76c0r (#4) created: pending
+2026-09-17T16:41:58Z revision rev_01m2r3y4kjpknagzgy4hd76c0r is preparing
+2026-09-17T16:41:58Z revision rev_01m2r3y4kjpknagzgy4hd76c0r is ready
+2026-09-17T16:41:58Z + tsls functions invoke hello --payload {"name":"jp"} --revision-id rev_01m2r3y4kjpknagzgy4hd76c0r --json
+2026-09-17T16:42:04Z invocation inv_01m2r3y4vqge9t8zj98hh6275q trace=inv_01m2r3y4vqge9t8zj98hh6275q
+2026-09-17T16:42:04Z PASS  p2.placement_jp_label_admitted                             node label region=jp, revision requires jp: exit=0
+2026-09-17T16:42:04Z + tsls functions deploy --function hello --binary /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --json --region us --no-publish --description lab region us
+2026-09-17T16:42:04Z uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-hello (1432512 bytes, arch aarch64)
+2026-09-17T16:42:04Z artifact sha256:8f26f2d043c72c24be935f1fc9965b7cf7c5e9605296abc8918fa29ea4cdf076
+2026-09-17T16:42:04Z revision rev_01m2r3yah6cz8fvcgd9gxsck00 (#5) created: pending
+2026-09-17T16:42:04Z revision rev_01m2r3yah6cz8fvcgd9gxsck00 is preparing
+2026-09-17T16:42:04Z revision rev_01m2r3yah6cz8fvcgd9gxsck00 is ready
+2026-09-17T16:42:04Z + tsls functions invoke hello --payload {"name":"us"} --revision-id rev_01m2r3yah6cz8fvcgd9gxsck00 --json
+2026-09-17T16:42:04Z error: provider_unavailable (HTTP 503): placement: placement requires region `us` but node `lab-6c6786c8` is in region `jp`; the constraint is never relaxed [request=01m2r3yas8r3gbvmx9pzrsxbnm]
+2026-09-17T16:42:04Z PASS  p2.placement_us_refused                                    exit=6 reason=placement (never relaxed)
+2026-09-17T16:42:04Z NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
+2026-09-17T16:42:04Z + curl -X GET http://127.0.0.1:58287/metrics
+2026-09-17T16:42:04Z PASS  p2.metrics_snapshot                                        HTTP 200, 353 samples -> p2-metrics.prom
+2026-09-17T16:42:04Z tsls_node_in_flight 0
+2026-09-17T16:42:04Z tsls_environments{state="promised"} 0
+2026-09-17T16:42:04Z tsls_environments{state="starting"} 0
+2026-09-17T16:42:04Z tsls_environments{state="busy"} 0
+2026-09-17T16:42:04Z tsls_environments{state="parking"} 0
+2026-09-17T16:42:04Z tsls_environments{state="idle"} 0
+2026-09-17T16:42:04Z tsls_environments{state="draining"} 0
+2026-09-17T16:42:04Z tsls_admission_grants_total{kind="cold"} 16
+2026-09-17T16:42:04Z tsls_admission_grants_total{kind="warm"} 0
+2026-09-17T16:42:04Z tsls_environment_starts_total{result="success"} 16
+2026-09-17T16:42:04Z tsls_environment_starts_total{result="failure"} 0
+2026-09-17T16:42:04Z tsls_scale_events_total{kind="activation",reason="backlog"} 12
+2026-09-17T16:42:04Z tsls_scale_events_total{kind="scale_up",reason="backlog"} 4
+2026-09-17T16:42:04Z tsls_scale_events_total{kind="prestart",reason="none"} 0
+2026-09-17T16:42:04Z tsls_scale_events_total{kind="scale_down",reason="none"} 0
+2026-09-17T16:42:04Z tsls_scale_events_total{kind="scale_to_zero",reason="none"} 0
+2026-09-17T16:42:04Z tsls_scale_events_total{kind="drain",reason="alias_switch"} 4
+2026-09-17T16:42:04Z + curl -X GET http://127.0.0.1:58287/metrics
+2026-09-17T16:42:04Z PASS  p2.metrics_operator_only                                   tenant token -> HTTP 401
+2026-09-17T16:42:04Z 
+2026-09-17T16:42:04Z == P3: invokeAsync -> retries -> dead letter -> redrive -> cron -> webhook -> usage -> budget (provider firecracker) ==
+2026-09-17T16:42:05Z NOTE  firecracker: examples/idempotent-async needs the host file system, so the async demo uses hello ({"fail":true} for the dead letter)
+2026-09-17T16:42:05Z + curl -X POST http://127.0.0.1:58287/v1/functions/fn_01m2r3vhmwhzxtp6d192sqv2wg:invokeAsync --data-binary @/home/takanorifukuyama.guest/lab/.lab/demo/20260917T164033Z-all/p3-async.json
+2026-09-17T16:42:05Z PASS  p3.async_accepted_202                                      HTTP 202 invocation=inv_01m2r3yatfs6eqy1h233kcp6b9 (committed before the 202)
+2026-09-17T16:42:11Z PASS  p3.async_succeeded                                         status=succeeded (published to NATS JetStream, run by the dispatcher)
+2026-09-17T16:42:11Z + curl -X POST http://127.0.0.1:58287/v1/functions/fn_01m2r3vhmwhzxtp6d192sqv2wg:invokeAsync --data-binary @/home/takanorifukuyama.guest/lab/.lab/demo/20260917T164033Z-all/p3-async-large.json
+2026-09-17T16:42:17Z PASS  p3.async_large_input_object_store                          HTTP 202 status=succeeded objects under data/objects: 0 -> 2 (AES-256-GCM, lab key)
+2026-09-17T16:42:17Z PASS  p3.object_store_ciphertext                                 the 100 KiB plaintext pad is not readable in data/objects
+2026-09-17T16:42:17Z + curl -X POST http://127.0.0.1:58287/v1/functions/fn_01m2r3vhmwhzxtp6d192sqv2wg:invokeAsync --data-binary @/home/takanorifukuyama.guest/lab/.lab/demo/20260917T164033Z-all/p3-async.json
+2026-09-17T16:42:34Z + curl -X GET http://127.0.0.1:58287/v1/invocations/inv_01m2r3ypryq4jp2dgxjntbvfh0
+2026-09-17T16:42:34Z PASS  p3.retries_then_dead_letter                                status=failed attempts=3 (max_attempts 3) dead_letter=dlq_01m2r3z7xzgmb9nc40d920rn02
+2026-09-17T16:42:34Z + tsls dead-letters list hello --json
+2026-09-17T16:42:34Z PASS  p3.dead_letter_listed                                      reason=attempts_exhausted
+2026-09-17T16:42:34Z + tsls dead-letters redrive dlq_01m2r3z7xzgmb9nc40d920rn02 --reason lab demo without the role --json
+2026-09-17T16:42:34Z error: forbidden (HTTP 403): forbidden: role `redrive` is required [request=01m2r3z7z3wsyjjx8tg99cfck4]
+2026-09-17T16:42:34Z PASS  p3.redrive_needs_role                                      deploy+invoke token: exit=2 code=forbidden
+2026-09-17T16:42:34Z + tsls (tenant A on-call: invoke+redrive) dead-letters redrive dlq_01m2r3z7xzgmb9nc40d920rn02 --reason lab demo: downstream fixed --json
+2026-09-17T16:42:34Z PASS  p3.redrive_accepted                                        exit=0 new invocation=inv_01m2r3z7z9a5cwyqaheg3pzxb3 requested_by=lab-a-oncall
+2026-09-17T16:42:53Z PASS  p3.redrive_ran                                             status=failed (hello {"fail":true} fails again by design; the redrive itself is what is shown)
+2026-09-17T16:42:53Z + tsls triggers create hello --name lab-cron-164204fa84 --kind cron --schedule */2 * * * * * --timezone Asia/Tokyo --payload {"name":"cron"} --missed-run skip --json
+2026-09-17T16:42:53Z PASS  p3.cron_created                                            trigger=trg_01m2r3zswadgyje6v1gz0aa5fm schedule='*/2 * * * * *' (6 fields: every 2 s)
+2026-09-17T16:43:00Z + tsls triggers update hello trg_01m2r3zswadgyje6v1gz0aa5fm --disable
+2026-09-17T16:43:00Z id                 trg_01m2r3zswadgyje6v1gz0aa5fm
+2026-09-17T16:43:00Z function_id        fn_01m2r3vhmwhzxtp6d192sqv2wg
+2026-09-17T16:43:00Z name               lab-cron-164204fa84
+2026-09-17T16:43:00Z kind               cron
+2026-09-17T16:43:00Z status             disabled
+2026-09-17T16:43:00Z status_reason      -
+2026-09-17T16:43:00Z generation         2
+2026-09-17T16:43:00Z alias              -
+2026-09-17T16:43:00Z revision_id        -
+2026-09-17T16:43:00Z expression         */2 * * * * *
+2026-09-17T16:43:00Z timezone           Asia/Tokyo
+2026-09-17T16:43:00Z missed_run_policy  {"kind":"skip"}
+2026-09-17T16:43:00Z next_fire_at       -
+2026-09-17T16:43:00Z last_scheduled_at  2026-09-17T16:43:00.000Z
+2026-09-17T16:43:00Z updated_at         2026-09-17T16:43:00.206Z
+2026-09-17T16:43:00Z + tsls triggers fires hello trg_01m2r3zswadgyje6v1gz0aa5fm --limit 20 --json
+2026-09-17T16:43:00Z PASS  p3.cron_fired                                              accepted fires in ~7 s: 4 (then disabled)
+2026-09-17T16:43:08Z PASS  p3.cron_fire_ran                                           first fire invocation=inv_01m2r400h1smj0277z2wdzej95 status=succeeded
+2026-09-17T16:43:08Z + tsls triggers delete hello trg_01m2r3zswadgyje6v1gz0aa5fm
+2026-09-17T16:43:08Z deleted trg_01m2r3zswadgyje6v1gz0aa5fm
+2026-09-17T16:43:08Z + tsls triggers create hello --name lab-hook-164204fa84 --kind webhook --max-body-bytes 4096 --json
+2026-09-17T16:43:08Z PASS  p3.webhook_created                                         trigger=trg_01m2r408hb3x4df9b04hc1vneb secret shown once (kept in memory only, never written)
+2026-09-17T16:43:08Z + tsls triggers webhook-sign --secret-env LAB_WEBHOOK_SECRET --timestamp 1789663388 --body-file p3-webhook-body.json
+2026-09-17T16:43:08Z + curl -X POST http://127.0.0.1:58287/v1/hooks/trg_01m2r408hb3x4df9b04hc1vneb (x-tachyon-webhook-timestamp, x-tachyon-webhook-signature, x-tachyon-webhook-id)
+2026-09-17T16:43:08Z PASS  p3.webhook_signed_202                                      HTTP 202
+2026-09-17T16:43:08Z PASS  p3.webhook_bad_signature_401                               HTTP 401 (no invocation)
+2026-09-17T16:43:09Z + tsls triggers fires hello trg_01m2r408hb3x4df9b04hc1vneb --json
+2026-09-17T16:43:14Z PASS  p3.webhook_fire_ran                                        invocation=inv_01m2r408hyhm54kfssdwc4qfjy status=succeeded
+2026-09-17T16:43:14Z + tsls triggers delete hello trg_01m2r408hb3x4df9b04hc1vneb
+2026-09-17T16:43:14Z deleted trg_01m2r408hb3x4df9b04hc1vneb
+2026-09-17T16:43:16Z + tsls usage --group-by function --json
+2026-09-17T16:43:16Z PASS  p3.usage_report                                            lines=3 attempts=29 retries=4 provisional=true billing_enabled=false
+2026-09-17T16:43:16Z + tsls usage --group-by function
+2026-09-17T16:43:16Z PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+2026-09-17T16:43:16Z tenant              tn_01hzzzzzzzzzzzzzzzzzzzzzza
+2026-09-17T16:43:16Z range               2026-09-01T00:00:00+00:00 .. 2026-09-17T16:43:16.397948955+00:00
+2026-09-17T16:43:16Z price table         provisional-dev-2026-09-v1 (effective 2026-09-01T00:00:00+00:00, JPY; billable: user_init_ms, handler_ms)
+2026-09-17T16:43:16Z collected through   2026-09-17T16:43:16.223684092+00:00
+2026-09-17T16:43:16Z unjournaled events  0
+2026-09-17T16:43:16Z FUNCTION                       DAY  INVOCATIONS  ATTEMPTS  RETRIES  TIMEOUTS  HANDLER MS  BILLABLE MS  UNMETERED  CHARGE (PROVISIONAL)
+2026-09-17T16:43:16Z fn_01m2r3vhmwhzxtp6d192sqv2wg  -    17           21        4        0         2303        11811        0          0.018026 JPY
+2026-09-17T16:43:16Z fn_01m2r3vxgqskxv0qjexg0crx36  -    1            1         0        0         113         604          0          0.000849 JPY
+2026-09-17T16:43:16Z fn_01m2r3w3qmz2cs92p6afctt8ff  -    7            7         0        1         7753        10959        0          0.015013 JPY
+2026-09-17T16:43:16Z TOTAL                          -    25           29        4        1         10169       23374        0          0.033888 JPY
+2026-09-17T16:43:16Z + wrote /home/takanorifukuyama.guest/lab/.lab/config/budgets.toml (cpu-burn hard_limit_micros = 1)
+2026-09-17T16:43:16Z + tsls functions invoke cpu-burn --payload {"seconds":0} --json
+2026-09-17T16:43:16Z error: budget_exhausted (HTTP 429): budget: the function budget's hard limit (1 micro-units) does not admit this invocation's maximum charge of 183840 (15013 already committed in 2026-09) [type=Host.BudgetExhausted] [request=01m2r40ghxp5jeqy0v0w5xgpnx]
+2026-09-17T16:43:16Z PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
+2026-09-17T16:43:16Z + tsls budget --json
+2026-09-17T16:43:16Z + tsls budget
+2026-09-17T16:43:16Z PROVISIONAL - provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype
+2026-09-17T16:43:16Z tenant         tn_01hzzzzzzzzzzzzzzzzzzzzzza
+2026-09-17T16:43:16Z enforced       true
+2026-09-17T16:43:16Z period         2026-09 (2026-09-01T00:00:00+00:00 .. 2026-10-01T00:00:00+00:00, calendar_month_utc)
+2026-09-17T16:43:16Z price table    provisional-dev-2026-09-v1 (JPY)
+2026-09-17T16:43:16Z configuration  valid (generation 27)
+2026-09-17T16:43:16Z admitting      true
+2026-09-17T16:43:16Z SCOPE                          HARD LIMIT      RESERVED  SETTLED   UNMETERED HOLD  REMAINING      ACTIVE  REFUSALS  ALERTS
+2026-09-17T16:43:16Z tenant                         1000000.000000  0.000000  0.033885  0.000000        999999.966115  0       1         -
+2026-09-17T16:43:16Z fn_01m2r3vhmwhzxtp6d192sqv2wg  -               0.000000  0.018023  0.000000        -              0       0         -
+2026-09-17T16:43:16Z fn_01m2r3vxgqskxv0qjexg0crx36  -               0.000000  0.000849  0.000000        -              0       0         -
+2026-09-17T16:43:16Z fn_01m2r3w3qmz2cs92p6afctt8ff  0.000001        0.000000  0.015013  0.000000        0.000000       0       1         -
+2026-09-17T16:43:16Z + tsls functions invoke hello --payload {"name":"other"} --json
+2026-09-17T16:43:22Z invocation inv_01m2r40gje49kk7e89r5as2sme trace=inv_01m2r40gje49kk7e89r5as2sme
+2026-09-17T16:43:22Z PASS  p3.budget_is_per_function                                  hello still admitted: exit=0
+2026-09-17T16:43:22Z + restored /home/takanorifukuyama.guest/lab/.lab/config/budgets.toml (default only)
+2026-09-17T16:43:22Z + tsls functions invoke cpu-burn --payload {"seconds":0} --json
+2026-09-17T16:43:27Z invocation inv_01m2r40p4e7fmwcw6mz4sh2g30 trace=inv_01m2r40p4e7fmwcw6mz4sh2g30
+2026-09-17T16:43:27Z PASS  p3.budget_released                                         exit=0 after the limit was removed
+2026-09-17T16:43:27Z NOTE  budgets and usage are provisional (dev price table); billing is disabled and nothing is charged. Local only: no cloud spend.
+2026-09-17T16:43:27Z 
+2026-09-17T16:43:27Z == secret values absent from logs, demo outputs and the ledger ==
+2026-09-17T16:43:27Z PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+2026-09-17T16:43:27Z 
+2026-09-17T16:43:27Z results (/home/takanorifukuyama.guest/lab/.lab/demo/20260917T164033Z-all/results.txt):
+2026-09-17T16:43:27Z PASS  p1.provider_kind                                           kind=firecracker isolation=micro_vm dev_only=false
+2026-09-17T16:43:27Z PASS  p1.provider_is_microvm                                     isolation=micro_vm dev_only=false
+2026-09-17T16:43:27Z PASS  p1.function_registered                                     hello=fn_01m2r3vhmwhzxtp6d192sqv2wg
+2026-09-17T16:43:27Z PASS  p1.publish_v1                                              revision=rev_01m2r3vhrrg3xhx593c0f55hyb (prod -> v1)
+2026-09-17T16:43:27Z PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+2026-09-17T16:43:27Z PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
+2026-09-17T16:43:27Z PASS  p1.logs                                                    invocation=inv_01m2r3vj0zkd44jz793y82nrzf lines=7
+2026-09-17T16:43:27Z PASS  p1.boot_evidence                                           host_pid=377205 guest_boot_id=020f4db5-b29c-4f82-aaa3-44de8b908623 handler_ms=104
+2026-09-17T16:43:27Z PASS  p1.guest_boot_id                                           a microVM reports its own boot id
+2026-09-17T16:43:27Z PASS  p1.user_error                                              exit=3 code=user_error
+2026-09-17T16:43:27Z PASS  p1.http_adapter                                            status=200 body=ok
+2026-09-17T16:43:27Z PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
+2026-09-17T16:43:27Z PASS  p1.publish_v2                                              revision=rev_01m2r3wcv12kvxsww7vednk8wk greeting=v2
+2026-09-17T16:43:27Z PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
+2026-09-17T16:43:27Z PASS  p1.other_tenant_404                                        tenant B get fn_01m2r3vhmwhzxtp6d192sqv2wg: exit=2 code=not_found
+2026-09-17T16:43:27Z PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
+2026-09-17T16:43:27Z PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+2026-09-17T16:43:27Z PASS  p2.revision_max_concurrency                                revision=rev_01m2r3wsf61vq8rsqw8wyvsqwe max_concurrency=2
+2026-09-17T16:43:27Z PASS  p2.burst_all_served                                        5/5 invocations exit 0 (the rest waited in the queue)
+2026-09-17T16:43:27Z PASS  p2.burst_bounded                                           max environments of the revision observed=2 (limit 2; samples in p2-capacity-samples.ndjson)
+2026-09-17T16:43:27Z PASS  p2.scale_to_zero                                           environments of rev_01m2r3wsf61vq8rsqw8wyvsqwe=0; zero environments is not zero host cost: the gateway, its store and the node keep running
+2026-09-17T16:43:27Z PASS  p2.cold_reaccess                                           exit=0 (a new environment is started for the request)
+2026-09-17T16:43:27Z PASS  p2.alias_switch                                            prod generation 3 -> v3: greeting before=v1 after=v3
+2026-09-17T16:43:27Z PASS  p2.alias_rollback                                          greeting=v1 (back to v1)
+2026-09-17T16:43:27Z PASS  p2.placement_jp_label_admitted                             node label region=jp, revision requires jp: exit=0
+2026-09-17T16:43:27Z PASS  p2.placement_us_refused                                    exit=6 reason=placement (never relaxed)
+2026-09-17T16:43:27Z NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
+2026-09-17T16:43:27Z PASS  p2.metrics_snapshot                                        HTTP 200, 353 samples -> p2-metrics.prom
+2026-09-17T16:43:27Z PASS  p2.metrics_operator_only                                   tenant token -> HTTP 401
+2026-09-17T16:43:27Z NOTE  firecracker: examples/idempotent-async needs the host file system, so the async demo uses hello ({"fail":true} for the dead letter)
+2026-09-17T16:43:27Z PASS  p3.async_accepted_202                                      HTTP 202 invocation=inv_01m2r3yatfs6eqy1h233kcp6b9 (committed before the 202)
+2026-09-17T16:43:27Z PASS  p3.async_succeeded                                         status=succeeded (published to NATS JetStream, run by the dispatcher)
+2026-09-17T16:43:27Z PASS  p3.async_large_input_object_store                          HTTP 202 status=succeeded objects under data/objects: 0 -> 2 (AES-256-GCM, lab key)
+2026-09-17T16:43:27Z PASS  p3.object_store_ciphertext                                 the 100 KiB plaintext pad is not readable in data/objects
+2026-09-17T16:43:27Z PASS  p3.retries_then_dead_letter                                status=failed attempts=3 (max_attempts 3) dead_letter=dlq_01m2r3z7xzgmb9nc40d920rn02
+2026-09-17T16:43:27Z PASS  p3.dead_letter_listed                                      reason=attempts_exhausted
+2026-09-17T16:43:27Z PASS  p3.redrive_needs_role                                      deploy+invoke token: exit=2 code=forbidden
+2026-09-17T16:43:27Z PASS  p3.redrive_accepted                                        exit=0 new invocation=inv_01m2r3z7z9a5cwyqaheg3pzxb3 requested_by=lab-a-oncall
+2026-09-17T16:43:27Z PASS  p3.redrive_ran                                             status=failed (hello {"fail":true} fails again by design; the redrive itself is what is shown)
+2026-09-17T16:43:27Z PASS  p3.cron_created                                            trigger=trg_01m2r3zswadgyje6v1gz0aa5fm schedule='*/2 * * * * *' (6 fields: every 2 s)
+2026-09-17T16:43:27Z PASS  p3.cron_fired                                              accepted fires in ~7 s: 4 (then disabled)
+2026-09-17T16:43:27Z PASS  p3.cron_fire_ran                                           first fire invocation=inv_01m2r400h1smj0277z2wdzej95 status=succeeded
+2026-09-17T16:43:27Z PASS  p3.webhook_created                                         trigger=trg_01m2r408hb3x4df9b04hc1vneb secret shown once (kept in memory only, never written)
+2026-09-17T16:43:27Z PASS  p3.webhook_signed_202                                      HTTP 202
+2026-09-17T16:43:27Z PASS  p3.webhook_bad_signature_401                               HTTP 401 (no invocation)
+2026-09-17T16:43:27Z PASS  p3.webhook_fire_ran                                        invocation=inv_01m2r408hyhm54kfssdwc4qfjy status=succeeded
+2026-09-17T16:43:27Z PASS  p3.usage_report                                            lines=3 attempts=29 retries=4 provisional=true billing_enabled=false
+2026-09-17T16:43:27Z PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
+2026-09-17T16:43:27Z PASS  p3.budget_is_per_function                                  hello still admitted: exit=0
+2026-09-17T16:43:27Z PASS  p3.budget_released                                         exit=0 after the limit was removed
+2026-09-17T16:43:27Z NOTE  budgets and usage are provisional (dev price table); billing is disabled and nothing is charged. Local only: no cloud spend.
+2026-09-17T16:43:27Z PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
+2026-09-17T16:43:27Z 
+2026-09-17T16:43:27Z 49 checks passed, 0 failed
+# finished: 2026-09-17T16:43:27Z exit=0

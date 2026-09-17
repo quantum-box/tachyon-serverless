@@ -1,0 +1,2 @@
+[lab] ERROR: gateway is not running (run: scripts/lab/lab.sh up)
+[lab] transcript: /home/takanorifukuyama.guest/lab/.lab/logs/commands/20260917T163427Z-demo-356063.log (exit 1)

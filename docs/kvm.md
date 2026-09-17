@@ -464,6 +464,27 @@ fake / process provider でだけ確認していた PLT-4634 / 4635 / 4631 / 465
 
 `scripts/e2e/burst.sh` と `zero-scale.sh` は gateway を自分で起動するので、jailer と cgroup required の設定では **スクリプト全体を root で**動かす（`sudo -n env PATH="$PATH" HOME="$HOME" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 ... scripts/e2e/<script>.sh`、build は事前に通常ユーザーで行う）。gateway を `sudo` 経由で起動して SIGSTOP する場合、`sudo` 自身も停止するので SIGCONT は gateway と `sudo` の両方に送る。
 
+### 5.8 KVM 最終検証（2026-09-17、origin/main `9b6f2c8` 以降）
+
+fake / process provider でだけ確認していた検証を、この VM の Firecracker（jailer・cgroup required、gateway は root）で実行した。tree は `9b6f2c8` に試験 harness・lab.sh・文書の commit を足したもの（product の Rust コードは変更なし）。VM 側で使った script は `docs/evidence/kvm-final-scripts/*.txt`、各実行の横に Mac（外から 10 秒ごとの `sysctl vm.loadavg`）と VM の load average、実行後の残留検査（process・cgroup・jail・env dir・tap・netns・nft・ip_forward・disk）を置いた。
+
+| 対象 | 実行したもの | 結果 | 証跡 |
+|---|---|---|---|
+| durable invocation logs（PR #36） | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` | 29/29（step 27 で再起動前後の log が一致） | `docs/evidence/kvm-final-logs-restart-20260917T145357Z/` |
+| PLT-4637 metrics・負荷シナリオ | `scripts/load/scenarios.sh` burst / idle-to-zero / mixed / restart / lifecycle を `[pool]` 有効・`[metrics] bearer_token` の gateway に向けて | 5/5 ok（cgroup の environment_stats、`warm_reuse`・`boot_changed` 0、休止中の idle CPU 0、findings 0、timeline.svg） | `docs/evidence/kvm-final-metrics-load-20260917T150242Z/` |
+| PLT-4640 / 4641 非同期・trigger | `TSLS_PROVIDER=firecracker scripts/queue/async-dispatch-e2e.sh`・`triggers-e2e.sh`（副作用 store は egress restricted の外部 store） | dispatch 40/40（ack wait 4 s の 1 回目は 39/40、理由は証跡）、triggers 39/39 | `docs/evidence/kvm-final-async-triggers-20260917T150658Z/` |
+| PLT-4642 / 4643 usage・budget | `TSLS_PROVIDER=firecracker scripts/usage/usage-e2e.sh`・`budget-e2e.sh`、journal の fsync の A/B | usage 18/18（`EnvironmentStopped` に cgroup の CPU usec・memory.peak）、budget 19/19、durable store の追加遅延は warm の host platform p50 +7 ms（上限値） | `docs/evidence/kvm-final-usage-budget-20260917T151250Z/` |
+| PLT-4646 故障マトリクス | `TSLS_PROVIDER=firecracker scripts/chaos/matrix.sh --only` 6 シナリオ + guest OOM、3 回 | 最終回 6/7。`stale_owner_sync_lease` は 1・2 回目 pass、最終回は凍結した gateway が state.db の lock を持ったまま止まり失敗。reclaim が終わらせた環境の host 原価は未計上 | `docs/evidence/kvm-final-chaos-20260917T152228Z/` |
+| PLT-4647 benchmark | `scripts/kvm/bench.sh`（`BENCH_MAX_CALIBRATION_MS=150`） | 1 回目は混雑で開始拒否、2 回目 41/41 step・714 request 失敗 0 | `docs/evidence/bench-20260917T155921Z/`（比較は `kvm-final-run/summary.txt`、`docs/benchmark.md` §6.6） |
+| PLT-4648 runbook | clean clone で `scripts/lab/lab.sh --provider firecracker` preflight → teardown | origin/main は `up` で失敗、lab.sh を直した clone で demo all 49/49・`orphan check: clean` | `docs/evidence/kvm-final-lab-firecracker-20260917T162937Z/` |
+
+気づいたこと（この VM 固有を含む）:
+
+- provider の `workdir` は jailer の `chroot_base`（既定 `/srv/jailer`）と同じ file system に置く。この VM の `/tmp` は tmpfs なので、`/tmp` の下に workdir を置いた gateway は preflight の `jailer` が失敗して `/readyz` 503 のまま（負荷シナリオの最初の試行）。
+- `/tmp` が tmpfs なので、fsync の計測は `/tmp` では意味がない（0.03 ms）。data_dir は root の ext4 に置く。
+- rsync でコピーした tree に古い `.git` が残っていると、スクリプトが `git rev-parse HEAD` で違う commit を記録する（負荷・非同期の `run.json` / `environment.txt` の `d6e729f`）。途中で `.git` を退避し、`TSLS_COMMIT` を記録するようにした。
+- egress restricted の guest から届く「外部」の宛先は、provider の nftables が node 自身と private / special-purpose の範囲を落とすので、別 network namespace の veth（`scripts/queue/effects-netns.sh`）に置いた。名前を `tsls` で始めると reconcile が孤児 tap として消す。
+
 ## 6. 既知の制約
 
 - host と同じアーキテクチャの guest のみ。`validate_artifact` は ELF の `e_machine` を revision の宣言と host の両方に照合し、`PT_INTERP` があるバイナリ（動的リンク）は `artifact rejected`（rootfs に libc が無い）。

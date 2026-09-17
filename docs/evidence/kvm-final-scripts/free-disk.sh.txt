@@ -1,0 +1,6 @@
+#!/bin/bash
+cd ~/tsls || exit 1
+du -sh target/* 2>/dev/null
+rm -rf target/release target/debug/incremental target/tmp
+sudo rm -rf docs/evidence/bench-* ~/verify/usage-first-attempt
+df -h / | tail -1

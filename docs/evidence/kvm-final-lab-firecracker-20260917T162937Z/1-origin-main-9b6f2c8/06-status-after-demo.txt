@@ -1,0 +1,21 @@
+lab lab-5d68f8c4  provider=firecracker  state=up  dir=/home/takanorifukuyama.guest/lab-main/.lab
+
+STATUS COMPONENT              CHECK                                        DETAIL
+ok    nats-server            process                                      pid 344098
+ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+FAIL  gateway                process                                      not running (lab.sh up)
+ok    gateway                GET /healthz                                 200
+FAIL  gateway                GET /readyz .ready                           false
+FAIL  provider               readyz .preflight (failing checks listed)    firecracker ok=false socket_path_length,egress_network
+ok    dispatcher             readyz .dispatcher.fenced                    false
+FAIL  config-cache           readyz .control_plane.new_invocations        refused config=stale_but_valid
+ok    usage-journal          readyz .usage                                accepting=true journal_healthy=true collector_error=null
+ok    budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=null
+FAIL  ledger                 state.db schema_version = migrations         unreadable/8
+ok    queue                  tsls_async_queue_condition{healthy}          1
+ok    trigger-scheduler      tsls_trigger_scheduler_owner                 1
+ok    async-dispatcher       tsls_async_dispatch_runs_in_flight           0
+ok    metrics                operator token 200, tenant token 401         401
+ok    object-store           root exists, key 0600, backend filesystem    /home/takanorifukuyama.guest/lab-main/.lab/data/objects
+skip  console                GET /console/                                not enabled (up --console)
+[lab] transcript: /home/takanorifukuyama.guest/lab-main/.lab/logs/commands/20260917T163114Z-status-347068.log (exit 1)

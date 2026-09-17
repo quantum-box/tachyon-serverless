@@ -1,0 +1,30 @@
+[lab] step 1/5: throwaway secrets and config (lab lab-5d68f8c4, provider firecracker)
+[lab] generated throwaway tokens and demo secret: /home/takanorifukuyama.guest/lab-main/.lab/secrets/tokens.env (0600)
+[lab] generated object store key: /home/takanorifukuyama.guest/lab-main/.lab/secrets/object.key (0600)
+[lab] generated trigger sealing key: /home/takanorifukuyama.guest/lab-main/.lab/secrets/triggers.key (0600)
+[lab] config: /home/takanorifukuyama.guest/lab-main/.lab/config/gateway.toml (0600)
+[lab] step 2/5: nats-server v2.14.7 on 127.0.0.1:49411 (store /home/takanorifukuyama.guest/lab-main/.lab/nats/jetstream)
+[queue] nats-server v2.14.7 ready on 127.0.0.1:49411 (pid 344098, store /home/takanorifukuyama.guest/lab-main/.lab/nats/jetstream)
+[lab] step 3/5: gateway on 127.0.0.1:46243 (applies forward-only migrations to /home/takanorifukuyama.guest/lab-main/.lab/data/state.db before listening)
+[lab] gateway pid 344126, log /home/takanorifukuyama.guest/lab-main/.lab/logs/gateway.log
+[lab] step 4/5: health of every component
+STATUS COMPONENT              CHECK                                        DETAIL
+ok    nats-server            process                                      pid 344098
+ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+ok    gateway                process                                      pid 344126
+ok    gateway                GET /healthz                                 200
+FAIL  gateway                GET /readyz .ready                           false
+FAIL  provider               readyz .preflight (failing checks listed)    firecracker ok=false socket_path_length,egress_network
+ok    dispatcher             readyz .dispatcher.fenced                    false
+FAIL  config-cache           readyz .control_plane.new_invocations        refused config=stale_but_valid
+ok    usage-journal          readyz .usage                                accepting=true journal_healthy=true collector_error=null
+ok    budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=null
+FAIL  ledger                 state.db schema_version = migrations         unreadable/8
+ok    queue                  tsls_async_queue_condition{healthy}          1
+ok    trigger-scheduler      tsls_trigger_scheduler_owner                 1
+ok    async-dispatcher       tsls_async_dispatch_runs_in_flight           0
+ok    metrics                operator token 200, tenant token 401         401
+ok    object-store           root exists, key 0600, backend filesystem    /home/takanorifukuyama.guest/lab-main/.lab/data/objects
+skip  console                GET /console/                                not enabled (up --console)
+[lab] ERROR: health checks failed after start (docs/runbook.md §5, §6)
+[lab] transcript: /home/takanorifukuyama.guest/lab-main/.lab/logs/commands/20260917T163044Z-up-343946.log (exit 1)

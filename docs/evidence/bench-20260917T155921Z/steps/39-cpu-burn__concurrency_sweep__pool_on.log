@@ -1,0 +1,4 @@
+[e2e] sweep cpu-burn warm c=1: 24 requests in 12855 ms
+[e2e] sweep cpu-burn warm c=2: 24 requests in 8418 ms
+[e2e] sweep cpu-burn warm c=4: 24 requests in 6903 ms
+[e2e] sweep cpu-burn warm c=8: 24 requests in 1763 ms

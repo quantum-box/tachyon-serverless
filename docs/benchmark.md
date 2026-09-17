@@ -2,7 +2,7 @@
 
 - 対象: `scripts/kvm/bench.sh`（計測）、`scripts/kvm/bench-sample.sh`（host 側の資源 snapshot、root）、`scripts/kvm/bench-report.sh`（集計。offline で再実行できる）
 - 関連: [kvm.md](kvm.md)（§3.5 gateway、§3.6 host cgroup / jailer、§3.7 warm 再利用、§5 Lima）、[adr/0001](adr/0001-execution-provider-firecracker-first.md)「残る測定」M2〜M4・M7、[inventory-tachyon-apps.md](inventory-tachyon-apps.md) §5・§6、[acceptance.md](acceptance.md)「PLT-4647」
-- 状態: 1 回の記録がある（`docs/evidence/bench-20260917T055450Z/`）。**Apple M4 上の Lima VM（nested virtualization）の aarch64 だけ**で、x86_64・bare metal・専用の新品 host では未測定。
+- 状態: 2 回の記録がある（`docs/evidence/bench-20260917T055450Z/`、最新 main での再計測 `docs/evidence/bench-20260917T155921Z/`（§6.6））。**Apple M4 上の Lima VM（nested virtualization）の aarch64 だけ**で、x86_64・bare metal・専用の新品 host では未測定。
 
 **ここにある数値は SLA でも販売価格の根拠でもない。** nested virtualization のオーバーヘッド（とくに guest の serial console と KVM の二重化）を含み、bare metal の x86_64 の値を代表しない。RFC の仮目標（§6）と比べた判定も、この host での判定である。
 
@@ -90,7 +90,7 @@ git checkout でない tree（Lima VM に rsync したコピーなど）では `
 
 ## 6. 結果（`docs/evidence/bench-20260917T055450Z/`）
 
-条件: commit `400bb45`（rebase 前の branch の commit。計測スクリプトだけを足した commit で、スクリプトは rebase 後の `cae5189`（feat(bench): record in-VM CPU calibration ...）と同じ。application / provider のコードは `origin/main` `3704c80` と同じ）、Apple M4 上の Lima VM（vz、nested virtualization、4 vCPU / 8 GiB、Linux 7.0.0-31 aarch64）、Firecracker / jailer v1.17.0、guest kernel 6.1.155、256 MiB・500 m・jailer・cgroup required・egress none、gateway release build。全 714 request、失敗 11（すべて並列 8 の sweep）。表の全体は `summary.md`。計測した commit は `origin/main` `3704c80` を基点にしており、その後 main に入った PLT-4634（admission・autoscaler。`[capacity]` の semaphore を置き換え）、PLT-4635、PLT-4636、PLT-4638 は含まない。とくに同時実行の拒否と queue の挙動（§6.2）はこれらで変わりうるが、**新しい main での再計測はしていない**。
+条件: commit `400bb45`（rebase 前の branch の commit。計測スクリプトだけを足した commit で、スクリプトは rebase 後の `cae5189`（feat(bench): record in-VM CPU calibration ...）と同じ。application / provider のコードは `origin/main` `3704c80` と同じ）、Apple M4 上の Lima VM（vz、nested virtualization、4 vCPU / 8 GiB、Linux 7.0.0-31 aarch64）、Firecracker / jailer v1.17.0、guest kernel 6.1.155、256 MiB・500 m・jailer・cgroup required・egress none、gateway release build。全 714 request、失敗 11（すべて並列 8 の sweep）。表の全体は `summary.md`。計測した commit は `origin/main` `3704c80` を基点にしており、その後 main に入った PLT-4634（admission・autoscaler。`[capacity]` の semaphore を置き換え）、PLT-4635、PLT-4636、PLT-4638 は含まない。とくに同時実行の拒否と queue の挙動（§6.2）はこれらで変わりうるが、新しい main での再計測は §6.6。
 
 物理 host（開発用の Mac）は他の作業と共用で、1 分 load average は p50 6.5 / 最大 31.5 だった（`physical-host-load.tsv`）。cpu-burn の開始時の calibration は他の sample の 4〜5 倍（399〜607 ms、他は 82〜122 ms）で、cpu-burn の cold の p95 / p99 と fresh host の最大値はその影響を含む。同じ日の 1 回目の実行（load average 40〜140）は失敗が多発したため途中で止めた（§7「物理 host の共用」に内容を記録）。
 
@@ -141,13 +141,46 @@ cold の内訳（hello、p50 / p95）: queue 0 / 0、boot 5102 / 5315、init 501
 
 休止は memory を返さない。要求 256 MiB に対し host が実際に保持するのは 1 環境あたり約 41 MiB（guest が触った分）で、4 vCPU / 8 GiB の VM で pool に 6 環境を置いても host の MemAvailable は約 244 MiB（7356.6 → 7112.2 MiB、hello）しか減らなかった。
 
+### 6.6 最新 main での再計測（`docs/evidence/bench-20260917T155921Z/`、KVM 最終検証 2026-09-17）
+
+条件: commit `40a3c4a`（origin/main `9b6f2c8` に試験 harness と文書の commit だけを足したもの。product のコードは main と同じ）、同じ Lima VM・Firecracker v1.17.0・kernel 6.1.155・256 MiB / 500 m / jailer / cgroup required、既定の負荷（fresh 5 / cold 20 / warm 20 / sweep 1,2,4,8 × 24 / idle 60 s）、`BENCH_MAX_CALIBRATION_MS=150`。1 回目（15:22Z）は Mac の 1 分 load average が 150〜163 で calibration が 193〜203 ms になり、**開始を拒否した**（その evidence は preflight だけで保存していない。`kvm-final-run/host.txt` に記録）。2 回目（15:59Z）は calibration 77〜85 ms・Mac の load average p50 12.0 / 最大 17.2 で、41 / 41 step PASS、714 request で失敗 0、`cleanup.txt` の残留 0。前回（§6、`bench-20260917T055450Z`）との比較と読み方は `kvm-final-run/summary.txt`。
+
+| sample | scenario | 前回 client p50 / p95 | 今回 client p50 / p95 |
+|---|---|---|---|
+| hello | fresh-miss（n=5） | 6158 / 7609 | 5931 / 6267 |
+| hello | cold（n=20） | 5817 / 6037 | 5819 / 6059 |
+| hello | warm（n=20） | 56 / 75（host platform 7 / 17） | 51 / 61（6 / 15） |
+| http-axum | fresh-miss | 5908 / 6128 | 5827 / 5959 |
+| http-axum | cold | 6502 / 9430 | 5699 / 5804 |
+| http-axum | warm | 70 / 112（8 / 31） | 48 / 52（5 / 10） |
+| cpu-burn | fresh-miss | 6925 / 14106 | 5728 / 5895 |
+| cpu-burn | cold | 6944 / 12250 | 5638 / 5767 |
+| cpu-burn | warm | 278 / 311（6 / 17） | 288 / 305（6 / 6） |
+
+| sample | pool | 並列 8 前回（client p50 / p95、件/s、失敗） | 並列 8 今回 |
+|---|---|---|---|
+| hello | off | 10126 / 19429、0.42、504 × 4 | 14660 / 15998、0.51、0（queue p95 8597 ms） |
+| hello | on | 142 / 6439、3.53（cold 2） | 114 / 175、70.4（全て warm） |
+| http-axum | off | 14611 / 22369、0.42、504 × 2 | 14164 / 15618、0.54、0（queue p95 8243 ms） |
+| http-axum | on | 167 / 30110、0.70、502 × 2 | 105 / 153、55.6（全て warm） |
+| cpu-burn | off | 14186 / 23350、0.41、504 × 3 | 14081 / 14904、0.55、0（queue p95 7718 ms） |
+| cpu-burn | on | 548 / 747、3.6（cold 1） | 537 / 584、13.6（全て warm） |
+
+- **cold の中身は変わっていない**: boot p50 5102 → 5136 ms、throttled period 比 p50 0.99 のまま。cold / fresh の p95 と http-axum・cpu-burn の cold が縮んだのは主に物理 host の混み具合の差（前回は cpu-burn の前の calibration が 399〜607 ms、今回は全体で 77〜85 ms）。RFC の cold p95 ≤ 3 s は引き続き未達、warm の基盤追加遅延 p95 ≤ 20 ms は 3 sample とも達成（前回は http-axum が 31 ms で未達）。
+- **admission / autoscaler（PLT-4634）**: pool 無効・並列 8 で前回は `[capacity]` の semaphore の queue で 9 件が 10 s を超えて 504 になった。今回は admission queue が全件を queue p95 7.7〜8.6 s で流し、失敗 0・スループット 0.41 → 0.55 件/s、代わりに p50 が伸びた。`queue_timeout_seconds = 10` に近く、遅い host では再び 504 になりうる。
+- **warm pool の並列 8**: 前段の sweep で pool に入った環境を再利用し、revision の上限 4 を超えた分は admission で待たせた（queue p50 43〜266 ms）。前回の cold 起動 1〜2 件と http-axum の 502 `Host.EnvironmentBootFailed` × 2 は無く、スループットは 14〜70 件/s。
+- **zero-scale（PLT-4635）**: warm の gateway は `idle_ttl_seconds = 900` で、計測中に pool の環境は回収されない。
+- **usage journal の fsync（PLT-4642）**: warm の host platform p50 は 5〜6 ms（前回 6〜8 ms）で、この比較では見えない。同じ host の A/B（`docs/evidence/kvm-final-usage-budget-20260917T151250Z/journal-ab/`）では durable store 全体で host platform +7 ms・client − handler +19 ms（p50、上限値）。
+- **durable invocation logs（PR #36）ほかの常駐処理**: gateway の RSS が環境 0 で 19.5 → 30〜32 MiB、休止環境 1 つの 60 s で gateway の CPU tick が 3 → 16〜18。環境ごとの原価（休止中の VMM CPU 0、memory.current 約 41 MiB、disk 349.6 MiB）は変わらない。gateway の増分を部品ごとに分けて測ってはいない。
+- **budget**: 既定で無効（`config/gateway.firecracker.toml` に `[budget]` が無い）なので、この数値に予算の予約は入っていない。
+
 ### 6.4 RFC 仮目標（RFC §19）との比較
 
 | 目標 | 判定 | 測定 | 理由 |
 |---|---|---|---|
-| cold first response（小さな Rust 関数、image cache hit）p95 ≤ 3 秒 | **未達** | hello cold p95 6037 ms（n=20、失敗 0） | boot p95 5315 ms のうち大半が guest kernel の起動で、500 m の cgroup quota に throttle され続けている（throttled period 比 0.99）。nested virtualization の serial console が重い。bare metal・console 抑制・quota 変更時の値は未測定なので、構造的に 3 秒を超えるかは判断できない |
+| cold first response（小さな Rust 関数、image cache hit）p95 ≤ 3 秒 | **未達**（再計測でも同じ） | hello cold p95 6037 ms（n=20、失敗 0）、再計測 6059 ms（§6.6） | boot p95 5315 ms のうち大半が guest kernel の起動で、500 m の cgroup quota に throttle され続けている（throttled period 比 0.99）。nested virtualization の serial console が重い。bare metal・console 抑制・quota 変更時の値は未測定なので、構造的に 3 秒を超えるかは判断できない |
 | cache miss を別集計 | 記録のみ | hello 6158 / 7609（n=5）、http-axum 5908 / 6128、cpu-burn 6925 / 14106 | RFC に数値目標は無い |
-| warm の基盤追加遅延 p95 ≤ 20 ms（handler 除く） | **一部未達**（hello 17 ms・cpu-burn 17 ms は達成、http-axum 31 ms は未達） | host 計測の total − handler。client から見た client − handler は 23 / 51 / 30 ms | 逐次・loopback・1 host の値。http-axum の p95 は readiness（p95 15 ms）を含む。内訳ごとの揺れの原因は調べていない。RFC の「同一 region・所定負荷」の条件ではない |
+| warm の基盤追加遅延 p95 ≤ 20 ms（handler 除く） | **一部未達**（hello 17 ms・cpu-burn 17 ms は達成、http-axum 31 ms は未達）。再計測（§6.6、混雑の少ない host）では 15 / 10 / 6 ms で 3 sample とも達成 | host 計測の total − handler。client から見た client − handler は 23 / 51 / 30 ms | 逐次・loopback・1 host の値。http-axum の p95 は readiness（p95 15 ms）を含む。内訳ごとの揺れの原因は調べていない。RFC の「同一 region・所定負荷」の条件ではない |
 | Fast Restore が cold より p95 / p99 と原価で改善 | **一部達成**（X1、別判定） | `examples/restore-verify` で client p95 / p99: cold 9572 / 10546、restored 1674 / 1861 ms（n=20 / 30）。生きている環境の private memory 103 → 6 MiB | 同時 4 restore と平文 cache なしは悪化、snapshot ごとに disk 約 596 MiB と共有 page cache。nested aarch64 の 1 host だけ。`docs/x1-results.md`（PLT-4654） |
 | 正常 invoke の可用性 99.9% | 未測定 | 失敗率は逐次の group で 0、並列 8 で 8〜17% | 数百 request・1 host の記録は可用性の測定ではない |
 

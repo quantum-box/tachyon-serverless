@@ -2,15 +2,16 @@
 # item 5 (PLT-4648): scripts/lab/lab.sh --provider firecracker, full path, from a clean clone
 . "$(dirname "$0")/common.sh"
 REF="${REF:-9b6f2c8}"
-CLONE="$HOME/lab-main"
-W=$VERIFY/lab; sudo rm -rf "$W"; mkdir -p "$W"
+CLONE_NAME="${CLONE_NAME:-lab-main}"
+CLONE="$HOME/$CLONE_NAME"
+W=$VERIFY/lab${SUFFIX:-}; sudo rm -rf "$W"; mkdir -p "$W"
 hostinfo "$W/host.txt" before
 t0=$(date -u +%s)
 vmload_sampler "$W/vm-load.tsv"; S=$!
 if [ -d "$CLONE" ]; then sudo rm -rf "$CLONE"; fi
 {
   echo "\$ git clone <host repo> $CLONE && git checkout --detach $REF"
-  git -c safe.directory='*' clone -q /Users/takanorifukuyama/git/tachyon-serverless "$CLONE" 2>&1
+  git -c safe.directory="*" clone -q "$HOSTWT" "$CLONE" 2>&1
   git -C "$CLONE" checkout -q --detach "$REF" 2>&1
   git -C "$CLONE" log -1 --format='%H %s'
   git -C "$CLONE" status --porcelain | wc -l

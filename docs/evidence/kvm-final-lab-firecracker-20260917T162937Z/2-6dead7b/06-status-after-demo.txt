@@ -1,0 +1,16 @@
+lab lab-12064596  provider=firecracker  state=up  dir=/home/takanorifukuyama.guest/lab/.lab
+
+STATUS COMPONENT              CHECK                                        DETAIL
+ok    nats-server            process                                      pid 355716
+ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+ok    gateway                process                                      pid 355744
+ok    gateway                GET /healthz                                 200
+ok    gateway                GET /readyz .ready                           true
+ok    provider               readyz .preflight                            firecracker ok=true egress_network
+ok    dispatcher             readyz .dispatcher.fenced                    false
+ok    config-cache           readyz .control_plane.new_invocations        accepted config=fresh
+ok    usage-journal          readyz .usage                                accepting=true journal_healthy=true collector_error=null
+ok    budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=null
+ok    ledger                 state.db schema_version = migrations         8/8
+ok    queue                  tsls_async_queue_condition{healthy}          1
+[lab] transcript: /home/takanorifukuyama.guest/lab/.lab/logs/commands/20260917T163427Z-status-356120.log (exit 141)

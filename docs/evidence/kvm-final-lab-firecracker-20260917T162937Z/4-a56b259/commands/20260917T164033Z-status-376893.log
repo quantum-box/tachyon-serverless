@@ -1,0 +1,28 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh --provider firecracker status
+# started:  2026-09-17T16:40:33Z
+# lab_dir:  /home/takanorifukuyama.guest/lab/.lab
+# lab_id:   lab-6c6786c8
+# host:     Linux 7.0.0-31-generic aarch64 user=takanorifukuyama
+# git:      a56b259d4f2cdc0120dced1040a155691d4951cf
+2026-09-17T16:40:33Z lab lab-6c6786c8  provider=firecracker  state=up  dir=/home/takanorifukuyama.guest/lab/.lab
+2026-09-17T16:40:33Z 
+2026-09-17T16:40:33Z STATUS COMPONENT              CHECK                                        DETAIL
+2026-09-17T16:40:33Z ok    nats-server            process                                      pid 376675
+2026-09-17T16:40:33Z ok    nats-server            GET /healthz?js-enabled-only=true            200 (JetStream enabled)
+2026-09-17T16:40:33Z ok    gateway                process                                      pid 376703
+2026-09-17T16:40:33Z ok    gateway                GET /healthz                                 200
+2026-09-17T16:40:33Z ok    gateway                GET /readyz .ready                           true
+2026-09-17T16:40:33Z ok    provider               readyz .preflight                            firecracker ok=true egress_network
+2026-09-17T16:40:33Z ok    dispatcher             readyz .dispatcher.fenced                    false
+2026-09-17T16:40:33Z ok    config-cache           readyz .control_plane.new_invocations        accepted config=fresh
+2026-09-17T16:40:33Z ok    usage-journal          readyz .usage                                accepting=true journal_healthy=true collector_error=null
+2026-09-17T16:40:33Z ok    budget                 readyz .budget                               accepting=true store_healthy=true stalled=false file_error=null
+2026-09-17T16:40:33Z ok    ledger                 state.db schema_version = migrations         8/8
+2026-09-17T16:40:33Z ok    queue                  tsls_async_queue_condition{healthy}          1
+2026-09-17T16:40:33Z ok    trigger-scheduler      tsls_trigger_scheduler_owner                 1
+2026-09-17T16:40:33Z ok    async-dispatcher       tsls_async_dispatch_runs_in_flight           0
+2026-09-17T16:40:33Z ok    metrics                operator token 200, tenant token 401         401
+2026-09-17T16:40:33Z ok    object-store           root exists, key 0600, backend filesystem    /home/takanorifukuyama.guest/lab/.lab/data/objects
+2026-09-17T16:40:33Z skip  console                GET /console/                                not enabled (up --console)
+# finished: 2026-09-17T16:40:33Z exit=0

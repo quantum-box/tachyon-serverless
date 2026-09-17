@@ -1,0 +1,78 @@
+KVM final batch — PLT-4647 benchmark re-run on the latest main, compared with bench-20260917T055450Z
+
+run       scripts/kvm/bench.sh, defaults (3 samples, fresh 5 / cold 20 / warm 20 / sweep 1,2,4,8 x 24 cold and
+          warm / idle 60 s), BENCH_MAX_CALIBRATION_MS=150, release gateway + CLI (../../kvm-final-scripts/run-bench.sh.txt)
+tree      40a3c4a = origin/main 9b6f2c8 + test-harness / docs commits of this branch (no product code changed:
+          scripts/, examples/idempotent-async, docs/). Old run: 400bb45 (origin/main 3704c80 + bench scripts).
+host      Lima VM tsls-kvm, Apple M4, nested virtualization, 4 vCPU / 8 GiB; same VM and kernel/rootfs pins as
+          the old run (rootfs rebuilt: bridge 5039960 bytes vs 4963152)
+gating    attempt 1 at 15:22:09Z refused to start: calibration 193/203/196 ms > 150 while the Mac's 1-min load
+          was 150-163 (host.txt; its evidence directory held only the preflight/metadata steps and was not kept).
+          attempt 2 at 15:59:21Z started: calibration start 79/79/77 ms, per sample 77-85 ms, end 75-84 ms
+          (old run 82-122 ms, and 399-607 ms before cpu-burn). Mac 1-min load p50 12.0 / max 17.2 over the run
+          (n=173, physical-host-load.tsv; old run p50 6.5 / max 31.5). VM load max in vm-load.tsv.
+result    41/41 steps PASS, 714 requests, 0 failed attempts (old: 11 failed), cleanup.txt all none.
+
+FIRST RESPONSE (client ms p50 / p95; host platform = total - handler for warm)
+sample     scenario     old (bench-...055450Z)        new (bench-...155921Z)
+hello      fresh-miss   6158 / 7609                   5931 / 6267
+hello      cold         5817 / 6037                   5819 / 6059
+hello      warm         56 / 75   (platform 7/17)     51 / 61   (platform 6/15)
+http-axum  fresh-miss   5908 / 6128                   5827 / 5959
+http-axum  cold         6502 / 9430                   5699 / 5804
+http-axum  warm         70 / 112  (platform 8/31)     48 / 52   (platform 5/10)
+cpu-burn   fresh-miss   6925 / 14106                  5728 / 5895
+cpu-burn   cold         6944 / 12250                  5638 / 5767
+cpu-burn   warm         278 / 311 (platform 6/17)     288 / 305 (platform 6/6)
+cold boot (environment_boot_ms) hello p50/p95: old 5102/5315, new 5136/5318; throttled period ratio p50 0.99 in both.
+
+CONCURRENCY (client p50 / p95, successes per second, failures)
+sample     pool c   old                                   new
+hello      off  8   10126 / 19429, 0.42/s, 504 x 4        14660 / 15998, 0.51/s, 0 failures (queue p95 8597)
+hello      on   8   142 / 6439, 3.53/s (cold 2)           114 / 175, 70.4/s (all warm)
+http-axum  off  8   14611 / 22369, 0.42/s, 504 x 2        14164 / 15618, 0.54/s, 0 failures (queue p95 8243)
+http-axum  on   8   167 / 30110, 0.70/s, 502 x 2          105 / 153, 55.6/s (all warm)
+cpu-burn   off  8   14186 / 23350, 0.41/s, 504 x 3        14081 / 14904, 0.55/s, 0 failures (queue p95 7718)
+cpu-burn   on   8   548 / 747, 3.6/s (cold 1)             537 / 584, 13.6/s (all warm)
+off c=4: hello 11825/27970 -> 7750/8490; http-axum 7730/8966 -> 7110/8848; cpu-burn 7575/15052 -> 6944/8057.
+
+IDLE / FIXED COST (per environment unless noted)
+- paused environment over 60 s: VMM CPU ticks 0, cgroup usage_usec +0, VMM RSS 38.6-38.8 MiB, memory.current
+  40.3-41.3 MiB, memory.peak p95 41.3-41.5 MiB, disk 349.6 MiB (env dir + jail): unchanged from the old run.
+- gateway RSS with 0 environments: old 19.5 MiB, new 30.1-32.2 MiB; with 1 pooled environment 22.3 -> 33.1-35.0 MiB.
+- gateway CPU while idle for 60 s with one pooled environment: old 3 ticks (30 ms), new 16-18 ticks (160-180 ms).
+- gateway start to readyz 200: fresh host p50 500 -> 483 ms, warm cache 493 -> 474 ms; deploy 277 -> 280 ms.
+
+RFC TARGETS: cold p95 <= 3 s still missed (hello 6059 ms). warm platform p95 <= 20 ms now met for all three
+samples (15 / 10 / 6 ms); in the old run http-axum missed it (31 ms).
+
+WHAT EXPLAINS THE DIFFERENCES (reading, with what supports it)
+1. Host contention, not code, explains most of the cold / fresh / warm p95 improvements: the calibration loop
+   was 4-5x slower before the old cpu-burn sample and the Mac peaked at 31.5; now it was flat (77-85 ms) with
+   a lower peak (17.2). The boot time p50 is unchanged (5.1 s) and the throttling ratio is still 0.99, so the
+   cold path did not get faster; its tail did.
+2. Admission / autoscaler (PLT-4634) replaced the [capacity] semaphore: with the pool off and 8 clients the
+   old run timed out 9 queued requests after 10 s (504 Host.QueueTimeout); the new admission queue kept the
+   24 requests with queue p95 7.7-8.6 s (below queue_timeout_seconds = 10) and served all of them, so
+   throughput rose from 0.41-0.42 to 0.51-0.55/s at the price of a higher p50 (the queue is paid by more
+   requests instead of failing some). This is close to the 10 s limit on this host; a slower host would
+   time out again.
+3. Warm pool at c=8 (all warm, 14-70 req/s instead of 0.7-3.6): the environments pooled by the earlier sweep
+   levels were reused; admission holds requests over the revision cap of 4 in the queue (queue p50 43-44 ms,
+   cpu-burn 266 ms) instead of booting extra microVMs (old: 1-2 cold boots and 2 x 502
+   Host.EnvironmentBootFailed in http-axum). Zero-scale (PLT-4635): gateway-warm.toml sets idle_ttl_seconds
+   = 900, longer than the warm phase, so pooled environments were not reclaimed between levels.
+4. Usage journal fsync (PLT-4642): not visible in the warm host platform (p50 5-6 ms vs 6-8 ms before). The
+   A/B in docs/evidence/kvm-final-usage-budget-20260917T151250Z/journal-ab/ puts the durable stores at about
+   +7 ms host platform and +19 ms client - handler at p50 on this host; in this run the gain from a quieter
+   host is larger than that cost, so the two runs cannot isolate it.
+5. Durable invocation logs writer (PR #36, logs.db) and the other durable stores (usage journal / ledger,
+   budget store, config cache loops): the gateway's fixed RSS grew by about 11 MiB and its idle CPU from
+   3 to 16-18 ticks per 60 s (flush every 200 ms, collector every 1 s, admission/scaling reconcile). This is
+   the new idle cost of the gateway process, not of the environments. Not decomposed per component: the
+   attribution to these loops is a reading of what main added since 3704c80, not a measurement.
+6. Budget is off by default (no [budget] section in config/gateway.firecracker.toml; /readyz budget.enabled
+   false in the KVM runs of this batch), so no budget
+   reservation is in these numbers.
+
+LIMITS    one run each; nested virtualization on a shared Mac; not x86_64 / bare metal; see docs/benchmark.md §7.

@@ -1,0 +1,42 @@
+lab preflight: provider=firecracker lab_dir=/home/takanorifukuyama.guest/lab-main/.lab lab_id=lab-5d68f8c4
+
+ok    os                         Linux 7.0.0-31-generic
+ok    arch                       aarch64
+ok    kvm                        /dev/kvm is rw for takanorifukuyama
+WARN  nested_virt                running inside apple: nested virtualization; boot times are reference values only
+ok    kernel                     7.0.0-31-generic
+ok    cgroup_v2                  cpuset cpu io memory hugetlb pids rdma misc dmem 
+ok    disk_lab                   25339 MiB free for /home/takanorifukuyama.guest/lab-main/.lab (need 6144)
+ok    disk_build                 25339 MiB free for target/ (cargo build needs ~8 GiB)
+ok    memory                     7913 MiB
+ok    tool:bash                  /usr/bin/bash (GNU bash, version 5.3.9(1)-release (aarch64-unknown-linux-gnu))
+ok    tool:curl                  /usr/bin/curl (curl 8.18.0 (aarch64-unknown-linux-gnu) libcurl/8.18.0 OpenSSL/3.5.5 zlib/1.3.1 brotli/1.2.0 zstd/1.5.7 libidn2/2.3.8 libpsl/0.21.2 libssh2/1.11.1 nghttp2/1.68.0 librtmp/2.3 mit-krb5/1.22.1 OpenLDAP/2.6.10)
+ok    tool:jq                    /usr/bin/jq (jq-1.8.1)
+ok    tool:python3               /usr/bin/python3 (Python 3.14.4)
+ok    tool:openssl               /usr/bin/openssl (OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026))
+ok    tool:tar                   /usr/bin/tar (tar (GNU tar) 1.35)
+ok    tool:git                   /usr/bin/git (git version 2.53.0)
+ok    tool:cargo                 /home/takanorifukuyama.guest/.cargo/bin/cargo (cargo 1.95.0 (f2d3ce0bd 2026-03-21))
+ok    tool:cc                    /usr/bin/cc (cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0)
+ok    tool:perl                  /usr/bin/perl (perl 5.040001)
+skip  tool:mise                  not found (optional)
+ok    tool:sha256                /usr/bin/sha256sum
+ok    pin:rust                   rust-toolchain.toml 1.95.0 = versions.lock
+ok    rustc                      1.95.0 (from the repository toolchain file)
+ok    pin:nats                   versions.lock = deploy/nats/versions.env (v2.14.7)
+ok    pin:firecracker            v1.17.0 + kernel pinned for aarch64
+ok    tool:rustup                /home/takanorifukuyama.guest/.cargo/bin/rustup (rustup 1.29.1 (d95a37b6a 2026-08-13))
+ok    tool:mkfs.ext4             /usr/sbin/mkfs.ext4 (mke2fs 1.47.2 (1-Jan-2025))
+ok    tool:ip                    /usr/sbin/ip (ip utility, iproute2-6.19.0, libbpf 1.6.3)
+ok    tool:nft                   /usr/sbin/nft (nftables v1.1.6 (Commodore Bullmoose #7))
+ok    socket_path                92 bytes (max 107)
+ok    privileges                 passwordless sudo: gateway runs as root (jailer chroot/uid drop, cgroup v2, tap/nft cleanup)
+ok    port:GATEWAY_PORT          not assigned yet (up picks a free 127.0.0.1 port)
+ok    port:NATS_PORT             not assigned yet (up picks a free 127.0.0.1 port)
+ok    port:NATS_HTTP_PORT        not assigned yet (up picks a free 127.0.0.1 port)
+ok    network                    github.com releases reachable (nats-server, firecracker)
+ok    network:kernel             S3 guest kernel reachable
+
+READY with warnings (read the WARN rows)
+next: scripts/lab/lab.sh --provider firecracker bootstrap
+[lab] transcript: /home/takanorifukuyama.guest/lab-main/.lab/logs/commands/20260917T162937Z-preflight-335916.log (exit 0)

@@ -1,0 +1,4 @@
+[e2e] sweep hello warm c=1: 24 requests in 7585 ms
+[e2e] sweep hello warm c=2: 24 requests in 5997 ms
+[e2e] sweep hello warm c=4: 24 requests in 6659 ms
+[e2e] sweep hello warm c=8: 24 requests in 341 ms

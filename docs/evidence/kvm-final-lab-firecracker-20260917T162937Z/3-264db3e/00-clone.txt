@@ -1,0 +1,3 @@
+$ git clone <host repo> /home/takanorifukuyama.guest/lab && git checkout --detach 264db3e
+264db3e1c8e64fa4e4ce8d6360afbc50675a7882 fix(lab): demo sees a root-owned firecracker gateway; status survives a large metrics body
+0

@@ -1,0 +1,3 @@
+$ git clone <host repo> /home/takanorifukuyama.guest/lab && git checkout --detach a56b259
+a56b259d4f2cdc0120dced1040a155691d4951cf fix(lab): P3 demo reads the root-owned object root and state.db of a firecracker lab
+0

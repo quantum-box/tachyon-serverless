@@ -1,0 +1,20 @@
+teardown of lab lab-4382d02e (provider firecracker, dir /home/takanorifukuyama.guest/lab/.lab)
+ledger environments recorded by this lab: 17
+1. processes
+[lab] stopping gateway pid 364783 (SIGTERM: in-flight invocations are cancelled and environments destroyed)
+[queue] nats-server (pid 364755) stopped with SIGTERM
+2. Linux host resources named after this lab (jails, cgroups, taps, nft chains)
+3. files owned by this lab
+  remove /home/takanorifukuyama.guest/lab/.lab/fc/jail
+  remove /home/takanorifukuyama.guest/lab/.lab/fc
+  remove /home/takanorifukuyama.guest/lab/.lab/nats
+  remove /home/takanorifukuyama.guest/lab/.lab/data/objects
+  remove /home/takanorifukuyama.guest/lab/.lab/data
+  remove /home/takanorifukuyama.guest/lab/.lab/demo
+  remove /home/takanorifukuyama.guest/lab/.lab/run
+  remove /home/takanorifukuyama.guest/lab/.lab/config
+  remove /home/takanorifukuyama.guest/lab/.lab/secrets
+  remove /home/takanorifukuyama.guest/lab/.lab/cache
+4. orphan check
+orphan check: clean (lab lab-4382d02e)
+[lab] transcript: /home/takanorifukuyama.guest/lab/.lab/logs/commands/20260917T163819Z-teardown-367797.log (exit 0)

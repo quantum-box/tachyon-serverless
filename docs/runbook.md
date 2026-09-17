@@ -39,7 +39,7 @@ rollback は 2 種類ある。**関数の rollback**（alias を前の revision 
 | 用途 | OS / arch | provider | 状態 |
 |---|---|---|---|
 | 開発モード（既定） | macOS（Apple Silicon で確認）または Linux、aarch64 / x86_64 | `process` — **microVM ではない。隔離なし**。関数は gateway の子プロセスとして動く | macOS arm64 で clean clone から通した（§9） |
-| 本来の形 | Linux + `/dev/kvm`、aarch64 / x86_64 | `firecracker` — Firecracker microVM、jailer、cgroup v2 | **lab.sh 経由は未検証**（§10）。同じ構成要素は `scripts/kvm/*` と `scripts/e2e/demo.sh` で aarch64 nested virt 上の記録がある（docs/kvm.md §5） |
+| 本来の形 | Linux + `/dev/kvm`、aarch64 / x86_64 | `firecracker` — Firecracker microVM、jailer、cgroup v2 | aarch64 nested の Lima VM で lab.sh の全経路を実行（`docs/evidence/kvm-final-lab-firecracker-20260917T162937Z/`、demo all 49/49）。x86_64 は未検証（§10）。同じ構成要素は `scripts/kvm/*` と `scripts/e2e/demo.sh` で aarch64 nested virt 上の記録がある（docs/kvm.md §5） |
 
 macOS で microVM を動かすには Lima VM の中で Linux/KVM の手順を使う（docs/kvm.md §5）。
 
@@ -156,7 +156,7 @@ console を見る場合は `bootstrap --console`（node / pnpm が要る）→ `
 ### 4.2 Linux/KVM（firecracker provider）
 
 > [!IMPORTANT]
-> lab.sh の firecracker 経路は **未検証**（§10）。下の手順は既存の `scripts/kvm/bootstrap.sh`・`config/gateway.firecracker.toml`・docs/kvm.md で確認済みの構成（Firecracker v1.17.0、guest kernel 6.1.155、jailer、cgroup required）をそのまま lab directory に閉じ込めたもので、実機での通し実行はまだ記録が無い。
+> lab.sh の firecracker 経路は 2026-09-17 に aarch64 nested virtualization の Lima VM（passwordless sudo、privileged）で clean clone から通した（`docs/evidence/kvm-final-lab-firecracker-20260917T162937Z/`: preflight → bootstrap → up → status → demo all 49/49 → teardown `orphan check: clean`）。x86_64・bare metal・`LAB_FC_PRIVILEGED=0` は未実行。jailer を使う lab では lab directory の path を 39 byte 以下にする（§2 の socket path）。
 
 ```sh
 scripts/lab/lab.sh --provider firecracker preflight   # /dev/kvm rw、cgroup v2、sudo -n、socket path 長
@@ -415,11 +415,11 @@ command log の形式: 先頭に `# command:`、`# started:`、`# lab_dir:`、`#
 | 日付 | 誰が | 環境 | 範囲 | 結果 |
 |---|---|---|---|---|
 | 2026-09-17 | **自動化された agent**（実装した agent 自身が、作業ツリーではなく GitHub から fresh clone した別 directory で、この文書の §4.1 のコマンドだけを順に実行。**別の人間による追試ではない**） | Darwin 25.6.0 arm64、process provider | preflight → bootstrap → up → demo all → status → CLI → teardown、§6.4 / §6.5 / §6.6 / §6.7 / §6.9 の失敗を起こして記載の手順で復旧 | すべて通過（demo 47/47）。1 回目の追試で見つけた不足 5 件を直してから最終 commit で再実行。記録 `docs/evidence/lab-20260917T1219Z-process-clean-clone/`、詳細と不足の一覧は docs/acceptance.md「PLT-4648」 |
-| — | — | Linux/KVM、firecracker provider | §4.2 | **未検証**（§10） |
+| — | — | Linux/KVM、firecracker provider | §4.2 | aarch64 nested の Lima VM で実行（自動化 agent、demo all 49/49）。x86_64 は未検証（§10） |
 
 ## 10. まだ再現できないこと
 
-- **lab.sh の firecracker 経路**: 実機（KVM host）で通していない。構成要素（Firecracker v1.17.0、kernel 6.1.155、jailer、cgroup required、gateway 経由の E2E）は aarch64 の Lima nested virt で別の script から確認済みだが、lab.sh の生成設定・sudo 起動・teardown の cgroup / jail 削除は未確認。
+- **lab.sh の firecracker 経路**: aarch64 nested virtualization の Lima VM（privileged）で clean clone から全経路を通した（`docs/evidence/kvm-final-lab-firecracker-20260917T162937Z/`）。未確認: x86_64、bare metal、`LAB_FC_PRIVILEGED=0`、teardown 自身が jail / cgroup / tap を消す経路（その実行では gateway の停止で既に回収されていた）。
 - **x86_64**: bare metal でも VM でも、このプロトタイプを Firecracker で動かした記録が無い。versions.lock の x86_64 kernel / Firecracker の sha256 は配布物から計算した値で、boot は確認していない。
 - **bare metal**: KVM の記録はすべて nested virtualization 上。時間の値は参考値。
 - **KVM CI runner**: 未登録（docs/ci.md §4.4 / §5）。`scripts/lab/**` は CI では shellcheck だけで、KVM job は lab.sh を実行しない（そのため KVM 必要の分類にもしていない。docs/ci.md §3）。

@@ -76,7 +76,9 @@ B2     memory   40  118 / 164       113 / 159      108 / 150         5 / 6      
     in the VM, VM load 1.49): synchronous=FULL p50 6.48 / p95 19.3 / p99 25.4 ms; synchronous=OFF p50 0.03 ms
     journal-append-bench-tmp-tmpfs.json: the first attempt ran on /tmp, which is tmpfs in this VM (fsync is a
     no-op there: 0.03 ms either way) and is not a measurement of the disk; kept only to show that.
-  An idle-VM rerun is in journal-append-bench-rootfs-idle.json when present (see below).
+    journal-append-bench-rootfs-idle.json (root ext4, VM idle 0.08, Mac 1.5, 16:46Z): synchronous=FULL p50 0.41 /
+    p95 1.63 / p99 2.86 ms; synchronous=OFF p50 0.01 ms. The fsync cost of one append depends on what else
+    writes to the disk by more than an order of magnitude (0.4 ms idle, 6.5 ms during a cargo build).
 - No journal-disabled mode exists in the product (only the in-memory store); nothing was changed for this.
 
 LIMITS   one host, one run each; nested virtualization; Mac shared with other builds (loads above).

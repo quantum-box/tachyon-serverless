@@ -1,0 +1,40 @@
+{
+  "schema": "tachyon-serverless/kvm-profile/v1",
+  "recorded_at": "2026-09-17T15:59:21Z",
+  "commit": "40a3c4ac148bfc7e8294a8ce7c00769667ecc6b0",
+  "worktree_dirty": "unknown",
+  "ref": null,
+  "event": null,
+  "repository": null,
+  "run_id": null,
+  "run_attempt": null,
+  "runner_name": null,
+  "firecracker": {
+    "version": "Firecracker v1.17.0",
+    "manifest_version": "v1.17.0",
+    "binary_sha256": "fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c",
+    "tgz_sha256": "e351ebe4f7a16b5873bbd51005d2e6767103cff4d5ebc829df2d3f95a93e2256"
+  },
+  "guest_kernel": {
+    "sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+    "manifest_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+    "key": "firecracker-ci/v1.15/aarch64/vmlinux-6.1.155",
+    "url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/aarch64/vmlinux-6.1.155",
+    "ci_version": "v1.15"
+  },
+  "rootfs": {
+    "sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064"
+  },
+  "gateway_config_sha256": "a482f633514bcfe62c0db73f599b2c15abfdee8c7be84736f7227c10e3f4ef98",
+  "host": {
+    "uname": "Linux lima-tsls-kvm 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 03:33:01 UTC 2026 aarch64 GNU/Linux",
+    "arch": "aarch64",
+    "kernel_release": "7.0.0-31-generic",
+    "cpu_model": "0x000",
+    "cpus": "4",
+    "mem_total_kib": "8103308",
+    "kvm": "rw",
+    "nested_virtualization": "false"
+  },
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)"
+}
