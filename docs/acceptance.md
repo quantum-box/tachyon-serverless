@@ -1,6 +1,6 @@
-# 受入チェックリスト（PLT-4613〜PLT-4630、PLT-4632、PLT-4633、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4633、PLT-4651 X1）
 
-- 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4632 と PLT-4633
+- 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
 - 状態の記録日: 2026-09-16（統合ブランチ `feat/serverless-prototype-p1` の commit `8555e34` 以降（2026-09-16 のレビュー指摘の修正を統合した後。E2E はこの統合後の commit `95af2ba` で再実行）のコード・テスト・`docs/evidence/` を読んで更新）
 
@@ -40,6 +40,7 @@
 | `docs/evidence/20260917T024812Z-process/` | `scripts/e2e/demo.sh`（PLT-4651 の SDK / bridge 変更後の P1 互換確認。設定は下の行と同じく listen・data_dir・workdir だけを変えたコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/restore-aware-20260917T025043Z-process/` | `examples/restore-aware`（PLT-4651、実験）を gateway + process provider で deploy し、`{"n":97}` / `{"n":91}` と、`RESTORE_AWARE_FAIL=bootstrap` / `after_restore` の revision を invoke した結果・ログ | macOS、process provider（隔離なし） | 成功 2（`restored=false`）、`Runtime.PreCheckpointFailed` 1、`Runtime.AfterRestoreFailed` 1 |
 | `docs/evidence/20260917T020229Z-process/` | `scripts/e2e/demo.sh`（PLT-4618: 台帳が `state.db`。step 27 は `state.db` と `state.db-wal` も検査。port 8080 が使用中のため `config/gateway.dev.toml` の listen と data_dir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定） | macOS、process provider（隔離なし） | 28/28 PASS |
+| `docs/evidence/20260917T034846Z-process/` | `scripts/e2e/demo.sh`（PLT-4631: dispatcher の登録・slot の acquire / complete・heartbeat 付きの gateway での P1 互換確認。`gateway.log` に `dispatcher registered`、`startup reconcile finished` に `foreign` / `reclaimed_dispatchers` / `fenced_*`。設定は listen・data_dir・workdir だけを変えたコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 
 本文の「E2E step NN」は各 E2E ディレクトリの `steps/NN-*.log`（例: step 23 = `steps/23-cross-tenant_get_invoke_-__404.log`）。特に断らない限り process と firecracker の両方で PASS している。
 
@@ -145,7 +146,7 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 | 12 | secret を DB に保存しない | 実装済み | domain の行に secret 値の field が無い。`pipeline.rs::happy_path_records_timings_evidence_secrets_and_cleanup`（`state.db` と `-wal` の bytes に secret 値が無い）、E2E step 27（`state.db` / `state.db-wal` を検査） |
 | 13 | DB file の権限 | 実装済み（新規作成時 0600） / 未検証（Linux 実機） | `sqlite/tests.rs::the_database_file_is_private_to_its_owner`（macOS で実行）、`docs/threat-model.md` §14-4 |
 | 14 | TiDB | 未着手 | ADR-0003 で単一 host は SQLite と決定。TiDB 互換は主張しない。変わる点は ADR-0003「TiDB（MySQL protocol）adapter にするときに変わるもの」 |
-| 15 | 同じ `data_dir` を複数 gateway が同時に使う / lease の期限評価（ADR-0003 A1〜A4, A6, A7） | 未着手 / 未検証 | 起動時 reconcile は P1 と同じく非 terminal をすべて settle するため、複数 gateway の同時使用は対象外。ADR-0003「決定・受入条件との差分」 |
+| 15 | 同じ `data_dir` を複数 gateway が同時に使う / lease の期限評価（ADR-0003 A1〜A4, A6, A7） | 実装済み（A1・A2・A3・A6、PLT-4631） / 未着手（A4、意図的） / 未検証（A7） | 下の「PLT-4631」節と ADR-0003「実装メモ（PLT-4631）」 |
 
 ## PLT-4619 関数管理 API・tenant 認可・execution role
 
@@ -312,7 +313,7 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 | 11 | release と claim が競合しても、session の無い行を掴まない | 実装済み | `crates/application/src/services/pool.rs::a_claim_racing_a_release_never_takes_a_row_without_its_session` |
 | 12 | 再試行に必要な間だけ payload を保持する | 実装済み | `crates/application/src/services/invoke.rs::a_dispatched_payload_is_retained_only_while_a_cold_retry_can_need_it` |
 | 13 | KVM 実機での再利用 | 実装済み・KVM実測あり | `docs/evidence/warm-20260916T162532Z/summary.txt`（6 invocation 中 5 が warm、同一環境を 6 epoch 再利用）。詳細は次節 |
-| 14 | 複数プロセス間での slot・lease・pool membership の原子性 | 未着手 | pool は 1 プロセス内。`docs/adr/0003-execution-state-persistence.md` の方針に沿って PLT-4631 で扱う |
+| 14 | 複数プロセス間での slot・lease・pool membership の原子性 | 実装済み（PLT-4631） | 次々節「PLT-4631」。pool の claim / sweep は環境の owner（dispatcher）に限る（`contract_tests.rs::the_pool_only_hands_out_and_sweeps_its_owners_environments`） |
 
 ## PLT-4633 idle 休止・再開（warm 再利用の実機計測）
 
@@ -348,6 +349,33 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 | 7 | 検証: mock restore 通知による hook 順序 | 実装済み | `crates/sdk/src/lifecycle.rs::hooks_run_in_order_around_a_mock_restore`（`POST bootstrap → hook bootstrap → POST checkpoint → GET continue → (通知) → hook after_restore → POST ready`）、`crates/runtime-bridge/src/session.rs::lifecycle_ready_reaches_the_host_only_after_the_restore`（`run_session_with` に mock `RestoreSource` を注入）、`crates/protocol/src/runtime_api.rs::continuation_wire_shape` |
 | 8 | 実際の snapshot / restore での hook | 未着手 | PLT-4653。restore を bridge に知らせる frame（version を上げる）か `HelloAck` の能力 field、restore 後の init budget の host 側の扱い、restore 後に新しい secret を渡す経路はいずれも未実装（`docs/protocol.md` §B-X1「互換性の規則」「環境変数」） |
 | 9 | Firecracker（KVM）での実行 | 未検証 | `cargo check --target aarch64-unknown-linux-musl` は通るが、microVM 内で `examples/restore-aware` を動かした記録は無い |
+
+## PLT-4631 実行 slot の lease・fencing・Invoke 冪等性
+
+gateway プロセスごとの dispatcher（owner）と lease、slot の原子的取得、世代付きの完了通知、lease 失効時の fence と終了確認、`Idempotency-Key` の失効を実装した（`docs/architecture.md` §4「dispatcher・lease・fencing」、`docs/adr/0003-execution-state-persistence.md`「実装メモ（PLT-4631）」、`docs/threat-model.md` §6-3・§6-8・§10・T24・§14-8）。テストは次で再現する: `cargo test -p tachyon-serverless-application --lib repository`（契約テストは `repository::contract_tests::{memory,sqlite}::<名前>` の 2 回）、`cargo test -p tachyon-serverless-application --test leases`、`cargo test -p tachyon-serverless-application --test pipeline`、`cargo test -p tachyon-serverless-gateway --test gateway_integration`。**provider はすべて fake**（`crates/providers/fake`）で、KVM 実機・2 つの gateway プロセスを並べた E2E は無い。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 同時 acquire で勝者は一つ | 実装済み | property（N = 2, 8, 16, 4 の 4 ラウンド、ラウンドごとに slot を解放して次の epoch で再び競合）: `contract_tests.rs::acquire_is_a_cas_with_exactly_one_winner_per_epoch`（両 store、スレッド）。同じ file に別 connection: `sqlite/tests.rs::concurrent_acquires_on_separate_connections_have_one_winner_per_epoch`（N = 2, 4, 8, 12、未 release の lease は常に 1）。**OS プロセス**: `sqlite/tests.rs::separate_processes_racing_for_one_slot_or_one_key_have_one_winner`（テスト binary を 6 プロセス起動、全員の準備完了を待ってから同時に acquire、勝者 1・epoch + 1） |
+| 2 | 古い epoch の完了通知は状態を上書きしない | 実装済み | `contract_tests.rs::a_completion_with_a_stale_epoch_never_overwrites_state`（前の assignment の遅れた完了、現在の lease に前の epoch を付けた完了、reclaim 後の完了がいずれも `Stale` で、`Running` / `Succeeded` / `OutcomeUnknown{Host.LeaseExpired}` が変わらない）、`tests/leases.rs::a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced`（guest が reclaim の後に正しい `(attempt_id, epoch)` で `Response` を返しても台帳は reclaim の結果のまま、呼び出し元にも結果を返さない）、既存の session 側 fencing `pipeline.rs::a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one` |
+| 3 | 同じキー / 入力の再送は同じ Invocation | 実装済み | 同一 gateway: `pipeline.rs::{idempotency_replay_and_conflict, concurrent_requests_with_the_same_key_run_once, capacity_rejection_does_not_consume_the_idempotency_key}`、HTTP: `apps/gateway/tests/gateway_integration.rs::full_api_roundtrip`。別 gateway が実行中: `tests/leases.rs::a_key_replayed_on_another_gateway_returns_the_same_invocation_and_never_runs_twice`（実行中の invocation を台帳で追って同じ id・同じ出力、実行は 1 回）。OS プロセス / 別 connection で同じ key を同時に結び付け: `sqlite/tests.rs::{separate_processes_racing_for_one_slot_or_one_key_have_one_winner, reclaim_and_key_binding_are_exactly_once_across_connections}`。保持期限: `contract_tests.rs::idempotency_bindings_expire_after_their_invocation_finished`（実行中は失効しない、`finished_at + retention` で失効、失効後の同 key は新規、purge） |
+| 4 | 違う入力は 409 | 実装済み | `pipeline.rs::idempotency_replay_and_conflict`（`AppError::IdempotencyConflict`、本文の `invocation_id` と `error_type = Host.IdempotencyKeyReused`、何も実行しない）、`gateway_integration.rs::full_api_roundtrip`（HTTP 409 の本文）、`tests/leases.rs::a_key_replayed_on_another_gateway_returns_the_same_invocation_and_never_runs_twice`（別 gateway が実行中でも 409） |
+| 5 | lease 失効だけで未停止の環境へ新しい処理を重ねない | 実装済み（fake provider） / 未検証（KVM 実機、2 プロセスの gateway） | fence（`Draining`、epoch + 1）の後は claim・acquire・pool の対象外で、`confirm_terminated`（同じ epoch の CAS）でだけ `Lost`: `contract_tests.rs::reclaim_happens_once_fences_and_only_a_confirmed_terminate_settles`、`domain/src/environment.rs::a_fenced_environment_is_never_reusable_and_its_old_epoch_is_stale`。provider の terminate 成功後にだけ settle: `tests/leases.rs::a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced`、`pipeline.rs::a_pooled_environment_is_reclaimed_after_a_restart`。terminate に失敗し続ける間は fenced（`Draining`、claim 不可、`pending`）のまま 3 周期残り、成功した周期でだけ `Lost`: `tests/leases.rs::a_fenced_environment_stays_fenced_until_its_terminate_succeeds` |
+| 6 | host fencing / 終了確認と連携する | 実装済み（fake provider） / 未検証（Firecracker） | 上の #5。起動時 reconcile は他の live dispatcher の環境を terminate・`Lost` にしない: `tests/leases.rs::two_gateways_on_one_data_dir_never_settle_each_others_work`（`foreign` に数え、fake の terminate 呼び出し 0） |
+| 7 | 開始後の同期失敗を再実行しない | 実装済み | dispatch 後の接続断は `OutcomeUnknown` で再実行しない: `pipeline.rs::disconnect_after_invoke_is_outcome_unknown`。再実行するのは handler が開始していない warm の配送失敗だけ: `pipeline.rs::{an_undelivered_warm_dispatch_is_classified_like_a_cold_one, a_warm_dispatch_into_a_dead_guest_falls_back_to_a_cold_start}`。lease の reclaim も再実行しない（`tests/leases.rs::a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced`、`fake.created()` は 1） |
+| 8 | 外部副作用の exactly-once は保証しない | 文書化済み | `docs/api.md` §5.6「再実行しない」、`docs/threat-model.md` §9・§10・§15、`crates/application/src/services/invoke.rs` の module doc |
+
+検証項目:
+
+| 検証 | 状態 | 証跡 |
+|---|---|---|
+| 競合 property test | 実装済み | 上の #1、`contract_tests.rs::concurrent_claims_never_hand_the_same_environment_to_two_callers`（pool の claim） |
+| dispatcher 二重起動 | 実装済み（1 プロセス内に 2 つの `Application`） / 未検証（2 つの gateway プロセスを HTTP で並べた E2E） | `tests/leases.rs::{two_gateways_on_one_data_dir_never_settle_each_others_work, renewal_keeps_the_lease_and_a_graceful_stop_hands_over_at_once}`、`contract_tests.rs::a_live_dispatcher_is_never_reclaimed_and_a_stopped_one_is_at_once`。別 gateway が駆動中の invocation の cancel は 409（`two_gateways_...`） |
+| 遅延 callback | 実装済み | 上の #2 |
+| lease 失効 / 時刻差 | 実装済み（注入した `FixedClock`） / 未検証（実時計の飛び、プロセスの停止） | `contract_tests.rs::{leases_renew_only_while_unexpired_and_expire_past_the_clock_skew, a_fenced_dispatcher_can_neither_renew_nor_acquire}`、`tests/leases.rs::{a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced, renewal_keeps_the_lease_and_a_graceful_stop_hands_over_at_once}`（2 つの gateway に別々の `FixedClock`。期限 + 1 s（skew 2 s の内側）では回収せず、+ 3 s で 1 回だけ回収、renew し続ける限り 25 s 先を行く時計からも回収されない）、`domain/src/environment.rs::a_lease_is_renewed_only_while_unexpired_and_expires_past_the_skew`。**OS プロセス**: `sqlite/tests.rs::a_lease_left_by_an_exited_process_is_reclaimed_once_and_only_after_expiry`（lease を持ったまま exit した子プロセス。別 instance は期限前に回収できず、以後 1 回だけ。同じ instance の再起動は pid の不在で即時） |
+| E2E（process provider、P1 互換） | 実装済み | `docs/evidence/20260917T034846Z-process/`（28/28 PASS） |
+
+関連する修正: `pipeline.rs::concurrent_requests_with_the_same_key_run_once` が稀に ``alias `prod` not found`` で落ちた原因は、revision の検証 task が「`Ready` の書き込み」と「`prod` alias の publish」を別々の store 更新で行い、`RevisionService::wait_terminal` が `Ready` を見た時点で戻っていたこと（テストの deploy helper がその直後に alias を読む）。`wait_terminal` が同じプロセスで走っている検証 task の完了（publish を含む）まで待つようにした。publish の直前に 50 ms の遅延を入れると修正前は毎回同じ失敗になり、修正後は通ることを手元で確認した（遅延は commit していない）。HTTP で `GET revision` を poll する client からは、`Ready` と alias の移動の間の短い窓は従来どおり見えうる。
 
 ## ADR-0001 残る測定の状況
 

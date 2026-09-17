@@ -1,0 +1,182 @@
+{
+  "run_id": "20260917T034846Z-process",
+  "provider": "process",
+  "architecture": "aarch64",
+  "host": "Darwin 25.6.0 arm64",
+  "gateway_config": "/private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/e2e/gateway.toml",
+  "generated_at": "2026-09-17T03:49:45Z",
+  "steps": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "duration_ms": 25928,
+      "message": ""
+    },
+    {
+      "name": "gateway healthz/readyz",
+      "status": "PASS",
+      "duration_ms": 2707,
+      "message": ""
+    },
+    {
+      "name": "tokens for tenant A and B",
+      "status": "PASS",
+      "duration_ms": 138,
+      "message": ""
+    },
+    {
+      "name": "provider capability table",
+      "status": "PASS",
+      "duration_ms": 116,
+      "message": ""
+    },
+    {
+      "name": "create functions (idempotent)",
+      "status": "PASS",
+      "duration_ms": 242,
+      "message": ""
+    },
+    {
+      "name": "deploy hello (GREETING=v1, DEMO_SECRET)",
+      "status": "PASS",
+      "duration_ms": 1226,
+      "message": ""
+    },
+    {
+      "name": "deploy http-axum",
+      "status": "PASS",
+      "duration_ms": 1899,
+      "message": ""
+    },
+    {
+      "name": "deploy cpu-burn",
+      "status": "PASS",
+      "duration_ms": 1289,
+      "message": ""
+    },
+    {
+      "name": "invoke hello ok (message, secret_present, greeting)",
+      "status": "PASS",
+      "duration_ms": 2248,
+      "message": ""
+    },
+    {
+      "name": "invoke hello fail -> exit 3 user_error",
+      "status": "PASS",
+      "duration_ms": 563,
+      "message": ""
+    },
+    {
+      "name": "invoke hello panic -> exit 3 crash",
+      "status": "PASS",
+      "duration_ms": 529,
+      "message": ""
+    },
+    {
+      "name": "init failure revision -> exit 3 init_error",
+      "status": "PASS",
+      "duration_ms": 1698,
+      "message": ""
+    },
+    {
+      "name": "http GET / -> 200 ok",
+      "status": "PASS",
+      "duration_ms": 1765,
+      "message": ""
+    },
+    {
+      "name": "http POST /echo -> body echoed",
+      "status": "PASS",
+      "duration_ms": 695,
+      "message": ""
+    },
+    {
+      "name": "http GET /status/404 -> 404 passthrough",
+      "status": "PASS",
+      "duration_ms": 691,
+      "message": ""
+    },
+    {
+      "name": "http GET /headers -> custom header visible",
+      "status": "PASS",
+      "duration_ms": 644,
+      "message": ""
+    },
+    {
+      "name": "invoke cpu-burn 1s ok",
+      "status": "PASS",
+      "duration_ms": 2252,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn timeout 2s -> exit 4 timeout, wall < 10s",
+      "status": "PASS",
+      "duration_ms": 5077,
+      "message": ""
+    },
+    {
+      "name": "no orphan bridge / VMM processes",
+      "status": "PASS",
+      "duration_ms": 2685,
+      "message": ""
+    },
+    {
+      "name": "logs contain handler lines",
+      "status": "PASS",
+      "duration_ms": 69,
+      "message": ""
+    },
+    {
+      "name": "history shows attempts with boot evidence",
+      "status": "PASS",
+      "duration_ms": 152,
+      "message": ""
+    },
+    {
+      "name": "rollback: v2 -> rollback -> v1",
+      "status": "PASS",
+      "duration_ms": 2695,
+      "message": ""
+    },
+    {
+      "name": "cross-tenant get/invoke -> 404",
+      "status": "PASS",
+      "duration_ms": 176,
+      "message": ""
+    },
+    {
+      "name": "cancel running invocation",
+      "status": "PASS",
+      "duration_ms": 502,
+      "message": ""
+    },
+    {
+      "name": "collect evidence",
+      "status": "PASS",
+      "duration_ms": 732,
+      "message": ""
+    },
+    {
+      "name": "gateway stops on SIGTERM with exit 0",
+      "status": "PASS",
+      "duration_ms": 30,
+      "message": ""
+    },
+    {
+      "name": "secret values absent from gateway log, evidence and state",
+      "status": "PASS",
+      "duration_ms": 81,
+      "message": ""
+    },
+    {
+      "name": "no orphans after gateway shutdown",
+      "status": "PASS",
+      "duration_ms": 148,
+      "message": ""
+    }
+  ],
+  "passed": 28,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

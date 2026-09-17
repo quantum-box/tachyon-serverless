@@ -91,7 +91,8 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 1. **guest の自己申告は authz・metering・termination の根拠にしない。** `Ready.init_ms`、`Response.handler_ms`、`Heartbeat`、`Log.ts_ms`、`guest_boot_id` は表示・診断のための参考値。課金相当の事実は `UsageEvent{evidence_quality: HostObserved}` と `AttemptTimings`（host 計測）だけから作る。timeout の判定は host の watchdog が `execution_deadline` で行い、guest の申告や `Heartbeat` の有無で延長も短縮もしない。terminate は provider に対して host が発行し、guest の同意を要しない。
 2. **他 tenant の資源は存在しない扱い（404）。** 403 で存在を漏らさない。`Function::ensure_owned_by` / `Invocation::ensure_owned_by` が `TenantMismatch` を返したら、gateway は `NotFound` に写像する。
-3. **結果は Lease と一致するものだけ受理する。** `(attempt_id, epoch)` が一致しない `Response` / `Error` は捨てる。deadline 判定後に届いた結果も捨てる。
+3. **結果は Lease と一致するものだけ受理する。** `(attempt_id, epoch)` が一致しない `Response` / `Error` は捨てる。deadline 判定後に届いた結果も捨てる。session での判定に加え、台帳への書き込みも `SlotStore::complete` が「未 release の同じ Lease、同じ epoch の環境」を 1 トランザクションで確認してからしか行わない（PLT-4631）。別の dispatcher が reclaim した slot の結果は、届いた gateway の中で正しくても台帳に入らない。
+8. **lease の失効は環境を空きにしない（PLT-4631）。** lease を失った dispatcher の環境は fence（`Draining`、epoch + 1）され、pool にも容量にも数えられず、provider の terminate が成功したことを確認してから `Lost` にする。生きている dispatcher の仕事は、その lease が期限 + 許容する時計のずれを過ぎるまで、別の gateway から settle も terminate もしない。
 4. **secret 値は `HelloAck.env` にだけ載せる。** `SecretValue` の `Debug` は redact。ログ・API 応答・台帳（`state.db`）・`BootEvidence` に書かない。`HelloAck` frame そのものをログに出さない。
 5. **Revision は受付時に固定され、以後変わらない。** `spec_digest` で不変性を検証する。alias は generation で CAS 更新する。
 6. **終了は冪等で、後始末は列挙する。** `terminate_environment` は 2 回目に `was_running = false` を返し、`TerminateReport.cleaned` に消したものを列挙する。
@@ -157,7 +158,8 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 1. `Invoke` frame の書き込みが成功した後、`Response` / `Error` を受け取る前に bridge との stream が閉じた（EOF / IO error）。
 2. `observe_environment` が `Exited` / `NotFound` を返し、結果 frame が無い。
-3. gateway が再起動し、ledger に `Running` の invocation が残っている（起動時 reconcile。`Invoke` frame は書き終えているので handler が走った可能性がある）。Attempt も同じ分類にする。
+3. gateway が再起動し、ledger に `Running` の invocation が残っている（`Invoke` frame は書き終えているので handler が走った可能性がある）。対象は owner の無い行（起動時 reconcile）と、stopped / 前の incarnation と証明された dispatcher の行（reclaim、`Host.Restarted`）。Attempt も同じ分類にする。
+4. invocation を実行していた dispatcher の lease が期限 + 許容する時計のずれを過ぎ、別の dispatcher が reclaim した（`Host.LeaseExpired`、PLT-4631）。元の dispatcher がまだ生きていて後から結果を得ても、台帳は上書きされない（§6-3）。
 
 入らない条件:
 
@@ -170,7 +172,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 
 契約:
 
-- HTTP 502 `outcome_unknown`、`error_type = "Host.OutcomeUnknown"`（起動時 reconcile で確定したものは `Host.Restarted`）。応答には `invocation_id` を含める。
+- HTTP 502 `outcome_unknown`、`error_type = "Host.OutcomeUnknown"`（起動時 reconcile で確定したものは `Host.Restarted`、lease の失効で reclaim されたものは `Host.LeaseExpired`）。応答には `invocation_id` を含める。
 - **自動再実行しない。** 再実行の判断は client の責務。client は「実行されたかもしれない」として自身の冪等性で扱う。
 - 同じ Idempotency-Key での再送は `OutcomeUnknown` の記録を返し、再実行しない（§10）。
 - 環境は必ず terminate する。後から届く `Response` は Lease 解放済みのため捨てる。
@@ -181,11 +183,13 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 - header: `Idempotency-Key`（`crates/api-types::headers::IDEMPOTENCY_KEY`）。1..=256 文字（`Invocation::accept` が検証）。
 - scope: `(tenant_id, function_id, key)`。tenant B が同じ key を送っても A の invocation には触れない（B の scope で新規作成）。
 - 一致（同 key、同 `input_digest`）: 既存 Invocation を返し、**再実行しない**。terminal でなければ現在の状態（`accepted` / `queued` / `running`）を返し、client は `GET /v1/invocations/{id}` で追跡する。
-- 不一致（同 key、異なる `input_digest`）: 409 `conflict`。
+- 不一致（同 key、異なる `input_digest`）: 409 `conflict`。本文の `invocation_id` は key が結び付いている invocation、`error_type` は `Host.IdempotencyKeyReused`（key は呼び出し元自身の tenant・function の scope なので、id を返しても他者の情報は漏れない）。
+- 別の gateway（同じ `state.db` を開く別プロセス）が実行中の invocation に一致した場合、応答はその invocation が terminal になるか、その invocation の `client_deadline` まで台帳を追ってから返す。どちらの gateway でも 2 回目の実行はしない（PLT-4631、`crates/application/tests/leases.rs::a_key_replayed_on_another_gateway_returns_the_same_invocation_and_never_runs_twice`）。
+- 一意性: `(tenant_id, function_id, key)` は `idempotency` 表の主キーで、結び付けは `BEGIN IMMEDIATE` の中で行う。複数プロセスが同時に同じ key を送っても結び付くのは 1 つだけ（`crates/application/src/repository/sqlite/tests.rs::{separate_processes_racing_for_one_slot_or_one_key_have_one_winner, reclaim_and_key_binding_are_exactly_once_across_connections}`）。
 - key は Invocation の ledger 行と **同じ store 更新** で結び付ける。受付前に拒否された request（400 / 413 / 429 など）は key を消費せず、同じ key での再送は新規として受け付けられる。key が既存 Invocation に結び付いていれば、容量が満杯でも 429 ではなくその記録を返す。並行した同 key の request は 1 つだけが受け付けられ、残りは同じ Invocation を返す。
 - 旧版の台帳（`state.json` の import を含む）に残った「Invocation の無い key」は起動時の reconcile で捨てる（404 を返し続けない）。
 - alias / revision の違いは key の一致判定に含めない（同 key なら最初に受け付けた revision の結果が返る）。
-- 保持期間: key は invocation の行がある限り `state.db` に残る（行の retention は未実装）。インライン出力は `[store] output_retention_seconds`（既定 7 日）を過ぎると digest に置き換わるので、その後の同 key の再送は記録（状態と digest）を返すが出力本文は返さない。これは SLA ではない。
+- 保持期間（PLT-4631）: key は invocation が terminal になった時点から `[store] idempotency_retention_seconds`（既定 24 時間、0 は無期限）だけ応答する。実行中の invocation の key は失効しない。失効後の同じ key は新しい invocation として受け付け、失効した結び付きは起動時と 10 分ごとに削除する（invocation の行は残る）。インライン出力は `[store] output_retention_seconds`（既定 7 日）を過ぎると digest に置き換わるので、その後の同 key の再送（key の保持期間を 7 日より長くした場合）は記録（状態と digest）を返すが出力本文は返さない。これは SLA ではない。
 - Idempotency-Key は副作用の exactly-once を保証しない。`OutcomeUnknown` / `Timeout` の後の再送は、同 key なら記録を返すだけで、副作用が起きたかどうかを確定させない。
 
 ## 11. payload と資源の上限
@@ -222,7 +226,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | T02 | tenant B が A の名前で invoke する | `Principal.tenant_id` は token 由来。header 不一致は 403 | token 漏洩（A6） |
 | T03 | secret 値がログ・応答・state に混入 | `SecretValue` の `Debug` redact、`HelloAck.env` にだけ載せる、`HelloAck` を log しない、`BootEvidence.details` に secret 禁止 | 実装ミス。host 側は `crates/application/tests/pipeline.rs::secret_values_never_reach_host_logs`（TRACE で捕捉した host log と invocation log に値が無いこと）で確認。bridge 側の同等テストは PLT-4623 |
 | T04 | secret が別 environment に配られる | `SecretDeliveryContext{tenant_id, revision_id, environment_id, epoch}` で解決。environment 割当後にしか解決しない | — |
-| T05 | 古い / 偽の結果で ledger を上書き | `ExecutionLease::accepts(attempt_id, epoch)`（test `lease_fencing`）。deadline 判定後の frame は捨てる | — |
+| T05 | 古い / 偽の結果で ledger を上書き | `ExecutionLease::accepts(attempt_id, epoch)`（test `lease_fencing`）。deadline 判定後の frame は捨てる。台帳は `SlotStore::complete` が Lease と epoch を CAS で確認してからしか書かない（`crates/application/src/repository/contract_tests.rs::a_completion_with_a_stale_epoch_never_overwrites_state`、`crates/application/tests/leases.rs::a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced`） | — |
 | T06 | guest が `handler_ms` / `Ready` を偽って課金・timeout を操作 | §6-1。host の `AttemptTimings`、`UsageEvent{HostObserved}`、watchdog | — |
 | T07 | 暴走 handler（cpu-burn、無限ループ） | host watchdog → `Cancel` → `terminate`（SIGKILL）→ `Failed{Timeout}`。環境は再利用しない | terminate の実測（`docs/adr/0001` の残る測定） |
 | T08 | 巨大 payload / response / frame による memory 枯渇 | §11 の各上限。frame 上限は codec で decode 前に拒否 | — |
@@ -240,6 +244,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | T20 | OCI artifact を「実行できる」と誤認 | `ArtifactRef::OciImage` は受理するが validation で理由付き `Failed`（`Support::Unsupported`） | — |
 | T21 | guest が書き込みで host のディスクを使い切る（`/tmp` の fill、rootfs の remount、serial console の洪水、VMM ログ） | rootfs と function drive は Firecracker に `is_read_only` で渡す。書ける drive は `ephemeral_storage_mib` の scratch drive だけで、作成時に `fallocate` で確保。`console.log` は pipe 経由で上限付き、`fc.log` は watchdog。作成前に budget + 512 MiB の空きを確認（`crates/providers/firecracker/src/host_guard.rs`）。KVM 実測: 64 MiB に 256 MiB 書こうとして 58 MiB で `ENOSPC`、`/` `/function` は `EROFS`、host の空きの減少は drive の確保分（`docs/evidence/isolation-20260917T011555Z/`） | console 洪水と `fc.log` の上限は fake VMM と unit test だけで、KVM 上では未計測。`fallocate` 非対応の fs では sparse になり確保されない（warn と `scratch_drive_reserved=false`）。drive の IO 帯域（`rate_limiter`）は未設定で、隣の環境の IO を遅くできる |
 | T22 | network policy が効く前に user code が動く（egress の race） | egress none は NIC を付けない。restricted / public-web は tap と nftables chain を作って `nft -j list table` で読み戻し、一致したときだけ NIC を計画に入れ、egress gate が「検証済み tap を指す eth0 1 本だけ・MMDS なし」を計画と `GET /vm/config` で確認し、`InstanceStart` 直前にもう一度読み戻す（`crates/providers/firecracker/src/network.rs`、ADR-0005）。tap に map 要素が無い間は table の既定 drop に落ちる。以下は egress none の従来の検査: `InstanceStart` の前に、送る API に `/network-interfaces` `/mmds` が無いことと、`GET /vm/config` の `network-interfaces` が空で `mmds-config` が null であることを確認し、違えば起動しない（`crates/providers/firecracker/src/egress_gate.rs`、`tests/fake_vmm.rs::egress_gate_refuses_to_start_a_vm_with_a_network_interface`）。guest の init と user code はその後にしか動かない。M8 実測で guest は `lo` だけ。restricted / public-web の KVM 実測では policy を付けた 4 回の起動すべてで policy の検証が `InstanceStart` より前（`docs/evidence/isolation-20260917T031126Z/net-race.json`） | 実測は aarch64 の nested virtualization 1 host。host の別の firewall が本 table より先に drop / accept する構成は未検証 |
+| T24 | 同じ `state.db` を開く 2 つ目の gateway、または止まっていた古い gateway が、他の gateway の実行中の invocation を失敗扱いにする / 同じ環境に重ねて dispatch する / 古い結果を書き込む（PLT-4631） | dispatcher ごとの owner と lease。reclaim は期限 + `max_clock_skew_ms` を過ぎた・stopped・前の incarnation と証明された dispatcher だけ。環境の owner は変わらず、pool の claim / sweep は owner の環境だけ。slot の acquire は `(state, epoch)` の CAS と未 release lease の不在が条件。reclaim された dispatcher は heartbeat も acquire もできず、結果は store が拒否する。別 gateway が駆動中の invocation の cancel は 409（`crates/application/tests/leases.rs::two_gateways_on_one_data_dir_never_settle_each_others_work`、`crates/application/src/repository/sqlite/tests.rs::a_lease_left_by_an_exited_process_is_reclaimed_once_and_only_after_expiry`） | 時計のずれが `max_clock_skew_ms` を超える、または heartbeat が lease_ttl + skew より長く止まると、生きている gateway の仕事が reclaim され、その handler は terminate で途中終了しうる（結果は上書きされない）。同一 host の同一 file だけ。2 つの gateway プロセスを HTTP で並べた E2E は未実施 |
 | T23 | guest が管理網・node・metadata・他 tenant・private 範囲・IPv6 に届く（SSRF、横移動）、DNS や redirect で回り込む | 環境ごとの chain が送信元偽装・`BLOCKED_IPV4`・IPv4 以外を profile の規則より先に drop、`input` / `output` で node と tap の間を遮断、`forward` で tap 宛ては応答だけ通す（tenant 間なし）。DNS は public-web でも設定 resolver だけ、restricted では allowlist に無ければ無し。DNS 応答や HTTP redirect が denied な宛先を指しても IP 層で drop。guest は `ipv6.disable=1`、host 側でも IPv6 を drop。KVM 実測（`docs/evidence/isolation-20260917T031126Z/`）: public-web 16/16・restricted 11/11 の拒否対象がすべて失敗し、許可対象は成功。2 tenant 同時起動で A から B の guest / tap に届かず B の受け付けは 0。`169.254.169.254.nip.io` と httpbin の 302 → metadata も接続できない | `public-web` は公開 IPv4 すべてに出られるので、DNS over HTTPS や外部 relay 経由の exfiltration は防がない。hostname の allowlist は無い。帯域・接続数の上限（`rate_limiter`）が無い。gateway は root（`CAP_NET_ADMIN`）が必要。x86_64・bare metal は未測定 |
 
 ## 13. process provider が守らないもの
@@ -273,12 +278,13 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 5. **hypervisor 側の DoS（fork bomb、大量 fd）。** microVM の vCPU / memory 上限は Firecracker の `machine-config` で与え、guest から見える値と超過 alloc の `crash` 分類は実測した（ADR-0001 M9、`docs/evidence/isolation-20260917T011555Z/`）。CPU は vCPU 単位（500 m でも 1 vCPU を占有できる）で、VMM スレッドに host 側の cgroup quota は無い。同じ host に 2 tenant の環境を並べて負荷をかけた干渉（noisy neighbor）の計測はしていない。
 6. **時刻の単調性。** deadline は wall-clock。host の時刻が飛ぶと deadline 判定がずれる。P1 では `AttemptTimings` に `Instant` を使い、deadline だけ wall-clock とする。
 7. **`OutcomeUnknown` 後の副作用の可視化。** ledger は「不明」としか言えない。
+8. **lease と時計（PLT-4631）。** lease の期限は wall-clock で判定する。gateway 間の時計のずれは `[dispatcher] max_clock_skew_ms`（既定 2 s）までしか許さず、それを超える時刻の飛びや、heartbeat が `lease_ttl_seconds + max_clock_skew_ms` より長く止まる停止（SIGSTOP、過負荷、VM の pause）では、生きている dispatcher の仕事が reclaim される。その場合も fencing で台帳は守られるが、handler は terminate されて途中で止まり、外部副作用は不明のまま残る。`dispatchers` 表には retention が無く、起動のたびに 1 行増える。
 
 ## 15. 非目標（P1）
 
 - 有償サービスとしての提供、SLA、料金（`UsageSummaryResponse.not_billable = true`）。
 - AWS Lambda / API Gateway との互換（イベント形式、`X-Amz-*` header、Lambda Runtime API）。`tachyon.invoke.v1` / `tachyon.http.v1` は独自。
-- 副作用の exactly-once。at-most-once の pipeline 実行と、Idempotency-Key による記録の再利用まで。
+- 副作用の exactly-once。at-most-once の pipeline 実行と、Idempotency-Key による記録の再利用まで。dispatch 後の失敗は再実行しない（lease の reclaim でも自動再実行しない）ので、handler の外部副作用は client の再送による at-least-once か、`OutcomeUnknown` の「不明」になる。
 - warm 再利用、idle 休止、snapshot / restore、非同期 invoke、cron（`docs/architecture.md` §6）。
 - 複数 host へのスケジューリング、Kubernetes 連携。
 - DDoS 耐性、rate limit、TLS 終端、WAF。

@@ -1,0 +1,2 @@
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: crash (HTTP 502): invocation inv_01m2pqqfz2s68a9x50vtzd4jah failed: Runtime.Panic: panic requested [type=Runtime.Panic] [invocation=inv_01m2pqqfz2s68a9x50vtzd4jah] [request=01m2pqqfz2ht8jt7fd9nt6gxne]
