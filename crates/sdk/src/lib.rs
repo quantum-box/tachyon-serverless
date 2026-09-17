@@ -43,6 +43,8 @@ use tokio::sync::watch;
 
 pub mod client;
 mod http;
+#[cfg(feature = "experimental-restore")]
+pub mod lifecycle;
 
 pub use axum::Router;
 pub use client::{HttpResponse, RuntimeClient};
@@ -66,6 +68,11 @@ pub enum SdkError {
     UnsupportedEvent(String),
     #[error("invalid http event: {0}")]
     InvalidHttpEvent(String),
+    /// A lifecycle hook failed or timed out; already reported to the bridge
+    /// (experimental, PLT-4651).
+    #[cfg(feature = "experimental-restore")]
+    #[error("{error_type}: {message}")]
+    Lifecycle { error_type: String, message: String },
 }
 
 /// Error returned by a handler. `error_type` is a stable, machine-readable

@@ -1,0 +1,13 @@
+revision ok: rev_01m2pmcdjppbgmff56zhzp0mx3
+invoke-prime exit=0
+invoke-composite exit=0
+fail-bootstrap exit=3
+fail-after-restore exit=3
+--- invoke-prime
+{"is_prime":true,"n":97,"restored":false,"generation":0,"table_primes":9592,"secret_present":true,"instance_id":"env_01m2pmceeqpdj8a0h68n49zns4-9a7490220c0a9471","connection_id":"conn-b5e3b463d01dc9bd","error":null,"error_type":null,"message":null}
+--- invoke-composite
+{"is_prime":false,"n":91,"restored":false,"generation":0,"table_primes":9592,"secret_present":true,"instance_id":"env_01m2pmchwzh1gmajc49cwrbgrd-754a016e1789b225","connection_id":"conn-a5ca39617da4f65c","error":null,"error_type":null,"message":null}
+--- fail-bootstrap
+{"is_prime":null,"n":null,"restored":null,"generation":null,"table_primes":null,"secret_present":null,"instance_id":null,"connection_id":null,"error":"init_error","error_type":"Runtime.PreCheckpointFailed","message":"invocation inv_01m2pmcmjjwmdbcfswr7d7tnnx failed: Runtime.PreCheckpointFailed: Demo.BootstrapFailure: RESTORE_AWARE_FAIL=bootstrap"}
+--- fail-after-restore
+{"is_prime":null,"n":null,"restored":null,"generation":null,"table_primes":null,"secret_present":null,"instance_id":null,"connection_id":null,"error":"init_error","error_type":"Runtime.AfterRestoreFailed","message":"invocation inv_01m2pmcrb4zew0znq3nxzhsw7m failed: Runtime.AfterRestoreFailed: Demo.AfterRestoreFailure: RESTORE_AWARE_FAIL=after_restore"}

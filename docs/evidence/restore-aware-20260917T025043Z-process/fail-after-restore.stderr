@@ -1,0 +1,2 @@
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: init_error (HTTP 502): invocation inv_01m2pmcrb4zew0znq3nxzhsw7m failed: Runtime.AfterRestoreFailed: Demo.AfterRestoreFailure: RESTORE_AWARE_FAIL=after_restore [type=Runtime.AfterRestoreFailed] [invocation=inv_01m2pmcrb4zew0znq3nxzhsw7m] [request=01m2pmcrb279fwbc4t90ck33ez]

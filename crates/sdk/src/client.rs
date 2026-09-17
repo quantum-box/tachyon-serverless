@@ -137,9 +137,23 @@ impl RuntimeClient {
         body: Option<&[u8]>,
         timeout: Duration,
     ) -> Result<HttpResponse, SdkError> {
-        let mut stream = std::net::TcpStream::connect_timeout(&self.addr, timeout)?;
-        stream.set_read_timeout(Some(timeout))?;
-        stream.set_write_timeout(Some(timeout))?;
+        self.request_blocking_with(method, path, body, timeout, Some(timeout))
+    }
+
+    /// Blocking request whose response may take arbitrarily long when
+    /// `read_timeout` is `None` (the experimental lifecycle's `continue`,
+    /// which waits for a checkpoint/restore before any async runtime exists).
+    pub fn request_blocking_with(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+        connect_timeout: Duration,
+        read_timeout: Option<Duration>,
+    ) -> Result<HttpResponse, SdkError> {
+        let mut stream = std::net::TcpStream::connect_timeout(&self.addr, connect_timeout)?;
+        stream.set_read_timeout(read_timeout)?;
+        stream.set_write_timeout(Some(connect_timeout))?;
         let request = build_request(method, path, &self.host_header, body);
         stream.write_all(&request)?;
         let mut parser = ResponseParser::default();

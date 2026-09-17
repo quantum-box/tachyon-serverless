@@ -17,6 +17,7 @@ members = [
   "examples/http-axum",
   "examples/cpu-burn",
   "examples/isolation-probe",
+  "examples/restore-aware",
 ]
 
 [workspace.package]

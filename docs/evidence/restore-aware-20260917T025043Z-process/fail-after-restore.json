@@ -1,0 +1,1 @@
+{"error":{"code":"init_error","message":"invocation inv_01m2pmcrb4zew0znq3nxzhsw7m failed: Runtime.AfterRestoreFailed: Demo.AfterRestoreFailure: RESTORE_AWARE_FAIL=after_restore","request_id":"01m2pmcrb279fwbc4t90ck33ez","invocation_id":"inv_01m2pmcrb4zew0znq3nxzhsw7m","error_type":"Runtime.AfterRestoreFailed"}}

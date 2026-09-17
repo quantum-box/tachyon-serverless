@@ -49,7 +49,7 @@ bridge ──Pong{nonce}──▶ host                    (frame loop が即答�
 | `POST /runtime/v1/invocations/{attempt_id}/response` | 結果 JSON | 202 / 404 未知 attempt / 409 完了済み / 413 過大（body または canonical JSON が上限超過。attempt は `Error{response_too_large}` `Runtime.ResponseTooLarge` で完了済み） |
 | `POST /runtime/v1/invocations/{attempt_id}/error` | `RuntimeErrorReport{error_type, message, stack_trace}`（body は `MAX_ERROR_REPORT_BYTES` = 1 MiB まで） | 202 / 404 / 409 / 413 過大（attempt は `Error{handler}` `Runtime.ErrorReportTooLarge` で完了済み） |
 | `POST /runtime/v1/init/error` | 初期化失敗（body は 1 MiB まで） | 202 / 413 過大 |
-| `POST /runtime/v1/ready` | 準備完了（冪等） | 202 |
+| `POST /runtime/v1/ready` | 準備完了（冪等） | 202 / 409（実験 lifecycle が開いていて continue 前。§B-X1） |
 
 - 413 を返す前に bridge は宣言された body を 16 MiB まで（最大 5 秒）読み捨てる。body を書き切ってから応答を読む client も broken pipe ではなく 413 を受け取り、処理を続けられる。SDK は 413 を「bridge が attempt を完了済み」として扱う。
 - SDK は error report を送る前に `error_type` 256 B、`message` 64 KiB、`stack_trace` 256 KiB に文字境界で切り詰め（`...[truncated N bytes]` を付ける）、escape 後も 1 MiB を超える場合は `stack_trace` を落として `message` を 16 KiB にする。
@@ -61,6 +61,44 @@ event_type:
   - SDK は `path` をそのまま router に渡す。防御として URI path に使えないバイト（RFC 3986 の pchar と `/` 以外。既存の `%XX` は保持）だけを percent-encode するので、規約外の path でも `http::Uri` の構築に失敗せず、`?` / `#` で query や fragment に化けない。
 
 SDK のエラー型: handler の `Err` → `Handler.Error`、panic → `Runtime.Panic`（`catch_unwind`）、`serve_http` に非 http event → `Runtime.UnsupportedEvent`。
+
+### B-X1. 実験: 初期化保存点と復元後 hook（PLT-4651）
+
+**実験 API**。SDK は cargo feature `experimental-restore`（既定 off）の `tachyon_serverless_sdk::lifecycle` だけがこれを使う。feature を有効にしなくても bridge はこの path を提供するが、呼ばない process（P1 の `run` / `serve_http` を含む）には §B の表どおりの API しか見えない。snapshot の取得・復元そのものは実装していない（PLT-4653）。
+
+目的は、snapshot の全 copy で共有してよい**再利用可能な初期化状態**と、**instance ごとに作り直す状態**を分けること。
+
+| method/path | 意味 | 応答 |
+|---|---|---|
+| `POST /runtime/v1/lifecycle/bootstrap` | lifecycle を開く。これから再利用可能な状態を作る | 202 / 409（ready 後、または 2 回目） |
+| `POST /runtime/v1/lifecycle/checkpoint` | 再利用可能な状態ができた。ここから snapshot を取ってよい | 202 / 409（bootstrap 中でない） |
+| `GET /runtime/v1/lifecycle/continue` | どう続けるかを long-poll。body は `{"kind":"cold"}` または `{"kind":"restored","instance_id","restored_at_ms","generation"}`、header `tachyon-lifecycle-version: 1` | 200 / 409（checkpoint 前、ready 後）。再試行には同じ答えを返す |
+| `POST /runtime/v1/lifecycle/error` | hook の失敗。body は `RuntimeErrorReport`（1 MiB まで） | 202 / 409（lifecycle 外） / 413 |
+
+```
+user: POST bootstrap → bootstrap()（同期。async runtime・secret・socket・thread・一意な値を作らない）
+user: POST checkpoint                         ← ここ以降なら snapshot を取ってよい
+user: GET continue ─(RestoreSource が答えるまで block)→ cold | restored
+user: 時計を読む → Tokio runtime を作る → after_restore(fixed, ctx)（identity・RNG・認証・接続・常駐 task）
+user: POST /runtime/v1/ready                  → bridge ──Ready{init_ms}──▶ host
+```
+
+- **Ready の gate**: lifecycle が開いている間、bridge は `continue` に答えるまで `POST /ready` を 409 にし、`GET /next` は `ready` が明示的に来るまで 409 にする（lifecycle 内では `next` は ready を意味しない）。したがって bootstrap / checkpoint 待ち / after_restore の途中で `Ready` frame が host に届くことはない。
+- **失敗の型**（`InitError.error_type`）。bridge が自分の観測した phase で決め、process の申告した型は `message` の先頭（`<型>: <message>`）に残す。
+  - `Runtime.PreCheckpointFailed`: bootstrap 中（checkpoint 後で continue 前を含む）に `lifecycle/error`。
+  - `Runtime.AfterRestoreFailed`: continue 後、ready 前に `lifecycle/error`。
+  - `Runtime.PreCheckpointTimeout`: init deadline 到達時に bootstrap 中、または checkpoint 済みでまだ continue を要求していない。
+  - `Runtime.CheckpointTimeout`: continue を要求済みで、bridge（provider 側の snapshot / restore）が答えていない。function の責任ではない。
+  - `Runtime.AfterRestoreTimeout`: continue 後、ready 前に init deadline 到達。
+  - lifecycle を開かなかった process の init timeout は従来どおり `Runtime.InitTimeout`。process の異常終了は従来どおり `Runtime.InitExit`。
+- **init deadline**: cold は P1 と同じ 1 本（`HelloAck.init_timeout_ms`）で bootstrap から ready までを覆い、X1 で延びない。`restored` の答えを返したときだけ bridge は deadline を張り直す（bootstrap に使った時間は snapshot 元の process が使ったもの）。host 側の init deadline（`Host.InitTimeout`）は変えていないので、restore の budget を host がどう持つかは PLT-4653 で決める。
+- **continue の答え**: bridge の `RestoreSource` が決める。同梱の provider はどれも snapshot を取らないので bridge バイナリは常に `NoSnapshot`（即座に `cold`）を使い、**通常起動も同じ API 経路を通る**。`restored` はテストの mock restore 通知（`run_session_with`）からしか出ない。
+- **互換性の規則**:
+  - host↔bridge frame は変えていない。`PROTOCOL_VERSION` は 2 のまま。lifecycle は `InitError` の `error_type` の値を増やしただけで、host はこれまでどおり `init_error` として扱う（未知の `error_type` 文字列は許容されている）。
+  - Runtime API への追加は additive。lifecycle を使わない process の挙動は変わらない。lifecycle を使う SDK が古い bridge に当たると `bootstrap` が 404 になり、SDK はその時点で（bootstrap hook を実行せずに）エラーで終了する。
+  - 本物の snapshot を扱う host は、restore を bridge に知らせる新しい frame（または `HelloAck` の field）が必要になる。未知 type は protocol error なので、**新しい frame を足すときは `PROTOCOL_VERSION` を上げる**。`HelloAck` に「snapshot 能力あり」の field を足すだけなら、未知 field は無視されるので version は上げず、field が無い host は「snapshot なし＝常に cold」と解釈する。どちらも PLT-4653 で行う。
+- **snapshot-safe を主張しない**: この API は function が「copy 間で共有してはいけない状態」を置く場所を用意するだけである。任意のライブラリ（乱数 seed・hostname・monotonic clock の基準・fd・thread pool・TLS session を初期化時に握るもの）や multithread runtime が透過的に snapshot-safe になるわけではない。SDK が保証するのは、SDK 自身が checkpoint 前に async runtime・thread・signal handler・永続接続を作らないこと（lifecycle の呼び出しは 1 リクエスト 1 接続の blocking HTTP）と、after_restore が成功するまで ready を送らないことだけである。hook の中身は function 作者の責任。
+- **環境変数**: process の環境は process image の一部なので、restore された copy の `std::env` は snapshot 元の値である。restore 後に新しい secret を渡す経路はまだ無い（PLT-4653）。現状で動くのは cold だけで、cold では環境は最新である。
 
 ## C. Firecracker guest 規約（providers/firecracker と runtime-bridge の合意事項）
 
