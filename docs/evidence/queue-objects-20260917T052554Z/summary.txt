@@ -1,0 +1,44 @@
+PLT-4638 durable queue and object store - verification record
+==============================================================
+
+date:     2026-09-17 (UTC 05:25-05:41; verify/ and e2e/ re-run after rebasing onto PLT-4634)
+host:     macOS Darwin 25.6.0 arm64 (Apple M4), single host (verify/ and e2e/ each run twice; the recorded files are the second run)
+branch:   feat/plt-4638-queue-objects (rebased on origin/main 8ad8b67)
+server:   nats-server v2.14.7 darwin-arm64, sha256 9fc225cd...b9001 verified against
+          deploy/nats/versions.env before use; run as a local process (no docker),
+          listen 127.0.0.1, JetStream file store, sync_interval: always
+
+verify/   scripts/queue/verify.sh --evidence docs/evidence/queue-objects-20260917T052554Z/verify
+          results.txt: 16/16 ok
+  auth.anonymous_refused          client without credentials -> Authorization Violation
+  auth.wrong_password_refused     wrong password -> Authorization Violation (error_code unauthorized)
+  restart.*                       publish 100, ack 10, 10 left in flight, kill -9 the server, restart on
+                                  the same store: 90 stored before and after; all 90 unacked delivered
+                                  (10 of them redelivered, delivery_count > 1); drained to 0
+  restart.dedup_after_restart     OBSERVATION (same result in 2 runs, before and after the rebase):
+                                  republishing the same 100 ids -> 90 duplicates, 10 accepted again. The 10 accepted are the ids acked (removed) before the kill:
+                                  after a restart JetStream rebuilds dedup from the messages still in the
+                                  stream. Dedup is not an idempotency guarantee (ADR-0008 decision 1).
+  capacity.discard_new_refuses    stream max_msgs 5, publish 8 -> 5 stored, 3 refused queue_full
+                                  (server error code 10077 "maximum messages exceeded")
+  capacity.existing_kept          the 5 stored messages are intact
+  capacity.message_too_large      4096-byte payload vs max_message_bytes 1024 -> message_too_large
+                                  (refused by the adapter before sending; the server-side 10054 path is
+                                  not exercised by this run)
+  retention.max_age_expires       max_age 2 s: 3 messages -> 0 after 4 s
+  contract.nats                   EventQueue contract suite against JetStream, TACHYON_NATS_REQUIRED=1: 5/5
+  objects_and_sqlite_queue        object store / GC / SQLite queue / ledger reference tests: 25/25
+
+e2e/      scripts/e2e/demo.sh, process provider (NOT isolated), copy of config/gateway.dev.toml with
+          only listen / data_dir / workdir changed; [queue] and [objects] unset (default none).
+          28/28 PASS. gateway.log "application bootstrapped" shows "queue":"none","objects":"none".
+
+What this does NOT show
+- High availability or region failure tolerance: one nats-server process on one host, num_replicas 1,
+  objects on one disk, no replication, no backup.
+- Durability against host / disk loss or power failure (only a process kill -9).
+- Throughput or latency of sync_interval: always.
+- TLS, nkey / JWT operator mode, key rotation, S3-compatible object storage.
+- Any use by the invoke pipeline (invokeAsync is PLT-4639).
+- Linux: the CI job durable-queue runs the same script on ubuntu-latest (linux-amd64 binary); no Linux
+  run is recorded here.

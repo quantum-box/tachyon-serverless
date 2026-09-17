@@ -1,0 +1,6 @@
+nats_server_version=v2.14.7
+platform=darwin-arm64
+sha256=9fc225cddebc67438345ad988c5d6bfc6daad16a7609bcceaafa88bcab9b9001
+stamp=20260917T054026Z
+host=Darwin 25.6.0 arm64
+count=100

@@ -1,0 +1,32 @@
+[package]
+name = "tachyon-serverless-queue-nats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "NATS JetStream adapter for the EventQueue port: file-stored work-queue stream bootstrapped as code, explicit-ack pull consumers, authenticated connections only (PLT-4638, docs/adr/0008)."
+
+[[bin]]
+# Operator / verification probe used by scripts/queue/verify.sh.
+name = "tachyon-queue-probe"
+path = "src/bin/probe.rs"
+
+[dependencies]
+tachyon-serverless-domain = { workspace = true }
+tachyon-serverless-durable-port = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tachyon-serverless-durable-port = { workspace = true, features = ["testkit"] }
+tempfile = { workspace = true }

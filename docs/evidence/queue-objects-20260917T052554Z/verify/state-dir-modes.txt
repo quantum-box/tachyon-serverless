@@ -1,0 +1,6 @@
+-rw-------@ auth.conf
+-rw-------@ gateway.password
+drwx------@ jetstream
+-rw-------@ nats-server.conf
+-rw-------@ nats-server.log
+-rw-------@ nats-server.pid

@@ -1,0 +1,36 @@
+# nats-server configuration for the local durable queue (PLT-4638, docs/adr/0008).
+#
+# Template: scripts/queue/up.sh renders it into the state directory, replacing the @...@ tokens,
+# and writes auth.conf (generated password, mode 0600) next to it. Do not put secrets here.
+#
+# What this is: ONE server process on ONE host, JetStream file store on that host's disk,
+# no clustering, no replication, no TLS (loopback only). It survives a process crash / kill -9
+# (file store + sync_interval: always); it does NOT survive losing the disk or the host, and it
+# is not highly available. See docs/adr/0008 「保存先と複製」.
+
+server_name: tachyon-queue-local
+
+# Loopback only: the queue is never reachable from a guest or another host.
+listen: 127.0.0.1:24222
+# Monitoring (/healthz, /jsz) for up.sh readiness checks. Loopback only; carries no credentials.
+http: 127.0.0.1:28222
+
+max_payload: 1MB
+max_connections: 256
+max_control_line: 4KB
+write_deadline: "10s"
+
+jetstream {
+  store_dir: "<repo>/target/queue/verify-state-20260917T054026Z/jetstream"
+  # Server-wide ceilings. Per-account limits are in auth.conf; per-stream limits are applied by
+  # the gateway ([queue.limits]) when it bootstraps the stream.
+  max_memory_store: 64MB
+  max_file_store: 2GB
+  # fsync every write before acknowledging a publish: a publish that returned Ok is on disk
+  # even if the host loses power right after (at a throughput cost).
+  sync_interval: always
+}
+
+# Accounts and users. There is deliberately no `no_auth_user`: a client without credentials
+# is refused (Authorization Violation).
+include ./auth.conf

@@ -29,6 +29,7 @@ tachyon-serverless-protocol = { workspace = true }
 tachyon-serverless-provider-port = { workspace = true }
 tachyon-serverless-api-types = { workspace = true }
 tachyon-serverless-application = { workspace = true }
+tachyon-serverless-queue-nats = { workspace = true }
 tachyon-serverless-provider-process = { workspace = true, optional = true }
 tachyon-serverless-provider-firecracker = { workspace = true, optional = true }
 anyhow = { workspace = true }

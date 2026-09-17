@@ -14,6 +14,7 @@
 //!   `/http/` and `/http/{*path}` for any method.
 
 pub mod config_client;
+pub mod durable;
 pub mod error;
 pub mod handlers;
 pub mod middleware;
@@ -177,13 +178,17 @@ pub async fn serve(
             )?))
         }
     };
-    let app = Application::bootstrap_with(
+    // PLT-4638: the JetStream queue (if `[queue] backend = "nats"`) is
+    // connected before bootstrap; everything else durable is built inside.
+    let durable = durable::connect(&config).await?;
+    let app = Application::bootstrap_with_durable(
         config,
         provider,
         BootstrapOptions {
             config_source,
             ..BootstrapOptions::default()
         },
+        durable,
     )?;
     // Reclaim environments a previous process left behind before the listener
     // accepts, so an orphan cannot outlive a crash or a kill.
@@ -252,6 +257,24 @@ pub async fn serve(
             }
         })
     };
+    // Object retention (PLT-4638): expired and orphaned objects that no
+    // non-terminal invocation references. Not spawned without an object store.
+    let object_gc = app.durable.object_gc.is_some().then(|| {
+        let app = app.clone();
+        let every = app.config.objects.gc_interval();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(every);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                if let Some(report) = app.collect_objects().await
+                    && report != Default::default()
+                {
+                    tracing::info!(?report, "object retention pass");
+                }
+            }
+        })
+    });
     // The dispatcher lease (PLT-4631): renew this process's lease and the
     // slot leases of its in-flight attempts, then reclaim the work of
     // dispatchers that lost theirs and terminate what that fenced. Holds only
@@ -296,6 +319,9 @@ pub async fn serve(
     heartbeat.abort();
     if let Some(task) = config_refresh {
         task.abort();
+    }
+    if let Some(object_gc) = object_gc {
+        object_gc.abort();
     }
     // Nothing of this process is in flight any more: another gateway on the
     // same data_dir may take over whatever is left at once.

@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4636、PLT-4645、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4636、PLT-4638、PLT-4645、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -41,6 +41,7 @@
 | `docs/evidence/restore-aware-20260917T025043Z-process/` | `examples/restore-aware`（PLT-4651、実験）を gateway + process provider で deploy し、`{"n":97}` / `{"n":91}` と、`RESTORE_AWARE_FAIL=bootstrap` / `after_restore` の revision を invoke した結果・ログ | macOS、process provider（隔離なし） | 成功 2（`restored=false`）、`Runtime.PreCheckpointFailed` 1、`Runtime.AfterRestoreFailed` 1 |
 | `docs/evidence/20260917T020229Z-process/` | `scripts/e2e/demo.sh`（PLT-4618: 台帳が `state.db`。step 27 は `state.db` と `state.db-wal` も検査。port 8080 が使用中のため `config/gateway.dev.toml` の listen と data_dir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T034846Z-process/` | `scripts/e2e/demo.sh`（PLT-4631: dispatcher の登録・slot の acquire / complete・heartbeat 付きの gateway での P1 互換確認。`gateway.log` に `dispatcher registered`、`startup reconcile finished` に `foreign` / `reclaimed_dispatchers` / `fenced_*`。設定は listen・data_dir・workdir だけを変えたコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
+| `docs/evidence/queue-objects-20260917T052554Z/` | PLT-4638: `scripts/queue/verify.sh`（`verify/`: 認証拒否、kill -9 後の再配送、容量境界、`max_age`、JetStream 契約テスト、object store テスト）と `scripts/e2e/demo.sh`（`e2e/`: `[queue]` / `[objects]` 未設定の gateway の P1 互換確認。listen・data_dir・workdir だけを変えた設定のコピー）、`summary.txt` | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、process provider（隔離なし） | verify 16/16 ok、E2E 28/28 PASS |
 | `docs/evidence/20260917T051140Z-process/` | `scripts/e2e/demo.sh`（PLT-4634: semaphore を admission に置き換えた後の P1 互換確認。PLT-4636 の統合後の branch。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T051238Z-burst-process/` | `scripts/e2e/burst.sh`（PLT-4634: node 900 MiB・`max_queue = 4`・region `us` の使い捨て gateway に cpu-burn の 7 件 / 14 件の同時 invoke、jp-only の tenant、`GET /v1/capacity` の 50 ms 間隔の記録） | macOS、process provider（隔離なし） | 9/9 PASS |
 
@@ -424,7 +425,7 @@ control plane（`combined`）が generation 付きの設定を配信し、data p
 
 ## PLT-4634 autoscaler・bounded queue・tenant 公平配分・容量上限
 
-gateway 全体の semaphore を、資源で予約する admission（capacity ledger・tenant ごとの公平 bounded queue・tenant / revision quota・起動の合流（desired）・start-rate token bucket・起動失敗 circuit breaker・配置制約）に置き換えた（`docs/adr/0006-autoscaling-and-admission.md`、`docs/architecture.md` §3 手順 5・§4「admission・autoscaler」、`docs/api.md` §4・§5.1.1、`docs/threat-model.md` §8・§11・T17・T25・§14-10）。記録日 2026-09-17、branch `feat/plt-4634-autoscaler`。テストは次で再現する: `cargo test -p tachyon-serverless-application --lib admission`（fake clock、決定的）、`cargo test -p tachyon-serverless-application --test admission`（fake provider、実時間で数秒）、`cargo test -p tachyon-serverless-gateway --test gateway_integration capacity`、`scripts/e2e/burst.sh`（実 gateway + process provider）。**KVM（Firecracker）上の burst は未実行**（検証 VM を別作業が使用中だったため）。以下のテスト名のうち `admission::tests::` は `crates/application/src/services/admission/tests.rs`、`tests/admission.rs` は `crates/application/tests/admission.rs`。
+gateway 全体の semaphore を、資源で予約する admission（capacity ledger・tenant ごとの公平 bounded queue・tenant / revision quota・起動の合流（desired）・start-rate token bucket・起動失敗 circuit breaker・配置制約）に置き換えた（`docs/adr/0006-autoscaling-and-admission.md`、`docs/architecture.md` §3 手順 5・§4「admission・autoscaler」、`docs/api.md` §4・§5.1.1、`docs/threat-model.md` §8・§11・T17・T25・§14-11）。記録日 2026-09-17、branch `feat/plt-4634-autoscaler`。テストは次で再現する: `cargo test -p tachyon-serverless-application --lib admission`（fake clock、決定的）、`cargo test -p tachyon-serverless-application --test admission`（fake provider、実時間で数秒）、`cargo test -p tachyon-serverless-gateway --test gateway_integration capacity`、`scripts/e2e/burst.sh`（実 gateway + process provider）。**KVM（Firecracker）上の burst は未実行**（検証 VM を別作業が使用中だったため）。以下のテスト名のうち `admission::tests::` は `crates/application/src/services/admission/tests.rs`、`tests/admission.rs` は `crates/application/tests/admission.rs`。
 
 | # | 受入条件 | 状態 | 証跡 |
 |---|---|---|---|
@@ -445,6 +446,36 @@ gateway 全体の semaphore を、資源で予約する admission（capacity led
 | tachyon-apps の runner の容量計算との整合 | 未検証 | 別リポジトリ。runner がどの単位（memory / slot）で容量を数えているかは本リポジトリでは確認していない |
 
 既知の制約: 状態は gateway プロセスのメモリにだけあり、再起動で到着率・breaker・拒否数は消える。同じ `data_dir` を共有する 2 つの gateway はそれぞれ自分の予約しか数えない（1 host 1 gateway 前提）。起動は待機中の invocation の分だけで、`min_ready` による先行起動・zero-scale は PLT-4635。user の init error も breaker の失敗に数える。
+
+## PLT-4638 durable queue・入出力 object 保管・保持期限
+
+非同期イベントの永続配送（NATS JetStream、単一 node）と大きな入出力の object 保管（tenant / region 別、暗号化、digest、TTL、GC）を検証環境に用意した（`docs/adr/0008-durable-queue-and-object-store.md`、`docs/architecture.md` §4「durable queue と object store」、`docs/threat-model.md` B6・A9〜A11・T27〜T30・§14-11）。記録日 2026-09-17、branch `feat/plt-4638-queue-objects`。**invoke pipeline からはまだ使わない**（PLT-4639）。本番 queue の置き換えはしていない。テストは次で再現する: `cargo test -p tachyon-serverless-application --lib -- durable:: repository::object_contract_tests`、`cargo test -p tachyon-serverless-durable-port`、`eval "$(scripts/queue/up.sh)" && TACHYON_NATS_REQUIRED=1 cargo test -p tachyon-serverless-queue-nats`、`scripts/queue/verify.sh`。実測は macOS arm64 の 1 host・1 回（`docs/evidence/queue-objects-20260917T052554Z/`）。Linux は CI job `durable-queue` で同じ script を回す設定だけで、実行の記録はまだ無い。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | queue 再起動後も永続化済みメッセージを読み出せる | 実装済み（JetStream 実測あり、単一 host） | `verify/results.txt` の `restart.*`: 100 件 publish・10 件 ACK・10 件 in-flight の状態で nats-server を kill -9 → 同じ store で再起動し、保存 90 件を維持、未 ACK の 90 件すべてを配送（10 件は `delivery_count > 1` の再配送）。契約 `testkit::unacked_messages_survive_a_reopen`（JetStream: `queue-nats` `tests::nats_queue_passes_the_queue_contract`、SQLite: `durable::sqlite_queue::tests::sqlite_queue_passes_the_queue_contract`）、`durable::sqlite_queue::tests::committed_messages_survive_a_reopen_of_the_file` |
+| 2a | tenant 越境参照を拒否する | 実装済み | object: `durable::tests::objects_are_invisible_across_tenants`（別 tenant・別 region の scope は `NotFound` で読めず消せない、A の ciphertext と metadata を B の directory に偽造コピーしても `Integrity`、提供しない region への put は `RegionNotServed`）。台帳の参照: `repository::object_contract_tests::{memory,sqlite}::an_object_reference_never_crosses_a_tenant`。queue は platform 内部の credential だけが使い、tenant には接続させない（subject に tenant を載せて配送時に返す）。**queue に tenant ごとの権限や上限は無い**（§14-11） |
+| 2b | 未認証アクセスを拒否する | 実装済み（JetStream 実測あり） | server: `verify/results.txt` の `auth.anonymous_refused` / `auth.wrong_password_refused`（`Authorization Violation`）、`queue-nats` `tests::nats_refuses_unauthenticated_and_wrong_credentials`。gateway 側: `durable::tests::nats_config_refuses_anonymous_connections`（credential の無い `[queue.nats]` は起動前に拒否）、`queue-nats` `tests::credential_files_must_be_private_and_are_redacted`（group / other に読める file を拒否） |
+| 2c | 上限超過を拒否する | 実装済み（JetStream 実測あり） | queue: `verify/results.txt` の `capacity.*`（`max_msgs` 5 に 8 件 → 5 件保存・3 件 `queue_full`（server error 10077）・既存 5 件は無傷、1 message の超過は `message_too_large`（adapter が送信前に拒否。server 側の 10054 は未観測））、契約 `a_full_stream_refuses_the_publish_and_keeps_what_it_has`、`durable::sqlite_queue::tests::a_full_queue_refuses_publish_with_queue_full`。object: `durable::tests::object_size_and_tenant_quota_are_enforced`（`TooLarge`、全 region 合計の `QuotaExceeded`、何も書かない） |
+| 3 | ACK / 再送と DB ledger の責任分界、実際の保存先 / 複製条件を記録する | 実装済み（文書） | ADR-0008 §1（queue は at-least-once の配送、決定と冪等性は台帳、ACK は commit の後、dedup は kill -9 後に削除済み id を忘れるという実測）、§6（保存先: nats-server の 1 host の local disk / `data_dir`、複製なし）。`docs/architecture.md` §4・§5-14 |
+| 4 | retention / GC が未完了 Invocation の object を消さない | 実装済み | `durable::tests::gc_never_collects_objects_of_unfinished_invocations`（TTL 60 s の object を 30 日後に GC しても非 terminal の invocation が参照していれば残り、terminal になった後の pass で消える）、`gc_and_attach_race_never_leave_a_dangling_reference`（put → invocation insert の間の GC、grace を過ぎた後の tombstone と attach 拒否）、`gc_collects_orphans_only_after_the_grace_period`、`gc_removes_incomplete_writes_after_the_grace_period`、`repository::object_contract_tests::*::{a_non_terminal_reference_protects_an_expired_object, an_attach_after_a_collection_claim_is_refused}`（2 スレッドの競合 20 回） |
+| 5 | 単一 node prototype を HA / region 障害耐性と説明しない | 実装済み（文書） | ADR-0008 §6 と「結果」、`docs/threat-model.md` T30・§14-11、`deploy/nats/nats-server.conf` と `scripts/queue/up.sh` の冒頭、`docs/evidence/queue-objects-20260917T052554Z/summary.txt` の「What this does NOT show」 |
+
+検証項目:
+
+| 検証 | 状態 | 証跡 |
+|---|---|---|
+| queue の起動（pin した版・checksum 検証・docker なし） | 実装済み（macOS 実測） / 未検証（Linux の実行記録） | `scripts/queue/up.sh`、`verify/environment.txt`（sha256 照合済み）。CI job `durable-queue`（ubuntu-latest）は追加したが、この branch では未実行 |
+| 再起動（kill -9） | 実装済み（JetStream 実測 1 回） | 上の #1 |
+| 保持期限 | 実装済み | queue: `retention.max_age_expires`（`max_age` 2 s で 3 → 0）、契約 `messages_older_than_max_age_are_removed`。object: 上の #4 |
+| 容量境界 | 実装済み | 上の #2c |
+| stream / consumer の IaC | 実装済み | `NatsEventQueue::stream_config`（file / workqueue / discard new / replicas 1 / 上限）を起動時に作成・更新: `queue-nats` `tests::{nats_stream_is_bootstrapped_as_code_and_idempotent, stream_config_is_file_workqueue_discard_new_single_replica}` |
+| 改竄検出（digest / 暗号化） | 実装済み | `durable::tests::tampered_objects_fail_verification`、`durable::crypto::tests::*` |
+| 既存の同期 gateway の回帰 | 実装済み（process provider） | `e2e/20260917T053936Z-process/`（28/28 PASS、`queue`/`objects` = `none`） |
+| S3 互換 object storage | 未着手 | port は載せられる形。常駐 service と credential を検証環境に増やさないため今回は実装しない |
+| HA（JetStream cluster、複製）、TLS、鍵 rotation、tenant ごとの queue 上限 | 未着手 | ADR-0008「非対象」 |
+
+残り・制約: 実測は macOS arm64 の 1 host・1 回で、kill -9 以外の障害（host 停止、disk 喪失、電源断）は試していない。`sync_interval: always` の throughput は未計測。object の quota は 1 プロセス内でだけ直列化し（`root` の共有は非対応）、quota と GC の列挙は metadata の全走査。object の鍵は 1 つで全 tenant 共通。attach は invocation insert と別トランザクション（PLT-4639 で outbox と同じトランザクションにする）。
 
 ## ADR-0001 残る測定の状況
 

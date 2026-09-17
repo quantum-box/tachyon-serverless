@@ -36,8 +36,10 @@ apps/cli
 | `crates/domain` | ID, entity, 状態遷移, エラー分類 | tokio / axum / DB / hypervisor |
 | `crates/protocol` | host↔bridge frame, bridge↔SDK Runtime API | axum, provider 実装 |
 | `crates/provider-port` | `ExecutionProvider` ほか port trait | 具体 provider |
+| `crates/durable-port` | `EventQueue`（永続 queue）と `ObjectStore`（tenant / region 別の暗号化 object）の port、queue 契約テスト（feature `testkit`）。PLT-4638 | 具体 queue / storage |
+| `crates/adapters/queue-nats` | NATS JetStream の `EventQueue`（stream as code、認証必須）と検証用 `tachyon-queue-probe`。PLT-4638 | application |
 | `crates/api-types` | 管理/Invoke API の DTO, エラー code | application |
-| `crates/application` | usecase, repository (in-memory), invoke pipeline, bridge session (host 側), watchdog, log 保持, 設定配信と data plane の cache（`control/`、PLT-4636） | axum, hypervisor 固有 API, HTTP client |
+| `crates/application` | usecase, repository (in-memory), invoke pipeline, bridge session (host 側), watchdog, log 保持, 設定配信と data plane の cache（`control/`、PLT-4636）, 埋め込み SQLite queue・filesystem object store・object GC（`durable/`、PLT-4638） | axum, hypervisor 固有 API, HTTP client |
 | `crates/providers/process` | 子プロセス + unix socket。dev 専用 | — |
 | `crates/providers/firecracker` | Firecracker API socket, vsock, drive, cleanup | domain 以外の上位 |
 | `crates/providers/fake` | テスト専用。duplex stream 上のスクリプト guest | — |
@@ -210,6 +212,32 @@ max_total_idle = 8             # 全 reuse key 合計の idle 上限
 allow_unverified_idle = false  # 計測専用。未計測（Unverified）の idle capability を受け入れる。既定 off
                                # profile = "production" では拒否される
 
+[queue]                        # PLT-4638。既定 "none"（何も接続しない）
+backend = "none"               # none | sqlite（<data_dir>/queue.db、dev 専用）| nats
+# [queue.nats]
+# url = "nats://127.0.0.1:14222"
+# stream = "TACHYON_EVENTS"
+# subject_prefix = "tachyon.events"
+# user = "gateway"             # user + password_file か nkey_seed_file のどちらか一方が必須（匿名は不可）
+# password_file = "target/queue/nats/gateway.password"   # mode 0600 でなければ拒否
+# [queue.limits]
+# max_messages = 100000
+# max_bytes = 268435456
+# max_message_bytes = 262144
+# max_age_seconds = 604800     # 0 は拒否（無期限の stream を作らない）
+# duplicate_window_seconds = 120
+
+[objects]                      # PLT-4638。既定 "none"
+backend = "none"               # none | filesystem
+# root = "./data/objects"
+# regions = ["local"]          # これ以外の region への put は拒否
+# key_file = "secrets/object.key"   # 64 hex（32 bytes）、mode 0600。key_env とどちらか一方
+# max_object_bytes = 8388608
+# tenant_quota_bytes = 1073741824
+# default_ttl_seconds = 604800
+# orphan_grace_seconds = 3600
+# gc_interval_seconds = 600
+
 [[identity.tokens]]
 token = "dev-token-tenant-a"
 tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
@@ -373,6 +401,21 @@ gate が開いているとき、pool は環境の**休止と再開そのもの**
 
 Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が記録され、API 応答の `attempts[].start_kind` に出る。
 
+### durable queue と object store（PLT-4638）
+
+非同期 invoke（PLT-4639 以降）のための配送と本文の置き場。**検証環境の用意までで、invoke pipeline はまだ使わない。** `[queue]` / `[objects]` の既定は `none` で、既定の gateway は何も接続しない。決定と実測は `docs/adr/0008-durable-queue-and-object-store.md`。
+
+| 項目 | 内容 |
+|---|---|
+| port | `crates/durable-port`: `EventQueue`（publish（message id で dedup）、pull consumer の fetch、ack / nak / term、`max_deliver`、`ack_wait`、backlog stats）と `ObjectStore`（put / get / head / delete / usage / GC 候補の列挙） |
+| 責任分界 | queue は at-least-once の**配送**だけ。invocation の受付・終了・冪等性の**決定**は台帳（`state.db`）。worker は台帳の CAS の後に ACK する。queue の dedup は publisher 再送よけで、kill -9 の後は削除済み message の id を忘れる（実測） |
+| queue（本番候補） | NATS JetStream（`crates/adapters/queue-nats`）。起動時に stream を作成・更新: file storage、work-queue retention、`discard: new`（満杯なら publish を `queue_full` で拒否）、`max_msgs` / `max_bytes` / `max_msg_size` / `max_age` / `duplicate_window`、`num_replicas = 1`。subject は `<prefix>.<tenant>.<topic>`、consumer は durable pull・explicit ack。gateway は `[queue] backend = "nats"` なら bootstrap 前に接続し、認証に失敗したら起動しない |
+| queue（dev / CI） | `SqliteEventQueue`（`<data_dir>/queue.db`、0600、WAL、FULL sync）。同じ契約テストを通す。`profile = "production"` では拒否 |
+| server（IaC） | `deploy/nats/`（版と sha256 の pin、server 設定、account / user の雛形）、`scripts/queue/up.sh` / `down.sh`（docker 不要、local process、loopback だけ、`sync_interval: always`、password は生成して 0600）、`scripts/queue/verify.sh`（認証拒否・kill -9 後の再配送・容量境界・`max_age`・契約テスト・object store） |
+| object | `FsObjectStore`: `<root>/<region>/<tenant>/<obj_id>.{data,meta}`（dir 0700、file 0600）。AES-256-GCM（鍵は key file / env、metadata に key id）、平文 SHA-256 を読むたびに検証、AAD で id・tenant・region・digest に束縛。別 tenant / region の scope からは `NotFound`。`max_object_bytes` と tenant quota は明示エラー |
+| retention / GC | 台帳の `object_refs` / `object_tombstones`（migration 005）。GC は期限切れと orphan（grace を過ぎて一度も参照されていない）を、**非 terminal の invocation が参照していない場合だけ** tombstone → 削除する。tombstone 後の attach は拒否されるので、put と invocation insert の競合で消えた object を指すことはない |
+| 保存先と複製 | queue は nats-server の 1 host の local disk、object は gateway の host の `data_dir`。**複製なし、HA ではない、region 障害に耐えない**（region は置き場所の境界であって複製先ではない） |
+
 ## 5. 決め事（実装者が守ること）
 
 1. domain / application は `firecracker` `kube` `axum` を import しない。provider は `ExecutionProvider` だけを実装する。
@@ -388,10 +431,11 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 11. 再起動で「開始したかもしれない」ものを `Failed` にしない。dispatch 済みは `OutcomeUnknown`、未 dispatch だけ `Failed`（§4「起動時の後始末」）。孤児環境の回収は listener を開ける前に済ませる。
 12. 永続化は `<data_dir>/state.db`（埋め込み SQLite、§4「永続化」、`docs/adr/0003-execution-state-persistence.md`）。repository を経由しない読み書きをしない。更新は「読んだ値を条件にした CAS」で、負けたら読み直す（`AliasService::apply`）。新しい列や表は migration を追加して入れ、適用済みの migration を書き換えない。TiDB は将来の adapter で §6 のとおり非対象のまま。
 13. invoke の経路（認証・function / route / revision / policy の解決・cold start の可否）は `ConfigCache` / `InvokeGate`（`crates/application/src/control/`）だけを読み、`FunctionRepository` / `AliasRepository` / `RevisionRepository` を直接読まない。設定の有効期限切れで実行中の invocation を止めない（§4「設定配信と認可 lease」、ADR-0007）。
+14. queue の ACK を「実行した」「終わった」の根拠にしない。決定は台帳の CAS で行い、ACK はその commit の後に送る。object は必ず `ObjectScope`（tenant, region）と一緒に扱い、非 terminal の invocation が参照する object を消さない（§4「durable queue と object store」、ADR-0008）。
 
 ## 6. 非対象（P1）
 
-snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。egress restricted / public-web は PLT-4622 で Firecracker provider に実装した（tap + nftables、`docs/adr/0005-egress-profiles.md`）。権限の無い host では Capability が理由付きの Unsupported になる。
+snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、OCI image の pull。非同期 invoke のための durable queue と object store は PLT-4638 で検証環境として用意したが（§4「durable queue と object store」）、invoke からはまだ使わない。これらは Capability / API で明示的に Unsupported を返す。egress restricted / public-web は PLT-4622 で Firecracker provider に実装した（tap + nftables、`docs/adr/0005-egress-profiles.md`）。権限の無い host では Capability が理由付きの Unsupported になる。
 
 snapshot/restore に向けた**実験**として、SDK に初期化保存点と復元後 hook の API がある（PLT-4651、X1、`docs/protocol.md` §B-X1）。`tachyon-serverless-sdk` の feature `experimental-restore`（既定 off）の `lifecycle::builder().bootstrap(..).after_restore(..).run(..)` で、同期 bootstrap（Tokio・secret・接続なし）→ checkpoint → continue（`cold` / `restored`）→ after_restore（identity・RNG・時計・認証・接続）→ ready の順に進む。bridge は `continue` に答えるまで Ready を host に送らない。snapshot を取る provider は無いので bridge は常に `cold` と答え、通常起動も同じ経路を通る。host↔bridge frame は変えていない。これは任意のライブラリや multithread runtime を snapshot-safe にするものではない。例は `examples/restore-aware`。P0〜P4 はこれに依存しない。
 

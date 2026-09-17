@@ -23,8 +23,9 @@ branch protection で required にするのは **`ci-gate` と `kvm-gate` の 2 
 | `contracts`（`contracts`） | ci.yml | docs-only 以外 | `ci-gate` 経由で required | 下の 3 step | 同上 |
 | └ OpenAPI snapshot | | | | `apps/gateway/tests/openapi_snapshot.rs`: utoipa から生成した文書が `docs/openapi.json` と違えば失敗（route・schema・status の変更をレビュー対象の diff にする）。`/v1/` の全 operation に bearer security があること | |
 | └ protocol golden | | | | `crates/protocol/tests/golden.rs`: host↔bridge の全 frame 種別・全 `GuestErrorKind`・length prefix のバイト列、Runtime API の JSON body（error report / HTTP event / HTTP response / continuation）と定数（path・header・event type・上限・`PROTOCOL_VERSION`）を双方向（fixture → decode、sample → encode）で照合。fixture の過不足も検出 | |
-| └ security regression group | | | | `scripts/ci/security-regression.sh`: `scripts/ci/security-regression.list` の 120 テスト（tenant 認可 23、reuse key 7、lease / epoch 23、deadline 11、egress（起動ゲートの順序・allowlist・nftables 規則）15、資源上限 41（うち PLT-4634 の admission・quota・queue 上限・breaker・placement 18））を `--exact` で実行し、**list にあるテストが実行結果に現れなければ失敗**（rename・削除・`#[ignore]` で coverage が黙って落ちない） | |
+| └ security regression group | | | | `scripts/ci/security-regression.sh`: `scripts/ci/security-regression.list` の 127 テスト（tenant 認可 28、reuse key 7、lease / epoch 23、deadline 11、egress（起動ゲートの順序・allowlist・nftables 規則）15、資源上限 43（うち PLT-4634 の admission・quota・queue 上限・breaker・placement 18、PLT-4638 の queue 満杯・object の size / quota 2）。tenant 認可のうち 5 は PLT-4638 の object の tenant 境界と queue の匿名接続拒否）を `--exact` で実行し、**list にあるテストが実行結果に現れなければ失敗**（rename・削除・`#[ignore]` で coverage が黙って落ちない） | |
 | `guest musl build`（`guest-musl-build`） | ci.yml | docs-only 以外 | `ci-gate` 経由で required | guest 側（bridge・examples）の x86_64 musl static build | 同上 |
+| `durable queue and objects`（`durable-queue`） | ci.yml | docs-only 以外 | `ci-gate` 経由で required | `scripts/queue/verify.sh`（PLT-4638）: `deploy/nats/versions.env` で pin した nats-server（linux-amd64）を download して sha256 を照合し、local process で起動（docker なし）。匿名・誤 password の拒否、kill -9 後の再配送、`discard: new` の容量境界、`max_age`、JetStream 契約テスト（`TACHYON_NATS_REQUIRED=1` なので server が無ければ skip せず失敗）、object store / GC テスト。証跡は artifact `queue-evidence` | docs-only のときだけ skip を成功扱い |
 | `shell scripts`（`scripts`） | ci.yml | 常に | `ci-gate` 経由で required | `bash -n`、shellcheck、`scripts/e2e/selftest.sh`、`scripts/ci/selftest.sh`（分類規則・kvm-gate 判定・security list の検証を固定） | skip しない |
 | **`ci-gate`** | ci.yml | 常に（`if: always()`） | **required** | 上の job の集約。failure / cancelled は失敗。skip は docs-only のときだけ許す | — |
 | `classify (is KVM required / allowed)` | kvm-integration.yml | 常に（hosted） | `kvm-gate` 経由 | KVM 必要か、この event が runner を使ってよいか | — |
@@ -48,13 +49,14 @@ PR は `base...merge commit`、main への push は `before...sha` の差分で�
 
 | 分類 | path | 効果 |
 |---|---|---|
-| docs-only | すべての path が `docs/**`（`docs/openapi.json` を除く）、`*.md`、`LICENSE*`、`.github/ISSUE_TEMPLATE/**` | `rust` / `contracts` / `guest-musl-build` を skip。`scripts` と `ci-gate` は走る |
+| docs-only | すべての path が `docs/**`（`docs/openapi.json` を除く）、`*.md`、`LICENSE*`、`.github/ISSUE_TEMPLATE/**` | `rust` / `contracts` / `guest-musl-build` / `durable-queue` を skip。`scripts` と `ci-gate` は走る |
 | KVM 必要 | `crates/providers/firecracker/**`、`crates/runtime-bridge/**`、`crates/protocol/**`、`crates/provider-port/**`、`crates/application/src/bridge_session.rs`、`crates/application/src/services/pool.rs`、`crates/domain/src/egress.rs`（egress allowlist。host の nftables / tap 規則になる）、`crates/**` のうち path に `billing` / `usage` / `metering` を含むもの、`scripts/kvm/**`、`scripts/e2e/**`、`scripts/ci/kvm-*`、`config/gateway.firecracker.toml`、`examples/{hello,cpu-burn,isolation-probe}/**`、`.github/workflows/kvm-integration.yml`、`rust-toolchain.toml`（いずれも `*.md` を除く） | `kvm-gate` が KVM 実行を要求する |
 | contract（参考） | `crates/protocol/**`、`crates/api-types/**`、`apps/gateway/**`、`docs/openapi.json`、`scripts/ci/security-regression.list` | 表示だけ（contract gate は docs-only 以外で常に走る） |
 
 判断メモ:
 
 - `Cargo.lock` は KVM 必要に含めていない。依存更新のたびに KVM を要求すると、runner が無い現状では merge が止まるため。`tokio-vsock` など guest に入る依存を上げる PR は、レビューで `kvm` label を付けるか dispatch する。
+- PLT-4638 の `crates/durable-port/**`・`crates/adapters/queue-nats/**`・`crates/application/src/durable/**`・`deploy/nats/**`・`scripts/queue/**` は KVM 必要にしない。guest / provider に触れない control plane の保存で、hosted runner の `durable-queue` job が実際の nats-server に対して検査する。port を `crates/provider-port` ではなく別 crate にしたのはこのため（`provider-port` は KVM 必要）。
 - PLT-4631 の `crates/application/src/services/dispatcher.rs`・`crates/application/src/repository/slot.rs`（dispatcher lease、slot の CAS、fencing）は KVM 必要にしない。provider に依存しない control plane の排他で、`crates/application/tests/leases.rs` と repository 契約テスト（別プロセスの競合を含む）が決定的に検査し、security regression group（`lease_epoch`）に入れている。
 - `crates/application` の lease / fencing / deadline のロジックは fake provider で決定的に試験できるので、KVM ではなく security regression group で守る（`bridge_session.rs` と `services/pool.rs` だけは実 VM の frame・休止に依存するので KVM 必要）。
 - 分類は path だけを見る保守的な規則で、変更の中身は見ない。docs 以外の path が 1 つでもあれば docs-only にはならない。
@@ -140,6 +142,7 @@ runtime profile = Firecracker の版（`FIRECRACKER_VERSION`、`scripts/kvm/boot
 | OpenAPI snapshot | `cargo test -p tachyon-serverless-gateway --test openapi_snapshot`（意図した変更は `TSLS_UPDATE_SNAPSHOTS=1` を付けて再生成し、`docs/openapi.json` を commit） |
 | wire golden | `cargo test -p tachyon-serverless-protocol --test golden`（意図した変更は `TSLS_UPDATE_SNAPSHOTS=1`。frame の形を変えるなら先に `PROTOCOL_VERSION` を判断する。`docs/protocol.md` §A） |
 | security regression group | `scripts/ci/security-regression.sh`（1 分類だけ: `--category deadline`）。テストを rename / 置換したら同じ変更で `scripts/ci/security-regression.list` を直す |
+| durable queue / object store | `scripts/queue/verify.sh`（証跡は既定で `target/queue/verify-<UTC>/`、`--evidence DIR` で変更）。手で試すなら `eval "$(scripts/queue/up.sh)"` → `TACHYON_NATS_REQUIRED=1 cargo test -p tachyon-serverless-queue-nats` → `scripts/queue/down.sh --purge` |
 | 分類・gate 判定の自己テスト | `scripts/ci/selftest.sh` |
 | 変更の分類 | `scripts/ci/classify-changes.sh --base origin/main --head HEAD` |
 | gate が壊れた変更を検出することの確認 | `scripts/ci/prove-gates.sh`（作業ツリーの一時コピーに既知の悪い変更を 1 つずつ入れ、対応する gate が失敗することを確認。証跡は `docs/evidence/ci-gates-<UTC>/`） |
@@ -156,5 +159,6 @@ runtime profile = Firecracker の版（`FIRECRACKER_VERSION`、`scripts/kvm/boot
 
 - `kvm` job の手順（特に `measure-warm.sh` と `demo.sh` を同じ job で続けて実行したときの port 8080・`data/` の再利用、x86_64 host での bootstrap）は KVM runner 上で一度も通していない。
 - KVM 必要な変更は、runner が登録されるまで `kvm-gate` が失敗または pending のままになる。これは意図した挙動で、merge するには owner が branch protection を一時的に外す判断を明示的にする必要がある（その場合は PR に「KVM 未検証」と書く）。
+- `durable-queue` job は GitHub の release から nats-server を download する。GitHub に届かない、または release が消えた場合は失敗する（checksum が一致しない binary は実行しない）。
 - security regression group は既存のテストを束ねたもので、新しい検査を増やしたわけではない。list に無い安全性テストは group の対象外（`cargo test --workspace` では走る）。
 - OpenAPI snapshot は utoipa の注釈から生成した文書を比べる。注釈と実際の handler の挙動のずれは検出しない（`apps/gateway/tests/gateway_integration.rs` の範囲）。

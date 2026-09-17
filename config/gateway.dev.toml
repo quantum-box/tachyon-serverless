@@ -115,3 +115,23 @@ output_retention_seconds = 604800  # インライン出力の保持期限（7 �
 # max_total_idle = 8            # 全 reuse key 合計の idle 上限
 # allow_unverified_idle = false # 計測専用。Unverified の idle capability を受け入れる。
 #                               # profile = "production" では拒否される（docs/kvm.md §3.7）
+
+# 非同期イベントの durable queue と大きな入出力の object store（PLT-4638、docs/adr/0008）。
+# 既定はどちらも "none" で、何も接続・作成しない（同期 invoke だけの gateway のまま）。
+# invoke pipeline はまだ使わない（invokeAsync は PLT-4639）。単一 node・複製なしで HA ではない。
+# [queue]
+# backend = "nats"               # none | sqlite（<data_dir>/queue.db、dev 専用）| nats
+# [queue.nats]
+# url = "nats://127.0.0.1:14222" # scripts/queue/up.sh が起動するローカル nats-server
+# user = "gateway"
+# password_file = "target/queue/nats/gateway.password"   # up.sh が生成（0600）。匿名接続は設定できない
+# [queue.limits]
+# max_messages = 100000
+# max_age_seconds = 604800
+#
+# [objects]
+# backend = "filesystem"         # none | filesystem（<data_dir>/objects、AES-256-GCM）
+# key_file = "secrets/object.key"  # 64 hex 文字、mode 0600（例: openssl rand -hex 32 > secrets/object.key）
+# regions = ["local"]
+# max_object_bytes = 8388608
+# tenant_quota_bytes = 1073741824

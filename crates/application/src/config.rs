@@ -804,6 +804,12 @@ pub struct GatewayConfig {
     pub control_plane: ControlPlaneConfig,
     #[serde(default)]
     pub control_plane_outage: ControlPlaneOutageConfig,
+    /// `[queue]` (PLT-4638). Off by default.
+    #[serde(default)]
+    pub queue: crate::durable::QueueConfig,
+    /// `[objects]` (PLT-4638). Off by default.
+    #[serde(default)]
+    pub objects: crate::durable::ObjectsConfig,
 }
 
 fn default_listen() -> String {
@@ -869,6 +875,7 @@ impl GatewayConfig {
                 abs(base, c);
             }
         }
+        crate::durable::config::absolutize(&mut self.queue, &mut self.objects, base);
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
@@ -1102,6 +1109,12 @@ impl GatewayConfig {
                 "invoke.inline_output_max_bytes must be <= limits.max_response_bytes".into(),
             ));
         }
+        crate::durable::config::validate(
+            &self.queue,
+            &self.objects,
+            self.profile == Profile::Production,
+        )
+        .map_err(ConfigError::Invalid)?;
         if self.pool.enabled {
             if self.pool.max_idle_per_revision == 0 {
                 return Err(ConfigError::Invalid(

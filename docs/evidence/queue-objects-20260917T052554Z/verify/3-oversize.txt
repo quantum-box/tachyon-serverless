@@ -1,0 +1,5 @@
+published=0
+duplicates=0
+queue_full=0
+other_errors=1
+first_error=message_too_large: message too large: 4096 bytes (max 1024)

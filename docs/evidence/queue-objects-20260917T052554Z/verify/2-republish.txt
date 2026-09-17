@@ -1,0 +1,5 @@
+published=10
+duplicates=90
+queue_full=0
+other_errors=0
+first_error=

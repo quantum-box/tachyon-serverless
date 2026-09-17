@@ -48,6 +48,7 @@ use super::{
 
 mod config;
 pub mod migrations;
+mod objects;
 mod slot;
 
 /// Fixed-width RFC 3339 UTC, so timestamps order correctly as text.

@@ -1,0 +1,3 @@
+received=10
+unique=10
+redelivered=0

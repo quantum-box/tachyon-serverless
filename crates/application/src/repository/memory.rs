@@ -50,6 +50,10 @@ struct State {
     dispatchers: BTreeMap<DispatcherId, DispatcherRecord>,
     publication: BTreeMap<String, super::config::PublishedRow>,
     publication_generation: u64,
+    /// object id -> referencing invocations (PLT-4638).
+    object_refs: BTreeMap<String, BTreeSet<InvocationId>>,
+    /// object id -> collection reason.
+    object_tombstones: BTreeMap<String, (super::objects::CollectReason, Timestamp)>,
 }
 
 /// Single-process volatile store. Cheap to clone via `Arc`.
@@ -1048,3 +1052,101 @@ impl SlotStore for InMemoryStore {
 
 /// Reason recorded on a fenced environment once its terminate is confirmed.
 const FENCED_TERMINATED: &str = "owner lost its lease; environment fenced and terminate confirmed";
+
+impl super::objects::ObjectReferenceRepository for InMemoryStore {
+    fn attach_object(
+        &self,
+        object: &tachyon_serverless_durable_port::ObjectRef,
+        invocation: &InvocationId,
+        now: Timestamp,
+    ) -> Result<(), RepoError> {
+        super::objects::check_attachable(&object.id, now)?;
+        let mut s = self.state.write();
+        let inv = s
+            .invocations
+            .get(invocation)
+            .ok_or_else(|| RepoError::NotFound(format!("invocation {invocation}")))?;
+        if inv.tenant_id != object.scope.tenant_id {
+            return Err(RepoError::Refused(format!(
+                "object {} belongs to another tenant than invocation {invocation}",
+                object.id
+            )));
+        }
+        if let Some((reason, _)) = s.object_tombstones.get(object.id.as_str()) {
+            return Err(RepoError::Refused(format!(
+                "object {} is being collected ({}); store it again",
+                object.id,
+                reason.as_str()
+            )));
+        }
+        s.object_refs
+            .entry(object.id.as_str().to_string())
+            .or_default()
+            .insert(invocation.clone());
+        Ok(())
+    }
+
+    fn object_references(
+        &self,
+        object: &tachyon_serverless_durable_port::ObjectId,
+    ) -> Result<Vec<InvocationId>, RepoError> {
+        Ok(self
+            .state
+            .read()
+            .object_refs
+            .get(object.as_str())
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    fn claim_for_collection(
+        &self,
+        object: &tachyon_serverless_durable_port::ObjectRef,
+        reason: super::objects::CollectReason,
+        now: Timestamp,
+    ) -> Result<super::objects::CollectDecision, RepoError> {
+        use super::objects::{CollectDecision, CollectReason};
+        let mut s = self.state.write();
+        if s.object_tombstones.contains_key(object.id.as_str()) {
+            return Ok(CollectDecision::Collect);
+        }
+        let refs = s
+            .object_refs
+            .get(object.id.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let live = refs
+            .iter()
+            .filter(|id| {
+                s.invocations
+                    .get(*id)
+                    .is_none_or(|inv| !inv.status.is_terminal())
+            })
+            .count();
+        if live > 0 {
+            return Ok(CollectDecision::InUse { invocations: live });
+        }
+        if reason == CollectReason::Orphan && !refs.is_empty() {
+            return Ok(CollectDecision::Referenced);
+        }
+        s.object_tombstones
+            .insert(object.id.as_str().to_string(), (reason, now));
+        Ok(CollectDecision::Collect)
+    }
+
+    fn forget_object(
+        &self,
+        object: &tachyon_serverless_durable_port::ObjectId,
+    ) -> Result<(), RepoError> {
+        let mut s = self.state.write();
+        s.object_refs.remove(object.as_str());
+        Ok(())
+    }
+
+    fn purge_tombstones(&self, before: Timestamp) -> Result<usize, RepoError> {
+        let mut s = self.state.write();
+        let n = s.object_tombstones.len();
+        s.object_tombstones.retain(|_, (_, at)| *at >= before);
+        Ok(n - s.object_tombstones.len())
+    }
+}

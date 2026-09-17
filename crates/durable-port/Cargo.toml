@@ -1,0 +1,24 @@
+[package]
+name = "tachyon-serverless-durable-port"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Port traits for durable asynchronous delivery (EventQueue) and tenant/region scoped encrypted object storage (ObjectStore), plus a contract test kit (PLT-4638, docs/adr/0008)."
+
+[features]
+# The queue contract suite, run by every EventQueue implementation's tests.
+testkit = []
+
+[dependencies]
+tachyon-serverless-domain = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+ulid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -11,6 +11,9 @@
 #                        group (scripts/ci/security-regression.list)
 # - guest-musl-build:    static Linux (musl) build of the guest side (bridge + examples),
 #                        which is what the firecracker provider ships into the microVM
+# - durable-queue:       pinned nats-server (checksum-verified, local process) + scripts/queue/verify.sh:
+#                        auth refusal, kill -9 persistence, capacity, max_age, JetStream contract,
+#                        object store (PLT-4638)
 # - scripts:             bash -n + shellcheck + helper self-tests for scripts/
 # - ci-gate:             aggregate status
 #
@@ -206,6 +209,41 @@ jobs:
             target/x86_64-unknown-linux-musl/release/example-cpu-burn
             target/x86_64-unknown-linux-musl/release/example-isolation-probe
 
+  durable-queue:
+    name: durable queue and objects (NATS JetStream, object store)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.95.0
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: durable-queue
+
+      # Downloads the nats-server release pinned in deploy/nats/versions.env, refuses it unless its
+      # sha256 matches, runs it as a local process (no docker), and checks auth refusal, kill -9
+      # persistence, discard-new capacity, max_age, the JetStream contract suite
+      # (TACHYON_NATS_REQUIRED=1: a missing server fails instead of skipping) and the object store.
+      - name: scripts/queue/verify.sh
+        run: scripts/queue/verify.sh --evidence "$RUNNER_TEMP/queue-evidence"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: queue-evidence
+          if-no-files-found: warn
+          retention-days: 7
+          path: ${{ runner.temp }}/queue-evidence
+
   scripts:
     name: shell scripts
     runs-on: ubuntu-latest
@@ -242,7 +280,7 @@ jobs:
 
   ci-gate:
     name: ci-gate
-    needs: [changes, rust, contracts, guest-musl-build, scripts]
+    needs: [changes, rust, contracts, guest-musl-build, durable-queue, scripts]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -254,6 +292,7 @@ jobs:
           R_RUST: ${{ needs.rust.result }}
           R_CONTRACTS: ${{ needs.contracts.result }}
           R_MUSL: ${{ needs.guest-musl-build.result }}
+          R_QUEUE: ${{ needs.durable-queue.result }}
           R_SCRIPTS: ${{ needs.scripts.result }}
         run: |
           set -euo pipefail
@@ -275,9 +314,10 @@ jobs:
           check rust "$R_RUST" "$skip_ok"
           check contracts "$R_CONTRACTS" "$skip_ok"
           check guest-musl-build "$R_MUSL" "$skip_ok"
+          check durable-queue "$R_QUEUE" "$skip_ok"
           {
             echo "### ci-gate"
             echo
-            echo "docs_only=$DOCS_ONLY changes=$R_CHANGES rust=$R_RUST contracts=$R_CONTRACTS guest-musl-build=$R_MUSL scripts=$R_SCRIPTS"
+            echo "docs_only=$DOCS_ONLY changes=$R_CHANGES rust=$R_RUST contracts=$R_CONTRACTS guest-musl-build=$R_MUSL durable-queue=$R_QUEUE scripts=$R_SCRIPTS"
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$fail"

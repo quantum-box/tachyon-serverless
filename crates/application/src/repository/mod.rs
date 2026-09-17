@@ -30,17 +30,21 @@ pub mod guard;
 mod legacy;
 mod logs;
 mod memory;
+pub mod objects;
 pub mod restart;
 pub mod slot;
 pub mod sqlite;
 
 #[cfg(test)]
-mod contract_tests;
+pub(crate) mod contract_tests;
+#[cfg(test)]
+mod object_contract_tests;
 
 pub use config::{
     ConfigObservation, ConfigPublicationRepository, ConfigRows, StampedConfig, StampedEntry,
 };
 pub use memory::InMemoryStore;
+pub use objects::{CollectDecision, CollectReason, ObjectReferenceRepository};
 pub use restart::{HOST_LEASE_EXPIRED, HOST_RESTARTED};
 pub use slot::{
     AcquireOutcome, CompletionOutcome, DispatcherRecord, HeartbeatOutcome, ReclaimReport,
@@ -248,6 +252,7 @@ pub trait StateStore:
     + ArtifactOwnerRepository
     + SlotStore
     + ConfigPublicationRepository
+    + ObjectReferenceRepository
     + std::fmt::Debug
 {
     /// `"sqlite"` or `"memory"`.

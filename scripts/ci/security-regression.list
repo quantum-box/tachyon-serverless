@@ -148,3 +148,15 @@ resource_limits tachyon-serverless-application test:admission pooled_environment
 resource_limits tachyon-serverless-application test:admission control_plane_refusals_are_not_admission_refusals_and_do_not_trip_the_breaker
 tenant_authz tachyon-serverless-application lib services::admission::tests::the_report_separates_host_capacity_from_environments
 tenant_authz tachyon-serverless-gateway test:gateway_integration capacity_is_reported_per_tenant_and_a_burst_is_released
+
+# --- PLT-4638: durable queue and object store -------------------------------------------------
+# objects are reachable only from their (tenant, region); references never cross a tenant
+tenant_authz tachyon-serverless-application lib durable::tests::objects_are_invisible_across_tenants
+tenant_authz tachyon-serverless-application lib repository::object_contract_tests::memory::an_object_reference_never_crosses_a_tenant
+tenant_authz tachyon-serverless-application lib repository::object_contract_tests::sqlite::an_object_reference_never_crosses_a_tenant
+# no anonymous queue connection can be configured; credential files must be private
+tenant_authz tachyon-serverless-application lib durable::tests::nats_config_refuses_anonymous_connections
+tenant_authz tachyon-serverless-queue-nats lib tests::credential_files_must_be_private_and_are_redacted
+# a full queue refuses the publish (discard new); object size and tenant quota are enforced
+resource_limits tachyon-serverless-application lib durable::sqlite_queue::tests::a_full_queue_refuses_publish_with_queue_full
+resource_limits tachyon-serverless-application lib durable::tests::object_size_and_tenant_quota_are_enforced

@@ -1,0 +1,5 @@
+stream_messages=0
+stream_bytes=0
+pending=0
+ack_pending=0
+redelivered=0
