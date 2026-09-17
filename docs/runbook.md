@@ -95,7 +95,7 @@ lab の実行中（`up` 以降）は外部に出ない。gateway・nats・consol
 | `target/`（cargo build） | 約 8 GiB | WARN |
 | lab directory | process 2 GiB / firecracker 6 GiB（versions.lock） | FAIL |
 | memory | 4 GiB 以上 | WARN |
-| firecracker の unix socket path | `<lab>/fc/run/env_<26>/v.sock_5000` が 107 byte 以下 | FAIL（短い `--lab-dir` にする） |
+| firecracker の unix socket path | 長い方が 107 byte 以下: `<lab>/fc/run/env_<26>/v.sock_5000`、privileged（jailer）では jail の中の `<lab>/fc/jail/firecracker/env-<26>/root/v.sock_5000`（lab directory の path が 39 byte を超えると FAIL。例: `/home/<user>/<clone>/.lab` なら clone の path を短くするか `--lab-dir` を短くする） | FAIL（短い `--lab-dir` にする） |
 
 ## 3. 安全上の注意（データ・region・秘密情報・費用）
 
@@ -296,6 +296,7 @@ PASS  secrets.not_leaked                                         20 locations x 
 ### 6.3 jailer / cgroup が使えない
 
 - 症状: `/readyz` が 503 のまま、`provider` 行に `host_cgroup` や `jailer` が失敗 check として出る。invoke は `Unavailable` で拒否される（fail closed）。
+- `provider` 行に `socket_path_length` が出る（`config-cache` 行も `refused`）: jail の中の vsock socket の path が 107 byte を超えた。preflight の `socket_path` は jail の path も数える（2026-09-17 の KVM 検証までは run directory だけを数えていたので、preflight が ok でも `up` で止まった）。短い `--lab-dir`（または短い clone の path）で `teardown` → `bootstrap` → `up` し直す。
 - `privileges` が FAIL: passwordless sudo を用意するか、root で実行する。
 - cgroup v2 でない（`/sys/fs/cgroup/cgroup.controllers` が無い）: systemd の unified hierarchy で boot する。
 - 一時的に隔離なしで試すだけなら `scripts/lab/lab.sh down` → `LAB_FC_PRIVILEGED=0 scripts/lab/lab.sh up`（profile dev、制限は unverified。本来の検証にはならない）。

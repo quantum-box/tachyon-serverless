@@ -277,9 +277,14 @@ api() {
 
 jqb() { printf '%s' "$HTTP_BODY" | jq -r "$1" 2>/dev/null; }
 
-# sqlite_ro DB SQL -> rows as a|b|c (python3's sqlite3 module; no sqlite3 CLI needed)
+# sqlite_ro DB SQL -> rows as a|b|c (python3's sqlite3 module; no sqlite3 CLI needed). A privileged
+# firecracker lab runs the gateway as root, so its data files are root-owned (0600): when the read
+# fails and LAB_SUDO is set, read again through it.
 sqlite_ro() {
-  python3 - "$1" "$2" <<'PY'
+  sqlite_ro_as "" "$1" "$2" 2>/dev/null || { [ -n "${LAB_SUDO:-}" ] && sqlite_ro_as "$LAB_SUDO" "$1" "$2"; }
+}
+sqlite_ro_as() { # sqlite_ro_as SUDO_OR_EMPTY DB SQL
+  ${1:+$1 }python3 - "$2" "$3" <<'PY'
 import sqlite3, sys
 con = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=10)
 for row in con.execute(sys.argv[2]):

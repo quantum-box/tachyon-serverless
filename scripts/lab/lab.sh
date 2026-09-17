@@ -251,8 +251,16 @@ cmd_preflight() {
     fi
     tool_row ip 0 ip -V
     tool_row nft 0 nft --version
+    # The longest Unix socket the provider binds: the vsock listener in the environment directory,
+    # or (privileged, jailer) the same listener inside the jail's chroot, which is longer:
+    # <lab>/fc/jail/firecracker/env-<26>/root/v.sock_5000. The gateway's own preflight
+    # (socket_path_length) refuses to start environments above 107 bytes.
     v="$FC_RUN_DIR/env_00000000000000000000000000/v.sock_5000"
-    if [ "${#v}" -le 107 ]; then row ok socket_path "${#v} bytes (max 107)"; else row FAIL socket_path "${#v} bytes > 107: use a shorter --lab-dir"; fi
+    if [ "${LAB_FC_PRIVILEGED:-1}" = 1 ]; then
+      jv="$FC_JAIL_DIR/firecracker/env-00000000000000000000000000/root/v.sock_5000"
+      [ "${#jv}" -le "${#v}" ] || v="$jv"
+    fi
+    if [ "${#v}" -le 107 ]; then row ok socket_path "${#v} bytes (max 107): $v"; else row FAIL socket_path "${#v} bytes > 107 ($v): use a shorter --lab-dir"; fi
   fi
   # --- privileges ------------------------------------------------------------
   if [ "$PROVIDER" = firecracker ] && [ "${LAB_FC_PRIVILEGED:-1}" = 1 ]; then
@@ -854,6 +862,8 @@ cmd_status() {
   lab_require_init
   lab_provider
   lab_binaries
+  # Root-owned data of a privileged firecracker lab (state.db) is read through sudo.
+  if [ "$PROVIDER" = firecracker ] && [ "${LAB_FC_PRIVILEGED:-1}" = 1 ] && [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then LAB_SUDO="sudo -n"; fi
   echo "lab $LAB_ID  provider=$PROVIDER  state=$(manifest_get STATE)  dir=$LAB_DIR"
   [ "$PROVIDER" = firecracker ] || echo "(process provider: dev mode, NOT a microVM, no isolation)"
   if [ ! -f "$TOKENS_FILE" ]; then
