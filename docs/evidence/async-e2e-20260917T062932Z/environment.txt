@@ -1,8 +1,0 @@
-nats_server_version=v2.14.7
-platform=darwin-arm64
-stamp=20260917T062936Z
-host=Darwin 25.6.0 arm64
-git_commit=6017e8488a9eb6063145d039f0b322cb71f59f99
-accepted=24
-messages_received=24
-messages_unique=24

@@ -425,7 +425,7 @@ x-tachyon-invocation-id: inv_01j7z2k3m4n5p6q7r8s9t0v1w2
 | queue に届かない | outbox に余裕がある間は **202**。上限に達したら 503 `async_unavailable`、`reason = queue_unavailable` | 202 の分は queue の回復後に配送 |
 | 台帳が失敗（COMMIT 前） | 503 `control_plane_unavailable`（`Host.StoreUnavailable`） | なし（put 済みの object は GC が回収） |
 | `[queue]` が無い、または台帳が揮発（`[store] backend = "memory"`） | 503 `async_unavailable`、`reason = not_configured` | なし |
-| function 削除済み / revision が ready でない / 他 tenant の function | 409 `function_deleted` / 409 `revision_not_ready` / 404 | なし |
+| function 削除中・削除済み（PLT-4635） / revision が ready でない / 他 tenant の function | 409 `function_deleted`（`Host.FunctionDeleted`） / 409 `revision_not_ready` / 404 | なし |
 
 配送は at-least-once。publisher が queue の ACK を得た後、台帳に送信済みを記録する前に止まると、同じ event（message id = invocation id）がもう一度 publish される。broker の duplicate window（既定 120 s）内なら 1 通にまとまるが、外なら 2 通届きうる。consumer は message ではなく invocation id で台帳に照らして決着する。
 

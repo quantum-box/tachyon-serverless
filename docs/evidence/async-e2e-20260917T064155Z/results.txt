@@ -1,0 +1,31 @@
+deploy.revision_ready                        ok rev_01m2q1ky03aercqmv1phrqp2k9
+accept.202                                   ok refused=0 inline=4 object=4
+accept.objects_used                          ok 
+accept.status_url_readable                   ok {"status":"queued","revision_id":"rev_01m2q1ky03aercqmv1phrqp2k9"}
+tenant.status_404_for_other_tenant           ok code=404
+idempotency.same_key_same_invocation         ok matched=3/3
+idempotency.other_input_409                  ok code=409
+converge.phase1_queued                       ok 
+crash.after_object_put.no_response           ok code=000
+crash.after_object_put.killed                ok 
+crash.after_object_put.orphan_on_disk        ok files=5
+crash.after_commit.no_response               ok code=000
+crash.after_commit.killed                    ok 
+crash.after_commit.retry_replayed            ok code=202
+crash.before_publish.accepted                ok code=202
+crash.before_publish.killed                  ok 
+crash.after_publish.accepted                 ok code=202
+crash.after_publish.killed                   ok 
+converge.after_crashes_queued                ok 
+crash.after_publish.republished_as_duplicate ok 1 log line(s)
+outage.outbox_pending_while_down             ok accepted=12 refused=9
+outage.accepted_into_outbox                  ok accepted=12
+outage.refused_queue_unavailable             ok refused=9 reason=queue_unavailable
+converge.after_outage_queued                 ok 
+outage.accepting_again                       ok code=202
+converge.final_queued                        ok 
+gc.orphan_collected_referenced_kept          ok files=6 referenced=6
+converge.no_accepted_invocation_lost         ok accepted=24 missing=0
+converge.nothing_unaccepted_published        ok unexpected=0
+converge.envelopes_name_their_invocation     ok bad=0
+converge.physical_messages                   ok received=24 unique=24 duplicates=0 (at-least-once; the ledger settles by invocation id)

@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+   Compiling example-http-axum v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0f813963f661ed27/examples/http-axum)
+   Compiling example-cpu-burn v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0f813963f661ed27/examples/cpu-burn)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s

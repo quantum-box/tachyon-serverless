@@ -35,7 +35,7 @@ Accepted（2026-09-17、PLT-4639）。受付と配送（queue に載るまで）
 
 ### 1. 受付（`AsyncInvokeService::accept`）
 
-1. 認可と解決は同期 invoke と同じく設定 cache から行う（`alias` / `revision_id` の query も同じ）。**revision はここで固定し、以後解決し直さない**。cold start の gate（PLT-4636）はこの時点では問わない（今は起動しない。起動時に dispatcher が問う）。削除済み function は 409 `function_deleted`。
+1. 認可と解決は同期 invoke と同じく設定 cache から行う（`alias` / `revision_id` の query も同じ）。**revision はここで固定し、以後解決し直さない**。cold start の gate（PLT-4636）はこの時点では問わない（今は起動しない。起動時に dispatcher が問う）。削除中・削除済みの function は、同期 invoke と同じ経路（設定 cache の解決、PLT-4635）で 409 `function_deleted`（`error_type = Host.FunctionDeleted`）になり、何も保存しない。
 2. 入力は JSON として解釈して直列化し直し（同期 invoke と同じ digest）、`limits.max_payload_bytes` を超えれば 413。
 3. `Idempotency-Key` が既に結び付いていれば、何も保存せずに答える（§3）。
 4. **早期の backlog 判定**（§4）。拒否ならここで返し、object を put しない。

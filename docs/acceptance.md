@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4636、PLT-4638、PLT-4639、PLT-4645、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4638、PLT-4639、PLT-4645、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -42,8 +42,8 @@
 | `docs/evidence/20260917T020229Z-process/` | `scripts/e2e/demo.sh`（PLT-4618: 台帳が `state.db`。step 27 は `state.db` と `state.db-wal` も検査。port 8080 が使用中のため `config/gateway.dev.toml` の listen と data_dir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T034846Z-process/` | `scripts/e2e/demo.sh`（PLT-4631: dispatcher の登録・slot の acquire / complete・heartbeat 付きの gateway での P1 互換確認。`gateway.log` に `dispatcher registered`、`startup reconcile finished` に `foreign` / `reclaimed_dispatchers` / `fenced_*`。設定は listen・data_dir・workdir だけを変えたコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/queue-objects-20260917T052554Z/` | PLT-4638: `scripts/queue/verify.sh`（`verify/`: 認証拒否、kill -9 後の再配送、容量境界、`max_age`、JetStream 契約テスト、object store テスト）と `scripts/e2e/demo.sh`（`e2e/`: `[queue]` / `[objects]` 未設定の gateway の P1 互換確認。listen・data_dir・workdir だけを変えた設定のコピー）、`summary.txt` | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、process provider（隔離なし） | verify 16/16 ok、E2E 28/28 PASS |
-| `docs/evidence/async-e2e-20260917T062932Z/` | PLT-4639: `scripts/queue/async-e2e.sh`（`results.txt`、受け付けた invocation id、JetStream から読んだ message と envelope の照合 `consume.txt`、gateway の JSON log、nats-server log） | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、gateway は feature `failpoints` の debug build、process provider | 31/31 ok（受付 24、SIGKILL 4 回、nats-server 停止 1 回、message 24 通・欠落 0・余分 0） |
-| `docs/evidence/20260917T063028Z-process/` | `scripts/e2e/demo.sh`（PLT-4639: `invokeAsync` を足した gateway の P1 互換確認。`[queue]` 未設定。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
+| `docs/evidence/async-e2e-20260917T064155Z/` | PLT-4639: `scripts/queue/async-e2e.sh`（`results.txt`、受け付けた invocation id、JetStream から読んだ message と envelope の照合 `consume.txt`、gateway の JSON log、nats-server log） | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、gateway は feature `failpoints` の debug build、process provider | 31/31 ok（受付 24、SIGKILL 4 回、nats-server 停止 1 回、message 24 通・欠落 0・余分 0） |
+| `docs/evidence/20260917T064259Z-process/` | `scripts/e2e/demo.sh`（PLT-4639: `invokeAsync` を足した gateway の P1 互換確認。PLT-4635 の merge 後に rebase した commit で実行。`[queue]` 未設定。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T051140Z-process/` | `scripts/e2e/demo.sh`（PLT-4634: semaphore を admission に置き換えた後の P1 互換確認。PLT-4636 の統合後の branch。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T051238Z-burst-process/` | `scripts/e2e/burst.sh`（PLT-4634: node 900 MiB・`max_queue = 4`・region `us` の使い捨て gateway に cpu-burn の 7 件 / 14 件の同時 invoke、jp-only の tenant、`GET /v1/capacity` の 50 ms 間隔の記録） | macOS、process provider（隔離なし） | 9/9 PASS |
 
@@ -521,6 +521,7 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 | 4a | DB 停止で正しく受付を拒否する | 実装済み（failpoint） | `tests::a_failure_before_commit_rolls_back_every_row_and_answers_503`（トランザクション内の失敗 → 503 `control_plane_unavailable` / `Host.StoreUnavailable`、invocation・key・outbox・参照なし）。実際の disk 障害・lock 待ちの timeout は試していない |
 | 4b | object 停止・容量超過で正しく受付を拒否する | 実装済み | `tests::object_store_refusals_answer_with_their_reason_and_record_nothing`（停止 503 `object_store_unavailable`、size 超過 413 `input_too_large`、quota 429 `object_quota`、payload 上限 413）、`tests::without_an_object_store_only_inline_inputs_are_accepted`、`tests::an_outbox_over_its_bound_refuses_with_429_backlog`、`tests::the_backlog_bound_holds_across_gateways`（2 application から 30 並行で上限 5 を越えない）、gateway `invoke_async_refusals_carry_status_and_reason`。object store の停止は failpoint で、実際の disk 障害ではない |
 | 4c | 孤児 object を GC できる | 実装済み（E2E 実測 1 回） | `tests::a_failure_after_the_object_put_leaves_only_an_orphan_the_gc_collects`（grace 内は残り、後で回収、key は未消費）、`tests::a_failure_before_commit_rolls_back_every_row_and_answers_503`、`tests::large_inputs_are_stored_as_objects_referenced_in_the_same_transaction`（参照中の入力は 8 日後も `kept_in_use`）。E2E `crash.after_object_put.orphan_on_disk` → `gc.orphan_collected_referenced_kept`（SIGKILL で残った 1 個が grace 後に消え、参照中の 6 個は残る） |
+| 4d | 削除中・削除済みの function への受付を拒否する（PLT-4635 との整合） | 実装済み | `tests::a_deleted_function_refuses_async_acceptance_with_function_deleted`（409 `function_deleted` / `Host.FunctionDeleted`、outbox・object とも何も残らない） |
 | 5 | tenant 越境 | 実装済み | `tests::async_invocations_and_their_inputs_never_cross_a_tenant`（他 tenant の受付・status は 404、routing tenant / message id を偽った delivery は 404、入力 object は他 tenant scope から `NotFound`、他 tenant の invocation への attach 拒否）、gateway `invoke_async_status_and_acceptance_never_cross_a_tenant`、E2E `tenant.status_404_for_other_tenant`。security regression group に 8 件追加 |
 
 検証項目:
@@ -533,7 +534,7 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 | queue 停止試験 | 実装済み（NATS JetStream 実測 1 回） / 実装済み（SQLite queue は failpoint） | E2E `outage.*`: nats-server を停止 → 12 件が 202（outbox）→ 以後 9 件が 503 `queue_unavailable` → nats-server 再起動 → 全件 `queued`、受付再開。`tests::a_queue_outage_fills_the_outbox_then_refuses_and_recovers` |
 | 全受付の配送（欠落なし・余分なし） | 実装済み（E2E 実測 1 回） | E2E `converge.*`: 受付 24 件すべてが `queued`、JetStream の message 24 通（unique 24）、欠落 0・受け付けていない id 0・envelope 不一致 0 |
 | Linux（CI job `durable-queue`）での E2E | 未検証 | job に step を追加したが、この branch では PR を開いていないので未実行 |
-| 同期 gateway の回帰 | 実装済み（process provider） | `docs/evidence/20260917T063028Z-process/`（28/28 PASS） |
+| 同期 gateway の回帰 | 実装済み（process provider） | `docs/evidence/20260917T064259Z-process/`（28/28 PASS） |
 | dispatcher・retry・DLQ・`queue_deadline` の強制 | 未着手 | PLT-4640 |
 
 残り・制約: 実測は macOS arm64 の 1 host・1 回。inline 入力の本文は台帳に暗号化せずに置き、terminal 後の保持期限は未実装（PLT-4640）。outbox の上限は全 tenant 共通。queue の状態（満杯・停止）はプロセスローカル。非同期 invocation の `dispatcher_id` は `None` で、ADR-0003 の guard では不変なので、PLT-4640 で所有を表す方法を決める必要がある。受付と publish の throughput は未計測。2 つの gateway process を HTTP で並べた E2E は無い（2 application を同じ `data_dir` で並べた unit test だけ）。HTTP adapter 経由の非同期は非対象。
