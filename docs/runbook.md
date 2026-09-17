@@ -364,7 +364,7 @@ teardown が対象にするのは **この lab のものだけ**:
 - 消す path はすべて、symlink を解決した上で lab directory の **内側** にあることを確認してから消す。外側なら `refusing to remove ...` で止まる。
 - `--lab-dir` に `/`、`$HOME`、リポジトリ root、`/tmp` などは指定できない。
 - 他の lab・他の gateway・`scripts/e2e` / `scripts/queue` の scratch directory・他人の nats-server には触れない（process は lab directory の path で、cgroup / tap / chain は lab id と台帳で特定するため）。
-- `manifest.env`（`STATE=torn_down`）と `logs/` は残る。同じ directory でもう一度使うときは、`--keep-cache` で消したなら `up` から、cache も消したなら `bootstrap` から（`up` は `lab not bootstrapped` で止まる）。lab id・port の割り当ては変わらず、token・鍵・台帳は新しく作られる。
+- `manifest.env`（`STATE=torn_down`）と `logs/` は残る。同じ directory でもう一度使うときは、`--keep-cache` で消したなら `up` から、cache も消したなら `bootstrap` から（`up` は `lab not bootstrapped` で止まる）。lab id は変わらず、port・token・鍵・台帳は新しく作られる。
 
 ### 7.2 孤児検査の読み方
 

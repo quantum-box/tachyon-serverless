@@ -1072,6 +1072,12 @@ orphan_check() {
       if have ip && ip link show "$tap" >/dev/null 2>&1; then report "tap $tap ($env)"; fi
       if have nft && $LAB_SUDO nft list chain inet tachyon_egress "g_$tap" >/dev/null 2>&1; then report "nft chain g_$tap ($env)"; fi
     done
+    if have ip; then
+      # Taps of environments whose ledger row is already gone cannot be attributed to this lab:
+      # report them for a human, never delete them (they may belong to another gateway).
+      left="$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^tsls[0-9a-f]{11}' || true)"
+      [ -z "$left" ] || echo "  NOTE tsls* tap devices exist that this lab cannot attribute (not removed): $(printf '%s' "$left" | tr '\n' ' ')"
+    fi
     if have losetup; then
       left="$(losetup -a 2>/dev/null | grep -F "$LAB_DIR/" || true)"
       [ -z "$left" ] || report "loop devices: $left"
