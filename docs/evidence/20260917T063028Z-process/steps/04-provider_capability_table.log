@@ -1,0 +1,24 @@
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+kind               process
+isolation          process
+dev_only           true
+environment_reuse  off; [pool] enabled is false
+capabilities:
+CAPABILITY               STATUS       NOTE
+create_terminate         supported
+egress_none              unsupported  shares host network
+egress_public_web        unsupported  shares host network
+egress_restricted        unsupported  shares host network
+enforce_deadline         supported
+enforce_resource_limits  unsupported  no cgroups in process provider
+host_metering            unsupported  process provider does not meter
+idle_quiesce             unsupported  destroy-after-invoke only
+idle_resume              unsupported  destroy-after-invoke only
+observe                  supported
+snapshot_clone           unsupported  no snapshots for host processes
+snapshot_create          unsupported  no snapshots for host processes
+preflight: ok=true
+CHECK              OK    DETAIL
+bridge_binary      true  /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0f813963f661ed27/target/debug/tachyon-serverless-runtime-bridge is executable
+workdir_writable   true  /private/tmp/claude-501/-Users-takanorifukuyama-git-tachyon-serverless/cecc4614-c5f1-4776-addc-7902253cc06d/scratchpad/demo-data/process
+host_architecture  true  aarch64

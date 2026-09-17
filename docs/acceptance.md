@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4636、PLT-4638、PLT-4645、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4636、PLT-4638、PLT-4639、PLT-4645、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -42,6 +42,8 @@
 | `docs/evidence/20260917T020229Z-process/` | `scripts/e2e/demo.sh`（PLT-4618: 台帳が `state.db`。step 27 は `state.db` と `state.db-wal` も検査。port 8080 が使用中のため `config/gateway.dev.toml` の listen と data_dir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T034846Z-process/` | `scripts/e2e/demo.sh`（PLT-4631: dispatcher の登録・slot の acquire / complete・heartbeat 付きの gateway での P1 互換確認。`gateway.log` に `dispatcher registered`、`startup reconcile finished` に `foreign` / `reclaimed_dispatchers` / `fenced_*`。設定は listen・data_dir・workdir だけを変えたコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/queue-objects-20260917T052554Z/` | PLT-4638: `scripts/queue/verify.sh`（`verify/`: 認証拒否、kill -9 後の再配送、容量境界、`max_age`、JetStream 契約テスト、object store テスト）と `scripts/e2e/demo.sh`（`e2e/`: `[queue]` / `[objects]` 未設定の gateway の P1 互換確認。listen・data_dir・workdir だけを変えた設定のコピー）、`summary.txt` | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、process provider（隔離なし） | verify 16/16 ok、E2E 28/28 PASS |
+| `docs/evidence/async-e2e-20260917T062932Z/` | PLT-4639: `scripts/queue/async-e2e.sh`（`results.txt`、受け付けた invocation id、JetStream から読んだ message と envelope の照合 `consume.txt`、gateway の JSON log、nats-server log） | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、gateway は feature `failpoints` の debug build、process provider | 31/31 ok（受付 24、SIGKILL 4 回、nats-server 停止 1 回、message 24 通・欠落 0・余分 0） |
+| `docs/evidence/20260917T063028Z-process/` | `scripts/e2e/demo.sh`（PLT-4639: `invokeAsync` を足した gateway の P1 互換確認。`[queue]` 未設定。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T051140Z-process/` | `scripts/e2e/demo.sh`（PLT-4634: semaphore を admission に置き換えた後の P1 互換確認。PLT-4636 の統合後の branch。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T051238Z-burst-process/` | `scripts/e2e/burst.sh`（PLT-4634: node 900 MiB・`max_queue = 4`・region `us` の使い捨て gateway に cpu-burn の 7 件 / 14 件の同時 invoke、jp-only の tenant、`GET /v1/capacity` の 50 ms 間隔の記録） | macOS、process provider（隔離なし） | 9/9 PASS |
 
@@ -297,7 +299,6 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 
 ---
 
-
 ## PLT-4632 ExecutionEnvironment pool・再利用キー・reconciler
 
 環境の再利用は二重の gate の内側にある。provider が `idle_quiesce` と `idle_resume` の両方を `Supported` と申告し、かつ `[pool] enabled = true` のときだけ有効になる。process は `Unsupported` のままで、Firecracker は PLT-4633 で休止・再開を実装し、実機計測を経て `Supported` になった（次節）。`[pool]` の既定は無効なので、**既定の挙動は P1 と同じ destroy-after-invoke のまま**である。本節の検証は fake provider による自動テストで行っており、実機の休止・再開は次節に記録する。
@@ -505,6 +506,38 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 
 既知の制約: route の観測・drain・scale event・backoff はプロセスのメモリだけにある。alias 切替の drain は前回の有効な観測との差で始めるので、起動直後の最初の reconcile より前の切替は drain しない（その時点で環境は無い）。secret の rotate は invocation か先行起動が新しい値を解決するまで検出しない。削除の確定は、この gateway の in-flight・admission・台帳の最新 1000 件の invocation・active な環境だけを見る。`min_ready` は環境再利用が無い gateway では満たされない（検証では拒否せず `scaling.warm_pool = false` で示す）。drain timeout を最大 revision timeout + grace 以下にする設定（`allow_short_drain = true`）では、alias 切替で長い handler が止まりうる（既定ではありえない）。
 
+## PLT-4639 invokeAsync の永続受付・transactional outbox
+
+`POST /v1/functions/{id}:invokeAsync` を、入力・Invocation・Idempotency-Key・object 参照・outbox event の 1 トランザクションと COMMIT 後の 202、outbox publisher（claim → publish → mark）で実装した（`docs/adr/0010-invoke-async-and-outbox.md`、`docs/api.md` §5.6.1、`docs/architecture.md` §4「非同期 invoke と outbox」、`docs/threat-model.md` T32・T33・§14-13）。記録日 2026-09-17、branch `feat/plt-4639-invoke-async`。**queue から取り出して実行する dispatcher は無い**（PLT-4640）: invocation は `queued` で止まる。テストは次で再現する: `cargo test -p tachyon-serverless-application --lib -- services::invoke_async failpoints`、`cargo test -p tachyon-serverless-gateway --test gateway_integration invoke_async`、`scripts/queue/async-e2e.sh`。以下のテスト名の `tests::` は `crates/application/src/services/invoke_async/tests.rs`。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1a | DB commit 前に 202 を返さない | 実装済み | 202 は `AsyncInvocationRepository::accept_async` の COMMIT の後だけ（`services/invoke_async/mod.rs`）。`tests::acceptance_commits_invocation_input_and_event_and_never_publishes_in_the_request`（受付直後に invocation・入力・outbox 行があり `accepted`）、`tests::a_failure_before_commit_rolls_back_every_row_and_answers_503`（COMMIT 前の失敗は 503 で何も残らない）、gateway `invoke_async_answers_202_with_a_status_url_and_converges_idempotently` |
+| 1b | broker への単純二重書込みで済ませない | 実装済み | request の中では queue に publish しない（上の test で受付直後の queue は空、publisher の pass の後に 1 通）。publish は `OutboxPublisher` が台帳の行から行う（ADR-0010 §1・§5） |
+| 2a | commit 後 / publish 前の再起動で配送が収束する | 実装済み（NATS JetStream 実測 1 回） | `tests::accepted_but_unpublished_invocations_survive_a_restart_and_are_delivered`（10 件受付 → application を作り直す → 全件 `accepted` のまま、10 通配送）、`tests::a_failure_after_commit_converges_on_the_same_invocation_after_a_restart`、`tests::a_publisher_crash_loop_converges`（claim 後の panic × 4）。E2E `crash.after_commit.*`（202 前の SIGKILL → 再起動 → 同じ key で `replayed`）、`crash.before_publish.*`（claim 後の SIGKILL → 再起動 → `queued`） |
+| 2b | publish 後 / 送信済み更新前の再起動で配送が収束する | 実装済み（NATS JetStream 実測 1 回） | `tests::a_crash_between_publish_and_mark_is_absorbed_by_the_broker_dedup`（再起動・claim 期限後の再 publish が 5 件とも `duplicate`、queue には 5 通）、`tests::a_republish_outside_the_dedup_window_is_only_a_logical_duplicate`（window 外は 2 通、どちらも同じ invocation に解決）、`tests::two_publishers_on_one_ledger_publish_each_event_once`。E2E `crash.after_publish.*`（ACK 後の SIGKILL → 再起動 → JetStream が duplicate と応答、`converge.physical_messages` で 24 通・重複 0） |
+| 3a | 同じ idempotency key は同じ Invocation へ収束する | 実装済み | `tests::the_same_idempotency_key_converges_on_one_invocation`（再送・並行 8 件・再起動後、別 input は 409）、`tests::a_key_bound_to_one_mode_is_a_conflict_in_the_other`（同期 ⇔ 非同期は 409）、gateway `invoke_async_answers_202_with_a_status_url_and_converges_idempotently`、E2E `idempotency.*` |
+| 3b | 受付時 Revision が retry 中も固定 | 実装済み | `tests::the_revision_is_pinned_at_acceptance_across_alias_changes_and_republishes`（受付後に alias を rev2 へ移し、crash 後の再 publish を含む 2 通の envelope と台帳がどちらも rev1、新しい受付は rev2）。dispatch 後の retry は PLT-4640 の範囲で未実装 |
+| 4a | DB 停止で正しく受付を拒否する | 実装済み（failpoint） | `tests::a_failure_before_commit_rolls_back_every_row_and_answers_503`（トランザクション内の失敗 → 503 `control_plane_unavailable` / `Host.StoreUnavailable`、invocation・key・outbox・参照なし）。実際の disk 障害・lock 待ちの timeout は試していない |
+| 4b | object 停止・容量超過で正しく受付を拒否する | 実装済み | `tests::object_store_refusals_answer_with_their_reason_and_record_nothing`（停止 503 `object_store_unavailable`、size 超過 413 `input_too_large`、quota 429 `object_quota`、payload 上限 413）、`tests::without_an_object_store_only_inline_inputs_are_accepted`、`tests::an_outbox_over_its_bound_refuses_with_429_backlog`、`tests::the_backlog_bound_holds_across_gateways`（2 application から 30 並行で上限 5 を越えない）、gateway `invoke_async_refusals_carry_status_and_reason`。object store の停止は failpoint で、実際の disk 障害ではない |
+| 4c | 孤児 object を GC できる | 実装済み（E2E 実測 1 回） | `tests::a_failure_after_the_object_put_leaves_only_an_orphan_the_gc_collects`（grace 内は残り、後で回収、key は未消費）、`tests::a_failure_before_commit_rolls_back_every_row_and_answers_503`、`tests::large_inputs_are_stored_as_objects_referenced_in_the_same_transaction`（参照中の入力は 8 日後も `kept_in_use`）。E2E `crash.after_object_put.orphan_on_disk` → `gc.orphan_collected_referenced_kept`（SIGKILL で残った 1 個が grace 後に消え、参照中の 6 個は残る） |
+| 5 | tenant 越境 | 実装済み | `tests::async_invocations_and_their_inputs_never_cross_a_tenant`（他 tenant の受付・status は 404、routing tenant / message id を偽った delivery は 404、入力 object は他 tenant scope から `NotFound`、他 tenant の invocation への attach 拒否）、gateway `invoke_async_status_and_acceptance_never_cross_a_tenant`、E2E `tenant.status_404_for_other_tenant`。security regression group に 8 件追加 |
+
+検証項目:
+
+| 検証 | 状態 | 証跡 |
+|---|---|---|
+| transaction 境界の failpoint | 実装済み | `crates/application/src/failpoints.rs`（7 地点、unit test と feature `failpoints` の build だけで動く）、`failpoints::tests::counted_failpoints_disarm_themselves`、上の各 test |
+| publisher 再起動 | 実装済み（OS process の SIGKILL は macOS 実測 1 回） | 上の 2a / 2b。E2E は `TSLS_FAILPOINTS=...=kill` で gateway process を SIGKILL し、同じ `data_dir` で起動し直す |
+| duplicate publish | 実装済み | 上の 2b（window 内は broker が捨て、window 外は 2 通で 1 invocation に解決） |
+| queue 停止試験 | 実装済み（NATS JetStream 実測 1 回） / 実装済み（SQLite queue は failpoint） | E2E `outage.*`: nats-server を停止 → 12 件が 202（outbox）→ 以後 9 件が 503 `queue_unavailable` → nats-server 再起動 → 全件 `queued`、受付再開。`tests::a_queue_outage_fills_the_outbox_then_refuses_and_recovers` |
+| 全受付の配送（欠落なし・余分なし） | 実装済み（E2E 実測 1 回） | E2E `converge.*`: 受付 24 件すべてが `queued`、JetStream の message 24 通（unique 24）、欠落 0・受け付けていない id 0・envelope 不一致 0 |
+| Linux（CI job `durable-queue`）での E2E | 未検証 | job に step を追加したが、この branch では PR を開いていないので未実行 |
+| 同期 gateway の回帰 | 実装済み（process provider） | `docs/evidence/20260917T063028Z-process/`（28/28 PASS） |
+| dispatcher・retry・DLQ・`queue_deadline` の強制 | 未着手 | PLT-4640 |
+
+残り・制約: 実測は macOS arm64 の 1 host・1 回。inline 入力の本文は台帳に暗号化せずに置き、terminal 後の保持期限は未実装（PLT-4640）。outbox の上限は全 tenant 共通。queue の状態（満杯・停止）はプロセスローカル。非同期 invocation の `dispatcher_id` は `None` で、ADR-0003 の guard では不変なので、PLT-4640 で所有を表す方法を決める必要がある。受付と publish の throughput は未計測。2 つの gateway process を HTTP で並べた E2E は無い（2 application を同じ `data_dir` で並べた unit test だけ）。HTTP adapter 経由の非同期は非対象。
+
 ## ADR-0001 残る測定の状況
 
 測定の定義は `docs/adr/0001-execution-provider-firecracker-first.md` §「残る測定」。値はすべて aarch64 の nested virtualization 上の参考値（§「証跡」の制約を参照）。
@@ -543,4 +576,4 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 ## 更新ルール
 
 - 各 PR で該当行の状態と証跡を更新する。「実装済み」にするときはテスト名・ファイルが実在することを、「KVM実測あり」にするときは `docs/evidence/` の該当ディレクトリを PR で示す。
-- 実機の記録の置き場所: `scripts/e2e/demo.sh` は `docs/evidence/<UTC>-<provider>/`、`scripts/control-plane/outage-e2e.sh` は `docs/evidence/<UTC>-split-process/`、`scripts/kvm/smoke.sh` は `docs/evidence/kvm-<UTC>/` に書く。profile（host arch、nested virtualization の有無、vCPU / memory、kernel / rootfs の sha256）を読み取れるようにする。
+- 実機の記録の置き場所: `scripts/e2e/demo.sh` は `docs/evidence/<UTC>-<provider>/`、`scripts/control-plane/outage-e2e.sh` は `docs/evidence/<UTC>-split-process/`、`scripts/queue/async-e2e.sh` は `docs/evidence/async-e2e-<UTC>/`（`--evidence` で指定）、`scripts/kvm/smoke.sh` は `docs/evidence/kvm-<UTC>/` に書く。profile（host arch、nested virtualization の有無、vCPU / memory、kernel / rootfs の sha256）を読み取れるようにする。
