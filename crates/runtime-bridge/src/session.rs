@@ -6,6 +6,7 @@
 
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
@@ -23,7 +24,9 @@ use tracing::{error, info, warn};
 use crate::process::{
     SIGKILL, SIGTERM, SpawnSpec, exit_parts, forward_logs, now_ms, signal_group, spawn_user,
 };
-use crate::runtime_api::{ApiEvent, ApiLimits, InvokeRequest, RuntimeApi};
+use crate::runtime_api::{
+    ApiEvent, ApiLimits, InvokeRequest, NoSnapshot, RestoreSource, RuntimeApi,
+};
 use crate::transport::BoxedHostStream;
 
 /// Bridge process exit codes (docs/protocol.md section A).
@@ -124,6 +127,18 @@ enum Outcome {
 
 /// Run a full session on an already connected host stream.
 pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
+    run_session_with(stream, cfg, Arc::new(NoSnapshot)).await
+}
+
+/// [`run_session`] with an explicit answer source for the experimental
+/// lifecycle's `continue` (PLT-4651). No provider takes snapshots yet, so the
+/// binary always uses [`NoSnapshot`]; tests inject a mock restore
+/// notification here.
+pub async fn run_session_with(
+    stream: BoxedHostStream,
+    cfg: SessionConfig,
+    restore: Arc<dyn RestoreSource>,
+) -> i32 {
     let (rd, wr) = tokio::io::split(stream);
     let mut reader = FramedRead::new(rd, FrameCodec);
     let mut writer = FramedWrite::new(wr, FrameCodec);
@@ -236,7 +251,12 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
     // --- runtime api server ---------------------------------------------
     let (api_tx, mut api_rx) = mpsc::channel::<ApiEvent>(64);
     let process_started_at = Instant::now();
-    let api = RuntimeApi::new(api_tx, ApiLimits { max_response_bytes }, process_started_at);
+    let api = RuntimeApi::with_restore_source(
+        api_tx,
+        ApiLimits { max_response_bytes },
+        process_started_at,
+        restore,
+    );
     let listener = match TcpListener::bind(cfg.runtime_api_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -401,6 +421,18 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
                     init_deadline = None;
                     let _ = out_tx.send(GuestMessage::Ready { init_ms }).await;
                 }
+                ApiEvent::Continued { restored } => {
+                    info!(restored, "experimental lifecycle: continue answered");
+                    bridge_log(&out_tx, LogPhase::Init, None, format!(
+                        "lifecycle continue answered ({})", if restored { "restored" } else { "cold" })).await;
+                    // A restored copy starts a fresh init budget for its
+                    // after-restore phase: the bootstrap time was spent by the
+                    // process the snapshot was taken from. A cold start keeps
+                    // the single P1 budget.
+                    if restored && launch.init_timeout_ms > 0 {
+                        init_deadline = Some(Box::pin(tokio::time::sleep(Duration::from_millis(launch.init_timeout_ms))));
+                    }
+                }
                 ApiEvent::InitError { error_type, message } => {
                     error!(%error_type, %message, "user process reported init error");
                     let _ = out_tx.send(GuestMessage::InitError { error_type, message, exit_code: None }).await;
@@ -486,20 +518,28 @@ pub async fn run_session(stream: BoxedHostStream, cfg: SessionConfig) -> i32 {
             exit_code::INIT_ERROR
         }
         Outcome::InitTimeout => {
-            error!(
-                "user process did not become ready within {} ms",
-                launch.init_timeout_ms
-            );
+            // Typed by the lifecycle phase (PLT-4651); `Runtime.InitTimeout`
+            // with the P1 message when the process never opened one.
+            let (error_type, pending) = api.init_timeout_classification();
+            let message = if error_type == "Runtime.InitTimeout" {
+                format!(
+                    "user process did not become ready within {} ms",
+                    launch.init_timeout_ms
+                )
+            } else {
+                format!(
+                    "user process did not finish {pending} within {} ms",
+                    launch.init_timeout_ms
+                )
+            };
+            error!(%error_type, "{message}");
             signal_group(pid, SIGKILL);
             wait_exit(&mut exit_rx, SHUTDOWN_GRACE).await;
             drain_logs(&mut log_tasks).await;
             let _ = out_tx
                 .send(GuestMessage::InitError {
-                    error_type: "Runtime.InitTimeout".into(),
-                    message: format!(
-                        "user process did not become ready within {} ms",
-                        launch.init_timeout_ms
-                    ),
+                    error_type: error_type.into(),
+                    message,
                     exit_code: None,
                 })
                 .await;
@@ -750,9 +790,9 @@ impl SignalSource for Option<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll};
+    use tachyon_serverless_protocol::runtime_api::lifecycle::Continuation;
     use tokio::io::{AsyncRead, DuplexStream, ReadBuf};
     use tokio_util::codec::Framed;
 
@@ -936,6 +976,227 @@ mod tests {
         fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
             Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
         }
+    }
+
+    /// Mock restore notification for the experimental lifecycle (PLT-4651).
+    struct MockRestore {
+        release: tokio::sync::Mutex<Option<oneshot::Receiver<Continuation>>>,
+    }
+
+    impl RestoreSource for MockRestore {
+        fn continuation(
+            &self,
+        ) -> Pin<Box<dyn std::future::Future<Output = Continuation> + Send + '_>> {
+            Box::pin(async move {
+                let rx = self.release.lock().await.take().expect("asked once");
+                rx.await.unwrap_or(Continuation::Cold)
+            })
+        }
+    }
+
+    /// A session whose user process only prints the Runtime API URL and
+    /// sleeps: the test plays both the host (frames) and the user process
+    /// (Runtime API calls), so it can drive the lifecycle step by step.
+    struct LifecycleHarness {
+        host: Framed<DuplexStream, FrameCodec>,
+        session: tokio::task::JoinHandle<i32>,
+        client: tachyon_serverless_sdk::RuntimeClient,
+        _dir: tempfile::TempDir,
+    }
+
+    impl LifecycleHarness {
+        async fn start(init_timeout_ms: u64, restore: Arc<dyn RestoreSource>) -> Self {
+            const ENV: &str = "env_lifecycle";
+            let (bridge_end, host_end) = tokio::io::duplex(1024 * 1024);
+            let dir = tempfile::tempdir().unwrap();
+            let working_dir = dir.path().to_string_lossy().into_owned();
+            let session = tokio::spawn(run_session_with(
+                Box::new(bridge_end),
+                SessionConfig {
+                    environment_id: ENV.into(),
+                    runtime_api_addr: "127.0.0.1:0".parse().unwrap(),
+                    guest_boot_id: None,
+                    unisolated: false,
+                },
+                restore,
+            ));
+            let mut host = Framed::new(host_end, FrameCodec);
+            let hello = timeout(T, host.next()).await.unwrap().unwrap().unwrap();
+            assert!(matches!(
+                decode_message::<GuestMessage>(&hello).unwrap(),
+                GuestMessage::Hello { .. }
+            ));
+            let ack = HostMessage::HelloAck {
+                environment_id: ENV.into(),
+                epoch: 1,
+                entrypoint: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "echo \"api=$TACHYON_RUNTIME_API\"; exec sleep 30".into(),
+                ],
+                env: vec![("PATH".into(), "/bin:/usr/bin".into())],
+                working_dir,
+                init_timeout_ms,
+                max_response_bytes: 1024,
+                max_log_line_bytes: 1024,
+            };
+            host.send(encode_message(&ack).unwrap()).await.unwrap();
+            let mut url = None;
+            while url.is_none() {
+                let frame = timeout(T, host.next()).await.unwrap().unwrap().unwrap();
+                if let GuestMessage::Log { line, .. } = decode_message(&frame).unwrap() {
+                    url = line.strip_prefix("api=").map(str::to_string);
+                }
+            }
+            let client = tachyon_serverless_sdk::RuntimeClient::new(&url.unwrap()).unwrap();
+            Self {
+                host,
+                session,
+                client,
+                _dir: dir,
+            }
+        }
+
+        async fn post(&self, path: &str) -> u16 {
+            self.client.post_json(path, b"{}").await.unwrap().status
+        }
+
+        /// Frames other than logs and heartbeats received within `wait`.
+        async fn frames_within(&mut self, wait: Duration) -> Vec<GuestMessage> {
+            let mut out = Vec::new();
+            let until = tokio::time::Instant::now() + wait;
+            while let Ok(Some(Ok(frame))) = tokio::time::timeout_at(until, self.host.next()).await {
+                match decode_message::<GuestMessage>(&frame).unwrap() {
+                    GuestMessage::Log { .. } | GuestMessage::Heartbeat { .. } => {}
+                    other => out.push(other),
+                }
+            }
+            out
+        }
+
+        async fn init_error(&mut self) -> (String, String, i32) {
+            let frames = self.frames_within(T).await;
+            let code = timeout(T, &mut self.session).await.unwrap().unwrap();
+            match frames.as_slice() {
+                [
+                    GuestMessage::InitError {
+                        error_type,
+                        message,
+                        ..
+                    },
+                ] => (error_type.clone(), message.clone(), code),
+                other => panic!("expected exactly one init error, got {other:?}"),
+            }
+        }
+    }
+
+    /// PLT-4651: order is bootstrap → checkpoint → (mock restore
+    /// notification) → continue → ready, and the host sees `Ready` only at
+    /// the very end.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn lifecycle_ready_reaches_the_host_only_after_the_restore() {
+        use tachyon_serverless_protocol::runtime_api::{self as rapi, lifecycle};
+        let (release, pending) = oneshot::channel();
+        let mut h = LifecycleHarness::start(
+            15_000,
+            Arc::new(MockRestore {
+                release: tokio::sync::Mutex::new(Some(pending)),
+            }),
+        )
+        .await;
+        assert_eq!(h.post(lifecycle::PATH_BOOTSTRAP).await, 202);
+        assert_eq!(h.post(rapi::PATH_READY).await, 409);
+        assert_eq!(h.post(lifecycle::PATH_CHECKPOINT).await, 202);
+        let client = h.client.clone();
+        let cont = tokio::spawn(async move { client.get(lifecycle::PATH_CONTINUE).await });
+        assert!(
+            h.frames_within(Duration::from_millis(300)).await.is_empty(),
+            "no Ready while waiting for the restore"
+        );
+        assert!(!cont.is_finished());
+        release
+            .send(Continuation::Restored {
+                instance_id: "inst_2".into(),
+                restored_at_ms: 7,
+                generation: 1,
+            })
+            .unwrap();
+        let resp = timeout(T, cont).await.unwrap().unwrap().unwrap();
+        assert_eq!(resp.status, 200);
+        let c: Continuation = serde_json::from_slice(&resp.body).unwrap();
+        assert!(matches!(c, Continuation::Restored { generation: 1, .. }));
+        assert!(
+            h.frames_within(Duration::from_millis(200)).await.is_empty(),
+            "continue alone is not Ready"
+        );
+        assert_eq!(h.post(rapi::PATH_READY).await, 202);
+        let frames = h.frames_within(Duration::from_millis(500)).await;
+        assert!(
+            matches!(frames.as_slice(), [GuestMessage::Ready { .. }]),
+            "{frames:?}"
+        );
+        h.host
+            .send(
+                encode_message(&HostMessage::Shutdown {
+                    reason: "test".into(),
+                })
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(timeout(T, h.session).await.unwrap().unwrap(), exit_code::OK);
+    }
+
+    /// PLT-4651: a timeout before the checkpoint and one after the restore are
+    /// reported with different error types, and neither reaches Ready.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn lifecycle_timeouts_are_typed_by_phase() {
+        use tachyon_serverless_protocol::runtime_api::lifecycle::{self, error_types};
+
+        let mut h = LifecycleHarness::start(400, Arc::new(NoSnapshot)).await;
+        assert_eq!(h.post(lifecycle::PATH_BOOTSTRAP).await, 202);
+        let (error_type, message, code) = h.init_error().await;
+        assert_eq!(error_type, error_types::PRE_CHECKPOINT_TIMEOUT, "{message}");
+        assert_eq!(code, exit_code::INIT_ERROR);
+
+        let mut h = LifecycleHarness::start(400, Arc::new(NoSnapshot)).await;
+        assert_eq!(h.post(lifecycle::PATH_BOOTSTRAP).await, 202);
+        assert_eq!(h.post(lifecycle::PATH_CHECKPOINT).await, 202);
+        let resp = h.client.get(lifecycle::PATH_CONTINUE).await.unwrap();
+        assert_eq!(resp.body, br#"{"kind":"cold"}"#);
+        let (error_type, message, code) = h.init_error().await;
+        assert_eq!(error_type, error_types::AFTER_RESTORE_TIMEOUT, "{message}");
+        assert_eq!(code, exit_code::INIT_ERROR);
+    }
+
+    /// PLT-4651: a failed after-restore hook ends the session as an init
+    /// error of its own type, without Ready.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn lifecycle_after_restore_failure_is_an_init_error() {
+        use tachyon_serverless_protocol::runtime_api::lifecycle::{self, error_types};
+        let mut h = LifecycleHarness::start(15_000, Arc::new(NoSnapshot)).await;
+        assert_eq!(h.post(lifecycle::PATH_BOOTSTRAP).await, 202);
+        assert_eq!(h.post(lifecycle::PATH_CHECKPOINT).await, 202);
+        assert_eq!(
+            h.client.get(lifecycle::PATH_CONTINUE).await.unwrap().status,
+            200
+        );
+        let body = br#"{"error_type":"Handler.Error","message":"cannot connect"}"#;
+        assert_eq!(
+            h.client
+                .post_json(lifecycle::PATH_ERROR, body)
+                .await
+                .unwrap()
+                .status,
+            202
+        );
+        let (error_type, message, code) = h.init_error().await;
+        assert_eq!(error_type, error_types::AFTER_RESTORE_FAILED);
+        assert_eq!(message, "Handler.Error: cannot connect");
+        assert_eq!(code, exit_code::INIT_ERROR);
     }
 
     #[cfg(unix)]

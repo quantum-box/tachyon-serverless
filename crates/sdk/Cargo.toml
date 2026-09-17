@@ -7,6 +7,13 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Rust SDK for Tachyon Serverless functions: run(handler), serve_http(router) and the invocation Context, speaking the in-guest Runtime API."
 
+[features]
+default = []
+# PLT-4651 (X1, experimental): `lifecycle` builder with a synchronous bootstrap
+# before a checkpoint point and an after-restore hook. Off by default; `run` and
+# `serve_http` behave identically with or without it.
+experimental-restore = []
+
 [dependencies]
 tachyon-serverless-protocol = { workspace = true }
 tokio = { workspace = true }

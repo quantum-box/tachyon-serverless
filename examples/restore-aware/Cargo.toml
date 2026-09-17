@@ -1,0 +1,20 @@
+[package]
+name = "example-restore-aware"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+# Example (PLT-4651, X1, experimental): the restore-aware lifecycle of the SDK.
+# bootstrap builds a synthetic lookup table (a prime sieve) with no runtime, secrets or
+# sockets; after_restore creates the instance identity, reseeds the RNG from the OS,
+# reads the clock, checks credential presence and opens a fake "connection".
+# Payload {"n": <u32>} -> {"n", "is_prime", "instance_id", "restored", "generation",
+# "random", "connection_id", "secret_present", ...}. No network access.
+# RESTORE_AWARE_FAIL=bootstrap|after_restore makes that hook fail (demo of error types).
+description = "Tachyon Serverless example: experimental restore-aware lifecycle (bootstrap / checkpoint / after_restore) with synthetic data."
+
+[dependencies]
+tachyon-serverless-sdk = { workspace = true, features = ["experimental-restore"] }
+serde_json = { workspace = true }

@@ -7,6 +7,8 @@
 //! them into wire frames.
 
 use std::collections::HashSet;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -17,13 +19,54 @@ use axum::http::{HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use http_body_util::{BodyExt, Limited};
+use tachyon_serverless_protocol::runtime_api::lifecycle::{
+    self, Continuation, error_types as lifecycle_errors,
+};
 use tachyon_serverless_protocol::runtime_api::{
     self as api, MAX_ERROR_REPORT_BYTES, RuntimeErrorReport, headers,
 };
 use tachyon_serverless_protocol::{
     GuestErrorKind, LogPhase, MAX_FRAME_BYTES, MAX_RESPONSE_PAYLOAD_BYTES,
 };
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, OnceCell, mpsc};
+
+/// Where the answer to `GET /runtime/v1/lifecycle/continue` comes from
+/// (experimental lifecycle, PLT-4651).
+///
+/// The bridge never takes snapshots itself: a provider that can (PLT-4653)
+/// supplies a source that resolves once the snapshot was taken and this copy
+/// was restored. Every provider today uses [`NoSnapshot`], so a function that
+/// opts into the lifecycle goes on at once with [`Continuation::Cold`].
+pub trait RestoreSource: Send + Sync + 'static {
+    fn continuation(&self) -> Pin<Box<dyn Future<Output = Continuation> + Send + '_>>;
+}
+
+/// No snapshot support: always [`Continuation::Cold`], immediately.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoSnapshot;
+
+impl RestoreSource for NoSnapshot {
+    fn continuation(&self) -> Pin<Box<dyn Future<Output = Continuation> + Send + '_>> {
+        Box::pin(std::future::ready(Continuation::Cold))
+    }
+}
+
+/// Progress of the experimental lifecycle as the bridge has observed it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LifecyclePhase {
+    /// The process never called a lifecycle path (P1 behaviour).
+    #[default]
+    NotUsed,
+    /// `bootstrap` received; reusable state is being built.
+    Bootstrapping,
+    /// `checkpoint` received; `continue` not answered yet.
+    AwaitingContinue {
+        /// `continue` was requested (the wait is on the bridge/provider).
+        requested: bool,
+    },
+    /// `continue` answered; per-instance state is being built until `ready`.
+    AfterRestore { restored: bool },
+}
 
 /// Length of the canonical JSON encoding of `value`, i.e. what the
 /// `Response` frame will carry, measured without allocating it. Numbers such
@@ -66,6 +109,8 @@ pub enum ApiEvent {
     Ready { init_ms: u64 },
     /// The user process reported an initialization failure.
     InitError { error_type: String, message: String },
+    /// `continue` was answered for the first time (experimental lifecycle).
+    Continued { restored: bool },
     Response {
         attempt_id: String,
         epoch: u64,
@@ -116,6 +161,7 @@ struct Inner {
     shutdown: bool,
     in_flight: Option<InFlight>,
     completed: HashSet<String>,
+    lifecycle: LifecyclePhase,
 }
 
 /// Shared Runtime API state. Cheap to clone via `Arc`.
@@ -126,6 +172,9 @@ pub struct RuntimeApi {
     events: mpsc::Sender<ApiEvent>,
     process_started_at: Instant,
     limits: ApiLimits,
+    restore: Arc<dyn RestoreSource>,
+    /// The single answer to `continue`, shared by retries.
+    continuation: OnceCell<Continuation>,
 }
 
 impl std::fmt::Debug for RuntimeApi {
@@ -142,13 +191,63 @@ impl RuntimeApi {
         limits: ApiLimits,
         process_started_at: Instant,
     ) -> Arc<Self> {
+        Self::with_restore_source(events, limits, process_started_at, Arc::new(NoSnapshot))
+    }
+
+    /// Like [`Self::new`] with an explicit answer source for the experimental
+    /// lifecycle's `continue` (tests use a mock restore notification).
+    pub fn with_restore_source(
+        events: mpsc::Sender<ApiEvent>,
+        limits: ApiLimits,
+        process_started_at: Instant,
+        restore: Arc<dyn RestoreSource>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             inner: Mutex::new(Inner::default()),
             notify: Notify::new(),
             events,
             process_started_at,
             limits,
+            restore,
+            continuation: OnceCell::new(),
         })
+    }
+
+    pub fn lifecycle_phase(&self) -> LifecyclePhase {
+        self.lock().lifecycle.clone()
+    }
+
+    /// `(error_type, what was pending)` for an init deadline that passed now.
+    /// Outside the experimental lifecycle this is the P1 `Runtime.InitTimeout`.
+    pub fn init_timeout_classification(&self) -> (&'static str, &'static str) {
+        match self.lock().lifecycle {
+            LifecyclePhase::NotUsed => ("Runtime.InitTimeout", "ready"),
+            LifecyclePhase::Bootstrapping
+            | LifecyclePhase::AwaitingContinue { requested: false } => (
+                lifecycle_errors::PRE_CHECKPOINT_TIMEOUT,
+                "the bootstrap (pre-checkpoint) phase",
+            ),
+            LifecyclePhase::AwaitingContinue { requested: true } => (
+                lifecycle_errors::CHECKPOINT_TIMEOUT,
+                "the checkpoint / restore decision",
+            ),
+            LifecyclePhase::AfterRestore { .. } => (
+                lifecycle_errors::AFTER_RESTORE_TIMEOUT,
+                "the after-restore phase",
+            ),
+        }
+    }
+
+    /// Whether `ready` (explicit or implied by `next`) may be accepted now.
+    /// Inside the experimental lifecycle only an explicit `ready` after
+    /// `continue` counts; `next` never implies it.
+    fn ready_allowed(&self, explicit: bool) -> bool {
+        let g = self.lock();
+        match g.lifecycle {
+            LifecyclePhase::NotUsed => true,
+            LifecyclePhase::AfterRestore { .. } => g.ready || explicit,
+            LifecyclePhase::Bootstrapping | LifecyclePhase::AwaitingContinue { .. } => false,
+        }
     }
 
     pub fn limits(&self) -> ApiLimits {
@@ -308,18 +407,162 @@ impl RuntimeApi {
             )
             .route(api::PATH_INIT_ERROR, post(post_init_error))
             .route(api::PATH_READY, post(post_ready))
+            .route(lifecycle::PATH_BOOTSTRAP, post(post_lifecycle_bootstrap))
+            .route(lifecycle::PATH_CHECKPOINT, post(post_lifecycle_checkpoint))
+            .route(lifecycle::PATH_CONTINUE, get(get_lifecycle_continue))
+            .route(lifecycle::PATH_ERROR, post(post_lifecycle_error))
             .with_state(self.clone())
     }
 }
 
 type Api = State<Arc<RuntimeApi>>;
 
-async fn post_ready(State(api): Api) -> StatusCode {
+fn lifecycle_conflict(message: String) -> Response {
+    (
+        StatusCode::CONFLICT,
+        format!("{}: {message}", lifecycle_errors::LIFECYCLE_VIOLATION),
+    )
+        .into_response()
+}
+
+async fn post_ready(State(api): Api) -> Response {
+    if !api.ready_allowed(true) {
+        return lifecycle_conflict(format!(
+            "ready refused in lifecycle phase {:?}: continue has not been answered",
+            api.lifecycle_phase()
+        ));
+    }
     api.emit_ready_if_first().await;
-    StatusCode::ACCEPTED
+    StatusCode::ACCEPTED.into_response()
+}
+
+async fn post_lifecycle_bootstrap(State(api): Api) -> Response {
+    {
+        let mut g = api.lock();
+        if g.ready || g.lifecycle != LifecyclePhase::NotUsed {
+            let phase = g.lifecycle.clone();
+            drop(g);
+            return lifecycle_conflict(format!(
+                "bootstrap must be the first lifecycle call before ready (phase {phase:?})"
+            ));
+        }
+        g.lifecycle = LifecyclePhase::Bootstrapping;
+    }
+    StatusCode::ACCEPTED.into_response()
+}
+
+async fn post_lifecycle_checkpoint(State(api): Api) -> Response {
+    {
+        let mut g = api.lock();
+        if g.lifecycle != LifecyclePhase::Bootstrapping {
+            let phase = g.lifecycle.clone();
+            drop(g);
+            return lifecycle_conflict(format!(
+                "checkpoint is only valid while bootstrapping (phase {phase:?})"
+            ));
+        }
+        g.lifecycle = LifecyclePhase::AwaitingContinue { requested: false };
+    }
+    StatusCode::ACCEPTED.into_response()
+}
+
+async fn get_lifecycle_continue(State(api): Api) -> Response {
+    {
+        let mut g = api.lock();
+        match g.lifecycle {
+            LifecyclePhase::AwaitingContinue { .. } => {
+                g.lifecycle = LifecyclePhase::AwaitingContinue { requested: true };
+            }
+            // A retry after the answer was given gets the same answer.
+            LifecyclePhase::AfterRestore { .. } if !g.ready => {}
+            ref phase => {
+                let phase = phase.clone();
+                drop(g);
+                return lifecycle_conflict(format!(
+                    "continue is only valid after checkpoint and before ready (phase {phase:?})"
+                ));
+            }
+        }
+    }
+    let continuation = api
+        .continuation
+        .get_or_init(|| api.restore.continuation())
+        .await
+        .clone();
+    let restored = matches!(continuation, Continuation::Restored { .. });
+    let first = {
+        let mut g = api.lock();
+        match g.lifecycle {
+            LifecyclePhase::AwaitingContinue { .. } => {
+                g.lifecycle = LifecyclePhase::AfterRestore { restored };
+                true
+            }
+            _ => false,
+        }
+    };
+    if first {
+        api.emit(ApiEvent::Continued { restored }).await;
+    }
+    let mut response = axum::Json(continuation).into_response();
+    if let Ok(v) = HeaderValue::from_str(&lifecycle::VERSION.to_string()) {
+        response.headers_mut().insert(lifecycle::HEADER_VERSION, v);
+    }
+    response
+}
+
+async fn post_lifecycle_error(State(api): Api, request: Request<Body>) -> Response {
+    let report = match read_body(request, MAX_ERROR_REPORT_BYTES).await {
+        BodyRead::Ok(bytes) => match serde_json::from_slice::<RuntimeErrorReport>(&bytes) {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("error report is not valid: {e}"),
+                )
+                    .into_response();
+            }
+        },
+        BodyRead::TooLarge { .. } => {
+            return (StatusCode::PAYLOAD_TOO_LARGE, "error report too large").into_response();
+        }
+        BodyRead::Failed(e) => {
+            return (StatusCode::BAD_REQUEST, format!("cannot read body: {e}")).into_response();
+        }
+    };
+    // The bridge, not the process, decides which phase failed.
+    let error_type = {
+        let g = api.lock();
+        match g.lifecycle {
+            LifecyclePhase::Bootstrapping | LifecyclePhase::AwaitingContinue { .. } => {
+                lifecycle_errors::PRE_CHECKPOINT_FAILED
+            }
+            LifecyclePhase::AfterRestore { .. } if !g.ready => {
+                lifecycle_errors::AFTER_RESTORE_FAILED
+            }
+            ref phase => {
+                let phase = phase.clone();
+                drop(g);
+                return lifecycle_conflict(format!(
+                    "lifecycle error outside an open lifecycle (phase {phase:?})"
+                ));
+            }
+        }
+    };
+    api.emit(ApiEvent::InitError {
+        error_type: error_type.to_string(),
+        message: format!("{}: {}", report.error_type, report.message),
+    })
+    .await;
+    StatusCode::ACCEPTED.into_response()
 }
 
 async fn get_next(State(api): Api) -> Response {
+    if !api.ready_allowed(false) {
+        return lifecycle_conflict(format!(
+            "next refused in lifecycle phase {:?}: post ready after continue first",
+            api.lifecycle_phase()
+        ));
+    }
     api.emit_ready_if_first().await;
     loop {
         // Register interest before inspecting state so a notification that
@@ -1074,6 +1317,246 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::GONE);
+    }
+
+    /// Mock restore notification: `continue` blocks until the test releases
+    /// the continuation.
+    struct MockRestore(tokio::sync::Mutex<Option<tokio::sync::oneshot::Receiver<Continuation>>>);
+
+    impl RestoreSource for MockRestore {
+        fn continuation(&self) -> Pin<Box<dyn Future<Output = Continuation> + Send + '_>> {
+            Box::pin(async move {
+                let rx = self.0.lock().await.take().expect("asked once");
+                rx.await.expect("test released the continuation")
+            })
+        }
+    }
+
+    fn get(path: &str) -> Request<Body> {
+        Request::get(path).body(Body::empty()).unwrap()
+    }
+
+    async fn status(router: &Router, req: Request<Body>) -> StatusCode {
+        router.clone().oneshot(req).await.unwrap().status()
+    }
+
+    /// PLT-4651: with no snapshot support the lifecycle answers `cold` at
+    /// once, and `ready` is only accepted after `continue`.
+    #[tokio::test]
+    async fn lifecycle_cold_start_gates_ready_until_continue() {
+        let (api, mut rx, router) = setup(1024);
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_CHECKPOINT, "")).await,
+            StatusCode::CONFLICT,
+            "checkpoint before bootstrap"
+        );
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_BOOTSTRAP, "")).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            api.init_timeout_classification().0,
+            lifecycle_errors::PRE_CHECKPOINT_TIMEOUT
+        );
+        assert_eq!(
+            status(&router, post(api::PATH_READY, "")).await,
+            StatusCode::CONFLICT,
+            "ready while bootstrapping"
+        );
+        assert_eq!(
+            status(&router, get(api::PATH_NEXT)).await,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            status(&router, get(lifecycle::PATH_CONTINUE)).await,
+            StatusCode::CONFLICT,
+            "continue before checkpoint"
+        );
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_CHECKPOINT, "")).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            status(&router, post(api::PATH_READY, "")).await,
+            StatusCode::CONFLICT,
+            "ready before continue"
+        );
+        let resp = router
+            .clone()
+            .oneshot(get(lifecycle::PATH_CONTINUE))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers()[lifecycle::HEADER_VERSION], "1");
+        assert_eq!(body_json(resp).await, serde_json::json!({"kind": "cold"}));
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ApiEvent::Continued { restored: false }
+        );
+        assert!(rx.try_recv().is_err(), "nothing reached Ready yet");
+        assert_eq!(
+            api.init_timeout_classification().0,
+            lifecycle_errors::AFTER_RESTORE_TIMEOUT
+        );
+        // `next` does not imply readiness inside the lifecycle.
+        assert_eq!(
+            status(&router, get(api::PATH_NEXT)).await,
+            StatusCode::CONFLICT
+        );
+        assert!(!api.is_ready());
+        assert_eq!(
+            status(&router, post(api::PATH_READY, "")).await,
+            StatusCode::ACCEPTED
+        );
+        assert!(matches!(rx.try_recv(), Ok(ApiEvent::Ready { .. })));
+        assert!(api.is_ready());
+        // Once ready, the lifecycle is closed.
+        assert_eq!(
+            status(&router, get(lifecycle::PATH_CONTINUE)).await,
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            status(
+                &router,
+                post(lifecycle::PATH_ERROR, r#"{"error_type":"x","message":"y"}"#)
+            )
+            .await,
+            StatusCode::CONFLICT
+        );
+    }
+
+    /// PLT-4651: a mock restore notification is what `continue` returns, and
+    /// the wait for it is typed as the bridge's, not the function's.
+    #[tokio::test]
+    async fn lifecycle_continue_waits_for_the_restore_notification() {
+        let (tx, mut rx) = mpsc::channel(16);
+        let (release, pending) = tokio::sync::oneshot::channel();
+        let api = RuntimeApi::with_restore_source(
+            tx,
+            ApiLimits {
+                max_response_bytes: 1024,
+            },
+            Instant::now(),
+            Arc::new(MockRestore(tokio::sync::Mutex::new(Some(pending)))),
+        );
+        let router = api.router();
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_BOOTSTRAP, "")).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_CHECKPOINT, "")).await,
+            StatusCode::ACCEPTED
+        );
+        let r2 = router.clone();
+        let poll = tokio::spawn(async move { r2.oneshot(get(lifecycle::PATH_CONTINUE)).await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!poll.is_finished(), "continue blocks until the restore");
+        assert_eq!(
+            api.init_timeout_classification().0,
+            lifecycle_errors::CHECKPOINT_TIMEOUT
+        );
+        let restored = Continuation::Restored {
+            instance_id: "inst_mock".into(),
+            restored_at_ms: 42,
+            generation: 3,
+        };
+        release.send(restored.clone()).unwrap();
+        let resp = timeout_ok(poll).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            body_json(resp).await,
+            serde_json::to_value(&restored).unwrap()
+        );
+        assert_eq!(
+            rx.recv().await,
+            Some(ApiEvent::Continued { restored: true })
+        );
+        assert_eq!(
+            api.lifecycle_phase(),
+            LifecyclePhase::AfterRestore { restored: true }
+        );
+        // A retry gets the same answer and no second event.
+        let resp = router
+            .clone()
+            .oneshot(get(lifecycle::PATH_CONTINUE))
+            .await
+            .unwrap();
+        assert_eq!(
+            body_json(resp).await,
+            serde_json::to_value(&restored).unwrap()
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    async fn timeout_ok(
+        poll: tokio::task::JoinHandle<Result<Response, std::convert::Infallible>>,
+    ) -> Response {
+        tokio::time::timeout(Duration::from_secs(5), poll)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+    }
+
+    /// PLT-4651: hook failures are typed by the phase the bridge observed,
+    /// whatever the process called them.
+    #[tokio::test]
+    async fn lifecycle_errors_are_typed_by_phase() {
+        let report = r#"{"error_type":"Handler.Error","message":"no table"}"#;
+        let (_api, mut rx, router) = setup(1024);
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_ERROR, report)).await,
+            StatusCode::CONFLICT,
+            "no lifecycle open"
+        );
+        status(&router, post(lifecycle::PATH_BOOTSTRAP, "")).await;
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_ERROR, report)).await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ApiEvent::InitError {
+                error_type: lifecycle_errors::PRE_CHECKPOINT_FAILED.into(),
+                message: "Handler.Error: no table".into()
+            }
+        );
+
+        let (_api, mut rx, router) = setup(1024);
+        status(&router, post(lifecycle::PATH_BOOTSTRAP, "")).await;
+        status(&router, post(lifecycle::PATH_CHECKPOINT, "")).await;
+        status(&router, get(lifecycle::PATH_CONTINUE)).await;
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ApiEvent::Continued { restored: false }
+        );
+        let wrong = r#"{"error_type":"Runtime.PreCheckpointFailed","message":"lying"}"#;
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_ERROR, wrong)).await,
+            StatusCode::ACCEPTED
+        );
+        match rx.try_recv().unwrap() {
+            ApiEvent::InitError { error_type, .. } => {
+                assert_eq!(error_type, lifecycle_errors::AFTER_RESTORE_FAILED)
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// PLT-4651: a P1 process that never touches the lifecycle is unaffected.
+    #[tokio::test]
+    async fn without_lifecycle_next_still_implies_ready() {
+        let (api, mut rx, router) = setup(1024);
+        assert_eq!(api.init_timeout_classification().0, "Runtime.InitTimeout");
+        api.shutdown();
+        assert_eq!(status(&router, get(api::PATH_NEXT)).await, StatusCode::GONE);
+        assert!(matches!(rx.try_recv(), Ok(ApiEvent::Ready { .. })));
+        assert_eq!(
+            status(&router, post(lifecycle::PATH_BOOTSTRAP, "")).await,
+            StatusCode::CONFLICT,
+            "the lifecycle cannot be opened after ready"
+        );
     }
 
     #[tokio::test]

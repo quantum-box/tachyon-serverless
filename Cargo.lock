@@ -424,6 +424,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-restore-aware"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tachyon-serverless-sdk",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

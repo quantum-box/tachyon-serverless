@@ -42,10 +42,10 @@ apps/cli
 | `crates/providers/firecracker` | Firecracker API socket, vsock, drive, cleanup | domain 以外の上位 |
 | `crates/providers/fake` | テスト専用。duplex stream 上のスクリプト guest | — |
 | `crates/runtime-bridge` | guest 側 agent。vsock/unix で host と接続、Runtime API を HTTP で提供、user process を起動・監視 | — |
-| `crates/sdk` | `run(handler)`, `serve_http(router)`, `Context` | bridge 内部 |
+| `crates/sdk` | `run(handler)`, `serve_http(router)`, `Context`。実験 feature `experimental-restore` で `lifecycle`（PLT-4651） | bridge 内部 |
 | `apps/gateway` | axum。管理 API + Invoke + logs + OpenAPI | — |
 | `apps/cli` | `tsls` CLI。deploy / invoke / logs / rollback / dev | application（HTTP 経由のみ） |
-| `examples/*` | hello / http-axum / cpu-burn | — |
+| `examples/*` | hello / http-axum / cpu-burn / isolation-probe / restore-aware（実験、PLT-4651） | — |
 
 ## 3. 実行の流れ（同期 Invoke, P1）
 
@@ -260,5 +260,7 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 ## 6. 非対象（P1）
 
 snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted/public-web、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。
+
+snapshot/restore に向けた**実験**として、SDK に初期化保存点と復元後 hook の API がある（PLT-4651、X1、`docs/protocol.md` §B-X1）。`tachyon-serverless-sdk` の feature `experimental-restore`（既定 off）の `lifecycle::builder().bootstrap(..).after_restore(..).run(..)` で、同期 bootstrap（Tokio・secret・接続なし）→ checkpoint → continue（`cold` / `restored`）→ after_restore（identity・RNG・時計・認証・接続）→ ready の順に進む。bridge は `continue` に答えるまで Ready を host に送らない。snapshot を取る provider は無いので bridge は常に `cold` と答え、通常起動も同じ経路を通る。host↔bridge frame は変えていない。これは任意のライブラリや multithread runtime を snapshot-safe にするものではない。例は `examples/restore-aware`。P0〜P4 はこれに依存しない。
 
 warm 再利用と idle 休止・再開は実装済み（§4「環境 pool と再利用キー」「idle 休止・再開と計測 gate」）だが、provider が `idle_quiesce` / `idle_resume` を `Supported` と報告しない限り働かない。process は `Unsupported`、firecracker は実機計測を経た `Supported` を返す。`[pool]` の既定が off なので **既定の構成では P1 と同じ destroy-after-invoke** であり、それを `crates/application/tests/pipeline.rs` が検査する。firecracker で再利用が働くのは `[pool] enabled = true` にしたときで、`Unverified` の provider を測るための `[pool] allow_unverified_idle` は別の switch として残る（その構成は API とログで一貫して「未検証」と表示される）。

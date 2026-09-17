@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4630、PLT-4632、PLT-4633）
+# 受入チェックリスト（PLT-4613〜PLT-4630、PLT-4632、PLT-4633、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4632 と PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -37,6 +37,8 @@
 | `docs/evidence/20260915T125610Z-firecracker/` | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` の同じファイル群 | 上と同じ VM、`config/gateway.firecracker.toml`（`profile = "production"`） | 27/27 PASS |
 | `docs/evidence/20260915T171415Z-process/` | `scripts/e2e/demo.sh`（レビュー指摘修正の統合後、secret 値の検査ステップを含む 28 ステップ） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260915T171631Z-firecracker/` | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`（同上、commit `95af2ba`） | 上と同じ VM | 28/28 PASS |
+| `docs/evidence/20260917T024812Z-process/` | `scripts/e2e/demo.sh`（PLT-4651 の SDK / bridge 変更後の P1 互換確認。設定は下の行と同じく listen・data_dir・workdir だけを変えたコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
+| `docs/evidence/restore-aware-20260917T025043Z-process/` | `examples/restore-aware`（PLT-4651、実験）を gateway + process provider で deploy し、`{"n":97}` / `{"n":91}` と、`RESTORE_AWARE_FAIL=bootstrap` / `after_restore` の revision を invoke した結果・ログ | macOS、process provider（隔離なし） | 成功 2（`restored=false`）、`Runtime.PreCheckpointFailed` 1、`Runtime.AfterRestoreFailed` 1 |
 | `docs/evidence/20260917T020229Z-process/` | `scripts/e2e/demo.sh`（PLT-4618: 台帳が `state.db`。step 27 は `state.db` と `state.db-wal` も検査。port 8080 が使用中のため `config/gateway.dev.toml` の listen と data_dir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定） | macOS、process provider（隔離なし） | 28/28 PASS |
 
 本文の「E2E step NN」は各 E2E ディレクトリの `steps/NN-*.log`（例: step 23 = `steps/23-cross-tenant_get_invoke_-__404.log`）。特に断らない限り process と firecracker の両方で PASS している。
@@ -325,6 +327,22 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 | 10 | 証跡が gate の状態を記録する | 実装済み・KVM実測あり | `docs/evidence/warm-20260916T162532Z/summary.json` の `reuse`（`enabled=true`、`verified=false`、`measurement_only=true`）。昇格前の計測であることが記録に残る |
 | 11 | x86_64 / bare metal での計測 | 未検証 | 記録は aarch64 の nested virtualization のみ（`docs/kvm.md` §5） |
 | 12 | 長時間 idle のあとの再開、N ≥ 20 の分布 | 未検証 | 今回の記録は 1 環境・warm 5 回。TTL 満了と drain の回収は fake provider のテストのみ |
+
+## PLT-4651 (X1) Rust SDK の初期化保存点・復元後 hook（実験 API）
+
+実験 API。SDK の feature `experimental-restore`（既定 off）の `lifecycle::builder().bootstrap(..).after_restore(..).run(..)` / `.serve_http(..)` と、bridge の Runtime API `lifecycle/{bootstrap, checkpoint, continue, error}`（`docs/protocol.md` §B-X1）。**snapshot の取得・復元は実装していない**（PLT-4653）。同梱の provider はどれも snapshot を取らないので bridge は常に `cold` を返し、`restored` はテストの mock restore 通知からしか出ない。P0〜P4 はこの Issue に依存しない。データは合成データ（素数表）だけを使う。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 通常起動も snapshot 不要で同じ API 経由で動く | 実装済み（process provider で 1 回実行） | `crates/sdk/src/lifecycle.rs::cold_start_takes_the_same_path_and_serves`、`crates/runtime-bridge/src/runtime_api.rs::lifecycle_cold_start_gates_ready_until_continue`、`crates/runtime-bridge/src/session.rs::lifecycle_timeouts_are_typed_by_phase`（`NoSnapshot` が `{"kind":"cold"}` を返す）、`docs/evidence/restore-aware-20260917T025043Z-process/`（`examples/restore-aware` を gateway + process provider で deploy / invoke。`restored=false`、`generation=0`、ログに `lifecycle continue answered (cold)`）。Firecracker では未実行 |
+| 2 | X1 無効時に P1 の互換性を壊さない | 実装済み | feature 無しの `cargo test -p tachyon-serverless-sdk`（既存 20 テスト、`lifecycle` は compile されない）、`crates/runtime-bridge/src/runtime_api.rs::without_lifecycle_next_still_implies_ready`、host↔bridge frame と `PROTOCOL_VERSION`（2）は無変更、`docs/evidence/20260917T024812Z-process/summary.json`（`scripts/e2e/demo.sh` 28/28 PASS。port 8080 が使用中のため `config/gateway.dev.toml` の listen・data_dir・workdir だけを変えたコピーを `TSLS_GATEWAY_CONFIG` で指定）。注: workspace では `examples/restore-aware` が feature を有効にするので、`cargo test --workspace` の SDK は feature 有りで build される（`run` / `serve_http` の挙動は feature に依存しない） |
+| 3 | 本番 Secret / DB 接続 / 常駐 task を保存前に作らない example | 実装済み | `examples/restore-aware/src/main.rs`（bootstrap は素数表だけ。identity・`/dev/urandom` からの RNG reseed・時計・secret の有無・fake connection は after_restore だけで作る。理由は module doc）、`examples/restore-aware/src/main.rs::{table_is_a_correct_sieve, copies_get_distinct_identity_and_random_streams}`、`crates/sdk/src/lifecycle.rs::hooks_run_in_order_around_a_mock_restore`（bootstrap 中に Tokio runtime が無いこと、after_restore は SDK が continue 後に作った runtime の中で動くことを assert）。SDK 自身は checkpoint 前に runtime・thread・signal handler・永続接続を作らない（lifecycle 呼び出しは 1 リクエスト 1 接続の blocking HTTP） |
+| 4 | pre-checkpoint / after-restore の失敗と timeout を区別する | 実装済み（process provider で失敗 2 種を 1 回ずつ実行） | 型: `Runtime.PreCheckpointFailed` / `Runtime.AfterRestoreFailed` / `Runtime.PreCheckpointTimeout` / `Runtime.AfterRestoreTimeout` / `Runtime.CheckpointTimeout`（bridge 側の待ち）。`crates/runtime-bridge/src/runtime_api.rs::{lifecycle_errors_are_typed_by_phase, lifecycle_continue_waits_for_the_restore_notification}`、`crates/runtime-bridge/src/session.rs::{lifecycle_timeouts_are_typed_by_phase, lifecycle_after_restore_failure_is_an_init_error}`、`crates/sdk/src/lifecycle.rs::{bootstrap_failure_never_reaches_checkpoint_or_ready, after_restore_failure_never_posts_ready}`（error と panic の両方）、`docs/evidence/restore-aware-20260917T025043Z-process/{fail-bootstrap.json, fail-after-restore.json}`（`init_error` / 各 error_type）。timeout は単体テストのみ |
+| 5 | 不完全な状態で Ready にならない | 実装済み | lifecycle が開いている間 bridge は continue 前の `ready` と、明示的な `ready` 前の `next` を 409 にする。`crates/runtime-bridge/src/runtime_api.rs::lifecycle_cold_start_gates_ready_until_continue`、`crates/runtime-bridge/src/session.rs::lifecycle_ready_reaches_the_host_only_after_the_restore`（mock restore 通知まで host に `Ready` frame が届かず、continue だけでも届かない）、`crates/sdk/src/lifecycle.rs::after_restore_failure_never_posts_ready` |
+| 6 | 任意ライブラリ・multithread runtime が透過的に snapshot-safe とは主張しない | 実装済み（文書） | `docs/protocol.md` §B-X1「snapshot-safe を主張しない」、`crates/sdk/src/lifecycle.rs` の module doc「What this does not do」、`RuntimeFlavor::MultiThread` の doc、`crates/protocol/src/runtime_api.rs`（`lifecycle` module doc）、`examples/restore-aware/src/main.rs` の module doc |
+| 7 | 検証: mock restore 通知による hook 順序 | 実装済み | `crates/sdk/src/lifecycle.rs::hooks_run_in_order_around_a_mock_restore`（`POST bootstrap → hook bootstrap → POST checkpoint → GET continue → (通知) → hook after_restore → POST ready`）、`crates/runtime-bridge/src/session.rs::lifecycle_ready_reaches_the_host_only_after_the_restore`（`run_session_with` に mock `RestoreSource` を注入）、`crates/protocol/src/runtime_api.rs::continuation_wire_shape` |
+| 8 | 実際の snapshot / restore での hook | 未着手 | PLT-4653。restore を bridge に知らせる frame（version を上げる）か `HelloAck` の能力 field、restore 後の init budget の host 側の扱い、restore 後に新しい secret を渡す経路はいずれも未実装（`docs/protocol.md` §B-X1「互換性の規則」「環境変数」） |
+| 9 | Firecracker（KVM）での実行 | 未検証 | `cargo check --target aarch64-unknown-linux-musl` は通るが、microVM 内で `examples/restore-aware` を動かした記録は無い |
 
 ## ADR-0001 残る測定の状況
 
