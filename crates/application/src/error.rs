@@ -103,9 +103,18 @@ impl AppError {
                 RejectReason::CircuitOpen | RejectReason::Placement => {
                     ErrorCode::ProviderUnavailable
                 }
+                RejectReason::FunctionDeleted => ErrorCode::FunctionDeleted,
             },
             Self::RevisionNotReady(_) => ErrorCode::RevisionNotReady,
             Self::FunctionDeleted(_) => ErrorCode::FunctionDeleted,
+            // A queued invocation refused because its function was deleted
+            // before it started (PLT-4635): the same 409 as a new one.
+            Self::Invocation { error, .. }
+                if reason_for_error_type(&error.error_type)
+                    == Some(RejectReason::FunctionDeleted) =>
+            {
+                ErrorCode::FunctionDeleted
+            }
             Self::Invocation { error, .. }
                 if reason_for_error_type(&error.error_type) == Some(RejectReason::CircuitOpen) =>
             {
@@ -140,6 +149,14 @@ impl AppError {
                 Some(IDEMPOTENCY_KEY_REUSED.to_string()),
             ),
             Self::Control { kind, .. } => (None, Some(kind.error_type().to_string())),
+            Self::FunctionDeleted(_)
+            | Self::Admission {
+                reason: RejectReason::FunctionDeleted,
+                ..
+            } => (
+                None,
+                Some(crate::services::admission::FUNCTION_DELETED.to_string()),
+            ),
             _ => (None, None),
         };
         let reason = match self {

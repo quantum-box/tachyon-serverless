@@ -93,6 +93,10 @@ pub enum FakeGuestScript {
     RespondOkForever(serde_json::Value),
     /// Ready, then answer *every* `Invoke` with the invoke payload itself.
     EchoForever,
+    /// [`Self::EchoForever`], but first wait the payload's `sleep_ms` (if any)
+    /// before answering: a long handler on a reusable environment
+    /// (PLT-4635 drain tests). Nothing is read while it sleeps.
+    SlowEchoForever,
     /// Ready, answer the first `Invoke` with this payload and then stop
     /// reading the connection entirely, without closing it: a guest that is
     /// still connected but no longer being scheduled (a resume that did not
@@ -139,6 +143,7 @@ impl FakeGuestScript {
             Self::WrongEpochThenOk(_) => "wrong_epoch_then_ok",
             Self::RespondOkForever(_) => "respond_ok_forever",
             Self::EchoForever => "echo_forever",
+            Self::SlowEchoForever => "slow_echo_forever",
             Self::RespondOkThenExit(_) => "respond_ok_then_exit",
             Self::RespondOkThenStopAnswering(_) => "respond_ok_then_stop_answering",
             Self::StaleEpochThenOkForever(_) => "stale_epoch_then_ok_forever",
@@ -1002,6 +1007,7 @@ async fn run_guest(script: FakeGuestScript, ctx: GuestContext, stream: DuplexStr
         // `Shutdown` or the stream dies.
         FakeGuestScript::RespondOkForever(_)
         | FakeGuestScript::EchoForever
+        | FakeGuestScript::SlowEchoForever
         | FakeGuestScript::StaleEpochThenOkForever(_) => {
             if !guest.ready().await {
                 return;
@@ -1015,6 +1021,17 @@ async fn run_guest(script: FakeGuestScript, ctx: GuestContext, stream: DuplexStr
                         guest.respond(&inv, inv.epoch, v.clone()).await
                     }
                     FakeGuestScript::EchoForever => {
+                        let v = inv.payload.clone();
+                        guest.respond(&inv, inv.epoch, v).await
+                    }
+                    FakeGuestScript::SlowEchoForever => {
+                        if let Some(ms) = inv
+                            .payload
+                            .get("sleep_ms")
+                            .and_then(serde_json::Value::as_u64)
+                        {
+                            tokio::time::sleep(Duration::from_millis(ms)).await;
+                        }
                         let v = inv.payload.clone();
                         guest.respond(&inv, inv.epoch, v).await
                     }

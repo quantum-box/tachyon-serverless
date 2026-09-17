@@ -219,17 +219,22 @@ pub async fn serve(
         "gateway listening"
     );
     let service = router(app.clone()).into_make_service_with_connect_info::<SocketAddr>();
-    // Reap pooled environments past their idle TTL. Not spawned at all unless
-    // environment reuse is on, in which case nothing is ever pooled.
-    let sweeper = app.pool.policy().reuse_enabled().then(|| {
-        let app = app.clone();
-        let every = (app.config.pool.idle_ttl() / 2).max(Duration::from_secs(1));
+    // The scale reconciler (PLT-4635): routes and drains, drain timeouts, the
+    // idle sweep (scale to zero), `min_ready` pre-starts and deletion
+    // finalization. Always runs: drains and deletions matter without reuse
+    // too. Holds only a weak reference.
+    let sweeper = Some({
+        let weak = Arc::downgrade(&app);
+        let every = app.config.scaling.reconcile_interval();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(every);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 ticker.tick().await;
-                app.sweep_idle_environments().await;
+                let Some(app) = weak.upgrade() else {
+                    return;
+                };
+                app.reconcile_scaling().await;
             }
         })
     });

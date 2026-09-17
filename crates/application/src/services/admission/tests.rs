@@ -56,7 +56,10 @@ fn env_resources() -> Resources {
 fn ticket(tenant: &TenantId, revision: &RevisionId, max_env: u32, deadline: Timestamp) -> Ticket {
     Ticket {
         tenant: tenant.clone(),
+        function: tachyon_serverless_domain::FunctionId::generate(),
         revision: revision.clone(),
+        idle_ttl_seconds: 60,
+        scale_down_cooldown_seconds: 30,
         resources: env_resources(),
         max_environments: max_env,
         concurrency_per_environment: 1,
@@ -945,4 +948,527 @@ async fn a_grant_for_a_waiter_that_went_away_is_released() {
     drop(second);
     let info = ctrl.snapshot(&a);
     assert_eq!((info.queue.length, info.in_flight), (0, 0));
+}
+
+// ---------------------------------------------------------------------------
+// scale to zero, min_ready, cooldown and drains (PLT-4635)
+// ---------------------------------------------------------------------------
+
+/// A ticket with an explicit scale policy.
+fn scale_ticket(
+    tenant: &TenantId,
+    revision: &RevisionId,
+    min_ready: u32,
+    idle_ttl_seconds: u64,
+    cooldown_seconds: u64,
+) -> Ticket {
+    Ticket {
+        min_ready,
+        idle_ttl_seconds,
+        scale_down_cooldown_seconds: cooldown_seconds,
+        ..ticket(tenant, revision, 4, t(3_600_000))
+    }
+}
+
+/// Serve one invocation of `tk` on a cold environment at `now` and park the
+/// environment idle. Returns its reservation.
+fn serve_and_park(s: &mut AdmissionState, tk: Ticket, now: Timestamp) -> ReservationId {
+    let w = s.enqueue(tk, false, now).unwrap();
+    let mut d = Deliveries::default();
+    d.collect(s);
+    let (r, kind) = d.granted[&w];
+    assert_eq!(kind, GrantKind::Cold);
+    s.ready(r);
+    s.park(r, now);
+    s.parked(r, now);
+    r
+}
+
+fn idle_since(at: Timestamp) -> ScaleDown {
+    ScaleDown::Idle { idle_since: at }
+}
+
+/// Acceptance 2 / 4 (timer race): the sweeper decided an environment is past
+/// its TTL, then an invocation arrives before it acts. The invocation is
+/// promised the idle environment, so the scale-down is aborted; the
+/// environment is not terminated under it. In the other order the sweeper
+/// wins, the environment is no longer idle, and the arrival starts cold
+/// instead of being promised an environment that is going away.
+#[test]
+fn an_arrival_between_the_sweep_decision_and_the_terminate_aborts_the_scale_down() {
+    let mut s = AdmissionState::new(settings());
+    let (a, rev) = (tenant(1), RevisionId::generate());
+    let r = serve_and_park(&mut s, scale_ticket(&a, &rev, 0, 60, 30), t(0));
+    // Sweep scheduled at t = 200 s (past TTL and cooldown)...
+    let now = t(200_000);
+    // ...a request arrives first and is promised the idle environment.
+    let mut d = Deliveries::default();
+    let w = s
+        .enqueue(scale_ticket(&a, &rev, 0, 60, 30), false, now)
+        .unwrap();
+    d.collect(&mut s);
+    let (promise, kind) = d.granted[&w];
+    assert_eq!(kind, GrantKind::Warm);
+    assert_eq!(
+        s.try_scale_down(r, idle_since(t(0)), now),
+        Err(KeepReason::Promised),
+        "the sweep is aborted: the environment is promised"
+    );
+    assert_eq!(s.state_of(r), Some(ResState::Idle));
+    // The claimer takes it: busy environments are never scaled down.
+    let busy = s.adopt(Some(promise), r, now);
+    assert_eq!(
+        s.try_scale_down(busy, idle_since(t(0)), now),
+        Err(KeepReason::NotIdle)
+    );
+    s.check_invariants();
+
+    // The other order: the sweeper decides first and wins.
+    s.park(busy, now);
+    s.parked(busy, now);
+    let later = t(400_000);
+    assert_eq!(s.try_scale_down(busy, idle_since(now), later), Ok(()));
+    assert_eq!(s.state_of(busy), Some(ResState::Draining));
+    let mut d = Deliveries::default();
+    let w = s
+        .enqueue(scale_ticket(&a, &rev, 0, 60, 30), false, later)
+        .unwrap();
+    d.collect(&mut s);
+    assert_eq!(
+        d.granted[&w].1,
+        GrantKind::Cold,
+        "a draining environment is never promised"
+    );
+    s.check_invariants();
+}
+
+/// Acceptance 4 (no flapping): no scale-down within the cooldown after an
+/// activation, however long the environment has been idle; right after the
+/// cooldown it may go, and a new activation starts the cooldown again.
+#[test]
+fn no_scale_down_within_the_cooldown_after_an_activation() {
+    let mut s = AdmissionState::new(settings());
+    let (a, rev) = (tenant(1), RevisionId::generate());
+    let tk = || scale_ticket(&a, &rev, 0, 1, 30);
+    let r = serve_and_park(&mut s, tk(), t(0));
+    let snap = s.snapshot(&a, t(0));
+    let event = snap.revisions[0].last_scale_event.clone().unwrap();
+    assert_eq!(
+        (event.kind.as_str(), event.reason.as_str()),
+        ("activation", "backlog")
+    );
+    // Idle 10 s > TTL 1 s, but within the 30 s cooldown.
+    assert_eq!(
+        s.try_scale_down(r, idle_since(t(0)), t(10_000)),
+        Err(KeepReason::Cooldown)
+    );
+    assert_eq!(
+        s.try_scale_down(r, idle_since(t(29_000)), t(29_999)),
+        Err(KeepReason::IdleTtl)
+    );
+    assert_eq!(s.try_scale_down(r, idle_since(t(0)), t(30_000)), Ok(()));
+    let snap = s.snapshot(&a, t(30_000));
+    let event = snap.revisions[0].last_scale_event.clone().unwrap();
+    assert_eq!(event.kind, "scale_to_zero");
+    s.release(r, t(30_001));
+    // Zero environments; the last decision stays visible.
+    let snap = s.snapshot(&a, t(30_002));
+    assert_eq!(snap.revisions.len(), 1);
+    assert_eq!(snap.revisions[0].environments.idle, 0);
+    assert_eq!(
+        snap.revisions[0].last_scale_event.as_ref().unwrap().kind,
+        "scale_to_zero"
+    );
+
+    // Re-activation at 31 s restarts the cooldown: no immediate re-drain.
+    let r2 = serve_and_park(&mut s, tk(), t(31_000));
+    assert_eq!(
+        s.try_scale_down(r2, idle_since(t(31_000)), t(40_000)),
+        Err(KeepReason::Cooldown)
+    );
+    assert_eq!(
+        s.try_scale_down(r2, idle_since(t(31_000)), t(61_000)),
+        Ok(())
+    );
+    s.check_invariants();
+}
+
+/// Acceptance 2: an idle environment is not scaled down while invocations of
+/// its revision wait in the queue (here: held back by the tenant quota).
+#[test]
+fn waiting_invocations_keep_the_revisions_idle_environment() {
+    let mut cfg = settings();
+    cfg.tenant_defaults.max_concurrency = Some(1);
+    let mut s = AdmissionState::new(cfg);
+    let a = tenant(1);
+    let (x, y) = (RevisionId::generate(), RevisionId::generate());
+    let idle_y = serve_and_park(&mut s, scale_ticket(&a, &y, 0, 1, 0), t(0));
+    // X takes the tenant's only in-flight slot.
+    let mut d = Deliveries::default();
+    let wx = s
+        .enqueue(scale_ticket(&a, &x, 0, 1, 0), false, t(10))
+        .unwrap();
+    d.collect(&mut s);
+    let (busy_x, _) = d.granted[&wx];
+    s.ready(busy_x);
+    // A Y invocation waits on the quota.
+    let wy = s
+        .enqueue(scale_ticket(&a, &y, 0, 1, 0), false, t(20))
+        .unwrap();
+    d.collect(&mut s);
+    assert!(s.is_queued(wy));
+    assert_eq!(
+        s.try_scale_down(idle_y, idle_since(t(0)), t(120_000)),
+        Err(KeepReason::Queued)
+    );
+    // Once it is served (warm, on that environment), nothing is left to keep.
+    s.release(busy_x, t(120_001));
+    d.collect(&mut s);
+    assert_eq!(d.granted[&wy].1, GrantKind::Warm);
+    s.check_invariants();
+}
+
+/// `min_ready`: pre-starts converge to `min_ready` and never beyond, count
+/// against every cap, never go ahead of a waiter, and the environments they
+/// keep are not scaled down while the revision is routed.
+#[test]
+fn min_ready_pre_starts_converge_within_the_caps_and_are_kept_while_routed() {
+    let mut cfg = settings();
+    cfg.max_concurrency = 3;
+    let mut s = AdmissionState::new(cfg);
+    let (a, rev, other) = (tenant(1), RevisionId::generate(), RevisionId::generate());
+    let tk = || scale_ticket(&a, &rev, 2, 1, 0);
+    assert_eq!(
+        s.try_prestart(tk(), t(0)),
+        Err(PrestartSkip::NotRouted),
+        "an unrouted revision is not pre-started"
+    );
+    s.set_routed([rev.clone()].into_iter().collect());
+    let r1 = s.try_prestart(tk(), t(0)).unwrap();
+    let r2 = s.try_prestart(tk(), t(0)).unwrap();
+    assert_eq!(s.try_prestart(tk(), t(0)), Err(PrestartSkip::Satisfied));
+    assert_eq!(s.provisioned(&rev), 2);
+    for r in [r1, r2] {
+        assert_eq!(s.state_of(r), Some(ResState::Starting));
+        s.ready(r);
+        s.park(r, t(10));
+        s.parked(r, t(10));
+    }
+    s.check_invariants();
+    // Repeated reconciles change nothing.
+    for i in 0..50 {
+        assert_eq!(
+            s.try_prestart(tk(), t(20 + i)),
+            Err(PrestartSkip::Satisfied)
+        );
+    }
+    // Kept for min_ready, whatever the TTL.
+    assert_eq!(
+        s.try_scale_down(r1, idle_since(t(10)), t(900_000)),
+        Err(KeepReason::MinReady)
+    );
+    let snap = s.snapshot(&a, t(900_000));
+    let info = snap
+        .revisions
+        .iter()
+        .find(|r| r.revision_id == rev.to_string())
+        .unwrap();
+    assert_eq!((info.min_ready, info.environments.idle), (2, 2));
+    assert_eq!(info.route_state, "routed");
+
+    // Waiters first: with the node full of busy environments and one
+    // invocation waiting, no pre-start takes capacity.
+    s.set_routed([rev.clone(), other.clone()].into_iter().collect());
+    let mut d = Deliveries::default();
+    let busy: Vec<ReservationId> = (0..3)
+        .map(|i| {
+            let w = s
+                .enqueue(ticket(&a, &other, 8, t(3_600_000)), false, t(1_000 + i))
+                .unwrap();
+            d.collect(&mut s);
+            d.granted[&w].0
+        })
+        .collect();
+    let queued = s
+        .enqueue(ticket(&a, &other, 8, t(3_600_000)), false, t(1_010))
+        .unwrap();
+    d.collect(&mut s);
+    assert!(s.is_queued(queued));
+    // One pooled environment is needed again: scale r2's revision below
+    // min_ready by draining it (the revision stops being routed).
+    s.set_routed([other.clone()].into_iter().collect());
+    assert_eq!(s.try_scale_down(r2, idle_since(t(10)), t(900_000)), Ok(()));
+    s.release(r2, t(900_001));
+    s.set_routed([rev.clone(), other.clone()].into_iter().collect());
+    assert_eq!(
+        s.try_prestart(tk(), t(900_002)),
+        Err(PrestartSkip::WaitersFirst)
+    );
+    s.withdraw(queued);
+    assert_eq!(
+        s.try_prestart(tk(), t(900_003)),
+        Err(PrestartSkip::Blocked("capacity")),
+        "node max_concurrency is full of busy environments"
+    );
+    s.release(busy[0], t(900_004));
+    let r3 = s.try_prestart(tk(), t(900_005)).unwrap();
+    assert_eq!(
+        s.try_prestart(tk(), t(900_005)),
+        Err(PrestartSkip::Satisfied)
+    );
+    s.check_invariants();
+    for r in [r1, r3, busy[1], busy[2]] {
+        s.release(r, t(900_010));
+    }
+    s.check_invariants();
+}
+
+/// Acceptance 4 (deletion): a deletion refuses the waiters of its revisions
+/// at once and every later arrival, drains idle environments without waiting
+/// for the TTL or the cooldown, and is never undone.
+#[test]
+fn a_function_deletion_refuses_waiters_and_arrivals_and_drains_at_once() {
+    let mut cfg = settings();
+    cfg.tenant_defaults.max_concurrency = Some(1);
+    let mut s = AdmissionState::new(cfg);
+    let a = tenant(1);
+    let (rev, other) = (RevisionId::generate(), RevisionId::generate());
+    let idle = serve_and_park(&mut s, scale_ticket(&a, &rev, 1, 600, 600), t(0));
+    let mut d = Deliveries::default();
+    let w_other = s
+        .enqueue(ticket(&a, &other, 4, t(3_600_000)), false, t(5))
+        .unwrap();
+    d.collect(&mut s);
+    let (busy_other, _) = d.granted[&w_other];
+    s.ready(busy_other);
+    let waiting = s
+        .enqueue(scale_ticket(&a, &rev, 1, 600, 600), false, t(6))
+        .unwrap();
+    d.collect(&mut s);
+    assert!(s.is_queued(waiting));
+    s.set_routed([rev.clone()].into_iter().collect());
+
+    assert!(s.begin_drain(&rev, DrainReason::FunctionDeleted, t(10)));
+    d.collect(&mut s);
+    assert_eq!(
+        d.rejected.get(&waiting),
+        Some(&RejectReason::FunctionDeleted)
+    );
+    let refused = s.enqueue(scale_ticket(&a, &rev, 1, 600, 600), false, t(11));
+    assert_eq!(refused.unwrap_err().reason, RejectReason::FunctionDeleted);
+    assert!(matches!(
+        s.try_prestart(scale_ticket(&a, &rev, 1, 600, 600), t(12)),
+        Err(PrestartSkip::Refused(r)) if r.reason == RejectReason::FunctionDeleted
+    ));
+    // No TTL, no cooldown, no min_ready for a drained revision.
+    assert_eq!(s.try_scale_down(idle, idle_since(t(12)), t(13)), Ok(()));
+    let snap = s.snapshot(&a, t(14));
+    let info = snap
+        .revisions
+        .iter()
+        .find(|r| r.revision_id == rev.to_string())
+        .unwrap();
+    assert_eq!(info.route_state, "deleting");
+    let event = info.last_scale_event.as_ref().unwrap();
+    assert_eq!(
+        (event.kind.as_str(), event.reason.as_str()),
+        ("drain", "function_deleted")
+    );
+    assert!(!s.end_drain(&rev), "a deletion is never undone");
+    assert!(
+        !s.begin_drain(&rev, DrainReason::AliasSwitch, t(15)),
+        "and not downgraded"
+    );
+    assert_eq!(s.drain_reason(&rev), Some(DrainReason::FunctionDeleted));
+    s.release(idle, t(16));
+    s.release(busy_other, t(16));
+    assert!(s.revision_is_empty(&rev));
+    s.check_invariants();
+}
+
+/// Alias switch: the superseded revision's idle environments are drained
+/// without TTL, cooldown or min_ready, but never out from under a promise;
+/// a rollback ends the drain.
+#[test]
+fn an_alias_switch_drain_skips_the_ttl_but_never_takes_a_promised_environment() {
+    let mut s = AdmissionState::new(settings());
+    let (a, old) = (tenant(1), RevisionId::generate());
+    s.set_routed([old.clone()].into_iter().collect());
+    let tk = || scale_ticket(&a, &old, 1, 600, 600);
+    let e1 = serve_and_park(&mut s, tk(), t(0));
+    // An invocation of the old revision accepted before the switch is
+    // promised e1.
+    let mut d = Deliveries::default();
+    let w = s.enqueue(tk(), false, t(1)).unwrap();
+    d.collect(&mut s);
+    let (promise, kind) = d.granted[&w];
+    assert_eq!(kind, GrantKind::Warm);
+
+    s.set_routed(std::collections::HashSet::new());
+    assert!(s.begin_drain(&old, DrainReason::AliasSwitch, t(2)));
+    assert_eq!(
+        s.try_scale_down(
+            e1,
+            ScaleDown::Drain {
+                reason: "alias_switch"
+            },
+            t(3)
+        ),
+        Err(KeepReason::Promised)
+    );
+    let busy = s.adopt(Some(promise), e1, t(4));
+    s.park(busy, t(5));
+    s.parked(busy, t(5));
+    assert_eq!(s.try_scale_down(busy, idle_since(t(5)), t(6)), Ok(()));
+    let snap = s.snapshot(&a, t(6));
+    assert_eq!(snap.revisions[0].route_state, "superseded");
+    s.release(busy, t(7));
+    assert!(s.end_drain(&old), "a rollback ends an alias-switch drain");
+    assert_eq!(s.drain_reason(&old), None);
+    s.check_invariants();
+}
+
+/// The ledger stays exact when scale-downs, pre-starts, drains, promises and
+/// releases interleave at random (the PLT-4634 property, with the PLT-4635
+/// operations added).
+#[test]
+fn scale_operations_keep_the_ledger_exact_under_random_interleavings() {
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n.max(1)
+        }
+    }
+    for seed in 1..=8u64 {
+        let mut rng = Rng(0xA076_1D64_78BD_642F ^ seed.wrapping_mul(0xE703_7ED1_A0B4_28DB));
+        let mut cfg = settings();
+        cfg.max_concurrency = 5;
+        cfg.node.memory_mib = Some(1_700);
+        cfg.start_rate_per_second = 10;
+        cfg.start_burst = 5;
+        let mut s = AdmissionState::new(cfg);
+        let a = tenant(1);
+        let revs: Vec<RevisionId> = (0..3).map(|_| RevisionId::generate()).collect();
+        let mut held: Vec<ReservationId> = Vec::new();
+        let mut waiters: Vec<WaiterId> = Vec::new();
+        let mut now = 0i64;
+        for _ in 0..2_000 {
+            now += rng.below(3_000) as i64;
+            let rev = revs[rng.below(3) as usize].clone();
+            let tk = scale_ticket(&a, &rev, rng.below(3) as u32, 5, 10);
+            match rng.below(10) {
+                0 | 1 => {
+                    if let Ok(w) = s.enqueue(tk, rng.below(4) == 0, t(now)) {
+                        waiters.push(w);
+                    }
+                }
+                2 => {
+                    if let Ok(r) = s.try_prestart(tk, t(now)) {
+                        held.push(r);
+                    }
+                }
+                3 => {
+                    let routed = revs.iter().filter(|_| rng.below(2) == 0).cloned().collect();
+                    s.set_routed(routed);
+                }
+                4 => {
+                    let reason = if rng.below(4) == 0 {
+                        DrainReason::FunctionDeleted
+                    } else {
+                        DrainReason::AliasSwitch
+                    };
+                    if rng.below(2) == 0 {
+                        s.begin_drain(&rev, reason, t(now));
+                    } else {
+                        s.end_drain(&rev);
+                    }
+                }
+                5 => {
+                    if let Some(w) = waiters.pop() {
+                        s.withdraw(w);
+                    }
+                }
+                _ => {
+                    if held.is_empty() {
+                        continue;
+                    }
+                    let i = rng.below(held.len() as u64) as usize;
+                    let r = held[i];
+                    match s.state_of(r) {
+                        Some(ResState::Starting) => {
+                            s.start_result(r, rng.below(5) != 0, t(now));
+                            s.ready(r);
+                        }
+                        Some(ResState::Busy) => {
+                            if rng.below(2) == 0 {
+                                s.park(r, t(now));
+                            } else {
+                                s.release(held.swap_remove(i), t(now));
+                            }
+                        }
+                        Some(ResState::Parking) => s.parked(r, t(now)),
+                        Some(ResState::Idle) => {
+                            let how = if rng.below(3) == 0 {
+                                ScaleDown::Drain { reason: "test" }
+                            } else {
+                                ScaleDown::Idle {
+                                    idle_since: t(now - rng.below(20_000) as i64),
+                                }
+                            };
+                            let _ = s.try_scale_down(r, how, t(now));
+                        }
+                        Some(ResState::Draining) => s.release(held.swap_remove(i), t(now)),
+                        Some(ResState::Promised) => {
+                            let revision = s.revision_of(r);
+                            let idle = held.iter().copied().find(|x| {
+                                s.state_of(*x) == Some(ResState::Idle)
+                                    && s.revision_of(*x) == revision
+                            });
+                            held.swap_remove(i);
+                            match idle {
+                                Some(idle) => {
+                                    s.adopt(Some(r), idle, t(now));
+                                }
+                                None => {
+                                    if s.redeem(r, t(now)) {
+                                        held.push(r);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            held.swap_remove(i);
+                        }
+                    }
+                }
+            }
+            for (w, o) in s.take_outbox() {
+                waiters.retain(|x| *x != w);
+                if let Outcome::Granted { reservation, .. } = o {
+                    held.push(reservation);
+                }
+            }
+            s.check_invariants();
+        }
+        for w in waiters {
+            s.withdraw(w);
+        }
+        s.take_outbox();
+        for r in held {
+            s.release(r, t(now + 1));
+        }
+        for (_, o) in s.take_outbox() {
+            if let Outcome::Granted { reservation, .. } = o {
+                s.release(reservation, t(now + 2));
+            }
+        }
+        s.check_invariants();
+        assert_eq!(s.reserved(), Resources::ZERO, "seed {seed}");
+    }
 }

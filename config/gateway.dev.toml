@@ -116,6 +116,16 @@ output_retention_seconds = 604800  # インライン出力の保持期限（7 �
 # allow_unverified_idle = false # 計測専用。Unverified の idle capability を受け入れる。
 #                               # profile = "production" では拒否される（docs/kvm.md §3.7）
 
+# スケール to zero・min_ready・drain（PLT-4635、docs/adr/0009）。省略時の値:
+# [scaling]
+# reconcile_interval_ms = 1000       # scale reconciler（idle sweep・min_ready・drain）の周期
+# scale_down_cooldown_seconds = 30   # scale-up / 活性化の後この間は scale-down しない（revision の既定）
+# drain_timeout_seconds = 961        # 省略時 = limits.max_execution_timeout_seconds + cancel grace + 60 s。
+#                                    # どの revision の timeout より長いので、alias 切替・削除の drain が
+#                                    # 自分の timeout の内側にいる invocation を止めることはない
+# allow_short_drain = false          # drain_timeout_seconds を「最大 timeout + grace」以下にするときだけ true
+# prestart_backoff_seconds = 5       # min_ready の先行起動が失敗した後の待ち
+
 # 非同期イベントの durable queue と大きな入出力の object store（PLT-4638、docs/adr/0008）。
 # 既定はどちらも "none" で、何も接続・作成しない（同期 invoke だけの gateway のまま）。
 # invoke pipeline はまだ使わない（invokeAsync は PLT-4639）。単一 node・複製なしで HA ではない。

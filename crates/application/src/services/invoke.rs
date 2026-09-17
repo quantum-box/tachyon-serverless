@@ -56,7 +56,8 @@ use crate::repository::{
 };
 use crate::services::Dispatcher;
 use crate::services::admission::{
-    AdmissionController, Grant, GrantKind, Pending, RejectReason, WaitError, error_type_for,
+    AdmissionController, FUNCTION_DELETED, Grant, GrantKind, Pending, RejectReason, WaitError,
+    error_type_for,
 };
 use crate::services::history::{HistoryService, InvocationDetail};
 use crate::services::pool::{
@@ -153,6 +154,35 @@ pub fn inline_output(invocation: &Invocation) -> Option<serde_json::Value> {
 enum CancelKind {
     Client,
     Shutdown,
+    /// The invocation's revision was drained (alias switch or function
+    /// deletion) and it was still running when the drain timeout passed
+    /// (PLT-4635). Ends like an execution timeout: `Host.DrainTimeout`.
+    Drain,
+}
+
+/// `error_type` of an invocation stopped because its revision's drain timed
+/// out (PLT-4635).
+pub const DRAIN_TIMEOUT: &str = "Host.DrainTimeout";
+
+/// The ledger error of an invocation that `kind` stopped while `what`.
+fn cancel_error(kind: CancelKind, what: &str) -> InvocationError {
+    match kind {
+        CancelKind::Client => InvocationError::new(
+            ErrorClass::Cancelled,
+            "Host.Cancelled",
+            format!("cancelled by request {what}"),
+        ),
+        CancelKind::Shutdown => InvocationError::new(
+            ErrorClass::Cancelled,
+            "Host.Cancelled",
+            format!("cancelled by gateway shutdown {what}"),
+        ),
+        CancelKind::Drain => InvocationError::new(
+            ErrorClass::Timeout,
+            DRAIN_TIMEOUT,
+            format!("stopped {what}: its revision was drained and the drain timeout passed"),
+        ),
+    }
 }
 
 struct DriverResult {
@@ -162,6 +192,10 @@ struct DriverResult {
 struct InFlight {
     cancel: watch::Sender<Option<CancelKind>>,
     done: watch::Receiver<Option<Arc<DriverResult>>>,
+    revision: RevisionId,
+    accepted_at: Timestamp,
+    /// A `min_ready` pre-start, not an invocation (PLT-4635).
+    prestart: bool,
 }
 
 pub struct InvokeService {
@@ -236,8 +270,125 @@ impl InvokeService {
         })
     }
 
+    /// Invocations this process is driving (pre-starts are not counted).
     pub fn in_flight_count(&self) -> usize {
-        self.in_flight.lock().len()
+        self.in_flight
+            .lock()
+            .values()
+            .filter(|e| !e.prestart)
+            .count()
+    }
+
+    /// Stop what still runs on a drained revision (PLT-4635): every
+    /// invocation of `revision` accepted before `accepted_before` is stopped
+    /// like an execution timeout (`Host.DrainTimeout`), and every pre-start
+    /// of it is abandoned. Returns how many invocations were told to stop.
+    pub fn stop_for_drain(&self, revision: &RevisionId, accepted_before: Timestamp) -> usize {
+        let map = self.in_flight.lock();
+        let mut stopped = 0;
+        for e in map.values().filter(|e| &e.revision == revision) {
+            if e.prestart {
+                let _ = e.cancel.send_replace(Some(CancelKind::Drain));
+            } else if e.accepted_at < accepted_before && e.cancel.borrow().is_none() {
+                let _ = e.cancel.send_replace(Some(CancelKind::Drain));
+                stopped += 1;
+            }
+        }
+        stopped
+    }
+
+    /// Abandon the pre-starts of `revision` (it stopped being routed).
+    pub fn cancel_prestarts(&self, revision: &RevisionId) -> usize {
+        let map = self.in_flight.lock();
+        let mut n = 0;
+        for e in map
+            .values()
+            .filter(|e| e.prestart && &e.revision == revision)
+        {
+            let _ = e.cancel.send_replace(Some(CancelKind::Drain));
+            n += 1;
+        }
+        n
+    }
+
+    /// Invocations of `revision` this process is still driving.
+    pub fn in_flight_of(&self, revision: &RevisionId) -> usize {
+        self.in_flight
+            .lock()
+            .values()
+            .filter(|e| !e.prestart && &e.revision == revision)
+            .count()
+    }
+
+    /// Boot one environment of `revision` for `min_ready` and hand it to the
+    /// pool (PLT-4635). `grant` is the pre-start reservation admission made
+    /// ([`AdmissionController::try_prestart`]). Nothing is recorded as an
+    /// invocation; the environment's ledger row, its logs and its usage
+    /// events are real (a pre-started environment costs what it costs).
+    /// `Err` says why it did not end up pooled; whatever was booted has been
+    /// terminated then.
+    pub async fn prestart(
+        self: &Arc<Self>,
+        function: Function,
+        revision: FunctionRevision,
+        grant: Grant,
+    ) -> Result<(), String> {
+        if self.draining.load(Ordering::SeqCst) || self.dispatcher.is_fenced() {
+            return Err("the gateway is shutting down or lost its dispatcher lease".into());
+        }
+        let id = InvocationId::from_ulid(self.ids.next_ulid());
+        let (cancel_tx, cancel_rx) = watch::channel(None);
+        let (done_tx, done_rx) = watch::channel(None);
+        let now = self.clock.now();
+        self.in_flight.lock().insert(
+            id.clone(),
+            InFlight {
+                cancel: cancel_tx,
+                done: done_rx,
+                revision: revision.id.clone(),
+                accepted_at: now,
+                prestart: true,
+            },
+        );
+        let exec = &revision.spec.execution;
+        let budget = Duration::from_secs(u64::from(exec.initialization_timeout_seconds))
+            + self.invoke_cfg.handshake_timeout();
+        let mut driver = Driver {
+            svc: Arc::clone(self),
+            invocation_id: id.clone(),
+            function,
+            revision,
+            event_kind: EventKind::Json,
+            payload: RetainedPayload::new(serde_json::Value::Null),
+            input_size: 0,
+            trace_id: id.to_string(),
+            client_deadline: now
+                + chrono::Duration::from_std(budget).unwrap_or(chrono::Duration::seconds(60)),
+            cancel_rx,
+            accepted_at: Instant::now(),
+            pre: None,
+            grant: Some(grant),
+            env_id: None,
+            attempt_id: None,
+            lease_id: None,
+            seq: 0,
+            epoch: 1,
+            warmup: true,
+        };
+        let result = match AssertUnwindSafe(driver.prewarm()).catch_unwind().await {
+            Ok(r) => r,
+            Err(_) => {
+                tracing::error!("pre-start driver panicked");
+                let _ = AssertUnwindSafe(driver.cleanup_after_panic())
+                    .catch_unwind()
+                    .await;
+                Err("the pre-start panicked".into())
+            }
+        };
+        driver.grant = None;
+        self.in_flight.lock().remove(&id);
+        done_tx.send_replace(Some(Arc::new(DriverResult { output: None })));
+        result
     }
 
     /// Synchronous invoke. Returns once the invocation reached a terminal
@@ -262,6 +413,7 @@ impl InvokeService {
             function,
             revision,
             alias,
+            alias_generation,
         } = self
             .gate
             .resolve(
@@ -339,6 +491,9 @@ impl InvokeService {
             now,
         )?;
         invocation.dispatcher_id = Some(self.dispatcher.id().clone());
+        // The route was resolved once, now: an alias switch after this point
+        // never re-points this invocation (PLT-4635).
+        invocation.alias_generation = alias_generation;
 
         // 3. Idempotency: a key bound to an existing invocation replays it,
         // even when capacity is exhausted.
@@ -386,6 +541,9 @@ impl InvokeService {
             InFlight {
                 cancel: cancel_tx,
                 done: done_rx.clone(),
+                revision: revision.id.clone(),
+                accepted_at: now,
+                prestart: false,
             },
         );
         // The key is bound in the same store mutation as the ledger insert.
@@ -422,6 +580,7 @@ impl InvokeService {
             lease_id: None,
             seq: 0,
             epoch: 1,
+            warmup: false,
         };
         tokio::spawn(driver.run(done_tx));
 
@@ -799,6 +958,10 @@ struct Driver {
     /// of every usage event id, so the events of an attempt on a reused
     /// environment never collide with those of the attempt before it.
     epoch: u64,
+    /// A `min_ready` pre-start (PLT-4635): there is no invocation behind
+    /// `invocation_id`, which is never stored and never put on a log line or
+    /// a usage event.
+    warmup: bool,
 }
 
 async fn wait_cancel(rx: &mut watch::Receiver<Option<CancelKind>>) -> CancelKind {
@@ -1021,7 +1184,7 @@ impl Driver {
             event_id: format!("{env}:{}:{sequence}", self.epoch),
             tenant_id: self.function.tenant_id.clone(),
             environment_id: env.clone(),
-            invocation_id: Some(self.invocation_id.clone()),
+            invocation_id: (!self.warmup).then(|| self.invocation_id.clone()),
             attempt_id: attempt.cloned(),
             event_type,
             sequence,
@@ -1048,7 +1211,12 @@ impl Driver {
                     reason.as_str()
                 ),
             ),
-            WaitError::Rejected(r) if r.reason == RejectReason::CircuitOpen => {
+            WaitError::Rejected(r)
+                if matches!(
+                    r.reason,
+                    RejectReason::CircuitOpen | RejectReason::FunctionDeleted
+                ) =>
+            {
                 InvocationError::new(
                     ErrorClass::PlatformError,
                     error_type_for(r.reason),
@@ -1060,16 +1228,7 @@ impl Driver {
                 error_type_for(r.reason),
                 r.message,
             ),
-            WaitError::Cancelled(kind) => InvocationError::new(
-                ErrorClass::Cancelled,
-                "Host.Cancelled",
-                match kind {
-                    CancelKind::Client => format!("cancelled by request while {while_what}"),
-                    CancelKind::Shutdown => {
-                        format!("cancelled by gateway shutdown while {while_what}")
-                    }
-                },
-            ),
+            WaitError::Cancelled(kind) => cancel_error(kind, &format!("while {while_what}")),
             WaitError::Closed => InvocationError::new(
                 ErrorClass::PlatformError,
                 "Host.CapacityClosed",
@@ -1222,6 +1381,12 @@ impl Driver {
         // resolved first; a binding this tenant cannot use fails the invocation
         // here, without a ledger row and without booting anything.
         let tenant = self.function.tenant_id.clone();
+        // A function deleted while this invocation queued is refused before
+        // anything boots (PLT-4635).
+        if svc.gate.cache().function_deleted(&self.function.id).await {
+            self.fail_function_deleted();
+            return Attempted::Done(None);
+        }
         let prospective_env_id = EnvironmentId::from_ulid(svc.ids.next_ulid());
         let init_timeout = Duration::from_secs(u64::from(
             self.revision.spec.execution.initialization_timeout_seconds,
@@ -1244,19 +1409,16 @@ impl Driver {
                 return Attempted::Done(None);
             }
         };
-        let reuse_key = reuse_key_for(
-            &tenant,
-            &self.revision,
-            secret_binding_generation(self.revision.spec.secrets.iter().zip(&secret_env).map(
-                |(binding, (_, value))| {
-                    (
-                        binding.env_name.as_str(),
-                        binding.binding_ref.as_str(),
-                        value.as_str(),
-                    )
-                },
-            )),
-        );
+        let reuse_key = self.reuse_key(&secret_env);
+        // The newest key of the revision: pooled environments under an older
+        // one (a rotated secret) are drained instead of waiting for their TTL
+        // (PLT-4635).
+        if svc.pool.note_current_key(&reuse_key) {
+            tracing::info!(
+                revision_id = %self.revision.id,
+                "the revision's reuse key changed; its older pooled environments are drained"
+            );
+        }
         // A pooled environment is taken only when its reuse key matches in
         // every field. Everything else boots cold — which, with both shipped
         // providers, is every invocation: the pool never hands anything out
@@ -1315,6 +1477,39 @@ impl Driver {
         if self.client_deadline_elapsed() {
             self.stop_for_client_deadline(Some(&mut session), &mut env, &logs)
                 .await;
+            return Attempted::Done(None);
+        }
+        // Nor for a function whose deletion landed while the environment was
+        // being prepared (PLT-4635). Nothing was dispatched, so this is a
+        // refusal, not an outcome.
+        if svc.gate.cache().function_deleted(&self.function.id).await {
+            logs.platform(
+                LogPhase::Init,
+                None,
+                "the function was deleted before the handler was dispatched; not starting it",
+            );
+            let _ = session.shutdown("function deleted").await;
+            let _ = svc
+                .provider
+                .terminate_environment(&env_id, TerminateReason::Cancelled)
+                .await;
+            self.grant = None;
+            let now = self.now();
+            let _ = env.mark_stopped(now);
+            self.save_env(&env);
+            self.seq += 1;
+            self.emit_usage(
+                &env_id,
+                None,
+                UsageEventType::EnvironmentStopped,
+                self.seq,
+                Some(environment_lifetime_ms(&env, now)),
+                0,
+                0,
+            )
+            .await;
+            self.env_id = None;
+            self.fail_function_deleted();
             return Attempted::Done(None);
         }
 
@@ -1662,17 +1857,18 @@ impl Driver {
                     .drain_until_closed(Instant::now() + grace + Duration::from_millis(200))
                     .await;
                 (
-                    Err(InvocationError::new(
-                        ErrorClass::Cancelled,
-                        "Host.Cancelled",
-                        match kind {
-                            CancelKind::Client => "cancelled by request",
-                            CancelKind::Shutdown => "cancelled by gateway shutdown",
-                        },
-                    )),
+                    Err(match kind {
+                        CancelKind::Drain => InvocationError::new(
+                            ErrorClass::Timeout,
+                            DRAIN_TIMEOUT,
+                            "the revision was drained and the handler was still running when \
+                             the drain timeout passed",
+                        ),
+                        _ => cancel_error(kind, "while the handler was running"),
+                    }),
                     EnvEnd {
                         reason: cancel_reason(kind),
-                        failure: None,
+                        failure: (kind == CancelKind::Drain).then_some("drain timeout"),
                     },
                 )
             }
@@ -1823,9 +2019,13 @@ impl Driver {
             // from here: it publishes the row only once the guest really is
             // quiesced, and if it cannot be, the pool terminates and meters it
             // instead. Either way this driver is done with it.
-            svc.pool
-                .clone()
-                .release_with(&env, session, self.seq, &mut self.grant)
+            svc.pool.clone().release_for(
+                &env,
+                session,
+                self.seq,
+                &mut self.grant,
+                self.revision.spec.execution.min_ready,
+            )
         } else {
             Err(Box::new(session))
         };
@@ -1909,6 +2109,113 @@ impl Driver {
         self.attempt_id = None;
         self.lease_id = None;
         Attempted::Done(output_value)
+    }
+
+    /// The reuse key of this revision under the resolved secret values.
+    fn reuse_key(&self, secret_env: &[(String, String)]) -> ReuseKey {
+        reuse_key_for(
+            &self.function.tenant_id,
+            &self.revision,
+            secret_binding_generation(self.revision.spec.secrets.iter().zip(secret_env).map(
+                |(binding, (_, value))| {
+                    (
+                        binding.env_name.as_str(),
+                        binding.binding_ref.as_str(),
+                        value.as_str(),
+                    )
+                },
+            )),
+        )
+    }
+
+    /// The function was deleted before this invocation was dispatched.
+    fn fail_function_deleted(&self) {
+        self.fail_invocation(InvocationError::new(
+            ErrorClass::PlatformError,
+            FUNCTION_DELETED,
+            format!(
+                "function {} was deleted before the invocation started; it was not run",
+                self.function.id
+            ),
+        ));
+    }
+
+    /// Boot one environment for `min_ready` and hand it to the pool
+    /// ([`InvokeService::prestart`]).
+    async fn prewarm(&mut self) -> Result<(), String> {
+        let svc = self.svc.clone();
+        let env_id = EnvironmentId::from_ulid(svc.ids.next_ulid());
+        let init_timeout = Duration::from_secs(u64::from(
+            self.revision.spec.execution.initialization_timeout_seconds,
+        ));
+        let secret_env = self
+            .resolve_secret_env(&env_id)
+            .await
+            .map_err(|f| format!("secret binding unavailable ({})", f.reason()))?;
+        let reuse_key = self.reuse_key(&secret_env);
+        svc.pool.note_current_key(&reuse_key);
+        svc.gate
+            .permit_cold_start(&self.revision, &self.function.tenant_id)
+            .map_err(|(kind, _)| kind.error_type().to_string())?;
+        let Some(prepared) = self
+            .prepare_cold(env_id, reuse_key, secret_env, init_timeout)
+            .await
+        else {
+            self.grant = None;
+            self.env_id = None;
+            return Err("the environment did not become ready".into());
+        };
+        let Prepared {
+            mut env, session, ..
+        } = prepared;
+        let env_id = env.id.clone();
+        // A finished attempt hands the pool a `Busy` row at its epoch; a
+        // pre-started one hands it the `Ready` row at epoch 0, which the
+        // ledger publishes as idle only while it never served an attempt
+        // (its first attempt will be epoch 1).
+        let pooled = svc.pool.clone().release_for(
+            &env,
+            session,
+            self.seq,
+            &mut self.grant,
+            self.revision.spec.execution.min_ready,
+        );
+        match pooled {
+            Ok(()) => {
+                tracing::info!(
+                    environment_id = %env_id,
+                    revision_id = %self.revision.id,
+                    "pre-started environment handed to the pool (min_ready)"
+                );
+                self.env_id = None;
+                Ok(())
+            }
+            Err(session) => {
+                let mut session = *session;
+                let _ = session.shutdown("not pooled").await;
+                let _ = svc
+                    .provider
+                    .terminate_environment(&env_id, TerminateReason::Completed)
+                    .await;
+                self.grant = None;
+                let now = self.now();
+                let _ = env.mark_stopped(now);
+                self.save_env(&env);
+                self.seq += 1;
+                self.emit_usage(
+                    &env_id,
+                    None,
+                    UsageEventType::EnvironmentStopped,
+                    self.seq,
+                    Some(environment_lifetime_ms(&env, now)),
+                    0,
+                    0,
+                )
+                .await;
+                self.env_id = None;
+                Err("the pool did not take the pre-started environment".into())
+            }
+        }
     }
 
     /// Resolve the revision's secret bindings for `env_id`, in binding order.
@@ -2160,7 +2467,7 @@ impl Driver {
             LogContext {
                 tenant_id: tenant.clone(),
                 environment_id: env_id.clone(),
-                invocation_id: Some(self.invocation_id.clone()),
+                invocation_id: (!self.warmup).then(|| self.invocation_id.clone()),
                 max_line_bytes: svc.limits.max_log_line_bytes,
             },
         );
@@ -2231,7 +2538,7 @@ impl Driver {
                 let _ = env.mark_stopped(self.now());
                 self.save_env(&env);
                 let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
-                self.fail_invocation(InvocationError::new(ErrorClass::Cancelled, "Host.Cancelled", "cancelled during environment creation"));
+                self.fail_invocation(cancel_error(k, "during environment creation"));
                 return None;
             }
         };
@@ -2345,7 +2652,7 @@ impl Driver {
                 let _ = env.mark_stopped(self.now());
                 self.save_env(&env);
                 let _ = svc.provider.terminate_environment(&env_id, cancel_reason(k)).await;
-                self.fail_invocation(InvocationError::new(ErrorClass::Cancelled, "Host.Cancelled", "cancelled during initialization"));
+                self.fail_invocation(cancel_error(k, "during initialization"));
                 return None;
             }
         };
@@ -2455,6 +2762,7 @@ fn cancel_reason(kind: CancelKind) -> TerminateReason {
     match kind {
         CancelKind::Client => TerminateReason::Cancelled,
         CancelKind::Shutdown => TerminateReason::Shutdown,
+        CancelKind::Drain => TerminateReason::Timeout,
     }
 }
 

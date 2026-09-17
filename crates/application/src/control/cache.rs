@@ -152,6 +152,20 @@ pub struct Resolved {
     pub function: Function,
     pub revision: FunctionRevision,
     pub alias: Option<AliasName>,
+    /// Generation of the route that chose the revision (PLT-4635). `None`
+    /// for a pinned revision.
+    pub alias_generation: Option<u64>,
+}
+
+/// What the scale reconciler reads from a *valid* configuration
+/// (PLT-4635).
+#[derive(Debug, Clone, Default)]
+pub struct ScaleView {
+    /// Revisions an alias of a live function points at.
+    pub routed: std::collections::HashMap<RevisionId, (Function, FunctionRevision)>,
+    /// Deleted functions (deleting or drained) and the revisions delivered
+    /// for them.
+    pub deleted: Vec<(Function, Vec<RevisionId>)>,
 }
 
 #[derive(Default)]
@@ -565,8 +579,8 @@ impl ConfigCache {
                 function.id
             )));
         }
-        let (target, alias) = match revision_id {
-            Some(pinned) => (pinned.clone(), None),
+        let (target, alias, alias_generation) = match revision_id {
+            Some(pinned) => (pinned.clone(), None, None),
             None => {
                 let name = alias.cloned().unwrap_or_else(AliasName::default_alias);
                 let key = ConfigKey::Route {
@@ -580,7 +594,9 @@ impl ConfigCache {
                     Lookup::Expired => {
                         return Err(Self::expired(format!("alias `{name}` of {}", function.id)));
                     }
-                    Lookup::Valid(ConfigValue::Route(a)) => (a.revision_id.clone(), Some(name)),
+                    Lookup::Valid(ConfigValue::Route(a)) => {
+                        (a.revision_id.clone(), Some(name), Some(a.generation))
+                    }
                     Lookup::Valid(_) => {
                         return Err(AppError::not_found(format!("alias `{name}` not found")));
                     }
@@ -628,7 +644,76 @@ impl ConfigCache {
             function,
             revision,
             alias,
+            alias_generation,
         })
+    }
+
+    /// The routes, revisions and deleted functions the scale reconciler
+    /// works from (PLT-4635). `None` unless the cache as a whole is valid:
+    /// an outage or an expired cache must never read as "every route went
+    /// away", which would drain everything and flap back on reconnect.
+    pub fn scale_view(&self) -> Option<ScaleView> {
+        if !self.state().is_valid() {
+            return None;
+        }
+        let now = self.clock.now();
+        let s = self.inner.read();
+        let valid = |e: &CachedEntry| now < e.valid_until;
+        let mut functions: std::collections::HashMap<FunctionId, Function> =
+            std::collections::HashMap::new();
+        let mut revisions: std::collections::HashMap<RevisionId, FunctionRevision> =
+            std::collections::HashMap::new();
+        for entry in s.entries.values().filter(|e| valid(e)) {
+            match &entry.value {
+                Some(ConfigValue::Function(f)) => {
+                    functions.insert(f.id.clone(), f.clone());
+                }
+                Some(ConfigValue::Revision(r)) => {
+                    revisions.insert(r.id.clone(), (**r).clone());
+                }
+                _ => {}
+            }
+        }
+        let mut view = ScaleView::default();
+        for entry in s.entries.values().filter(|e| valid(e)) {
+            if let Some(ConfigValue::Route(a)) = &entry.value
+                && let Some(f) = functions.get(&a.function_id)
+                && !f.is_deleted()
+                && let Some(r) = revisions.get(&a.revision_id)
+                && r.function_id == f.id
+            {
+                view.routed.insert(r.id.clone(), (f.clone(), r.clone()));
+            }
+        }
+        for f in functions.values().filter(|f| f.is_deleted()) {
+            let revs = revisions
+                .values()
+                .filter(|r| r.function_id == f.id)
+                .map(|r| r.id.clone())
+                .collect();
+            view.deleted.push((f.clone(), revs));
+        }
+        Some(view)
+    }
+
+    /// Whether the cache says `function` is deleted now. Checked right
+    /// before an accepted invocation is dispatched (PLT-4635): a deletion
+    /// that landed while it queued refuses it instead of starting it. An
+    /// unknown or expired entry is not a deletion.
+    pub async fn function_deleted(&self, function: &FunctionId) -> bool {
+        self.sync_if_authoritative().await;
+        let now = self.clock.now();
+        let s = self.inner.read();
+        matches!(
+            Self::lookup(
+                &s,
+                &ConfigKey::Function {
+                    function_id: function.clone(),
+                },
+                now,
+            ),
+            Lookup::Valid(ConfigValue::Function(f)) if f.is_deleted()
+        )
     }
 
     /// Whether `revision` and the authorization of `tenant` are still valid

@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use tachyon_serverless_api_types as api;
-use tachyon_serverless_domain::{RevisionId, TenantId, Timestamp};
+use tachyon_serverless_domain::{FunctionId, RevisionId, TenantId, Timestamp};
 
 use super::config::{NodeConfig, TenantQuotaConfig, TenantQuotaEntry};
 use super::resources::{NodeCapacity, Resources};
@@ -39,6 +39,9 @@ pub enum RejectReason {
     CircuitOpen,
     /// The tenant or revision requires a region this node is not in.
     Placement,
+    /// The revision's function is being deleted (PLT-4635): a waiter that was
+    /// accepted before the deletion is refused instead of started.
+    FunctionDeleted,
 }
 
 impl RejectReason {
@@ -50,9 +53,107 @@ impl RejectReason {
             Self::QueueDeadline => "queue_deadline",
             Self::CircuitOpen => "circuit_open",
             Self::Placement => "placement",
+            Self::FunctionDeleted => "function_deleted",
         }
     }
 }
+
+/// Why a revision is being drained (PLT-4635).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DrainReason {
+    /// Every alias that routed the revision moved to another one.
+    AliasSwitch,
+    /// The revision's function is being deleted: new work is refused.
+    FunctionDeleted,
+}
+
+impl DrainReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AliasSwitch => "alias_switch",
+            Self::FunctionDeleted => "function_deleted",
+        }
+    }
+}
+
+/// How the pool wants to end one idle environment (PLT-4635).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScaleDown {
+    /// The sweeper: idle since `idle_since`. Subject to the revision's idle
+    /// TTL, its cooldown and `min_ready`.
+    Idle { idle_since: Timestamp },
+    /// A drain (the revision is superseded or deleted, or the environment's
+    /// reuse key was superseded): no TTL, cooldown or `min_ready`.
+    Drain { reason: &'static str },
+}
+
+/// Why an idle environment was kept (PLT-4635).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepReason {
+    /// The reservation is not idle any more (claimed, or already draining).
+    NotIdle,
+    /// Invocations of the revision are waiting in the queue.
+    Queued,
+    /// Every idle environment of the revision is promised to a waiter.
+    Promised,
+    /// Idle for less than the revision's idle TTL.
+    IdleTtl,
+    /// Within the cooldown after a scale-up or an activation.
+    Cooldown,
+    /// Needed for `min_ready`.
+    MinReady,
+}
+
+impl KeepReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotIdle => "not_idle",
+            Self::Queued => "queued",
+            Self::Promised => "promised",
+            Self::IdleTtl => "idle_ttl",
+            Self::Cooldown => "cooldown",
+            Self::MinReady => "min_ready",
+        }
+    }
+}
+
+/// Why a `min_ready` pre-start did not happen (PLT-4635).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrestartSkip {
+    /// Enough environments are provisioned already.
+    Satisfied,
+    /// The revision is not routed, or it is being drained.
+    NotRouted,
+    /// Invocations are waiting: they get the capacity first.
+    WaitersFirst,
+    /// A cap (node, tenant, revision, start rate, breaker) says no now.
+    Blocked(&'static str),
+    /// Refused outright (placement, never fits, open breaker).
+    Refused(Rejection),
+}
+
+/// One scale decision, for `GET /v1/capacity`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScaleEvent {
+    pub kind: &'static str,
+    pub reason: &'static str,
+    pub at: Timestamp,
+}
+
+/// What is remembered about a revision's scaling after its ledger entry is
+/// gone (it scaled to zero).
+#[derive(Debug, Clone)]
+struct ScaleRecord {
+    tenant: TenantId,
+    event: ScaleEvent,
+    min_ready: u32,
+    max_environments: u32,
+    idle_ttl_seconds: u64,
+    cooldown_seconds: u64,
+}
+
+/// Scale records kept for revisions without reservations.
+const MAX_SCALE_RECORDS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rejection {
@@ -102,7 +203,12 @@ impl BlockReason {
 #[derive(Debug, Clone)]
 pub struct Ticket {
     pub tenant: TenantId,
+    pub function: FunctionId,
     pub revision: RevisionId,
+    /// The revision's idle TTL, resolved against the gateway default.
+    pub idle_ttl_seconds: u64,
+    /// The revision's scale-down cooldown, resolved against the default.
+    pub scale_down_cooldown_seconds: u64,
     /// Revision resources plus the node's per-environment overhead.
     pub resources: Resources,
     /// The revision's `max_concurrency`: its pool quota.
@@ -194,6 +300,14 @@ impl Counts {
     fn is_empty(&self) -> bool {
         self.0.iter().all(|n| *n == 0)
     }
+    /// Environments that exist or are on their way: what `min_ready` and
+    /// the autoscaler's `desired` are compared with.
+    fn provisioned(&self) -> u32 {
+        self.get(ResState::Starting)
+            + self.get(ResState::Busy)
+            + self.get(ResState::Idle)
+            + self.get(ResState::Parking)
+    }
     fn api(&self) -> api::EnvironmentCounts {
         api::EnvironmentCounts {
             starting: self.get(ResState::Starting).into(),
@@ -212,6 +326,11 @@ struct RevisionEntry {
     max_environments: u32,
     concurrency_per_environment: u32,
     min_ready: u32,
+    idle_ttl_seconds: u64,
+    cooldown_seconds: u64,
+    /// Last cold start granted (activation, scale-up or pre-start): the
+    /// cooldown runs from here.
+    last_scale_up: Option<Timestamp>,
     counts: Counts,
     queued: u32,
     stats: DemandStats,
@@ -282,6 +401,13 @@ pub struct AdmissionState {
     eviction_requested: bool,
     evictions: usize,
     rejections: BTreeMap<RejectReason, u64>,
+    /// Revisions an alias currently routes (PLT-4635), as the scale
+    /// reconciler last saw them in a valid configuration.
+    routed: std::collections::HashSet<RevisionId>,
+    /// Revisions being drained, and why.
+    drains: HashMap<RevisionId, DrainReason>,
+    /// The last scale decision per revision, kept after it scaled to zero.
+    scale_records: HashMap<RevisionId, ScaleRecord>,
 }
 
 impl std::fmt::Debug for AdmissionState {
@@ -345,6 +471,9 @@ impl AdmissionState {
             eviction_requested: false,
             evictions: 0,
             rejections: BTreeMap::new(),
+            routed: std::collections::HashSet::new(),
+            drains: HashMap::new(),
+            scale_records: HashMap::new(),
         }
     }
 
@@ -419,6 +548,9 @@ impl AdmissionState {
                 max_environments: t.max_environments,
                 concurrency_per_environment: t.concurrency_per_environment,
                 min_ready: t.min_ready,
+                idle_ttl_seconds: t.idle_ttl_seconds,
+                cooldown_seconds: t.scale_down_cooldown_seconds,
+                last_scale_up: None,
                 counts: Counts::default(),
                 queued: 0,
                 stats: DemandStats::default(),
@@ -427,7 +559,51 @@ impl AdmissionState {
         e.max_environments = t.max_environments.max(1);
         e.concurrency_per_environment = t.concurrency_per_environment.max(1);
         e.min_ready = t.min_ready;
+        e.idle_ttl_seconds = t.idle_ttl_seconds;
+        e.cooldown_seconds = t.scale_down_cooldown_seconds;
         e
+    }
+
+    /// Remember a scale decision for `revision` (bounded; the oldest record
+    /// of a revision without reservations goes first).
+    fn record_scale(
+        &mut self,
+        revision: &RevisionId,
+        kind: &'static str,
+        reason: &'static str,
+        now: Timestamp,
+    ) {
+        let event = ScaleEvent {
+            kind,
+            reason,
+            at: now,
+        };
+        let Some(rev) = self.revisions.get(revision) else {
+            if let Some(record) = self.scale_records.get_mut(revision) {
+                record.event = event;
+            }
+            return;
+        };
+        let record = ScaleRecord {
+            tenant: rev.tenant.clone(),
+            event,
+            min_ready: rev.min_ready,
+            max_environments: rev.max_environments,
+            idle_ttl_seconds: rev.idle_ttl_seconds,
+            cooldown_seconds: rev.cooldown_seconds,
+        };
+        if self.scale_records.len() >= MAX_SCALE_RECORDS
+            && !self.scale_records.contains_key(revision)
+            && let Some(oldest) = self
+                .scale_records
+                .iter()
+                .filter(|(id, _)| !self.revisions.contains_key(*id))
+                .min_by_key(|(_, r)| r.event.at)
+                .map(|(id, _)| id.clone())
+        {
+            self.scale_records.remove(&oldest);
+        }
+        self.scale_records.insert(revision.clone(), record);
     }
 
     fn reject_count(&mut self, reason: RejectReason) {
@@ -555,6 +731,9 @@ impl AdmissionState {
                     ),
                 ));
             }
+        }
+        if self.drains.get(&t.revision) == Some(&DrainReason::FunctionDeleted) {
+            return Err(function_deleted(&t.revision));
         }
         if let Some(rev) = self.revisions.get_mut(&t.revision)
             && rev.breaker.is_open(now)
@@ -696,6 +875,9 @@ impl AdmissionState {
             return Eval::Blocked(BlockReason::Pending, false);
         };
         let t = w.ticket.clone();
+        if self.drains.get(&t.revision) == Some(&DrainReason::FunctionDeleted) {
+            return Eval::Reject(function_deleted(&t.revision));
+        }
         let window = self.window();
         let tenant = &self.tenants[&t.tenant];
         let tenant_in_flight = tenant.in_flight;
@@ -777,6 +959,15 @@ impl AdmissionState {
                 if probe {
                     rev.breaker.probe_started();
                 }
+                // The cooldown runs from every cold start an invocation
+                // asked for: from zero it is an activation.
+                let kind = if rev.counts.provisioned() == 0 {
+                    "activation"
+                } else {
+                    "scale_up"
+                };
+                rev.last_scale_up = Some(now);
+                self.record_scale(&t.revision, kind, "backlog", now);
                 (ResState::Starting, t.resources, probe)
             }
         };
@@ -952,6 +1143,9 @@ impl AdmissionState {
             if probe {
                 rev.breaker.probe_started();
             }
+            rev.last_scale_up = Some(now);
+            let revision = r.revision.clone();
+            self.record_scale(&revision, "scale_up", "promised_environment_gone", now);
             self.account(&r, false);
             let converted = Reservation {
                 state: ResState::Starting,
@@ -1001,6 +1195,232 @@ impl AdmissionState {
         if let Some(rev) = self.revisions.get_mut(revision) {
             rev.stats.record_duration(seconds);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // scale to zero, min_ready and drains (PLT-4635)
+    // -----------------------------------------------------------------------
+
+    /// The revisions an alias routes now, from a *valid* configuration. The
+    /// caller does not call this while its configuration is expired, so an
+    /// outage never looks like "every route went away".
+    pub fn set_routed(&mut self, routed: std::collections::HashSet<RevisionId>) {
+        self.routed = routed;
+    }
+
+    pub fn is_routed(&self, revision: &RevisionId) -> bool {
+        self.routed.contains(revision)
+    }
+
+    /// Start draining `revision`. A function deletion also refuses every
+    /// waiter of the revision right away (they never started). Returns true
+    /// when this started the drain.
+    pub fn begin_drain(
+        &mut self,
+        revision: &RevisionId,
+        reason: DrainReason,
+        now: Timestamp,
+    ) -> bool {
+        let previous = self.drains.get(revision).copied();
+        // A deletion outranks an alias switch and is never undone.
+        let reason = match previous {
+            Some(DrainReason::FunctionDeleted) => DrainReason::FunctionDeleted,
+            _ => reason,
+        };
+        self.drains.insert(revision.clone(), reason);
+        let started = previous != Some(reason);
+        if started {
+            self.record_scale(revision, "drain", reason.as_str(), now);
+        }
+        if reason == DrainReason::FunctionDeleted {
+            let doomed: Vec<WaiterId> = self
+                .waiters
+                .iter()
+                .filter(|(_, w)| &w.ticket.revision == revision)
+                .map(|(id, _)| *id)
+                .collect();
+            for w in doomed {
+                self.remove_waiter(w);
+                self.reject_count(RejectReason::FunctionDeleted);
+                self.outbox
+                    .push((w, Outcome::Rejected(function_deleted(revision))));
+            }
+            self.pump(now);
+        }
+        started
+    }
+
+    /// Stop draining a superseded revision an alias routes again (a
+    /// rollback). A deletion is never ended.
+    pub fn end_drain(&mut self, revision: &RevisionId) -> bool {
+        if self.drains.get(revision) == Some(&DrainReason::AliasSwitch) {
+            self.drains.remove(revision);
+            return true;
+        }
+        false
+    }
+
+    pub fn drain_reason(&self, revision: &RevisionId) -> Option<DrainReason> {
+        self.drains.get(revision).copied()
+    }
+
+    /// Forget a finished drain (nothing of the revision is left).
+    pub fn forget_drain(&mut self, revision: &RevisionId) {
+        self.drains.remove(revision);
+    }
+
+    /// Whether anything of `revision` is still reserved or waiting.
+    pub fn revision_is_empty(&self, revision: &RevisionId) -> bool {
+        self.revisions
+            .get(revision)
+            .is_none_or(|r| r.counts.is_empty() && r.queued == 0)
+    }
+
+    /// May the idle environment behind `id` be terminated now? When it may,
+    /// the reservation moves to `Draining` in the same step, so no waiter can
+    /// be promised it afterwards; the caller then takes the ledger row with
+    /// its own compare-and-set, and a claimer that got there first simply
+    /// adopts the reservation back to `Busy`.
+    ///
+    /// Always kept: a revision with waiters, or with every idle environment
+    /// promised. For [`ScaleDown::Idle`], unless the revision is drained,
+    /// also kept: idle for less than the idle TTL, within the cooldown after
+    /// the last cold start, or needed for `min_ready` of a routed revision.
+    pub fn try_scale_down(
+        &mut self,
+        id: ReservationId,
+        how: ScaleDown,
+        now: Timestamp,
+    ) -> Result<(), KeepReason> {
+        let Some(r) = self.reservations.get(&id) else {
+            return Err(KeepReason::NotIdle);
+        };
+        if r.state != ResState::Idle {
+            return Err(KeepReason::NotIdle);
+        }
+        let revision = r.revision.clone();
+        let drained = self.drains.contains_key(&revision);
+        let routed = self.routed.contains(&revision);
+        let Some(rev) = self.revisions.get(&revision) else {
+            return Err(KeepReason::NotIdle);
+        };
+        if rev.queued > 0 {
+            return Err(KeepReason::Queued);
+        }
+        if rev.counts.get(ResState::Idle) <= rev.counts.get(ResState::Promised) {
+            return Err(KeepReason::Promised);
+        }
+        let reason = match how {
+            ScaleDown::Idle { idle_since } => {
+                if !drained {
+                    let ttl = chrono::Duration::seconds(
+                        rev.idle_ttl_seconds.min(i64::MAX as u64 / 1000) as i64,
+                    );
+                    if now - idle_since < ttl {
+                        return Err(KeepReason::IdleTtl);
+                    }
+                    let cooldown = chrono::Duration::seconds(
+                        rev.cooldown_seconds.min(i64::MAX as u64 / 1000) as i64,
+                    );
+                    if rev.last_scale_up.is_some_and(|t| now - t < cooldown) {
+                        return Err(KeepReason::Cooldown);
+                    }
+                    if routed && rev.counts.provisioned() <= rev.min_ready {
+                        return Err(KeepReason::MinReady);
+                    }
+                    "idle_ttl"
+                } else {
+                    self.drains.get(&revision).map_or("drain", |d| d.as_str())
+                }
+            }
+            ScaleDown::Drain { reason } => reason,
+        };
+        self.set_state(id, ResState::Draining);
+        let left = self
+            .revisions
+            .get(&revision)
+            .map_or(0, |r| r.counts.provisioned());
+        let kind = match how {
+            ScaleDown::Drain { .. } => "drain",
+            _ if drained => "drain",
+            _ if left == 0 => "scale_to_zero",
+            _ => "scale_down",
+        };
+        self.record_scale(&revision, kind, reason, now);
+        Ok(())
+    }
+
+    /// Reserve one speculative cold start for `min_ready` (PLT-4635). Never
+    /// queues and never goes ahead of a waiter: it happens only when the
+    /// revision is routed and not drained, fewer environments than
+    /// `min_ready` are provisioned, nobody is waiting anywhere, and every cap
+    /// that binds an invocation (node resources and `max_concurrency`,
+    /// tenant and revision quotas, start rate, a closed breaker) allows it.
+    /// The reservation counts against all of them like any other.
+    pub fn try_prestart(
+        &mut self,
+        ticket: Ticket,
+        now: Timestamp,
+    ) -> Result<ReservationId, PrestartSkip> {
+        self.check_static(&ticket, now)
+            .map_err(PrestartSkip::Refused)?;
+        if !self.routed.contains(&ticket.revision) || self.drains.contains_key(&ticket.revision) {
+            return Err(PrestartSkip::NotRouted);
+        }
+        if ticket.min_ready == 0 {
+            return Err(PrestartSkip::Satisfied);
+        }
+        if self.queued > 0 {
+            return Err(PrestartSkip::WaitersFirst);
+        }
+        let tenant_quota = self.quota_for(&ticket.tenant);
+        let tenant_in_flight = self.tenants.get(&ticket.tenant).map_or(0, |t| t.in_flight);
+        let node_full = self.counts.in_flight() as usize >= self.settings.max_concurrency;
+        let fits = self.capacity.admits(self.reserved.plus(ticket.resources));
+        let bucket_ok = self.bucket.available(now);
+        let rev = self.revision_entry(&ticket);
+        if rev.counts.provisioned() >= rev.min_ready {
+            return Err(PrestartSkip::Satisfied);
+        }
+        if tenant_quota
+            .max_concurrency
+            .is_some_and(|m| tenant_in_flight >= m)
+            || rev.counts.in_flight() >= rev.max_environments
+        {
+            return Err(PrestartSkip::Blocked("quota"));
+        }
+        if rev.breaker.gate(now) != BreakerGate::Allow {
+            return Err(PrestartSkip::Blocked("circuit_breaker"));
+        }
+        if node_full || !fits {
+            return Err(PrestartSkip::Blocked("capacity"));
+        }
+        if !bucket_ok {
+            return Err(PrestartSkip::Blocked("start_rate"));
+        }
+        rev.last_scale_up = Some(now);
+        let took = self.bucket.take(now);
+        debug_assert!(took);
+        let rid = self.next();
+        self.insert_reservation(
+            rid,
+            Reservation {
+                tenant: ticket.tenant.clone(),
+                revision: ticket.revision.clone(),
+                resources: ticket.resources,
+                state: ResState::Starting,
+                probe: false,
+            },
+        );
+        self.record_scale(&ticket.revision, "prestart", "min_ready", now);
+        Ok(rid)
+    }
+
+    /// Environments of `revision` starting, busy, parking or idle.
+    pub fn provisioned(&self, revision: &RevisionId) -> u32 {
+        self.revisions
+            .get(revision)
+            .map_or(0, |r| r.counts.provisioned())
     }
 
     fn forget_revision_if_idle(&mut self, revision: &RevisionId, now: Timestamp) {
@@ -1053,6 +1473,22 @@ impl AdmissionState {
             weight: quota.weight,
             required_region: quota.required_region.clone(),
         };
+        let routed = &self.routed;
+        let drains = &self.drains;
+        let records = &self.scale_records;
+        let route_state = |id: &RevisionId| match drains.get(id) {
+            Some(DrainReason::FunctionDeleted) => "deleting",
+            Some(DrainReason::AliasSwitch) => "superseded",
+            None if routed.contains(id) => "routed",
+            None => "unrouted",
+        };
+        let event_info = |id: &RevisionId| {
+            records.get(id).map(|r| api::ScaleEventInfo {
+                kind: r.event.kind.to_string(),
+                reason: r.event.reason.to_string(),
+                at: r.event.at,
+            })
+        };
         let mut revisions: Vec<api::RevisionCapacityInfo> = self
             .revisions
             .iter_mut()
@@ -1078,8 +1514,34 @@ impl AdmissionState {
                     .avg_duration()
                     .map(|s| (s * 1000.0).round() as u64),
                 circuit_breaker: rev.breaker.name(now).to_string(),
+                min_ready: rev.min_ready,
+                idle_ttl_seconds: rev.idle_ttl_seconds,
+                scale_down_cooldown_seconds: rev.cooldown_seconds,
+                route_state: route_state(id).to_string(),
+                last_scale_event: event_info(id),
             })
             .collect();
+        // Revisions that scaled to zero keep their last decision visible.
+        for (id, record) in records {
+            if &record.tenant != tenant || self.revisions.contains_key(id) {
+                continue;
+            }
+            revisions.push(api::RevisionCapacityInfo {
+                revision_id: id.to_string(),
+                desired: 0,
+                max_environments: record.max_environments,
+                environments: Counts::default().api(),
+                queued: 0,
+                arrival_rate_per_second: 0.0,
+                avg_duration_ms: None,
+                circuit_breaker: "closed".to_string(),
+                min_ready: record.min_ready,
+                idle_ttl_seconds: record.idle_ttl_seconds,
+                scale_down_cooldown_seconds: record.cooldown_seconds,
+                route_state: route_state(id).to_string(),
+                last_scale_event: event_info(id),
+            });
+        }
         revisions.sort_by(|a, b| a.revision_id.cmp(&b.revision_id));
         let node = &self.settings.node;
         api::CapacityInfo {
@@ -1127,6 +1589,7 @@ impl AdmissionState {
                 .collect(),
             tenant: tenant_info,
             revisions,
+            scaling: api::ScalingInfo::default(),
         }
     }
 
@@ -1201,6 +1664,16 @@ enum Eval {
     Reject(Rejection),
     /// Blocked, and whether the block is node-wide.
     Blocked(BlockReason, bool),
+}
+
+fn function_deleted(revision: &RevisionId) -> Rejection {
+    Rejection::new(
+        RejectReason::FunctionDeleted,
+        format!(
+            "the function of revision {revision} is being deleted; new work is refused \
+             (work already running completes)"
+        ),
+    )
 }
 
 fn circuit_open(revision: &RevisionId) -> Rejection {

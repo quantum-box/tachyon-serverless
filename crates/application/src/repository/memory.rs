@@ -710,8 +710,11 @@ impl SlotStore for InMemoryStore {
         let Some(current) = s.environments.get(&env.id) else {
             return Ok(None);
         };
+        // A `min_ready` pre-start (PLT-4635) is published straight from
+        // `Ready` at epoch 0: it never served an attempt.
+        let prestarted = matches!(current.state, EnvironmentState::Ready) && current.epoch == 0;
         if current.epoch != env.epoch
-            || !matches!(current.state, EnvironmentState::Busy)
+            || !(matches!(current.state, EnvironmentState::Busy) || prestarted)
             || current.is_fenced()
             || has_unreleased_lease(&s, &env.id)
         {
@@ -729,6 +732,9 @@ impl SlotStore for InMemoryStore {
             return Ok(None);
         }
         let mut pooled = env.clone();
+        if matches!(pooled.state, EnvironmentState::Ready) && pooled.mark_busy(now).is_err() {
+            return Ok(None);
+        }
         if pooled.mark_idle(now).is_err() {
             return Ok(None);
         }

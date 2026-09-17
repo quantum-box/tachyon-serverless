@@ -73,7 +73,16 @@ pub fn function_update(old: &Function, new: &Function) -> Result<Write, RepoErro
         return Ok(Write::Unchanged);
     }
     if old.is_deleted() {
-        return Err(refuse(format!("function {} is deleted", old.id)));
+        // The one write a deleted function takes: recording, once, that its
+        // deletion drained (PLT-4635). Nothing else about it may change.
+        let only_drained = old.drained_at.is_none()
+            && new.drained_at.is_some()
+            && new.deleted_at == old.deleted_at
+            && new.description == old.description
+            && new.updated_at >= old.updated_at;
+        if !only_drained {
+            return Err(refuse(format!("function {} is deleted", old.id)));
+        }
     }
     Ok(Write::Apply)
 }

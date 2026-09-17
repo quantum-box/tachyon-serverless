@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+   Compiling example-http-axum v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/examples/http-axum)
+   Compiling example-cpu-burn v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/examples/cpu-burn)
+   Compiling example-hello v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/examples/hello)
+   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/crates/runtime-bridge)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.95s

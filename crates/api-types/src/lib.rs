@@ -319,6 +319,60 @@ pub struct RevisionCapacityInfo {
     pub avg_duration_ms: Option<u64>,
     /// `closed` | `open` | `half_open`
     pub circuit_breaker: String,
+    /// Environments kept provisioned while the revision is routed
+    /// (`execution.min_ready`, PLT-4635). 0: scales to zero.
+    #[serde(default)]
+    pub min_ready: u32,
+    /// Idle time before a pooled environment may be scaled down.
+    #[serde(default)]
+    pub idle_ttl_seconds: u64,
+    /// No scale-down within this many seconds of a scale-up or activation.
+    #[serde(default)]
+    pub scale_down_cooldown_seconds: u64,
+    /// `routed` (an alias points at it) | `unrouted` (pinned invocations
+    /// only) | `superseded` (an alias moved away: draining) | `deleting`
+    /// (its function is being deleted: draining, new work refused).
+    #[serde(default)]
+    pub route_state: String,
+    /// The last scale decision taken for this revision, kept after it
+    /// scaled to zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_scale_event: Option<ScaleEventInfo>,
+}
+
+/// One scale decision (PLT-4635).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ScaleEventInfo {
+    /// `activation` (a cold start from zero) | `scale_up` | `prestart`
+    /// (min_ready) | `scale_down` | `scale_to_zero` | `drain` |
+    /// `drain_timeout`
+    pub kind: String,
+    /// Why, e.g. `backlog`, `min_ready`, `idle_ttl`, `alias_switch`,
+    /// `function_deleted`, `reuse_key_superseded`.
+    pub reason: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub at: Timestamp,
+}
+
+/// Node-wide scaling settings (PLT-4635).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+pub struct ScalingInfo {
+    /// How often the scale reconciler runs (idle sweep, min_ready, drains).
+    pub reconcile_interval_ms: u64,
+    /// Idle TTL of revisions that do not set their own.
+    pub default_idle_ttl_seconds: u64,
+    /// Scale-down cooldown of revisions that do not set their own.
+    pub default_scale_down_cooldown_seconds: u64,
+    /// In-flight invocations of a drained revision still running this long
+    /// after the drain started are stopped (`Host.DrainTimeout`).
+    pub drain_timeout_seconds: u64,
+    /// Whether this gateway can hold idle (warm) environments at all. When
+    /// false every environment ends with its invocation and `min_ready` is
+    /// not honoured.
+    pub warm_pool: bool,
+    /// What zero environments does *not* remove: the gateway, its store and
+    /// the node keep running and cost what they cost.
+    pub at_zero: String,
 }
 
 /// `GET /v1/capacity`.
@@ -335,6 +389,8 @@ pub struct CapacityInfo {
     pub rejections: std::collections::BTreeMap<String, u64>,
     pub tenant: TenantCapacityInfo,
     pub revisions: Vec<RevisionCapacityInfo>,
+    #[serde(default)]
+    pub scaling: ScalingInfo,
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +427,13 @@ pub struct FunctionResponse {
     #[schema(value_type = Option<String>, format = DateTime)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<Timestamp>,
+    /// `live` | `deleting` (new invocations refused, in-flight work and
+    /// environments still draining) | `deleted` (drained).
+    #[serde(default)]
+    pub deletion_state: String,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drained_at: Option<Timestamp>,
 }
 
 impl From<&domain::Function> for FunctionResponse {
@@ -383,6 +446,8 @@ impl From<&domain::Function> for FunctionResponse {
             created_at: f.created_at,
             updated_at: f.updated_at,
             deleted_at: f.deleted_at,
+            deletion_state: f.deletion_state().to_string(),
+            drained_at: f.drained_at,
         }
     }
 }
@@ -443,6 +508,18 @@ pub struct ExecutionRequest {
     pub initialization_timeout_seconds: u32,
     #[serde(default = "default_max_concurrency")]
     pub max_concurrency: u32,
+    /// Environments kept provisioned while an alias routes the revision
+    /// (PLT-4635). 0 (default): scale to zero. Needs environment reuse.
+    #[serde(default)]
+    pub min_ready: u32,
+    /// Idle seconds before a pooled environment may be scaled down.
+    /// Default: the gateway's `[pool] idle_ttl_seconds`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_ttl_seconds: Option<u32>,
+    /// No scale-down within this many seconds of a scale-up or activation.
+    /// Default: the gateway's `[scaling] scale_down_cooldown_seconds`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_down_cooldown_seconds: Option<u32>,
 }
 fn default_timeout() -> u32 {
     30
@@ -459,6 +536,9 @@ impl Default for ExecutionRequest {
             timeout_seconds: default_timeout(),
             initialization_timeout_seconds: default_init_timeout(),
             max_concurrency: default_max_concurrency(),
+            min_ready: 0,
+            idle_ttl_seconds: None,
+            scale_down_cooldown_seconds: None,
         }
     }
 }
@@ -686,6 +766,11 @@ pub struct InvocationResponse {
     pub revision_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+    /// Generation of the alias route that chose `revision_id`, resolved once
+    /// at `accepted_at` (PLT-4635). An alias switch later never re-points an
+    /// accepted invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias_generation: Option<u64>,
     /// `sync` | `async`
     pub mode: String,
     /// `accepted` | `queued` | `running` | `succeeded` | `failed` | `cancelled` | `outcome_unknown`

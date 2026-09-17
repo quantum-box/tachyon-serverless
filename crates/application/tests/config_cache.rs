@@ -242,6 +242,7 @@ fn revision_request(digest: &str, publish: bool) -> CreateRevisionRequest {
             timeout_seconds: 60,
             initialization_timeout_seconds: 30,
             max_concurrency: 8,
+            ..ExecutionRequest::default()
         },
         egress: None,
         egress_allow: Vec::new(),

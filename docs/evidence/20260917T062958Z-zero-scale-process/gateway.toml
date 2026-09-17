@@ -1,0 +1,27 @@
+listen = "127.0.0.1:56440"
+profile = "dev"
+data_dir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-zero.vUcd03/data"
+
+[provider]
+kind = "process"
+
+[provider.process]
+bridge_binary = "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-afa74a02e7a8e1df6/target/debug/tachyon-serverless-runtime-bridge"
+workdir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-zero.vUcd03/data/process"
+
+[capacity]
+max_concurrency = 8
+max_queue = 16
+queue_timeout_seconds = 30
+
+[scaling]
+reconcile_interval_ms = 500
+scale_down_cooldown_seconds = 1
+drain_timeout_seconds = 5
+allow_short_drain = true   # the drain-timeout step needs a short timeout on purpose
+
+[[identity.tokens]]
+token = "zero-scale-token-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "zero-a"
+roles = ["deploy", "invoke"]

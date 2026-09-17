@@ -125,7 +125,9 @@ impl ConfigValue {
     /// newer publication.
     pub fn natural_version(&self) -> u64 {
         match self {
-            Self::Function(f) => u64::from(f.deleted_at.is_some()),
+            Self::Function(f) => {
+                u64::from(f.deleted_at.is_some()) + u64::from(f.drained_at.is_some())
+            }
             Self::Route(a) => a.generation,
             Self::Revision(r) => match r.status {
                 RevisionStatus::Pending => 0,

@@ -33,12 +33,12 @@
 | GET | `/healthz` | liveness | 200 | — |
 | GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）） | 200 | 503 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
-| GET | `/v1/capacity` | node の容量と予約・状態別の環境数・待ち行列・start rate・拒否数・自 tenant の revision（PLT-4634、§5.1.1） | 200 `CapacityInfo` | 401 |
+| GET | `/v1/capacity` | node の容量と予約・状態別の環境数・待ち行列・start rate・拒否数・自 tenant の revision（PLT-4634、§5.1.1）、scale policy・route 状態・最後の scale event と `scaling`（PLT-4635、§8） | 200 `CapacityInfo` | 401 |
 | POST | `/v1/artifacts` | 実行ファイルの生バイト (`application/octet-stream`) を upload → digest | 200 `ArtifactUploadResponse` | 401, 413 `payload_too_large` |
 | POST | `/v1/functions` | Function 作成 | 201 `FunctionResponse` | 400 `invalid_request`, 409 `conflict`（同名） |
 | GET | `/v1/functions` | Function 一覧（テナント内） | 200 `ListResponse<FunctionResponse>` | — |
 | GET | `/v1/functions/{function_id}` | 取得 | 200 `FunctionResponse` | 404 |
-| DELETE | `/v1/functions/{function_id}` | 削除（新規 invoke を止める） | 200/204 | 404 |
+| DELETE | `/v1/functions/{function_id}` | 削除。新規 invoke と待機中の invoke を 409 で止め、実行中は完了（または drain timeout）まで待ち、環境が残らなくなると `deletion_state = deleted`（PLT-4635、§8） | 200 `FunctionResponse`（`deletion_state = deleting`） | 404 |
 | POST | `/v1/functions/{function_id}/revisions` | Revision 作成（非同期 validation） | 202 `RevisionResponse` (`pending`) | 400, 404 |
 | GET | `/v1/functions/{function_id}/revisions` | 一覧 | 200 `ListResponse<RevisionResponse>` | 404 |
 | GET | `/v1/functions/{function_id}/revisions/{revision_id}` | 取得（`ready` / `failed` を poll する） | 200 `RevisionResponse` | 404 |
@@ -85,6 +85,7 @@ admission（PLT-4634、`docs/adr/0006-autoscaling-and-admission.md`）が拒否�
 | `queue_deadline` | 順番・start rate・起動の合流を待ったまま queue deadline（`Host.QueueTimeout`） | 504 `queue_timeout` |
 | `circuit_open` | revision の起動が連続して失敗し、起動を止めている（待機中だった invocation は `Host.StartCircuitOpen`） | 503 `provider_unavailable` |
 | `placement` | tenant / revision の `required_region` をこの node が満たさない（負荷に関係なく緩めない） | 503 `provider_unavailable` |
+| `function_deleted` | 削除より前に受け付けて待機中だった invoke を、起動せずに終えた（`error_type = Host.FunctionDeleted`、attempt なし。PLT-4635） | 409 `function_deleted` |
 
 ```json
 {
@@ -121,11 +122,11 @@ admission（PLT-4634、`docs/adr/0006-autoscaling-and-admission.md`）が拒否�
 | `payload_too_large` | 413 | payload / artifact 上限超過 | 2 |
 | `capacity_exceeded` | 429 | 待ち行列（件数 / bytes / tenant の持ち分）が満杯、または 1 環境が node に収まらない（`reason`） | 2 |
 | `revision_not_ready` | 409 | alias / revision が `ready` でない | 2 |
-| `function_deleted` | 409 | 削除済み Function への invoke | 2 |
+| `function_deleted` | 409 | 削除済み（`deleting` / `deleted`）Function への invoke と `Idempotency-Key` の再送、および削除時に待機中だった invoke（`error_type = Host.FunctionDeleted`） | 2 |
 | `user_error` | 502 | handler が `Err` を返した（`Handler.Error`） | 3 |
 | `crash` | 502 | panic / プロセス異常終了（`Runtime.Panic`, `Runtime.Crash`） | 3 |
 | `init_error` | 502 | Ready 前に失敗 / init timeout | 3 |
-| `timeout` | 504 | 実行 deadline 超過（host が環境を終了） | 4 |
+| `timeout` | 504 | 実行 deadline 超過（host が環境を終了）。drain（alias 切替・削除）の開始から `[scaling] drain_timeout_seconds` を過ぎても実行中だった invocation は `Host.DrainTimeout` | 4 |
 | `queue_timeout` | 504 | queue deadline まで grant されなかった（`reason` = `capacity` / `quota` / `queue_deadline`） | 4 |
 | `cancelled` | 499 | cancel API による中断 | 3 |
 | `outcome_unknown` | 502 | 結果を確認できない（自動再実行しない） | 5 |
@@ -217,8 +218,15 @@ node（物理 host）と、その上の環境を分けて返す。`tenant` と `
   "revisions": [
     {"revision_id": "rev_...", "desired": 7, "max_environments": 8,
      "environments": {"starting": 1, "busy": 2, "promised": 0, "parking": 0, "idle": 0, "draining": 0},
-     "queued": 4, "arrival_rate_per_second": 1.2, "avg_duration_ms": 410, "circuit_breaker": "closed"}
-  ]
+     "queued": 4, "arrival_rate_per_second": 1.2, "avg_duration_ms": 410, "circuit_breaker": "closed",
+     "min_ready": 0, "idle_ttl_seconds": 60, "scale_down_cooldown_seconds": 30, "route_state": "routed",
+     "last_scale_event": {"kind": "activation", "reason": "backlog", "at": "2026-09-17T06:07:36.592Z"}}
+  ],
+  "scaling": {
+    "reconcile_interval_ms": 1000, "default_idle_ttl_seconds": 60, "default_scale_down_cooldown_seconds": 30,
+    "drain_timeout_seconds": 961, "warm_pool": true,
+    "at_zero": "zero environments is not zero host cost: the gateway, its store and the node keep running"
+  }
 }
 ```
 
@@ -226,6 +234,7 @@ node（物理 host）と、その上の環境を分けて返す。`tenant` と `
 - `hosts` は常に 1、`host_scale_out` は `not_supported`（host の追加はこの prototype の範囲外）。admission が増減するのはこの node の上の環境だけ。
 - `desired` は autoscaler の目標（`docs/architecture.md` §4「admission・autoscaler」）。起動はこれを超えないが、待機中の invocation の無い先行起動はしない。
 - 状態は gateway プロセスのメモリにあり、再起動で `rejections`・到着率・breaker は初期化される。
+- PLT-4635 の欄（§8）: revision の `min_ready` / `idle_ttl_seconds` / `scale_down_cooldown_seconds`（既定値を解決した値）、`route_state`、`last_scale_event`。環境が 0 になり admission が revision を忘れた後も、最後の event を持つ revision は環境数 0 で載る。「ready」の環境は `idle`（pool にあってすぐ使える）に当たる。
 
 ### 5.2 `POST /v1/artifacts`
 
@@ -258,7 +267,7 @@ node（物理 host）と、その上の環境を分けて返す。`tenant` と `
 }
 ```
 
-削除後は `deleted_at` が付く。一覧は `{"items": [...], "next_cursor": "..."}`（`next_cursor` は続きがある時だけ）。
+`deletion_state` は `live` / `deleting`（`deleted_at` が付き、新規と待機中の invoke は 409。実行中の invocation と環境が残っている）/ `deleted`（何も残っていない。`drained_at` が付く）。一覧は `{"items": [...], "next_cursor": "..."}`（`next_cursor` は続きがある時だけ）。
 
 ### 5.4 Revision
 
@@ -284,6 +293,7 @@ node（物理 host）と、その上の環境を分けて返す。`tenant` と `
 - `required_region`（任意）: この revision を動かしてよい region（例 `jp`）。node の `[capacity.node] region` が一致しなければ invoke は 503 `placement`。spec には `placement.region` として入り、未指定なら省略される（既存 revision の digest は変わらない）。
 - `egress`: `none`（既定。NIC なし）/ `restricted` / `public-web`。`egress_allow` は `restricted` のときだけ必須（1..=16 件）で、各要素は `{"cidr": "1.1.1.1/32", "protocol": "tcp", "ports": [443]}`（`protocol` は `tcp` 既定 / `udp`、`ports` は 1..=16 件）。IPv4 CIDR のみで、0/8・10/8・100.64/10・127/8・169.254/16・172.16/12・192.168/16 などの special-purpose 範囲と重なるものは 400。どの profile でも管理網・node・metadata・private 範囲・IPv6 には届かない（`docs/adr/0005-egress-profiles.md`）。spec の `egress_allow` は空なら省略される。
 - `publish_to_prod`（既定 true）: `ready` になった時点で alias `prod` を向ける。
+- scale policy（PLT-4635、§8）: `execution.min_ready`（既定 0 = 無負荷なら環境 0。`0..=16` かつ `max_concurrency` 以下。環境再利用が有効な gateway でだけ満たされる）、`execution.idle_ttl_seconds`（省略時 gateway の `[pool] idle_ttl_seconds`、`1..=86400`）、`execution.scale_down_cooldown_seconds`（省略時 `[scaling] scale_down_cooldown_seconds`、`0..=3600`）。環境数の上限は `max_concurrency`。後の 2 つは未指定なら spec に出ない（既存 revision の digest は変わらない）。
 
 Response 202 → `RevisionResponse`（`status` は `pending` → `preparing` → `validating` → `ready` | `failed`）:
 
@@ -382,6 +392,7 @@ event の `path` は `/http` より後ろの request-target path を **受け取
   "function_id": "fn_01j7z0a1b2c3d4e5f6g7h8j9k0",
   "revision_id": "rev_01j7z0m1n2p3q4r5s6t7v8w9x0",
   "alias": "prod",
+  "alias_generation": 3,
   "mode": "sync",
   "status": "succeeded",
   "output": { "message": "hello, demo", "greeting": "v1", "secret_present": true },
@@ -474,7 +485,8 @@ event の `path` は `/http` より後ろの request-target path を **受け取
 |---|---|---|
 | 成功 | 200 | — |
 | alias / revision が ready でない | 409 | `revision_not_ready` |
-| Function 削除済み | 409 | `function_deleted` |
+| Function 削除済み（新規、`Idempotency-Key` の再送、削除時に待機中だったもの） | 409 | `function_deleted`（`Host.FunctionDeleted`。待機中だったものは invocation に `Failed` として残り attempt なし） |
+| alias 切替・削除の drain 中に `drain_timeout_seconds` を超えて実行中 | 504 | `timeout`（`Host.DrainTimeout`） |
 | payload 上限超過 | 413 | `payload_too_large` |
 | queue 溢れ（件数 / bytes / tenant の持ち分）、node に収まらない環境 | 429 | `capacity_exceeded`（`reason` = `queue_full` / `quota` / `capacity`） |
 | queue deadline 超過 | 504 | `queue_timeout`（`reason` = `capacity` / `quota` / `queue_deadline`） |
@@ -548,3 +560,15 @@ data plane は `[[identity.tokens]]` を持てない（token は control plane �
 いずれの場合も **実行中の invocation は止めない**（`existing_executions: "continue"`）。`control_plane.cache` には `generation`、`last_success_at`、`consecutive_failures`、`last_error`、`config_valid_until`、`auth_valid_until`、`ignored_older_entries`、`ignored_regressed_deliveries` が入る。
 
 revoke の遅延上限: control plane に届く data plane では 1 refresh、届かない data plane では最大 `auth_lease_seconds`。
+
+## 8. スケール to zero・min_ready・drain（PLT-4635）
+
+決定と理由は `docs/adr/0009-scale-to-zero-and-drain.md`。
+
+- **zero**: `min_ready = 0`（既定）の revision は、pool の idle 環境が `idle_ttl` と cooldown を過ぎ、待機中の invocation も約束も無ければ scale reconciler（既定 1 s ごと）が終わらせ、環境数 0 になる。次の invoke は cold start（`attempts[].start_kind = "cold"`）。**環境数 0 は host 費用 0 ではない**（gateway・store・node は動き続ける。`GET /v1/capacity` の `scaling.at_zero`）。pool が無い gateway（`scaling.warm_pool = false`）では環境は invocation と一緒に終わる。
+- **0 からの burst**: 起動は `desired`・`max_concurrency`・quota・node 容量・start rate の範囲でだけ行い、残りは待つ（§4 の `reason`）。最初の応答は cold start ぶん遅い。
+- **route**: alias は受付時に 1 回だけ解決し、`InvocationResponse.alias_generation` に記録する。受付後の alias 切替で実行中・待機中の invocation の revision は変わらない。
+- **drain**: alias が別 revision に移ると、旧 revision の idle 環境は次の reconcile で終わり、実行中の環境は完了後に pool へ戻らない（`route_state = superseded`）。secret の値が変わった revision では、古い世代の idle 環境が次の reconcile で終わる。削除は `deleting` → 待機中を 409 → 実行中の完了 → `deleted`。drain の開始から `drain_timeout_seconds` を過ぎて実行中の invocation は 504 `Host.DrainTimeout`。既定の drain timeout はどの revision の timeout より長いので、既定の設定では drain が自分の timeout の内側にいる invocation を止めることはない（alias 切替・secret 世代変更・削除のどれでも同じ）。
+- **振動しない**: cooldown、待機者・約束の優先、先行起動の backoff。control plane に届かず設定が期限切れの間は route の観測を保持し、drain も先行起動の取り消しもしない。
+
+gateway 設定 `[scaling]`: `reconcile_interval_ms`（既定 1000）、`scale_down_cooldown_seconds`（30）、`drain_timeout_seconds`（省略時は `limits.max_execution_timeout_seconds` + cancel grace + 60 s。既定の limits では 961。自分の timeout の内側にいる invocation を drain が止めないための値で、これ以下を設定するには `allow_short_drain = true` が要る）、`prestart_backoff_seconds`（5）。`GET /v1/capacity` の `scaling.drain_timeout_seconds` は実際に使う値。

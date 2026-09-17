@@ -16,6 +16,11 @@ pub struct Function {
     pub updated_at: Timestamp,
     /// Set when deletion has started. A deleted function accepts no new invocations.
     pub deleted_at: Option<Timestamp>,
+    /// Set once the deletion drained (PLT-4635): no invocation of the function
+    /// is still in flight and none of its environments is still on the host.
+    /// Until then the function is `deleting`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drained_at: Option<Timestamp>,
 }
 
 impl Function {
@@ -43,6 +48,7 @@ impl Function {
             created_at: now,
             updated_at: now,
             deleted_at: None,
+            drained_at: None,
         })
     }
 
@@ -58,6 +64,29 @@ impl Function {
             });
         }
         self.deleted_at = Some(now);
+        self.updated_at = now;
+        Ok(())
+    }
+
+    /// `live`, `deleting` (deleted, still draining) or `deleted` (drained).
+    pub fn deletion_state(&self) -> &'static str {
+        match (self.deleted_at, self.drained_at) {
+            (None, _) => "live",
+            (Some(_), None) => "deleting",
+            (Some(_), Some(_)) => "deleted",
+        }
+    }
+
+    /// Record that the deletion drained. Only for a deleted function, once.
+    pub fn mark_drained(&mut self, now: Timestamp) -> Result<(), DomainError> {
+        if self.deleted_at.is_none() || self.drained_at.is_some() {
+            return Err(DomainError::IllegalTransition {
+                entity: "Function",
+                from: self.deletion_state().into(),
+                to: "deleted".into(),
+            });
+        }
+        self.drained_at = Some(now);
         self.updated_at = now;
         Ok(())
     }
