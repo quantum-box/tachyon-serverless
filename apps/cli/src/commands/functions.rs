@@ -276,6 +276,8 @@ pub fn print_function(f: &FunctionResponse, p: &mut Printer<'_>) -> Result<(), C
         ("created_at", ts(&f.created_at)),
         ("updated_at", ts(&f.updated_at)),
         ("deleted_at", opt_ts(&f.deleted_at)),
+        ("deletion", f.deletion_state.clone()),
+        ("drained_at", opt_ts(&f.drained_at)),
     ])
 }
 

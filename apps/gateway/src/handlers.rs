@@ -479,6 +479,7 @@ fn invocation_response(detail: &InvocationDetail) -> InvocationResponse {
         function_id: inv.function_id.to_string(),
         revision_id: inv.revision_id.to_string(),
         alias: inv.alias.as_ref().map(ToString::to_string),
+        alias_generation: inv.alias_generation,
         mode: match inv.mode {
             InvocationMode::Sync => "sync",
             InvocationMode::Async => "async",

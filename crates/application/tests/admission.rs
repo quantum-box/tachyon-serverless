@@ -113,6 +113,7 @@ async fn deploy(
             timeout_seconds: 10,
             initialization_timeout_seconds: 5,
             max_concurrency,
+            ..ExecutionRequest::default()
         },
         egress: None,
         egress_allow: Vec::new(),

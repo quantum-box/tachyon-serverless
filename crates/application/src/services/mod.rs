@@ -12,6 +12,7 @@ pub mod pool;
 pub mod provider;
 pub mod reconcile;
 pub mod revision;
+pub mod scaling;
 
 pub use admission::{AdmissionController, Grant, RejectReason, Rejection};
 pub use alias::AliasService;
@@ -27,3 +28,4 @@ pub use pool::{
 pub use provider::ProviderService;
 pub use reconcile::{ReclaimSummary, ReconcileReport, ReconcileService};
 pub use revision::RevisionService;
+pub use scaling::{ScaleController, ScaleReport, ScalingConfig};

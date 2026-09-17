@@ -254,6 +254,9 @@
             },
             "type": "array"
           },
+          "scaling": {
+            "$ref": "#/components/schemas/ScalingInfo"
+          },
           "start_rate": {
             "$ref": "#/components/schemas/StartRateInfo"
           },
@@ -495,6 +498,15 @@
       },
       "ExecutionRequest": {
         "properties": {
+          "idle_ttl_seconds": {
+            "description": "Idle seconds before a pooled environment may be scaled down.\nDefault: the gateway's `[pool] idle_ttl_seconds`.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "initialization_timeout_seconds": {
             "format": "int32",
             "minimum": 0,
@@ -504,6 +516,21 @@
             "format": "int32",
             "minimum": 0,
             "type": "integer"
+          },
+          "min_ready": {
+            "description": "Environments kept provisioned while an alias routes the revision\n(PLT-4635). 0 (default): scale to zero. Needs environment reuse.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scale_down_cooldown_seconds": {
+            "description": "No scale-down within this many seconds of a scale-up or activation.\nDefault: the gateway's `[scaling] scale_down_cooldown_seconds`.",
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "timeout_seconds": {
             "format": "int32",
@@ -526,8 +553,19 @@
               "null"
             ]
           },
+          "deletion_state": {
+            "description": "`live` | `deleting` (new invocations refused, in-flight work and\nenvironments still draining) | `deleted` (drained).",
+            "type": "string"
+          },
           "description": {
             "type": "string"
+          },
+          "drained_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -581,6 +619,15 @@
           "alias": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "alias_generation": {
+            "description": "Generation of the alias route that chose `revision_id`, resolved once\nat `accepted_at` (PLT-4635). An alias switch later never re-points an\naccepted invocation.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -761,8 +808,19 @@
                     "null"
                   ]
                 },
+                "deletion_state": {
+                  "description": "`live` | `deleting` (new invocations refused, in-flight work and\nenvironments still draining) | `deleted` (drained).",
+                  "type": "string"
+                },
                 "description": {
                   "type": "string"
+                },
+                "drained_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "id": {
                   "type": "string"
@@ -814,6 +872,15 @@
                 "alias": {
                   "type": [
                     "string",
+                    "null"
+                  ]
+                },
+                "alias_generation": {
+                  "description": "Generation of the alias route that chose `revision_id`, resolved once\nat `accepted_at` (PLT-4635). An alias switch later never re-points an\naccepted invocation.",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
                     "null"
                   ]
                 },
@@ -1280,7 +1347,30 @@
           "environments": {
             "$ref": "#/components/schemas/EnvironmentCounts"
           },
+          "idle_ttl_seconds": {
+            "description": "Idle time before a pooled environment may be scaled down.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_scale_event": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScaleEventInfo",
+                "description": "The last scale decision taken for this revision, kept after it\nscaled to zero."
+              }
+            ]
+          },
           "max_environments": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_ready": {
+            "description": "Environments kept provisioned while the revision is routed\n(`execution.min_ready`, PLT-4635). 0: scales to zero.",
             "format": "int32",
             "minimum": 0,
             "type": "integer"
@@ -1292,6 +1382,16 @@
           },
           "revision_id": {
             "type": "string"
+          },
+          "route_state": {
+            "description": "`routed` (an alias points at it) | `unrouted` (pinned invocations\nonly) | `superseded` (an alias moved away: draining) | `deleting`\n(its function is being deleted: draining, new work refused).",
+            "type": "string"
+          },
+          "scale_down_cooldown_seconds": {
+            "description": "No scale-down within this many seconds of a scale-up or activation.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [
@@ -1352,6 +1452,75 @@
           "spec_digest",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "ScaleEventInfo": {
+        "description": "One scale decision (PLT-4635).",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "description": "`activation` (a cold start from zero) | `scale_up` | `prestart`\n(min_ready) | `scale_down` | `scale_to_zero` | `drain` |\n`drain_timeout`",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why, e.g. `backlog`, `min_ready`, `idle_ttl`, `alias_switch`,\n`function_deleted`, `reuse_key_superseded`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "reason",
+          "at"
+        ],
+        "type": "object"
+      },
+      "ScalingInfo": {
+        "description": "Node-wide scaling settings (PLT-4635).",
+        "properties": {
+          "at_zero": {
+            "description": "What zero environments does *not* remove: the gateway, its store and\nthe node keep running and cost what they cost.",
+            "type": "string"
+          },
+          "default_idle_ttl_seconds": {
+            "description": "Idle TTL of revisions that do not set their own.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default_scale_down_cooldown_seconds": {
+            "description": "Scale-down cooldown of revisions that do not set their own.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "drain_timeout_seconds": {
+            "description": "In-flight invocations of a drained revision still running this long\nafter the drain started are stopped (`Host.DrainTimeout`).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reconcile_interval_ms": {
+            "description": "How often the scale reconciler runs (idle sweep, min_ready, drains).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "warm_pool": {
+            "description": "Whether this gateway can hold idle (warm) environments at all. When\nfalse every environment ends with its invocation and `min_ready` is\nnot honoured.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reconcile_interval_ms",
+          "default_idle_ttl_seconds",
+          "default_scale_down_cooldown_seconds",
+          "drain_timeout_seconds",
+          "warm_pool",
+          "at_zero"
         ],
         "type": "object"
       },

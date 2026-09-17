@@ -52,7 +52,7 @@
 //!
 //! [`EnvironmentRepository`]: crate::repository::EnvironmentRepository
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -63,7 +63,7 @@ use serde::Serialize;
 use tachyon_serverless_api_types::ReuseInfo;
 use tachyon_serverless_domain::{
     Clock, DispatcherId, EnvironmentId, EvidenceQuality, ExecutionEnvironment, FunctionRevision,
-    ReuseKey, Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType,
+    ReuseKey, RevisionId, Sha256Digest, TenantId, Timestamp, UsageEvent, UsageEventType,
 };
 use tachyon_serverless_provider_port::{
     Capabilities, ExecutionProvider, Support, TerminateReason, UsageSink,
@@ -72,7 +72,7 @@ use tachyon_serverless_provider_port::{
 use crate::bridge_session::BridgeSession;
 use crate::config::PoolConfig;
 use crate::repository::{PoolLimits, Repositories};
-use crate::services::admission::Grant;
+use crate::services::admission::{Grant, KeepReason, ScaleDown};
 
 // ---------------------------------------------------------------------------
 // policy
@@ -482,6 +482,12 @@ pub struct PoolSweep {
     /// Environments whose terminate failed. They stay `Draining` and the next
     /// sweep retries them.
     pub failed: usize,
+    /// Expired or drained environments admission kept (PLT-4635): a waiter of
+    /// the revision, a promise, the cooldown or `min_ready` needs them.
+    pub kept: usize,
+    /// Of `reaped`: environments ended by a drain (superseded or deleted
+    /// revision, superseded reuse key) rather than by the idle TTL.
+    pub drained: usize,
 }
 
 /// One environment the pool owns and is about to end. Everything the settling
@@ -537,6 +543,15 @@ pub struct EnvironmentPool {
     /// ([`EnvironmentPool::settle`]) before it sweeps, otherwise a shutdown
     /// could step over an environment that is about to become idle.
     quiescing: tokio::sync::watch::Sender<usize>,
+    /// Revisions being drained (PLT-4635): their idle environments are ended
+    /// on the next sweep whatever their TTL, and none of their environments
+    /// is taken back into the pool.
+    draining: Mutex<HashMap<RevisionId, &'static str>>,
+    /// The newest reuse key seen per revision (PLT-4635). An idle environment
+    /// of the revision under any other key (a rotated secret generation) can
+    /// never be claimed again, so it is drained instead of waiting for its
+    /// TTL, and a busy one is not taken back into the pool.
+    current_keys: Mutex<HashMap<(TenantId, RevisionId), ReuseKey>>,
 }
 
 impl std::fmt::Debug for EnvironmentPool {
@@ -568,6 +583,53 @@ impl EnvironmentPool {
             pending_termination: Mutex::new(Vec::new()),
             reservations: Mutex::new(HashMap::new()),
             quiescing: tokio::sync::watch::Sender::new(0),
+            draining: Mutex::new(HashMap::new()),
+            current_keys: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Drain `revision` (`Some(reason)`) or stop draining it (`None`).
+    pub fn set_draining(&self, revision: &RevisionId, reason: Option<&'static str>) {
+        let mut d = self.draining.lock();
+        match reason {
+            Some(r) => {
+                d.insert(revision.clone(), r);
+            }
+            None => {
+                d.remove(revision);
+            }
+        }
+    }
+
+    /// Revisions currently drained by the pool.
+    pub fn draining_revisions(&self) -> HashSet<RevisionId> {
+        self.draining.lock().keys().cloned().collect()
+    }
+
+    /// Record the reuse key an invocation (or a pre-start) of the revision
+    /// just computed. Returns true when it supersedes an earlier one.
+    pub fn note_current_key(&self, key: &ReuseKey) -> bool {
+        let mut keys = self.current_keys.lock();
+        let slot = (key.tenant_id.clone(), key.revision_id.clone());
+        match keys.insert(slot, key.clone()) {
+            Some(previous) => previous != *key,
+            None => false,
+        }
+    }
+
+    /// Why an environment with `key` may not stay pooled, if it may not.
+    fn drain_reason_for(&self, key: &ReuseKey) -> Option<&'static str> {
+        if let Some(reason) = self.draining.lock().get(&key.revision_id) {
+            return Some(reason);
+        }
+        let current = self
+            .current_keys
+            .lock()
+            .get(&(key.tenant_id.clone(), key.revision_id.clone()))
+            .cloned();
+        match current {
+            Some(current) if current != *key => Some("reuse_key_superseded"),
+            _ => None,
         }
     }
 
@@ -793,7 +855,32 @@ impl EnvironmentPool {
         sequence: u64,
         reservation: &mut Option<Grant>,
     ) -> Result<(), Box<BridgeSession>> {
+        self.release_for(env, session, sequence, reservation, 0)
+    }
+
+    /// [`Self::release_with`] for a revision with `min_ready` (PLT-4635): the
+    /// per-key idle cap is raised to `min_ready`, so environments kept for it
+    /// are not refused by the pool and re-created in a loop. Refused (the
+    /// caller terminates) while the revision is drained or the environment's
+    /// reuse key has been superseded.
+    pub fn release_for(
+        self: Arc<Self>,
+        env: &ExecutionEnvironment,
+        session: BridgeSession,
+        sequence: u64,
+        reservation: &mut Option<Grant>,
+        min_ready: u32,
+    ) -> Result<(), Box<BridgeSession>> {
         if !self.policy.reuse_enabled() || !session.is_usable() {
+            return Err(Box::new(session));
+        }
+        if let Some(reason) = self.drain_reason_for(&env.reuse_key) {
+            tracing::info!(
+                environment_id = %env.id,
+                revision_id = %env.revision_id,
+                reason,
+                "not pooling an environment of a drained revision or superseded reuse key"
+            );
             return Err(Box::new(session));
         }
         if let Some(grant) = reservation.take() {
@@ -802,8 +889,13 @@ impl EnvironmentPool {
         }
         self.quiescing.send_modify(|n| *n += 1);
         let env = env.clone();
+        let limits = PoolLimits {
+            max_idle_per_key: self.policy.limits.max_idle_per_key.max(min_ready as usize),
+            max_total_idle: self.policy.limits.max_total_idle,
+        };
         tokio::spawn(async move {
-            self.quiesce_and_publish(env, session, sequence).await;
+            self.quiesce_and_publish(env, session, sequence, limits)
+                .await;
             self.quiescing.send_modify(|n| *n -= 1);
         });
         Ok(())
@@ -816,6 +908,7 @@ impl EnvironmentPool {
         env: ExecutionEnvironment,
         session: BridgeSession,
         sequence: u64,
+        limits: PoolLimits,
     ) {
         // Quiesce *before* the row is published. The moment the row is `Idle`
         // a claimer can take it, and every claimer resumes what it takes, so
@@ -854,11 +947,7 @@ impl EnvironmentPool {
             // deadlock. The lock is a `parking_lot` one, so the block also
             // keeps it from being held across an await.
             let mut sessions = self.sessions.lock();
-            match self
-                .repos
-                .slots
-                .release_to_pool(&env, self.policy.limits, now)
-            {
+            match self.repos.slots.release_to_pool(&env, limits, now) {
                 Ok(Some(pooled)) => {
                     tracing::debug!(
                         environment_id = %pooled.id,
@@ -977,11 +1066,45 @@ impl EnvironmentPool {
         };
         report.examined = idle.len();
         for env in idle {
-            if !everything && !env.idle_expired(now, ttl) {
-                continue;
+            let drain = self.drain_reason_for(&env.reuse_key);
+            if !everything {
+                // Admission decides, under its lock, whether the environment
+                // is still needed (a waiter, a promise, the cooldown,
+                // `min_ready`) and moves its reservation to `Draining` in the
+                // same step (PLT-4635). A pool without admission falls back to
+                // the TTL alone.
+                let how = match drain {
+                    Some(reason) => ScaleDown::Drain { reason },
+                    None => ScaleDown::Idle {
+                        idle_since: env.idle_since.unwrap_or(now),
+                    },
+                };
+                let decided = self
+                    .reservations
+                    .lock()
+                    .get(&env.id)
+                    .map(|grant| grant.try_scale_down(how));
+                match decided {
+                    Some(Ok(())) => {}
+                    Some(Err(KeepReason::IdleTtl)) => continue,
+                    Some(Err(reason)) => {
+                        tracing::debug!(
+                            environment_id = %env.id,
+                            revision_id = %env.revision_id,
+                            kept = reason.as_str(),
+                            "idle environment kept"
+                        );
+                        report.kept += 1;
+                        continue;
+                    }
+                    None if drain.is_none() && !env.idle_expired(now, ttl) => continue,
+                    None => {}
+                }
             }
             // Take it out of the pool before terminating anything: an
-            // environment the sweeper owns must never reach an attempt.
+            // environment the sweeper owns must never reach an attempt. The
+            // ledger row is the compare-and-set: a claim that got there first
+            // wins, and its claimer adopts the reservation back to `Busy`.
             match self.repos.slots.take_idle_for_termination(&env.id, now) {
                 Ok(true) => self.draining(&env.id),
                 Ok(false) => {
@@ -1000,14 +1123,26 @@ impl EnvironmentPool {
             let termination = Termination {
                 id: env.id.clone(),
                 terminate: TerminateReason::Quiesced,
-                why: "idle timeout",
+                why: match (everything, drain) {
+                    (false, Some(reason)) => reason,
+                    (true, _) => "pool drain",
+                    _ => "idle timeout",
+                },
                 failure: None,
                 sequence: 0,
                 quiesced: true,
             };
             if self.terminate_and_settle(&termination).await {
                 report.reaped += 1;
-                tracing::info!(environment_id = %env.id, "idle environment reaped");
+                if drain.is_some() && !everything {
+                    report.drained += 1;
+                }
+                tracing::info!(
+                    environment_id = %env.id,
+                    revision_id = %env.revision_id,
+                    reason = termination.why,
+                    "idle environment reaped"
+                );
             } else {
                 report.failed += 1;
             }
@@ -1016,6 +1151,8 @@ impl EnvironmentPool {
             tracing::info!(
                 examined = report.examined,
                 reaped = report.reaped,
+                drained = report.drained,
+                kept = report.kept,
                 raced = report.raced,
                 failed = report.failed,
                 "idle sweep finished"

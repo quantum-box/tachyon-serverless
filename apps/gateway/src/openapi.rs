@@ -66,6 +66,8 @@ impl utoipa::Modify for SecurityAddon {
         api::StartRateInfo,
         api::TenantCapacityInfo,
         api::RevisionCapacityInfo,
+        api::ScaleEventInfo,
+        api::ScalingInfo,
         api::ArtifactUploadResponse,
         api::CreateFunctionRequest,
         api::FunctionResponse,

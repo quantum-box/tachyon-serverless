@@ -160,3 +160,20 @@ tenant_authz tachyon-serverless-queue-nats lib tests::credential_files_must_be_p
 # a full queue refuses the publish (discard new); object size and tenant quota are enforced
 resource_limits tachyon-serverless-application lib durable::sqlite_queue::tests::a_full_queue_refuses_publish_with_queue_full
 resource_limits tachyon-serverless-application lib durable::tests::object_size_and_tenant_quota_are_enforced
+
+# --- scale to zero and drains (PLT-4635): deletion refusal, drain, sweep races, no flapping ------
+tenant_authz tachyon-serverless-application test:scaling deleting_a_function_refuses_new_queued_and_retried_work_and_lets_running_work_finish
+tenant_authz tachyon-serverless-application lib services::admission::tests::a_function_deletion_refuses_waiters_and_arrivals_and_drains_at_once
+reuse_key tachyon-serverless-application test:scaling an_alias_switch_routes_only_new_invocations_and_drains_the_old_revision
+reuse_key tachyon-serverless-application test:scaling a_rotated_secret_drains_the_old_generations_pooled_environments
+lease_epoch tachyon-serverless-application test:scaling sweeps_racing_invocations_never_terminate_an_environment_in_use
+lease_epoch tachyon-serverless-application lib services::admission::tests::an_arrival_between_the_sweep_decision_and_the_terminate_aborts_the_scale_down
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::a_never_assigned_ready_environment_can_be_pre_started_into_the_pool
+deadline tachyon-serverless-application test:scaling a_drain_timeout_stops_what_still_runs_on_a_drained_revision
+resource_limits tachyon-serverless-application test:scaling a_busy_environment_is_never_scaled_down
+resource_limits tachyon-serverless-application test:scaling min_ready_pre_starts_into_the_pool_and_keeps_them_without_flapping
+resource_limits tachyon-serverless-application test:scaling an_outage_holds_routes_and_a_reconnect_storm_does_not_flap
+resource_limits tachyon-serverless-application lib services::admission::tests::no_scale_down_within_the_cooldown_after_an_activation
+resource_limits tachyon-serverless-application lib services::admission::tests::waiting_invocations_keep_the_revisions_idle_environment
+resource_limits tachyon-serverless-application lib services::admission::tests::min_ready_pre_starts_converge_within_the_caps_and_are_kept_while_routed
+resource_limits tachyon-serverless-application lib services::admission::tests::scale_operations_keep_the_ledger_exact_under_random_interleavings

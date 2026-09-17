@@ -185,6 +185,12 @@ pub struct Invocation {
     pub alias: Option<AliasName>,
     /// Revision fixed at acceptance. Never changes during queueing or retries.
     pub revision_id: RevisionId,
+    /// Generation of the alias route that resolved `revision_id`, read at
+    /// acceptance (PLT-4635). The route is resolved exactly once, at
+    /// `accepted_at`: an alias switch afterwards never re-points this
+    /// invocation. `None` for a pinned revision and for older rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias_generation: Option<u64>,
     pub mode: InvocationMode,
     pub event_kind: EventKind,
     pub status: InvocationStatus,
@@ -245,6 +251,7 @@ impl Invocation {
             function_id,
             alias,
             revision_id,
+            alias_generation: None,
             mode,
             event_kind,
             status: InvocationStatus::Accepted,

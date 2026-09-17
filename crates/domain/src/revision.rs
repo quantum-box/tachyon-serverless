@@ -109,9 +109,31 @@ pub struct ExecutionPolicy {
     pub concurrency_per_environment: u32,
     /// Upper bound of simultaneously running environments for this revision.
     pub max_concurrency: u32,
-    /// Number of environments kept ready. Always 0 in the prototype (destroy-after-invoke).
+    /// Environments kept provisioned (starting, busy, parking or idle) while
+    /// the revision is routed by an alias (PLT-4635). 0 (the default) lets the
+    /// revision scale to zero. Above 0 the gateway pre-starts environments
+    /// into the pool, which needs environment reuse to be on; the
+    /// pre-started environments reserve node capacity and count against the
+    /// quotas like any other.
     pub min_ready: u32,
+    /// Seconds an idle pooled environment of this revision is kept before the
+    /// sweeper may terminate it. `None`: `[pool] idle_ttl_seconds`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_ttl_seconds: Option<u32>,
+    /// Seconds after a scale-up or an activation during which no environment
+    /// of this revision is scaled down (hysteresis). `None`:
+    /// `[scaling] scale_down_cooldown_seconds`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_down_cooldown_seconds: Option<u32>,
 }
+
+/// Upper bound of `execution.min_ready` (PLT-4635): pre-started environments
+/// hold node capacity whether or not anything is invoked.
+pub const MAX_MIN_READY: u32 = 16;
+/// Upper bound of `execution.idle_ttl_seconds`.
+pub const MAX_IDLE_TTL_SECONDS: u32 = 86_400;
+/// Upper bound of `execution.scale_down_cooldown_seconds`.
+pub const MAX_SCALE_DOWN_COOLDOWN_SECONDS: u32 = 3_600;
 
 impl Default for ExecutionPolicy {
     fn default() -> Self {
@@ -121,6 +143,8 @@ impl Default for ExecutionPolicy {
             concurrency_per_environment: 1,
             max_concurrency: 4,
             min_ready: 0,
+            idle_ttl_seconds: None,
+            scale_down_cooldown_seconds: None,
         }
     }
 }
@@ -315,10 +339,26 @@ impl RevisionSpec {
                 "must be within 1..=1000",
             ));
         }
-        if e.min_ready != 0 {
+        if e.min_ready > MAX_MIN_READY || e.min_ready > e.max_concurrency {
             return Err(DomainError::validation(
                 "execution.min_ready",
-                "must be 0 in the prototype (destroy-after-invoke)",
+                format!("must be within 0..={MAX_MIN_READY} and at most execution.max_concurrency"),
+            ));
+        }
+        if e.idle_ttl_seconds
+            .is_some_and(|s| s == 0 || s > MAX_IDLE_TTL_SECONDS)
+        {
+            return Err(DomainError::validation(
+                "execution.idle_ttl_seconds",
+                format!("must be within 1..={MAX_IDLE_TTL_SECONDS}"),
+            ));
+        }
+        if e.scale_down_cooldown_seconds
+            .is_some_and(|s| s > MAX_SCALE_DOWN_COOLDOWN_SECONDS)
+        {
+            return Err(DomainError::validation(
+                "execution.scale_down_cooldown_seconds",
+                format!("must be within 0..={MAX_SCALE_DOWN_COOLDOWN_SECONDS}"),
             ));
         }
         match self.egress {
@@ -557,6 +597,38 @@ mod tests {
 
     fn now() -> Timestamp {
         chrono::Utc.with_ymd_and_hms(2026, 9, 15, 0, 0, 0).unwrap()
+    }
+
+    /// PLT-4635: the scale policy is bounded, and a revision that does not
+    /// set it keeps the digest it had before the fields existed.
+    #[test]
+    fn scale_policy_is_validated_and_absent_from_the_digest_when_default() {
+        let limits = Limits::default();
+        let plain = spec();
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(!json.contains("idle_ttl_seconds") && !json.contains("scale_down_cooldown"));
+        let ok = |f: &dyn Fn(&mut RevisionSpec)| {
+            let mut s = spec();
+            f(&mut s);
+            s.validate(&limits)
+        };
+        assert!(ok(&|s| s.execution.min_ready = 2).is_ok());
+        assert!(ok(&|s| s.execution.min_ready = s.execution.max_concurrency + 1).is_err());
+        assert!(
+            ok(&|s| {
+                s.execution.max_concurrency = 100;
+                s.execution.min_ready = MAX_MIN_READY + 1;
+            })
+            .is_err()
+        );
+        assert!(ok(&|s| s.execution.idle_ttl_seconds = Some(0)).is_err());
+        assert!(ok(&|s| s.execution.idle_ttl_seconds = Some(5)).is_ok());
+        assert!(ok(&|s| s.execution.scale_down_cooldown_seconds = Some(0)).is_ok());
+        assert!(
+            ok(&|s| s.execution.scale_down_cooldown_seconds =
+                Some(MAX_SCALE_DOWN_COOLDOWN_SECONDS + 1))
+            .is_err()
+        );
     }
 
     #[test]

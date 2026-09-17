@@ -237,6 +237,7 @@ contract!(
     concurrent_claims_never_hand_the_same_environment_to_two_callers,
     releasing_respects_the_pool_caps_and_refuses_a_stale_copy,
     a_ready_environment_is_not_in_the_pool_and_is_never_claimed,
+    a_never_assigned_ready_environment_can_be_pre_started_into_the_pool,
     taking_an_idle_environment_for_termination_excludes_a_claim,
 );
 
@@ -1381,6 +1382,38 @@ fn a_ready_environment_is_not_in_the_pool_and_is_never_claimed(make: fn(Limits) 
             .unwrap()
             .map(|e| e.id),
         Some(pooled_id)
+    );
+}
+
+/// PLT-4635: a `min_ready` pre-start is published straight from `Ready` at
+/// epoch 0 (it never served an attempt); a `Ready` row that was already
+/// assigned once, or claimed back out of the pool at a later epoch, is not.
+fn a_never_assigned_ready_environment_can_be_pre_started_into_the_pool(make: fn(Limits) -> Store) {
+    let s = make(Limits::default());
+    let key = fx::key(&TenantId::generate(), &RevisionId::generate());
+    let fresh = fx::ready_environment(&key);
+    envs(&s).insert(fresh.clone()).unwrap();
+    let pooled_env = slots(&s)
+        .release_to_pool(&fresh, POOL, now())
+        .unwrap()
+        .expect("a never-assigned Ready environment is pooled");
+    assert_eq!(pooled_env.state, EnvironmentState::Idle);
+    assert_eq!(pooled_env.epoch, 0);
+    // Claimed (Idle -> Ready at epoch 0), then assigned (epoch 1): it
+    // cannot be published from Ready again.
+    let claimed = slots(&s)
+        .claim_for_reuse(&key, None, now())
+        .unwrap()
+        .expect("claimable");
+    assert_eq!(claimed.state, EnvironmentState::Ready);
+    let mut assigned = claimed.clone();
+    assigned.assign(now()).unwrap();
+    assert!(
+        slots(&s)
+            .release_to_pool(&assigned, POOL, now())
+            .unwrap()
+            .is_none(),
+        "a copy at another epoch than the stored row is refused"
     );
 }
 

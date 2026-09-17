@@ -51,6 +51,11 @@ pub fn build_revision_request(
     if let Some(c) = args.max_concurrency {
         execution.max_concurrency = c;
     }
+    if let Some(n) = args.min_ready {
+        execution.min_ready = n;
+    }
+    execution.idle_ttl_seconds = args.idle_ttl_seconds;
+    execution.scale_down_cooldown_seconds = args.scale_down_cooldown_seconds;
     let env_vars = args
         .env
         .iter()
@@ -285,6 +290,9 @@ mod tests {
             timeout_seconds: Some(2),
             init_timeout_seconds: None,
             max_concurrency: Some(1),
+            min_ready: None,
+            idle_ttl_seconds: None,
+            scale_down_cooldown_seconds: None,
             env: vec!["GREETING=v1".into()],
             secret: vec!["DEMO_SECRET=demo-secret".into()],
             description: "d".into(),

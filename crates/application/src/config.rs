@@ -17,6 +17,7 @@ pub use crate::services::admission::config::{
     AutoscalerConfig, CircuitBreakerConfig, NodeConfig, StartRateConfig, TenantQuotaConfig,
     TenantQuotaEntry,
 };
+pub use crate::services::scaling::ScalingConfig;
 
 /// Frame bytes reserved for the `Invoke` / `Response` envelope (ids, event
 /// type, deadline, trace id) on top of the payload. `limits.max_payload_bytes`
@@ -796,6 +797,9 @@ pub struct GatewayConfig {
     pub reconcile: ReconcileConfig,
     #[serde(default)]
     pub pool: PoolConfig,
+    /// Scale-to-zero, `min_ready`, cooldown and drains (PLT-4635).
+    #[serde(default)]
+    pub scaling: ScalingConfig,
     #[serde(default)]
     pub store: StoreConfig,
     #[serde(default)]
@@ -1133,6 +1137,7 @@ impl GatewayConfig {
                 )));
             }
         }
+        self.scaling.validate().map_err(ConfigError::Invalid)?;
         Ok(())
     }
 }

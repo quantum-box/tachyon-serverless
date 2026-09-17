@@ -176,6 +176,18 @@ pub struct DeployArgs {
     pub init_timeout_seconds: Option<u32>,
     #[arg(long)]
     pub max_concurrency: Option<u32>,
+    /// Environments kept provisioned while an alias routes the revision (default 0:
+    /// scale to zero). Needs a gateway with environment reuse on.
+    #[arg(long)]
+    pub min_ready: Option<u32>,
+    /// Idle seconds before a pooled environment may be scaled down (default: the
+    /// gateway's `[pool] idle_ttl_seconds`).
+    #[arg(long)]
+    pub idle_ttl_seconds: Option<u32>,
+    /// No scale-down within this many seconds of a scale-up or activation (default: the
+    /// gateway's `[scaling] scale_down_cooldown_seconds`).
+    #[arg(long)]
+    pub scale_down_cooldown_seconds: Option<u32>,
     /// Non-secret environment variable `KEY=VALUE` (repeatable).
     #[arg(long = "env", value_name = "KEY=VALUE")]
     pub env: Vec<String>,

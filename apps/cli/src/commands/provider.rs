@@ -194,20 +194,50 @@ pub async fn capacity(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), Cli
             ),
         ),
     ])?;
+    p.kv(&[(
+        "scaling",
+        format!(
+            "reconcile every {} ms, idle ttl {} s, cooldown {} s, drain timeout {} s, warm pool {}; {}",
+            info.scaling.reconcile_interval_ms,
+            info.scaling.default_idle_ttl_seconds,
+            info.scaling.default_scale_down_cooldown_seconds,
+            info.scaling.drain_timeout_seconds,
+            if info.scaling.warm_pool { "on" } else { "off" },
+            info.scaling.at_zero
+        ),
+    )])?;
     let mut t = Table::new(&[
-        "REVISION", "DESIRED", "MAX", "STARTING", "BUSY", "IDLE", "QUEUED", "RATE/S", "BREAKER",
+        "REVISION",
+        "ROUTE",
+        "DESIRED",
+        "MIN",
+        "MAX",
+        "STARTING",
+        "BUSY",
+        "IDLE",
+        "DRAINING",
+        "QUEUED",
+        "RATE/S",
+        "BREAKER",
+        "LAST SCALE",
     ]);
     for r in &info.revisions {
         t.row(vec![
             r.revision_id.clone(),
+            r.route_state.clone(),
             r.desired.to_string(),
+            r.min_ready.to_string(),
             r.max_environments.to_string(),
             r.environments.starting.to_string(),
             r.environments.busy.to_string(),
             r.environments.idle.to_string(),
+            r.environments.draining.to_string(),
             r.queued.to_string(),
             format!("{:.2}", r.arrival_rate_per_second),
             r.circuit_breaker.clone(),
+            r.last_scale_event
+                .as_ref()
+                .map_or_else(|| "-".to_string(), |e| format!("{} ({})", e.kind, e.reason)),
         ]);
     }
     p.table(&t)?;

@@ -164,6 +164,7 @@ fn revision_request(
             timeout_seconds: timeout,
             initialization_timeout_seconds: init_timeout,
             max_concurrency,
+            ..ExecutionRequest::default()
         },
         egress: None,
         egress_allow: Vec::new(),

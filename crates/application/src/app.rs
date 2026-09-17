@@ -20,12 +20,12 @@ use crate::local_ports::{
 };
 use crate::repository::HeartbeatOutcome;
 use crate::repository::{InMemoryStore, Repositories, SqliteOptions, SqliteStore, StateStore};
-use crate::services::admission::{AdmissionController, AdmissionSettings};
+use crate::services::admission::{AdmissionController, AdmissionSettings, ScaleDefaults};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::{
     AliasService, ArtifactService, Dispatcher, EnvironmentPool, FunctionService, HistoryService,
     InvokeService, LogService, PoolPolicy, PoolSweep, ProviderService, ReclaimSummary,
-    ReconcileReport, ReconcileService, RevisionService,
+    ReconcileReport, ReconcileService, RevisionService, ScaleController, ScaleReport,
 };
 
 /// Builds the execution provider selected by configuration. The gateway
@@ -81,6 +81,8 @@ pub struct Application {
     /// Durable queue, object store and object GC (PLT-4638). All `None`
     /// unless `[queue]` / `[objects]` turn them on.
     pub durable: crate::durable::DurableComponents,
+    /// Scale to zero, `min_ready`, cooldown and drains (PLT-4635).
+    pub scaling: Arc<ScaleController>,
 }
 
 impl std::fmt::Debug for Application {
@@ -357,6 +359,20 @@ impl Application {
             AdmissionSettings::from_config(&config.capacity),
             clock.clone(),
         );
+        admission.set_scale_defaults(ScaleDefaults {
+            idle_ttl_seconds: config.pool.idle_ttl_seconds,
+            scale_down_cooldown_seconds: config.scaling.scale_down_cooldown_seconds,
+            info: tachyon_serverless_api_types::ScalingInfo {
+                reconcile_interval_ms: config.scaling.reconcile_interval_ms,
+                default_idle_ttl_seconds: config.pool.idle_ttl_seconds,
+                default_scale_down_cooldown_seconds: config.scaling.scale_down_cooldown_seconds,
+                drain_timeout_seconds: config.scaling.drain_timeout_seconds,
+                warm_pool: policy.reuse_enabled(),
+                at_zero: "zero environments is not zero host cost: the gateway, its store and \
+                          the node keep running"
+                    .into(),
+            },
+        });
         {
             let pool = Arc::downgrade(&pool);
             admission.set_evictor(move |count| {
@@ -388,6 +404,16 @@ impl Application {
             gate: invoke_gate.clone(),
             admission: admission.clone(),
         });
+        let scaling = ScaleController::new(
+            admission.clone(),
+            pool.clone(),
+            invoke.clone(),
+            invoke_gate.clone(),
+            repos.clone(),
+            clock.clone(),
+            config.scaling.clone(),
+            control.role == GatewayRole::Combined,
+        );
         // Reuse is visible at startup, on or off, with the gate that decided
         // it and the two capabilities behind it (PLT-4633 acceptance 4). The
         // same facts are on `GET /v1/provider`.
@@ -450,6 +476,7 @@ impl Application {
             config_publisher,
             admission,
             durable,
+            scaling,
         }))
     }
 
@@ -555,6 +582,14 @@ impl Application {
             return None;
         }
         Some(self.pool.sweep().await)
+    }
+
+    /// One scale reconcile round (PLT-4635): routes and drains, drain
+    /// timeouts, the idle sweep, `min_ready` pre-starts and deletion
+    /// finalization. The gateway runs this every `[scaling]
+    /// reconcile_interval_ms`; tests call it directly.
+    pub async fn reconcile_scaling(&self) -> ScaleReport {
+        self.scaling.reconcile().await
     }
 
     /// Terminate everything the pool holds, whatever its TTL. Called on

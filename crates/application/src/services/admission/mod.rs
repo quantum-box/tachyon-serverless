@@ -48,8 +48,8 @@ pub use config::{
 };
 pub use resources::{NodeCapacity, Resources};
 pub use state::{
-    AdmissionSettings, AdmissionState, BlockReason, GrantKind, RejectReason, Rejection,
-    ReservationId, Ticket, WaiterId,
+    AdmissionSettings, AdmissionState, BlockReason, DrainReason, GrantKind, KeepReason,
+    PrestartSkip, RejectReason, Rejection, ReservationId, ScaleDown, Ticket, WaiterId,
 };
 
 use crate::config::CapacityConfig;
@@ -63,6 +63,9 @@ pub const QUEUE_TIMEOUT: &str = "Host.QueueTimeout";
 pub const CAPACITY_WAIT_TIMEOUT: &str = "Host.CapacityWaitTimeout";
 pub const QUOTA_WAIT_TIMEOUT: &str = "Host.QuotaWaitTimeout";
 pub const START_CIRCUIT_OPEN: &str = "Host.StartCircuitOpen";
+/// A queued invocation whose function was deleted before it started
+/// (PLT-4635). Also the `error_type` of the 409 for a new one.
+pub const FUNCTION_DELETED: &str = "Host.FunctionDeleted";
 
 /// The `error.error_type` of an invocation that admission ended with `reason`.
 pub fn error_type_for(reason: RejectReason) -> &'static str {
@@ -70,6 +73,7 @@ pub fn error_type_for(reason: RejectReason) -> &'static str {
         RejectReason::Capacity => CAPACITY_WAIT_TIMEOUT,
         RejectReason::Quota => QUOTA_WAIT_TIMEOUT,
         RejectReason::CircuitOpen => START_CIRCUIT_OPEN,
+        RejectReason::FunctionDeleted => FUNCTION_DELETED,
         RejectReason::QueueFull | RejectReason::QueueDeadline | RejectReason::Placement => {
             QUEUE_TIMEOUT
         }
@@ -83,6 +87,7 @@ pub fn reason_for_error_type(error_type: &str) -> Option<RejectReason> {
         QUOTA_WAIT_TIMEOUT => Some(RejectReason::Quota),
         QUEUE_TIMEOUT => Some(RejectReason::QueueDeadline),
         START_CIRCUIT_OPEN => Some(RejectReason::CircuitOpen),
+        FUNCTION_DELETED => Some(RejectReason::FunctionDeleted),
         _ => None,
     }
 }
@@ -119,11 +124,31 @@ struct Inner {
 
 type Evictor = Arc<dyn Fn(usize) + Send + Sync>;
 
+/// Scale defaults a ticket resolves a revision's own settings against
+/// (PLT-4635), and what `GET /v1/capacity` reports about scaling.
+#[derive(Debug, Clone)]
+pub struct ScaleDefaults {
+    pub idle_ttl_seconds: u64,
+    pub scale_down_cooldown_seconds: u64,
+    pub info: tachyon_serverless_api_types::ScalingInfo,
+}
+
+impl Default for ScaleDefaults {
+    fn default() -> Self {
+        Self {
+            idle_ttl_seconds: 60,
+            scale_down_cooldown_seconds: 30,
+            info: tachyon_serverless_api_types::ScalingInfo::default(),
+        }
+    }
+}
+
 pub struct AdmissionController {
     inner: Mutex<Inner>,
     clock: Arc<dyn Clock>,
     ticking: AtomicBool,
     evictor: Mutex<Option<Evictor>>,
+    scale: Mutex<ScaleDefaults>,
 }
 
 impl std::fmt::Debug for AdmissionController {
@@ -144,7 +169,13 @@ impl AdmissionController {
             clock,
             ticking: AtomicBool::new(false),
             evictor: Mutex::new(None),
+            scale: Mutex::new(ScaleDefaults::default()),
         })
+    }
+
+    /// Set the scale defaults and the scaling report (PLT-4635).
+    pub fn set_scale_defaults(&self, defaults: ScaleDefaults) {
+        *self.scale.lock() = defaults;
     }
 
     /// Called with the number of idle pooled environments to evict when a
@@ -163,9 +194,17 @@ impl AdmissionController {
     ) -> Ticket {
         let overhead = self.inner.lock().state.overhead();
         let exec = &revision.spec.execution;
+        let defaults = self.scale.lock().clone();
         Ticket {
             tenant: tenant.clone(),
+            function: revision.function_id.clone(),
             revision: revision.id.clone(),
+            idle_ttl_seconds: exec
+                .idle_ttl_seconds
+                .map_or(defaults.idle_ttl_seconds, u64::from),
+            scale_down_cooldown_seconds: exec
+                .scale_down_cooldown_seconds
+                .map_or(defaults.scale_down_cooldown_seconds, u64::from),
             resources: Resources::for_environment(&revision.spec.resources, overhead),
             max_environments: exec.max_concurrency.max(1),
             concurrency_per_environment: exec.concurrency_per_environment.max(1),
@@ -342,7 +381,59 @@ impl AdmissionController {
 
     /// `GET /v1/capacity` for one tenant.
     pub fn snapshot(self: &Arc<Self>, tenant: &TenantId) -> CapacityInfo {
-        self.with_state(|inner, now| inner.state.snapshot(tenant, now))
+        let mut info = self.with_state(|inner, now| inner.state.snapshot(tenant, now));
+        info.scaling = self.scale.lock().info.clone();
+        info
+    }
+
+    // -- scale to zero, min_ready, drains (PLT-4635) -------------------------
+
+    /// The revisions an alias routes, from a valid configuration only.
+    pub fn set_routed(self: &Arc<Self>, routed: std::collections::HashSet<RevisionId>) {
+        self.with_state(|inner, _| inner.state.set_routed(routed));
+    }
+
+    pub fn is_routed(&self, revision: &RevisionId) -> bool {
+        self.inner.lock().state.is_routed(revision)
+    }
+
+    /// Start draining a revision; a deletion refuses its waiters at once.
+    pub fn begin_drain(self: &Arc<Self>, revision: &RevisionId, reason: DrainReason) -> bool {
+        self.with_state(|inner, now| inner.state.begin_drain(revision, reason, now))
+    }
+
+    /// A superseded revision is routed again.
+    pub fn end_drain(self: &Arc<Self>, revision: &RevisionId) -> bool {
+        self.with_state(|inner, _| inner.state.end_drain(revision))
+    }
+
+    pub fn drain_reason(&self, revision: &RevisionId) -> Option<DrainReason> {
+        self.inner.lock().state.drain_reason(revision)
+    }
+
+    pub fn forget_drain(self: &Arc<Self>, revision: &RevisionId) {
+        self.with_state(|inner, _| inner.state.forget_drain(revision));
+    }
+
+    /// Nothing of `revision` is reserved or waiting.
+    pub fn revision_is_empty(&self, revision: &RevisionId) -> bool {
+        self.inner.lock().state.revision_is_empty(revision)
+    }
+
+    /// Environments of `revision` starting, busy, parking or idle.
+    pub fn provisioned(&self, revision: &RevisionId) -> u32 {
+        self.inner.lock().state.provisioned(revision)
+    }
+
+    /// Reserve one `min_ready` pre-start (never queued, never ahead of a
+    /// waiter). The grant is a cold one, owned by the caller.
+    pub fn try_prestart(self: &Arc<Self>, ticket: Ticket) -> Result<Grant, PrestartSkip> {
+        let id = self.with_state(|inner, now| inner.state.try_prestart(ticket, now))?;
+        Ok(Grant {
+            ctrl: self.clone(),
+            id,
+            kind: GrantKind::Cold,
+        })
     }
 
     fn withdraw(self: &Arc<Self>, id: WaiterId) -> Option<BlockReason> {
@@ -493,6 +584,14 @@ impl Grant {
         let id = self.id;
         self.ctrl
             .with_state(|inner, now| inner.state.parked(id, now));
+    }
+
+    /// May the idle environment behind this reservation be terminated now
+    /// (PLT-4635)? On `Ok` the reservation is already `Draining`.
+    pub fn try_scale_down(&self, how: ScaleDown) -> Result<(), KeepReason> {
+        let id = self.id;
+        self.ctrl
+            .with_state(|inner, now| inner.state.try_scale_down(id, how, now))
     }
 
     /// Being terminated by the pool.
