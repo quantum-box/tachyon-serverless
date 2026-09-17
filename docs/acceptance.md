@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4636、PLT-4638、PLT-4645、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4636、PLT-4638、PLT-4645、PLT-4647、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -26,6 +26,7 @@
 | lint | `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings` | `.github/workflows/ci.yml` と同じ |
 | E2E（process provider） | `scripts/e2e/demo.sh` | 27 step。ヘルパのテストは `scripts/e2e/selftest.sh` |
 | KVM smoke | `scripts/kvm/bootstrap.sh` → `scripts/kvm/smoke.sh` | 手順と確認済みの環境は `docs/kvm.md` §5 |
+| KVM ベンチマーク（PLT-4647） | `scripts/kvm/bench.sh`（集計だけなら `scripts/kvm/bench-report.sh <dir>`） | 手順・集計規則・注意は `docs/benchmark.md` |
 | E2E（Firecracker provider） | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` | 同上 |
 
 ### 実機の記録（`docs/evidence/`）
@@ -44,6 +45,7 @@
 | `docs/evidence/queue-objects-20260917T052554Z/` | PLT-4638: `scripts/queue/verify.sh`（`verify/`: 認証拒否、kill -9 後の再配送、容量境界、`max_age`、JetStream 契約テスト、object store テスト）と `scripts/e2e/demo.sh`（`e2e/`: `[queue]` / `[objects]` 未設定の gateway の P1 互換確認。listen・data_dir・workdir だけを変えた設定のコピー）、`summary.txt` | macOS（Darwin 25.6.0 arm64）、nats-server v2.14.7（local process、単一 node）、process provider（隔離なし） | verify 16/16 ok、E2E 28/28 PASS |
 | `docs/evidence/20260917T051140Z-process/` | `scripts/e2e/demo.sh`（PLT-4634: semaphore を admission に置き換えた後の P1 互換確認。PLT-4636 の統合後の branch。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） | macOS、process provider（隔離なし） | 28/28 PASS |
 | `docs/evidence/20260917T051238Z-burst-process/` | `scripts/e2e/burst.sh`（PLT-4634: node 900 MiB・`max_queue = 4`・region `us` の使い捨て gateway に cpu-burn の 7 件 / 14 件の同時 invoke、jp-only の tenant、`GET /v1/capacity` の 50 ms 間隔の記録） | macOS、process provider（隔離なし） | 9/9 PASS |
+| `docs/evidence/bench-20260917T055450Z/` | `scripts/kvm/bench.sh`（PLT-4647）: 3 sample × fresh host 5 / cold 20 / warm 20、並列 1〜8 の sweep、休止環境の資源、`summary.md`、`attempts.jsonl`（714 request）、`metadata.json`、`cleanup.txt` | Apple M4 上の Lima VM（vz + nested virtualization、共用の物理 host）、Linux 7.0.0-31-generic aarch64、Firecracker / jailer v1.17.0、guest kernel 6.1.155、`config/gateway.firecracker.toml`（jailer + cgroup required）の data_dir を変えたコピー | 失敗 11 / 714（並列 8 のみ）、残留 0。RFC の cold p95 ≤ 3 s は未達 |
 
 本文の「E2E step NN」は各 E2E ディレクトリの `steps/NN-*.log`（例: step 23 = `steps/23-cross-tenant_get_invoke_-__404.log`）。特に断らない限り process と firecracker の両方で PASS している。
 
@@ -338,6 +340,26 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 | 11 | x86_64 / bare metal での計測 | 未検証 | 記録は aarch64 の nested virtualization のみ（`docs/kvm.md` §5） |
 | 12 | 長時間 idle のあとの再開、N ≥ 20 の分布 | 未検証 | 今回の記録は 1 環境・warm 5 回。TTL 満了と drain の回収は fake provider のテストのみ |
 
+## PLT-4647 cold / warm の first response・並列性能・resource 原価
+
+計測は `scripts/kvm/bench.sh`、集計は `scripts/kvm/bench-report.sh`、手順と読み方は `docs/benchmark.md`。記録は `docs/evidence/bench-20260917T055450Z/`（commit `400bb45`。rebase 前の branch の commit で、スクリプトは rebase 後の `cae5189`（feat(bench): record in-VM CPU calibration ...）と同じ。計測スクリプトだけを足した commit で、application / provider のコードは `origin/main` `3704c80` と同じ）。**Apple M4 上の Lima VM（nested virtualization）の aarch64 だけ**の記録で、物理 host は他の作業と共用（1 分 load average p50 6.5 / 最大 31.5 を `physical-host-load.tsv` に記録）。本節の数値は SLA・販売価格の根拠にしない。application / provider の挙動は変えていない。計測した commit は `origin/main` `3704c80` を基点にしており、その後 main に入った PLT-4634（admission・autoscaler。`[capacity]` の semaphore を置き換え）、PLT-4635、PLT-4636、PLT-4638 は含まない。とくに同時実行の拒否と queue の挙動（§6.2）はこれらで変わりうるが、**新しい main での再計測はしていない**。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | Rust サンプル 3 種を fresh host / image cache miss / hit / warm で測る | 実装済み・KVM実測あり（aarch64 nested） / 未検証（専用の新品 host） | hello / http-axum / cpu-burn × fresh host（`drop_caches` と data_dir 削除の後の初回、n = 5）・cold（n = 20）・warm（n = 20）。「cache hit」は page cache に kernel / rootfs / artifact がある状態で、function drive と scratch drive は毎回作る（drive の cache は実装に無い）。`summary.md` §1 |
+| 2 | p50 / p95 / p99 と queue / init / handler の内訳 | 実装済み・KVM実測あり | `attempts.jsonl`（1 request 1 行）、`summary.md` §1。例: hello cold の client 5817 / 6037 / 6071 ms、boot 5102 / 5315、init 501 / 566、handler 112 / 173。warm の client 56 / 75 / 95 ms、host platform（total − handler）7 / 17 / 24 |
+| 3 | 同時実行 | 実装済み・KVM実測あり | 並列 1 / 2 / 4 / 8 × 24 request × pool 無効 / 有効（`summary.md` §2）。並列 8・pool 無効で 504 `Host.QueueTimeout` が 4 / 2 / 3 件、http-axum の pool 有効・並列 8 で 502 `Host.EnvironmentBootFailed` 2 件。429 / 503 は 0 |
+| 4 | VM / bridge の固定 memory | 実装済み・KVM実測あり / 未検証（guest 内の内訳） | 環境 1 つあたり VMM RSS 38.6〜38.8 MiB、cgroup `memory.current` 約 41 MiB（要求 256 MiB、`memory.max` 320 MiB）、寿命全体の `memory.peak` p95 41.6 MiB（370 環境）。gateway RSS は環境 0 で 19.5 MiB、pool に 1 つで 22.3 MiB。guest 内の kernel / bridge / 関数の内訳は host から見えず未測定（`summary.md` §3.1〜§3.3） |
+| 5 | idle 保持原価 | 実装済み・KVM実測あり | pool で休止中の環境を 60 秒: VMM CPU tick 0、cgroup `usage_usec` 増分 0、RSS 変化なし（3 sample）。休止は memory を返さない。host disk は環境ごとに約 268 MiB（scratch 256 + function drive 10 MiB。rootfs / kernel は hard link で共有）（`summary.md` §3.1） |
+| 6 | 転送量 | 実装済み・KVM実測あり / 未測定（vsock） | client ↔ gateway の body / header bytes を request ごとに記録（hello 16 → 84 bytes、header 約 260 bytes）。egress none の guest は NIC 0 で network 転送 0。gateway ↔ guest の vsock byte 数は未測定 |
+| 7 | hardware / profile / commit / 負荷条件 / 試行数と生データを残す | 実装済み・KVM実測あり | `metadata.json`（uname、CPU、vCPU、memory、nested virtualization、Firecracker / jailer 版、kernel / rootfs / bridge / artifact の sha256、commit、config の sha256、profile、負荷、試行数、seed なしの明記）、`gateway-*.toml`、`profile/`、`calibration.jsonl`、`physical-host-load.tsv`、`invocations.jsonl` |
+| 8 | cache miss や起動失敗を除外せず、warm 未対応は N/A | 実装済み・KVM実測あり | client の percentile は失敗を含む全 attempt、失敗率は別列、warm に落ちなかった attempt も warm scenario に含める。warm は 3 sample とも対応したので N/A は無い。**物理 host が過負荷だった 1 回目の実行は途中で止めて生データを残していない**（失敗の件数と種類は `docs/benchmark.md` §7 に記録） |
+| 9 | P0 の Knative 比較条件と整合し、運用構成・容量も比較する | 一部（運用構成と容量の前提のみ） / 未測定（数値比較） | P0 では Kata / CH / Knative のどれも実行していないため数値は書かない。tachyon-apps の Kata RuntimeClass の宣言値（podFixed 250m / 256Mi、pods 20）と構成要素の比較だけ（`summary.md` §5、`docs/benchmark.md` §6.5） |
+| 10 | RFC 仮目標の達成 / 未達と理由、未測定値を SLA / 価格にしない | 実装済み | cold first response（image cache hit）p95 ≤ 3 s: **未達**（hello 6037 ms。boot 中の cgroup throttled period 比 0.99）。warm の基盤追加遅延 p95 ≤ 20 ms: **一部未達**（hello 17・cpu-burn 17 ms は達成、http-axum 31 ms は未達。逐次・loopback）。Fast Restore・可用性 99.9%: 未測定（`docs/benchmark.md` §6.4） |
+| 11 | 専用環境・上限付き負荷で benchmark を再実行できる | 実装済み / 未検証（専用 host） | preflight が他の gateway / VMM の同居、jailer / cgroup required でない config、disk 60% 以上を拒否。総 request 数は並列度によらず固定。実行後に残留 0 を `cleanup.txt` で確認し、残れば exit 3。`BENCH_MAX_CALIBRATION_MS` で混んだ host での開始を拒否できる。記録した host は共用の開発機 |
+| 12 | x86_64 / bare metal / fresh dedicated host | 未検証 | 記録は Lima VM の nested virtualization だけ |
+| 13 | Fast Restore を同じ測定方法へ追加（X1） | 未着手 | snapshot restore が未実装。追加手順は `docs/benchmark.md` §8 |
+
 ## PLT-4651 (X1) Rust SDK の初期化保存点・復元後 hook（実験 API）
 
 実験 API。SDK の feature `experimental-restore`（既定 off）の `lifecycle::builder().bootstrap(..).after_restore(..).run(..)` / `.serve_http(..)` と、bridge の Runtime API `lifecycle/{bootstrap, checkpoint, continue, error}`（`docs/protocol.md` §B-X1）。**snapshot の取得・復元は実装していない**（PLT-4653）。同梱の provider はどれも snapshot を取らないので bridge は常に `cold` を返し、`restored` はテストの mock restore 通知からしか出ない。P0〜P4 はこの Issue に依存しない。データは合成データ（素数表）だけを使う。
@@ -512,15 +534,15 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 | # | 状態 | 記録 |
 |---|---|---|
 | M1 | 実装済み・KVM実測あり | `docs/evidence/kvm-20260915T080221Z/hello.json` と `docs/evidence/20260915T125610Z-firecracker/provider.json` の `preflight`（9 項目 ok）。nested virtualization の有無は `PreflightReport` の項目に無く、`docs/kvm.md` §5 に記録 |
-| M2 | 実装済み・KVM実測あり（参考値） / 未検証（N ≥ 20、中央値・p95） | gateway 経由（E2E、11 attempt）: `environment_boot_ms` 3522〜4754。fc-smoke（2 回）: `boot_ms` 13468、11036 |
-| M3 | 同上 | gateway 経由: `runtime_init_ms` 331〜410（guest 申告 `guest_init_ms` 219〜274）。fc-smoke: `init_ms` 1341、1224 |
-| M4 | 同上 | gateway 経由の hello / http-axum: `handler_ms` 73〜93、`total_ms` 4296〜5355。fc-smoke の hello: `handler_ms` 319、`total_ms` 16337 |
+| M2 | 実装済み・KVM実測あり（aarch64 nested、N = 20） / 未検証（x86_64、bare metal） | PLT-4647（`docs/evidence/bench-20260917T055450Z/`、jailer + cgroup required）: cold の `environment_boot_ms` 中央値 / p95 は hello 5102 / 5315、http-axum 5551 / 7776、cpu-burn 5756 / 10490。以前の参考値: E2E 3522〜4754、fc-smoke 13468、11036 |
+| M3 | 同上 | PLT-4647: cold の `runtime_init_ms` 中央値 / p95 は hello 501 / 566、http-axum 555 / 819、cpu-burn 499 / 1120。以前の参考値: E2E 331〜410、fc-smoke 1341、1224 |
+| M4 | 同上 | PLT-4647: cold の `handler_ms` / `total_ms` 中央値（p95）は hello 112（173）/ 5729（5935）、http-axum 122（215）/ 6365（9154）。warm は hello 42（48）/ 49（68）、http-axum 47（102）/ 56（107）。client から見た分布（失敗を含む）は `docs/benchmark.md` §6 |
 | M5 | 実装済み・KVM実測あり（条件は ADR と異なる） | E2E step 18（`timeout_seconds = 2`）: `handler_ms` 2002、`total_ms` 7178、`Failed{Timeout}`、orphan 0。fc-smoke の timeout demo（deadline 3 s）。ADR の条件（`timeout_seconds = 5`、deadline + grace から terminate 完了まで ≤ 2 s）での単独測定は無い |
 | M6 | 未検証 | KVM 上で 2 回目の `terminate_environment` を呼んだ記録が無い。単体テストは `crates/providers/firecracker/src/provider.rs::terminate_missing_env_is_idempotent_noop` |
-| M7 | 実装済み・KVM実測あり | E2E step 19・27（13 invocation の後に `orphan-check: clean (firecracker)`）、fc-smoke の `leftovers` |
+| M7 | 実装済み・KVM実測あり | E2E step 19・27（13 invocation の後に `orphan-check: clean (firecracker)`）、fc-smoke の `leftovers`、PLT-4647 の 714 request・370 環境・gateway 18 回の起動停止の後に VMM / jailer / gateway プロセス・cgroup・jail・tap・nft table・環境ディレクトリが 0（`docs/evidence/bench-20260917T055450Z/` `cleanup.txt`） |
 | M8 | 実測済み | 3 宛先（1.1.1.1:443 / 169.254.169.254:80 / 10.0.2.2:80）すべて `NetworkUnreachable`、DNS 解決なし、interface は loopback のみ、default route 0。`docs/evidence/isolation-20260916T020934Z/egress.json` |
 | M9 | 実測済み | guest vCPU 1、MemTotal 232 MiB（要求 256 MiB）、128 MiB 環境での 512 MiB 確保は `crash` / `Runtime.Crash`（`docs/evidence/isolation-20260916T020934Z/resources.json`、`alloc-invocation.json`）。ephemeral storage は PLT-4622 で強制し、64 MiB の環境で 58 MiB 書いて `ENOSPC`（`docs/evidence/isolation-20260917T011555Z/disk.json`）。jailer と host cgroup 下の再計測でも同じ（`docs/evidence/isolation-20260917T041930Z/`） |
-| M10 | 未検証 | fake provider の `crates/application/tests/pipeline.rs::capacity_exceeded_and_queue_timeout` だけ |
+| M10 | 一部 KVM実測あり / 未検証（`max_queue` 溢れの 429） | PLT-4647 の sweep（`docs/evidence/bench-20260917T055450Z/`）: revision `max_concurrency = 4`・並列 8 で queue に入り、queue deadline 10 s 超過が 504 `Host.QueueTimeout`（pool 無効の 3 sample で 4 / 2 / 3 件）、429 / 503 は 0。429 は fake provider の `crates/application/tests/pipeline.rs::capacity_exceeded_and_queue_timeout` だけ |
 | M11 | 未検証 | fake provider の `crates/application/tests/pipeline.rs::disconnect_after_invoke_is_outcome_unknown` だけ |
 | M12 | 実装済み・KVM実測あり（nested virtualization） | 上記の evidence はすべて aarch64 |
 | M13 | 未検証 | 1 MiB payload / 6 MiB response の転送時間は未測定 |
@@ -531,7 +553,7 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 |---|---|---|
 | x86_64 KVM host での実行（`docs/inventory-tachyon-apps.md` §6 の第一 profile） | 未検証 | 実測は Apple M4 上の aarch64 nested virtualization だけ。CI は x86_64 musl の build だけで起動しない |
 | bare metal（nested virtualization なし）での測定 | 未検証 | 同上 |
-| baseline profile どおりの測定（N ≥ 20、中央値・p95、hello / http-axum / cpu-burn） | 未検証 | 記録は E2E 1 回分（11 attempt）と fc-smoke 2 回 |
+| baseline profile どおりの測定（N ≥ 20、中央値・p95、hello / http-axum / cpu-burn） | 一部 KVM実測あり / 未検証（x86_64、bare metal） | PLT-4647 で 3 sample・N = 20・p50 / p95 / p99 を aarch64 nested で記録（`docs/evidence/bench-20260917T055450Z/`）。baseline の第一 profile（x86_64）ではない |
 | 別開発者・別 host による追試 | 未着手 | 記録は 1 人・1 host |
 | self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未検証 | workflow・gate（`kvm-gate`）・runner 登録手順は PLT-4645 で用意（`docs/ci.md` §5）。runner が未登録のため `kvm` job は一度も実行されていない |
 | TiDB 永続化（PLT-4618） | 未着手 | ADR-0003 で単一 host は埋め込み SQLite（`state.db`、migration 実装済み）と決定。TiDB は将来の adapter |

@@ -1,0 +1,4 @@
+[e2e] sweep http-axum cold c=1: 24 requests in 150027 ms
+[e2e] sweep http-axum cold c=2: 24 requests in 77003 ms
+[e2e] sweep http-axum cold c=4: 24 requests in 48440 ms
+[e2e] sweep http-axum cold c=8: 24 requests in 52962 ms

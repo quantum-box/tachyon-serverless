@@ -143,6 +143,7 @@ tsls provider | health | dev
 - [docs/protocol.md](docs/protocol.md) — host ↔ bridge frame、Runtime API、Firecracker guest 規約
 - [docs/threat-model.md](docs/threat-model.md) — 脅威モデル（process provider の非隔離を含む）
 - [docs/kvm.md](docs/kvm.md) — Linux/KVM 環境の準備と smoke、macOS での Lima 手順と実測値
+- [docs/benchmark.md](docs/benchmark.md) — first response・同時実行・資源原価のベンチマーク（nested virtualization の参考値。SLA・価格ではない）
 - [docs/acceptance.md](docs/acceptance.md) — 受入条件ごとの状態（実装済み / KVM 実測あり / 未検証 / 未着手）と証跡
 - [docs/evidence/](docs/evidence/) — E2E デモと KVM smoke の実行記録
 - [docs/adr/](docs/adr/) — 設計判断の記録
