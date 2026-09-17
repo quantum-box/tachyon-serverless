@@ -1,0 +1,7 @@
+stamp=20260917T091055Z
+host=Darwin 25.6.0 arm64
+git_commit=f46b621fd578d1b733e6820a6cb86ef2ad1ad287
+queue=sqlite
+provider=process
+cron_fires=10
+downtime_seconds=6
