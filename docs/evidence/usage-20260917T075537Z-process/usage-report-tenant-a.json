@@ -1,0 +1,158 @@
+{
+  "provisional": true,
+  "not_an_invoice": true,
+  "billing_enabled": false,
+  "notice": "provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype",
+  "tenant_id": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+  "from": "2026-09-01T00:00:00Z",
+  "to": "2026-09-17T07:55:50.600908Z",
+  "group_by": [
+    "function"
+  ],
+  "price_table": {
+    "version": "provisional-dev-2026-09-v1",
+    "effective_from": "2026-09-01T00:00:00Z",
+    "currency": "JPY",
+    "billable_segments": [
+      "user_init_ms",
+      "handler_ms"
+    ],
+    "unit_prices_micros": {
+      "vcpu_second": 2500,
+      "gib_second": 400,
+      "invocation": 30,
+      "gb_transferred": 15000000
+    },
+    "rounding": [
+      "each segment: whole milliseconds rounded up from the host monotonic clock",
+      "per attempt: billable_ms = exact sum of host-measured billable segments; unknown and guest-reported segments count 0 and are reported as unmetered",
+      "per line (tenant x function x day): quantities summed exactly",
+      "per line and component: round_half_up(quantity x unit price / unit) in integer micro-units; line total = sum of components; report total = sum of line totals"
+    ]
+  },
+  "lines": [
+    {
+      "function_id": "fn_01m2q5tfc8mt20qe46afg4kqn5",
+      "usage": {
+        "invocations": 5,
+        "attempts": 5,
+        "retries": 0,
+        "outcomes": {
+          "succeeded": 4,
+          "failed": 0,
+          "timeout": 1,
+          "cancelled": 0,
+          "outcome_unknown": 0
+        },
+        "segments_ms": {
+          "queue_wait_ms": 5,
+          "vm_base_boot_ms": 547,
+          "user_init_ms": 1054,
+          "handler_ms": 5213,
+          "teardown_ms": 23,
+          "idle_pooled_ms": 0
+        },
+        "billable_ms": 6267,
+        "vcpu_milli_ms": 3133500,
+        "mib_ms": 1604352,
+        "request_bytes": 73,
+        "response_bytes": 280
+      },
+      "unmetered": {
+        "attempts": 0,
+        "segments": {
+          "queue_wait_ms": 0,
+          "vm_base_boot_ms": 0,
+          "user_init_ms": 0,
+          "handler_ms": 0,
+          "teardown_ms": 0,
+          "idle_pooled_ms": 0
+        },
+        "bytes": 0
+      },
+      "cost": {
+        "environments_stopped": 5,
+        "environment_lifetime_ms": 7867,
+        "idle_pooled_ms": 0,
+        "teardown_ms": 23,
+        "boot_without_attempt_ms": 0,
+        "cgroup_cpu_usec": 0,
+        "cgroup_cpu_unknown": 5,
+        "cgroup_memory_peak_bytes_max": 0
+      },
+      "provisional_charges_micros": {
+        "vcpu": 7834,
+        "memory": 627,
+        "invocations": 150,
+        "transfer": 5,
+        "total": 8616
+      },
+      "guest_reported": {
+        "guest_handler_ms": 3204,
+        "guest_init_ms": 1040
+      }
+    }
+  ],
+  "totals": {
+    "usage": {
+      "invocations": 5,
+      "attempts": 5,
+      "retries": 0,
+      "outcomes": {
+        "succeeded": 4,
+        "failed": 0,
+        "timeout": 1,
+        "cancelled": 0,
+        "outcome_unknown": 0
+      },
+      "segments_ms": {
+        "queue_wait_ms": 5,
+        "vm_base_boot_ms": 547,
+        "user_init_ms": 1054,
+        "handler_ms": 5213,
+        "teardown_ms": 23,
+        "idle_pooled_ms": 0
+      },
+      "billable_ms": 6267,
+      "vcpu_milli_ms": 3133500,
+      "mib_ms": 1604352,
+      "request_bytes": 73,
+      "response_bytes": 280
+    },
+    "unmetered": {
+      "attempts": 0,
+      "segments": {
+        "queue_wait_ms": 0,
+        "vm_base_boot_ms": 0,
+        "user_init_ms": 0,
+        "handler_ms": 0,
+        "teardown_ms": 0,
+        "idle_pooled_ms": 0
+      },
+      "bytes": 0
+    },
+    "cost": {
+      "environments_stopped": 5,
+      "environment_lifetime_ms": 7867,
+      "idle_pooled_ms": 0,
+      "teardown_ms": 23,
+      "boot_without_attempt_ms": 0,
+      "cgroup_cpu_usec": 0,
+      "cgroup_cpu_unknown": 5,
+      "cgroup_memory_peak_bytes_max": 0
+    },
+    "provisional_charges_micros": {
+      "vcpu": 7834,
+      "memory": 627,
+      "invocations": 150,
+      "transfer": 5,
+      "total": 8616
+    },
+    "guest_reported": {
+      "guest_handler_ms": 3204,
+      "guest_init_ms": 1040
+    }
+  },
+  "unjournaled_events": 0,
+  "collected_through": "2026-09-17T07:55:50.337056Z"
+}

@@ -179,6 +179,19 @@ process provider は idle の段階が無い（destroy-after-invoke）ので、i
 | `tsls_async_outbox_oldest_pending_age_seconds` | gauge | | 最古の未 publish event の滞留時間 |
 | `tsls_async_outbox_sent_retained_events` | gauge | | publish 済みで保持中の event |
 | `tsls_async_queue_condition` | gauge | `condition` | publisher が最後に見た queue の状態（`healthy` / `full` / `unavailable`）が 1 |
+| `tsls_usage_journal_healthy` | gauge | | usage journal を読み書きできれば 1（PLT-4642、ADR-0012） |
+| `tsls_usage_journal_admitting` | gauge | | journal に admission headroom より多くの余りがあり、新規 invoke を計測付きで受け付けるなら 1。0 の間は 503 `usage_journal_full`（`accept_unmetered` の dev profile を除く） |
+| `tsls_usage_journal_pending_events` | gauge | | journal に書いて ledger へまだ運んでいない usage event の数 |
+| `tsls_usage_journal_pending_bytes` | gauge | | その bytes |
+| `tsls_usage_journal_max_events` | gauge | | `[usage] journal_max_events` |
+| `tsls_usage_journal_max_bytes` | gauge | | `[usage] journal_max_bytes` |
+| `tsls_usage_unjournaled_events_total` | counter | | journal が拒否した（満杯・停止）usage event の累計。計測なし・推測しない |
+| `tsls_usage_collector_runs_total` | counter | | このプロセスの usage collector の実行回数 |
+| `tsls_usage_collector_failing` | gauge | | 直前の collector の実行が失敗（ledger 停止、journal の integrity）なら 1 |
+| `tsls_usage_collector_last_success_age_seconds` | gauge | | collector が最後に配送に成功してからの秒数（collector の遅れ）。初回成功までは系列なし |
+| `tsls_usage_collector_delivered_events_total` | counter | | このプロセスの collector が ledger に渡した journal 行の累計（再配送を含む） |
+| `tsls_usage_ledger_events` | gauge | | usage ledger の event 数（event_id で一意） |
+| `tsls_usage_ledger_duplicates_ignored_total` | counter | | ledger が既に持っていた event id として捨てた配送の累計 |
 | `tsls_metrics_series_truncated` | gauge | `dimension` | cardinality 上限で `_other` に畳んだ数（`revision` / `tenant` / `environment`） |
 
 ## 4. boot identity（再利用の証跡）

@@ -31,7 +31,7 @@
 | Method | Path | 役割 | 200 系 | 主なエラー |
 |---|---|---|---|---|
 | GET | `/healthz` | liveness | 200 | — |
-| GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）） | 200 | 503 |
+| GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）、`usage`（usage journal・collector・ledger の運用状態、PLT-4642、§5.10.1）。usage journal が満杯・停止で受付を拒否している間も 503） | 200 | 503 |
 | GET | `/metrics` | Prometheus text exposition（PLT-4637、`docs/metrics.md`）。全 tenant の revision・待ちを含むので `[metrics] bearer_token` の operator credential だけを受け付ける（tenant の token は operator role でも 401）。未設定の gateway には無い | 200 `text/plain; version=0.0.4` | 401, 404 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
 | GET | `/v1/capacity` | node の容量と予約・状態別の環境数・待ち行列・start rate・拒否数・自 tenant の revision（PLT-4634、§5.1.1）、scale policy・route 状態・最後の scale event と `scaling`（PLT-4635、§8） | 200 `CapacityInfo` | 401 |
@@ -54,6 +54,7 @@
 | POST | `/v1/invocations/{invocation_id}:cancel`<br>`/v1/invocations/{invocation_id}/cancel` | 実行中の Invocation を cancel | 200 `InvocationResponse` (`cancelled`) | 404, 409（既に terminal） |
 | GET | `/v1/invocations/{invocation_id}/logs` | ログ（invocation 単位、行数 / bytes 上限あり） | 200 `LogsResponse` | 404 |
 | GET | `/v1/functions/{function_id}/usage` | 使用量集計（課金ではない） | 200 `UsageSummaryResponse` | 404 |
+| GET | `/v1/usage` | token の tenant の**仮**利用量・仮料金の報告（PLT-4642、§5.10.1。請求書ではない）。query: `from`, `to`（RFC 3339 か `YYYY-MM-DD`）、`group_by`（`function` / `day` / `function,day` / `none`）、`function_id` | 200 `UsageReportResponse` | 400（範囲・`group_by`）, 401, 403（`invoke` role が無い） |
 | GET | `/openapi.json` | OpenAPI 3 | 200 | — |
 | GET | `/v1/internal/config?since=<generation>` | data plane 向けの設定配信（`combined` で `internal_token` を設定した gateway だけ。§7） | 200 `ConfigDelivery` | 401（内部 credential でない）, 404（提供しない gateway）, 503 `control_plane_unavailable`（store） |
 
@@ -138,6 +139,7 @@ admission（PLT-4634、`docs/adr/0006-autoscaling-and-admission.md`）が拒否�
 | `control_plane_unavailable` | 503 | 管理 API を提供できない。`Host.ControlPlaneUnavailable`（data plane の gateway）、`Host.StoreUnavailable`（台帳 store が応答しない） | 6 |
 
 | `async_unavailable` | 503 | 非同期 invoke を今は durable に受け付けられない（PLT-4639、§5.6.1）。`reason`: `queue_unavailable`（queue に届かず outbox も上限）、`object_store_unavailable`、`not_configured`（`[queue]` が無い、または台帳が揮発）。何も記録しない | 6 |
+| `usage_journal_full` | 503 | 利用量を計測できないので新しい invoke を受け付けない（PLT-4642、fail closed）。`reason`: `usage_journal_full`（`error_type = Host.UsageJournalFull`、未回収 event が上限の headroom に達した）/ `usage_journal_unavailable`（`Host.UsageJournalUnavailable`、journal を開けない・書けない）。invocation を作らず、`Idempotency-Key` も消費しない（結び付いた key の replay は答える） | 6 |
 
 `forbidden`（403）には PLT-4636 で `Host.UnknownTenant`（grant はあるが tenant が配信されていない / 削除された）と `Host.PolicyDenied`（revision の egress profile が配信された policy で許可されていない）が加わった。
 
@@ -533,6 +535,62 @@ event の `path` は `/http` より後ろの request-target path を **受け取
 ```
 
 `not_billable` は常に true（数値は使用量の事実であって請求ではない）。
+
+### 5.10.1 `GET /v1/usage` → `UsageReportResponse`（PLT-4642）
+
+token の tenant の、host が測った利用量を version 付き価格表で集計した**仮**の報告（`docs/adr/0012-usage-ledger-and-rating.md`）。**請求書ではない**: `provisional` と `not_an_invoice` は常に true、`billing_enabled` は常に false。collector が ledger に運んだ event だけが入る（`collected_through`）。
+
+```json
+{
+  "provisional": true,
+  "not_an_invoice": true,
+  "billing_enabled": false,
+  "notice": "provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype",
+  "tenant_id": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+  "from": "2026-09-16T00:00:00Z",
+  "to": "2026-09-18T00:00:00Z",
+  "group_by": ["function"],
+  "price_table": {
+    "version": "provisional-dev-2026-09-v1",
+    "effective_from": "2026-09-01T00:00:00Z",
+    "currency": "JPY",
+    "billable_segments": ["user_init_ms", "handler_ms"],
+    "unit_prices_micros": {"vcpu_second": 2500, "gib_second": 400, "invocation": 30, "gb_transferred": 15000000},
+    "rounding": ["each segment: whole milliseconds rounded up from the host monotonic clock", "..."]
+  },
+  "lines": [
+    {
+      "function_id": "fn_01j7z0a1b2c3d4e5f6g7h8j9k0",
+      "usage": {
+        "invocations": 5, "attempts": 5, "retries": 0,
+        "outcomes": {"succeeded": 4, "failed": 0, "timeout": 1, "cancelled": 0, "outcome_unknown": 0},
+        "segments_ms": {"queue_wait_ms": 2, "vm_base_boot_ms": 610, "user_init_ms": 1260, "handler_ms": 5215, "teardown_ms": 95, "idle_pooled_ms": 0},
+        "billable_ms": 6475, "vcpu_milli_ms": 3237500, "mib_ms": 1657600,
+        "request_bytes": 71, "response_bytes": 312
+      },
+      "unmetered": {"attempts": 0, "segments": {"queue_wait_ms": 0, "vm_base_boot_ms": 0, "user_init_ms": 0, "handler_ms": 0, "teardown_ms": 0, "idle_pooled_ms": 0}, "bytes": 0},
+      "cost": {"environments_stopped": 5, "environment_lifetime_ms": 7210, "idle_pooled_ms": 0, "teardown_ms": 95, "boot_without_attempt_ms": 0, "cgroup_cpu_usec": 0, "cgroup_cpu_unknown": 5, "cgroup_memory_peak_bytes_max": 0},
+      "provisional_charges_micros": {"vcpu": 8094, "memory": 647, "invocations": 150, "transfer": 6, "total": 8897},
+      "guest_reported": {"guest_handler_ms": 5190, "guest_init_ms": 5}
+    }
+  ],
+  "totals": {"usage": {"...": "sum of lines"}, "provisional_charges_micros": {"total": 8897}},
+  "unjournaled_events": 0,
+  "collected_through": "2026-09-17T07:20:31.512Z"
+}
+```
+
+| 欄 | 意味 |
+|---|---|
+| `usage` | **利用量**。課金対象の event（`AttemptSettled`）の、`host_measured` / `provider_reported` の量だけ。`invocations` は初回 attempt の数、`retries` は同じ invocation の 2 回目以降。`billable_ms` は価格表の `billable_segments` の和、`vcpu_milli_ms` / `mib_ms` はそれに要求 resource を掛けた値 |
+| `provisional_charges_micros` | **仮料金**（通貨の 10⁻⁶ 単位の整数）。行・成分ごとに `round_half_up(量 × 単価 / 単位)`、`total` は成分の和。`totals` は行の和で再丸めしない |
+| `cost` | **原価**の事実（環境寿命、pool の idle、teardown、attempt を持たなかった boot / init、cgroup CPU / peak memory）。価格を掛けない |
+| `unmetered` / `unjournaled_events` | 測れなかった区間・bytes を持つ attempt の数と、journal に入らなかった event の数。0 として扱い、推測しない |
+| `guest_reported` | guest の自己申告（参考値）。価格を掛けない |
+
+- 他 tenant の function を `function_id` に指定しても空の報告（存在を明かさない）。operator role は 403。
+- `from` の既定は `to` の 31 日前（価格表の `effective_from` より前には伸ばさない）。範囲は最大 92 日、`from` が `effective_from` より前なら 400。日付は event の host wall clock（UTC）。
+- `/readyz` の `usage`: `accepting` / `metered` / `policy` / `billing_enabled` / `price_table_version`、`journal`（`healthy`、`pending_events` / `pending_bytes`、`cursor_seq`、`limits`、`admitting`、`unjournaled_events`、`last_error`）、`collector`（`runs`、`last_success_at`、`last_error`、`delivered` / `inserted` / `duplicates`）、`ledger`（`events`、`duplicates_ignored`）。tenant の情報は含まない。
 
 ## 6. invoke のステータス早見表
 

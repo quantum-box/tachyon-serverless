@@ -38,7 +38,7 @@ tsls functions list
 | 3 | invoke がユーザーコード側で失敗 | `user_error` `crash` `init_error`（`cancelled` もここ） |
 | 4 | timeout | `timeout` `queue_timeout`、CLI 側の待機超過（`--wait-timeout`、gateway 起動待ち） |
 | 5 | 結果不明 | `outcome_unknown` |
-| 6 | platform 側の障害 | `platform_error` `provider_unavailable`、本文を解釈できない 5xx、gateway に接続できない |
+| 6 | platform 側の障害 | `platform_error` `provider_unavailable` `usage_journal_full`（利用量を計測できないので受付拒否、PLT-4642）、本文を解釈できない 5xx、gateway に接続できない |
 
 `functions http` は関数が返した HTTP status がいくつでも exit 0（404 を返す関数は正常）。gateway 側のエラー（本文が API エラー形式）だけ上表に従う。
 
@@ -71,6 +71,7 @@ tsls functions list
 | `provider` | `GET /v1/provider`。kind / isolation / dev_only と capability 表、preflight を表示。`dev_only` なら「隔離なし」の警告を標準エラーに出す |
 | `capacity` | `GET /v1/capacity`（PLT-4634）。node（region、hosts、host scale-out の可否、容量、環境ごとの overhead）、予約の合計、状態別の環境数、in-flight、待ち行列、start rate、scaling（reconcile 間隔・既定 TTL / cooldown・drain timeout・warm pool の有無・「環境 0 は host 費用 0 ではない」）と、自 tenant の revision ごとの route 状態 / desired / min_ready / starting / busy / idle / draining / queued / 到着率 / breaker / 最後の scale event（PLT-4635）を表示。`--json` で本文そのまま |
 | `health` | `GET /healthz` と `GET /readyz`。どちらかが 2xx でなければ exit 6 |
+| `usage [--from <RFC3339 or YYYY-MM-DD>] [--to ...] [--group-by function\|day\|function,day\|none] [--function <fn>]` | `GET /v1/usage`（PLT-4642）。token の tenant の**仮**利用量・仮料金。1 行目は常に `PROVISIONAL - provisional usage estimate: not an invoice, ...`。続いて tenant・範囲・価格表（version、effective_from、通貨、課金区間）・collector が運んだ時刻・journal に入らなかった event 数、行ごと（と `TOTAL`）の invocations / attempts / retries / timeouts / handler ms / billable ms / unmetered / 仮料金（通貨単位の小数）。`--json` で本文そのまま（原価・guest 申告・丸め規則を含む） |
 | `dev --binary <path> ...` | 使い捨て gateway で 1 バイナリを end-to-end 実行（§9） |
 
 ## 4. `functions deploy`

@@ -547,7 +547,8 @@
           "provider_unavailable",
           "config_unavailable",
           "control_plane_unavailable",
-          "async_unavailable"
+          "async_unavailable",
+          "usage_journal_full"
         ],
         "type": "string"
       },
@@ -643,6 +644,86 @@
           "description",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "GuestReportedTotals": {
+        "description": "Guest self-reports, shown for comparison only. Never rated.",
+        "properties": {
+          "guest_handler_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "guest_init_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "guest_handler_ms",
+          "guest_init_ms"
+        ],
+        "type": "object"
+      },
+      "HostCostFacts": {
+        "description": "What the host spent on the tenant's environments. Never charged.",
+        "properties": {
+          "boot_without_attempt_ms": {
+            "description": "Boot and initialization of environments that never served an attempt.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cgroup_cpu_unknown": {
+            "description": "Stopped environments without a cgroup reading.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cgroup_cpu_usec": {
+            "description": "cgroup v2 CPU of the VMMs (provider-reported).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cgroup_memory_peak_bytes_max": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "environment_lifetime_ms": {
+            "description": "Ledger `created_at` to the end of each environment (wall clock).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "environments_stopped": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "idle_pooled_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "teardown_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "environments_stopped",
+          "environment_lifetime_ms",
+          "idle_pooled_ms",
+          "teardown_ms",
+          "boot_without_attempt_ms",
+          "cgroup_cpu_usec",
+          "cgroup_cpu_unknown",
+          "cgroup_memory_peak_bytes_max"
         ],
         "type": "object"
       },
@@ -1284,6 +1365,83 @@
         ],
         "type": "object"
       },
+      "OutcomeCounts": {
+        "properties": {
+          "cancelled": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failed": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outcome_unknown": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "succeeded": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "timeout": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "succeeded",
+          "failed",
+          "timeout",
+          "cancelled",
+          "outcome_unknown"
+        ],
+        "type": "object"
+      },
+      "PriceTableInfo": {
+        "properties": {
+          "billable_segments": {
+            "description": "Segments whose host-measured milliseconds are charged as compute.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "effective_from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "rounding": {
+            "description": "The rounding rules, in the order they apply.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "unit_prices_micros": {
+            "$ref": "#/components/schemas/UnitPricesMicros"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "effective_from",
+          "currency",
+          "billable_segments",
+          "unit_prices_micros",
+          "rounding"
+        ],
+        "type": "object"
+      },
       "ProviderInfo": {
         "properties": {
           "capabilities": {
@@ -1312,6 +1470,44 @@
           "isolation",
           "capabilities",
           "preflight"
+        ],
+        "type": "object"
+      },
+      "ProvisionalCharges": {
+        "description": "Provisional charges in micro-units of the price table's currency.",
+        "properties": {
+          "invocations": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memory": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transfer": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "vcpu": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "vcpu",
+          "memory",
+          "invocations",
+          "transfer",
+          "total"
         ],
         "type": "object"
       },
@@ -1660,6 +1856,49 @@
         ],
         "type": "object"
       },
+      "SegmentTotals": {
+        "properties": {
+          "handler_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "idle_pooled_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queue_wait_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "teardown_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "user_init_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "vm_base_boot_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queue_wait_ms",
+          "vm_base_boot_ms",
+          "user_init_ms",
+          "handler_ms",
+          "teardown_ms",
+          "idle_pooled_ms"
+        ],
+        "type": "object"
+      },
       "StartRateInfo": {
         "properties": {
           "burst": {
@@ -1821,6 +2060,65 @@
         },
         "type": "object"
       },
+      "UnitPricesMicros": {
+        "description": "Unit prices in micro-units (1e-6) of `currency`.",
+        "properties": {
+          "gb_transferred": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "gib_second": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "invocation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "vcpu_second": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "vcpu_second",
+          "gib_second",
+          "invocation",
+          "gb_transferred"
+        ],
+        "type": "object"
+      },
+      "UnmeteredUsage": {
+        "description": "What was not measured: counted, contributes nothing to a charge.",
+        "properties": {
+          "attempts": {
+            "description": "Attempts with at least one billable segment unknown or guest-reported.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytes": {
+            "description": "Attempts whose request or response bytes were not measured.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "segments": {
+            "$ref": "#/components/schemas/SegmentTotals",
+            "description": "Per segment: how many attempts had it unknown or guest-reported."
+          }
+        },
+        "required": [
+          "attempts",
+          "segments",
+          "bytes"
+        ],
+        "type": "object"
+      },
       "UpdateAliasRequest": {
         "properties": {
           "expected_generation": {
@@ -1838,6 +2136,202 @@
         },
         "required": [
           "revision_id"
+        ],
+        "type": "object"
+      },
+      "UsageQuantities": {
+        "description": "Metered quantities (host-measured or provider-reported only).",
+        "properties": {
+          "attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "billable_ms": {
+            "description": "Sum of the billable segments.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "invocations": {
+            "description": "First attempts (one per invocation that was dispatched).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mib_ms": {
+            "description": "`billable_ms × requested memory_mib`.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outcomes": {
+            "$ref": "#/components/schemas/OutcomeCounts"
+          },
+          "request_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "response_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retries": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "segments_ms": {
+            "$ref": "#/components/schemas/SegmentTotals"
+          },
+          "vcpu_milli_ms": {
+            "description": "`billable_ms × requested cpu_millis`.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "invocations",
+          "attempts",
+          "retries",
+          "outcomes",
+          "segments_ms",
+          "billable_ms",
+          "vcpu_milli_ms",
+          "mib_ms",
+          "request_bytes",
+          "response_bytes"
+        ],
+        "type": "object"
+      },
+      "UsageReportLine": {
+        "properties": {
+          "cost": {
+            "$ref": "#/components/schemas/HostCostFacts"
+          },
+          "day": {
+            "description": "`YYYY-MM-DD` (UTC).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "function_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guest_reported": {
+            "$ref": "#/components/schemas/GuestReportedTotals"
+          },
+          "provisional_charges_micros": {
+            "$ref": "#/components/schemas/ProvisionalCharges"
+          },
+          "unmetered": {
+            "$ref": "#/components/schemas/UnmeteredUsage"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageQuantities"
+          }
+        },
+        "required": [
+          "usage",
+          "unmetered",
+          "cost",
+          "provisional_charges_micros",
+          "guest_reported"
+        ],
+        "type": "object"
+      },
+      "UsageReportResponse": {
+        "description": "`GET /v1/usage` (PLT-4642): a **provisional** usage report of the caller's\ntenant, rated with a versioned price table. Not an invoice: nothing is\ncharged, billing is hard-disabled in the prototype\n(`billing_enabled = false`, `not_an_invoice = true`).\n\nThree things are kept apart: `usage` (metered quantities),\n`provisional_charges_micros` (usage × price table) and `cost` (what the\nhost spent on the tenant's environments; never charged).",
+        "properties": {
+          "billing_enabled": {
+            "description": "Always false in the prototype.",
+            "type": "boolean"
+          },
+          "collected_through": {
+            "description": "Events still waiting in the journal are not in the report yet.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from": {
+            "description": "Inclusive, by the host wall clock of each event.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "function_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group_by": {
+            "description": "`function`, `day`, both, or empty (one line).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/UsageReportLine"
+            },
+            "type": "array"
+          },
+          "not_an_invoice": {
+            "description": "Always true.",
+            "type": "boolean"
+          },
+          "notice": {
+            "type": "string"
+          },
+          "price_table": {
+            "$ref": "#/components/schemas/PriceTableInfo"
+          },
+          "provisional": {
+            "description": "Always true.",
+            "type": "boolean"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "to": {
+            "description": "Exclusive.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/UsageReportLine",
+            "description": "Sum of `lines` (charges are the sum of the line charges, not re-rounded)."
+          },
+          "unjournaled_events": {
+            "description": "Events of this tenant the usage journal refused (full or unavailable).\nThey are not in any line: unmetered, never estimated.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provisional",
+          "not_an_invoice",
+          "billing_enabled",
+          "notice",
+          "tenant_id",
+          "from",
+          "to",
+          "group_by",
+          "price_table",
+          "lines",
+          "totals",
+          "unjournaled_events"
         ],
         "type": "object"
       },
@@ -3370,6 +3864,100 @@
         ],
         "tags": [
           "provider"
+        ]
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "operationId": "usage_report",
+        "parameters": [
+          {
+            "description": "inclusive start, RFC 3339 or YYYY-MM-DD (default: `to` minus 31 days; not before the price table's effective_from)",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "exclusive end, RFC 3339 or YYYY-MM-DD (default: now)",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`function`, `day`, `function,day` (default) or `none`",
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "only this function of the caller's tenant",
+            "in": "query",
+            "name": "function_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageReportResponse"
+                }
+              }
+            },
+            "description": "provisional usage report, not an invoice"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The caller's **provisional** usage report (PLT-4642): metered quantities,\nhost cost facts and provisional charges from a versioned price table.\nTenant-scoped (the token's tenant only). Not an invoice; billing is\ndisabled.",
+        "tags": [
+          "usage"
         ]
       }
     }

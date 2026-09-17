@@ -1,0 +1,19 @@
+function=fn_01m2q5tfc8mt20qe46afg4kqn5 revision=rev_01m2q5tfq0nnjm9awjdpapsbrf
+PASS  1-known-duration-invocations  200s=3/3 (payload seconds=1.0)
+PASS  2-timeout  status=504 code=timeout
+PASS  3-duplicate-request-replayed  same invocation id for both sends: inv_01m2q5tq8tpr1h03jkkckyvacm / inv_01m2q5tq8tpr1h03jkkckyvacm
+PASS  4-journal-holds-events-ledger-empty  journal pending=25 (attempt_settled=5) ledger events=0
+PASS  5-kill-9-gateway-1  exit=137 (nothing was collected)
+PASS  6-collector-killed-between-ledger-commit-and-cursor  exit=137 ledger events=4 journal cursor=0
+PASS  7-journal-drained-no-double-count  ledger events=25 (journal had 25) distinct=25 duplicates_ignored=4
+PASS  8a-counts  invocations=5 attempts=5 retries=0 timeouts=1
+PASS  8b-host-measured-handler-time  handler_ms=5213 expected [5200, 8700]
+PASS  8c-every-handler-segment-host-measured  non-host handler segments=0
+PASS  8c-known-duration-samples  tolerance 700 ms: [{"outcome":"succeeded","ms":1002,"guest":1001},{"outcome":"succeeded","ms":1002,"guest":1001},{"outcome":"succeeded","ms":1003,"guest":1001},{"outcome":"timeout","ms":2004,"guest":null},{"outcome":"succeeded","ms":202,"guest":201}]
+PASS  8d-billable-is-init-plus-handler  billable_ms=6267 user_init_ms=1054 handler_ms=5213 vcpu_milli_ms=3133500
+PASS  8e-provisional-charge-follows-price-table  vcpu charge=7834 micros (expected 7834, table provisional-dev-2026-09-v1)
+PASS  8f-provisional-not-an-invoice  {"provisional":true,"not_an_invoice":true,"billing_enabled":false}
+PASS  9-tenant-b-sees-nothing  attempts=0 lines=0
+PASS  10-tsls-usage  PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+evidence: /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-af016dd3598ed842a/docs/evidence/usage-20260917T075537Z-process
+usage e2e: all checks passed
