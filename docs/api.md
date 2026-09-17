@@ -8,12 +8,12 @@
 
 | 項目 | 内容 |
 |---|---|
-| 認証 | `Authorization: Bearer <token>`。token は gateway 設定 `[[identity.tokens]]` で tenant / subject / roles に解決される。 |
+| 認証 | `Authorization: Bearer <token>`。管理 API（functions / artifacts / revisions / aliases / invocations 一覧 / usage）は control plane の `[[identity.tokens]]` で、invoke・HTTP アダプタ・`/v1/invocations/*`・`/v1/provider` は gateway の設定 cache に配信された grant（認可 lease 付き）で tenant / subject / roles に解決される（PLT-4636、§7）。 |
 | テナント | 省略可の `x-tachyon-tenant-id` ヘッダ。token のテナントと一致しなければ 401/403。 |
 | 他テナントの資源 | 常に **404**（403 は返さない。存在を漏らさないため）。 |
 | roles | `deploy`（functions / artifacts / revisions / aliases の書き込み）、`invoke`（invoke / http / cancel と invocation / logs / usage の読み取り）。function / revision / alias の読み取りは `deploy` / `invoke` / `operator` のどれでもよい。`operator` は自 tenant の function / revision / alias の読み取りと `/v1/provider` だけで、他 tenant の資源は 404、invocation / logs / usage と書き込み・invoke は 403（`docs/threat-model.md` §7）。 |
 
-`/healthz` `/readyz` `/openapi.json` は認証不要。`/v1/provider` も認証不要（環境情報のみ）。
+`/healthz` `/readyz` `/openapi.json` は認証不要。`/v1/internal/config` は tenant の token ではなく内部 credential（`[control_plane] internal_token`）を bearer で要求する（§7）。
 
 ## 2. 共通ヘッダ
 
@@ -31,7 +31,7 @@
 | Method | Path | 役割 | 200 系 | 主なエラー |
 |---|---|---|---|---|
 | GET | `/healthz` | liveness | 200 | — |
-| GET | `/readyz` | readiness（provider preflight OK かつ dispatcher lease が有効。本文に `dispatcher: {id, instance, fenced}`） | 200 | 503 |
+| GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）） | 200 | 503 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
 | POST | `/v1/artifacts` | 実行ファイルの生バイト (`application/octet-stream`) を upload → digest | 200 `ArtifactUploadResponse` | 401, 413 `payload_too_large` |
 | POST | `/v1/functions` | Function 作成 | 201 `FunctionResponse` | 400 `invalid_request`, 409 `conflict`（同名） |
@@ -52,6 +52,7 @@
 | GET | `/v1/invocations/{invocation_id}/logs` | ログ（invocation 単位、行数 / bytes 上限あり） | 200 `LogsResponse` | 404 |
 | GET | `/v1/functions/{function_id}/usage` | 使用量集計（課金ではない） | 200 `UsageSummaryResponse` | 404 |
 | GET | `/openapi.json` | OpenAPI 3 | 200 | — |
+| GET | `/v1/internal/config?since=<generation>` | data plane 向けの設定配信（`combined` で `internal_token` を設定した gateway だけ。§7） | 200 `ConfigDelivery` | 401（内部 credential でない）, 404（提供しない gateway）, 503 `control_plane_unavailable`（store） |
 
 invoke / cancel は `:invoke` `/invoke` の両形式を受け付ける。CLI は既定で `/invoke` `/cancel` を使い、`--colon-routes` で切り替える。
 
@@ -104,7 +105,11 @@ invoke / cancel は `:invoke` `/invoke` の両形式を受け付ける。CLI は
 | `cancelled` | 499 | cancel API による中断 | 3 |
 | `outcome_unknown` | 502 | 結果を確認できない（自動再実行しない） | 5 |
 | `platform_error` | 500 | provider / bridge / 内部エラー | 6 |
-| `provider_unavailable` | 503 | provider が使えない（例: `/dev/kvm` 無し）、shutdown 中、または dispatcher lease を失った gateway（別の gateway に送り直す） | 6 |
+| `provider_unavailable` | 503 | provider が使えない（例: `/dev/kvm` 無し）、shutdown 中、dispatcher lease を失った gateway（別の gateway に送り直す）、または provider の制御 API が preflight に失敗していて新しい環境を起動できない（`Host.ProviderControlUnavailable`。実行中と warm 環境は継続） | 6 |
+| `config_unavailable` | 503 | 設定 cache が新しい仕事を保証できない（PLT-4636、§7）。`error_type`: `Host.ConfigNotDelivered`（未配信）、`Host.ConfigExpired`（TTL 切れ）、`Host.AuthLeaseExpired`（認可 lease 切れ）、`Host.ColdStartRestricted`（control plane 到達不能で cold start を制限中） | 6 |
+| `control_plane_unavailable` | 503 | 管理 API を提供できない。`Host.ControlPlaneUnavailable`（data plane の gateway）、`Host.StoreUnavailable`（台帳 store が応答しない） | 6 |
+
+`forbidden`（403）には PLT-4636 で `Host.UnknownTenant`（grant はあるが tenant が配信されていない / 削除された）と `Host.PolicyDenied`（revision の egress profile が配信された policy で許可されていない）が加わった。
 
 ## 5. DTO とフィクスチャ
 
@@ -425,3 +430,61 @@ event の `path` は `/http` より後ろの request-target path を **受け取
 | cancel API | 499 | `cancelled` |
 | 結果不明（Invoke 送信後の接続断） | 502 | `outcome_unknown` |
 | provider / 内部 | 500 / 503 | `platform_error` / `provider_unavailable` |
+| 設定が未配信 / TTL 切れ / 認可 lease 切れ（受付前、台帳に残らない） | 503 | `config_unavailable`（`Host.ConfigNotDelivered` / `Host.ConfigExpired` / `Host.AuthLeaseExpired`） |
+| grant の tenant が未知 / egress が policy 外 | 403 | `forbidden`（`Host.UnknownTenant` / `Host.PolicyDenied`） |
+| control plane 到達不能かつ `allow_cold_start = false` で cold start が要る | 503 | `config_unavailable`（`Host.ColdStartRestricted`。再利用 off なら受付前、on なら warm を試した後に `Failed` として記録） |
+| provider の制御 API が停止（preflight 失敗）で cold start が要る | 503 | `provider_unavailable`（`Host.ProviderControlUnavailable`） |
+| data plane の gateway に管理 API を送った | 503 | `control_plane_unavailable`（`Host.ControlPlaneUnavailable`） |
+
+## 7. 設定配信・認可 lease・control plane 停止（PLT-4636）
+
+決定は `docs/adr/0007-config-distribution-and-auth-leases.md`、構成は `docs/architecture.md` §4「設定配信と認可 lease」。
+
+### 7.1 役割
+
+| `[control_plane] role` | 提供するもの |
+|---|---|
+| `combined`（既定） | 管理 API、invoke、`internal_token` を設定したときだけ `GET /v1/internal/config` |
+| `data_plane` | invoke、HTTP アダプタ、`/v1/invocations/*`、`/v1/provider`、`/readyz`。管理 API はすべて 503 `control_plane_unavailable`。`/v1/internal/config` は 404 |
+
+data plane は `[[identity.tokens]]` を持てない（token は control plane から grant として届く）。secret binding の値は data plane 自身の `[[secrets.bindings]]` から解決する（配信されるのは binding の参照だけ）。
+
+### 7.2 `GET /v1/internal/config?since=<generation>`
+
+`Authorization: Bearer <internal_token>`（tenant の token は 401）。`since` より大きい generation の entry をすべて返し、「ここに無い entry は `generation` の時点で変わっていない」ことを主張する。
+
+```json
+{
+  "source": "management",
+  "generation": 15,
+  "since": 12,
+  "config_ttl_seconds": 60,
+  "auth_lease_seconds": 60,
+  "entries": [
+    {"key": {"kind": "route", "function_id": "fn_...", "alias": "prod"}, "generation": 13,
+     "value": {"kind": "route", "value": {"function_id": "fn_...", "name": "prod", "revision_id": "rev_...", "generation": 2, "...": "..."}}},
+    {"key": {"kind": "grant", "token_digest": "5bdc...43"}, "generation": 15, "value": null}
+  ]
+}
+```
+
+- key の `kind`: `function` / `route` / `revision` / `grant`（`token_digest` = HMAC-SHA256(internal_token, bearer token) の hex）/ `tenant` / `policy`。
+- `value: null` は tombstone（削除・revoke）。
+- generation は control plane の `state.db` に刻まれ、再起動をまたいで単調に増える。
+
+### 7.3 data plane の判断
+
+| 状況 | invoke の応答 | `/readyz` の `control_plane` |
+|---|---|---|
+| 一度も配信を受けていない | 503 `Host.ConfigNotDelivered` | `new_invocations: refused`、`refusal: Host.ConfigNotDelivered` |
+| control plane に届く | 通常どおり（deploy / rollback の反映は最大 `refresh_interval_ms`） | `control_plane_reachable: true` |
+| 届かない、TTL 内 | 通常どおり（cache から解決） | `control_plane_reachable: false`、`new_invocations: accepted` |
+| 届かない、`config_ttl_seconds` 超過 | 503 `Host.ConfigExpired`（受付前） | 503、`refusal: Host.ConfigExpired`、`existing_executions: continue` |
+| 届かない、`auth_lease_seconds` 超過 | 503 `Host.AuthLeaseExpired`（認証時） | 503、`refusal: Host.AuthLeaseExpired` |
+| 届かない、`[control_plane_outage] allow_cold_start = false` | cold start が要るものだけ 503 `Host.ColdStartRestricted`。warm 環境で受けられるものは継続 | `new_cold_starts: refused` |
+| provider の preflight が失敗 | cold start が要るものだけ 503 `Host.ProviderControlUnavailable` | `new_cold_starts: refused`（`ready: false`） |
+| 回復 | 最初の成功した refresh で最新 generation に収束。dispatcher lease を即座に再確認 | `cache.reconnects` が増える |
+
+いずれの場合も **実行中の invocation は止めない**（`existing_executions: "continue"`）。`control_plane.cache` には `generation`、`last_success_at`、`consecutive_failures`、`last_error`、`config_valid_until`、`auth_valid_until`、`ignored_older_entries`、`ignored_regressed_deliveries` が入る。
+
+revoke の遅延上限: control plane に届く data plane では 1 refresh、届かない data plane では最大 `auth_lease_seconds`。

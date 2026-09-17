@@ -1,0 +1,7 @@
+uploading /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a27f5b94059720f62/target/debug/example-hello (3517888 bytes, arch aarch64)
+artifact sha256:9190de5404cb8f5e6694be542bc8e3cde9d5a644e69d95dbdb886f365349c202
+revision rev_01m2pvczecm8awt392dhjvx9f4 (#2) created: pending
+revision rev_01m2pvczecm8awt392dhjvx9f4 is preparing
+revision rev_01m2pvczecm8awt392dhjvx9f4 is ready
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: init_error (HTTP 502): invocation inv_01m2pvczq9ar6d9r46t48g1mg3 failed: Runtime.InitError: HELLO_FAIL_INIT set [type=Runtime.InitError] [invocation=inv_01m2pvczq9ar6d9r46t48g1mg3] [request=01m2pvczq6z8nn14ex82kjf065]

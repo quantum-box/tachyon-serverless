@@ -37,13 +37,13 @@ apps/cli
 | `crates/protocol` | host↔bridge frame, bridge↔SDK Runtime API | axum, provider 実装 |
 | `crates/provider-port` | `ExecutionProvider` ほか port trait | 具体 provider |
 | `crates/api-types` | 管理/Invoke API の DTO, エラー code | application |
-| `crates/application` | usecase, repository (in-memory), invoke pipeline, bridge session (host 側), watchdog, log 保持 | axum, hypervisor 固有 API |
+| `crates/application` | usecase, repository (in-memory), invoke pipeline, bridge session (host 側), watchdog, log 保持, 設定配信と data plane の cache（`control/`、PLT-4636） | axum, hypervisor 固有 API, HTTP client |
 | `crates/providers/process` | 子プロセス + unix socket。dev 専用 | — |
 | `crates/providers/firecracker` | Firecracker API socket, vsock, drive, cleanup | domain 以外の上位 |
 | `crates/providers/fake` | テスト専用。duplex stream 上のスクリプト guest | — |
 | `crates/runtime-bridge` | guest 側 agent。vsock/unix で host と接続、Runtime API を HTTP で提供、user process を起動・監視 | — |
 | `crates/sdk` | `run(handler)`, `serve_http(router)`, `Context`。実験 feature `experimental-restore` で `lifecycle`（PLT-4651） | bridge 内部 |
-| `apps/gateway` | axum。管理 API + Invoke + logs + OpenAPI | — |
+| `apps/gateway` | axum。管理 API + Invoke + logs + OpenAPI。`role = "data_plane"` では invoke だけ（設定は `GET /v1/internal/config` から pull、`config_client.rs`） | — |
 | `apps/cli` | `tsls` CLI。deploy / invoke / logs / rollback / dev | application（HTTP 経由のみ） |
 | `examples/*` | hello / http-axum / cpu-burn / isolation-probe / restore-aware（実験、PLT-4651） | — |
 
@@ -51,8 +51,13 @@ apps/cli
 
 ```
 client ─POST /v1/functions/{id}:invoke─▶ gateway
-  1 認証: Bearer token → Principal{tenant, roles}. 他 tenant の資源は 404。
+  1 認証: Bearer token → Principal{tenant, roles}。invoke 系は配信済み grant（認可 lease 付き）の cache だけで引く
+     (PLT-4636、§4「設定配信と認可 lease」)。lease 切れ → 503 Host.AuthLeaseExpired、未知の tenant → 403
+     Host.UnknownTenant、未配信 → 503 Host.ConfigNotDelivered。他 tenant の資源は 404。
   2 Function 取得 (deleted → 409 function_deleted)。alias→Revision 解決 (Ready でなければ 409 revision_not_ready)。
+     function / route / revision / policy はすべて設定 cache から読み、管理 store は読まない。期限切れ → 503
+     Host.ConfigExpired、route の先や pin した revision が未配信 → 503 Host.ConfigNotDelivered、egress が policy 外 →
+     403 Host.PolicyDenied。環境再利用が off なら cold start の可否 (§4) もここで判定する。
      Revision は受付時に固定される。実行中に alias を変えても版は変わらない。
   3 payload 上限 (limits.max_payload_bytes → 413)、trace id ≤ 256 bytes、Idempotency-Key 1..=256 文字 (→ 400)。
      ここまで何も記録しない (拒否された request は key を消費しない)。Idempotency-Key が既存 Invocation に
@@ -70,7 +75,11 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      queue_deadline 超過 → 504 queue_timeout。
      Invocation の保存と Idempotency-Key の結び付けは 1 回の store 更新で行う (同 key の並行 request は
      1 つだけが受け付けられ、残りは同じ Invocation を返す)。
-  6 ExecutionEnvironment(Requested→Provisioning) を作成し、HelloAck(entrypoint, env(+secrets), limits) を組み立てる。
+  6 warm の環境が無く cold start になる場合、revision と tenant の認可が今も有効で、provider の preflight が失敗して
+     おらず、control plane が到達不能なら [control_plane_outage] allow_cold_start = true であることを確認する。
+     満たさなければ環境を作らず Failed{platform_error, Host.ConfigExpired | Host.AuthLeaseExpired |
+     Host.ProviderControlUnavailable | Host.ColdStartRestricted} (HTTP 503)。
+     ExecutionEnvironment(Requested→Provisioning) を作成し、HelloAck(entrypoint, env(+secrets), limits) を組み立てる。
      secret binding を解決できなければ環境を作らずに 502 init_error (Host.SecretBindingUnavailable。他 tenant の
      binding と存在しない binding は同じ応答)。secret backend の障害は 500 platform_error (Host.SecretBackend)。
      provider.create_environment(spec) (connect_timeout = init_deadline までの残り)。失敗 → InitError / PlatformError、環境 Failed。
@@ -149,6 +158,22 @@ max_clock_skew_ms = 2000       # 他の dispatcher の期限を判定すると�
 [reconcile]
 on_startup = true              # 起動時に provider の孤児環境を回収する（既定 true）
 
+[control_plane]                # PLT-4636。設定配信と認可 lease
+role = "combined"              # combined（管理 API + invoke）| data_plane（invoke だけ、設定は url から pull）
+# internal_token = "..."       # GET /v1/internal/config の credential と token digest の鍵（16 bytes 以上）。
+                               # combined は設定したときだけ endpoint を出す。data_plane は必須
+# url = "http://127.0.0.1:8080"  # data_plane: 管理 gateway
+refresh_interval_ms = 2000     # 到達できる間の refresh 周期
+config_ttl_seconds = 60        # function / route / revision / policy の有効期限（最後に確認した refresh の開始から）
+auth_lease_seconds = 60        # grant / tenant の有効期限（認可 lease、revoke の遅延上限）
+backoff_initial_ms = 500       # refresh 失敗後の待ち（倍々）
+backoff_max_ms = 10000
+fetch_timeout_ms = 2000
+allowed_egress = ["none", "restricted", "public-web"]  # combined が配信する policy
+
+[control_plane_outage]
+allow_cold_start = true        # control plane に届かない間も、有効な設定の範囲で新しい環境を起動するか
+
 [pool]
 enabled = false                # 環境再利用（warm）。既定 off
 max_idle_per_revision = 1      # reuse key ごとに idle で残す環境数
@@ -214,6 +239,35 @@ gateway プロセスは起動のたびに新しい **dispatcher**（`dsp_<ULID>`
 | 同期 invoke の再実行 | しない。dispatch 後の失敗は `Failed` / `OutcomeUnknown` のまま（`docs/threat-model.md` §9）。例外は従来どおり「warm への `Invoke` が届かなかった」場合の cold 1 回だけ。handler の外部副作用は at-least-once（client の再送）か不明であり、exactly-once は保証しない |
 
 時計: 期限の判定は判定する側の `Clock`（本番は wall clock）で行い、`max_clock_skew_ms` までのずれは許す。これを超えて時計がずれた、または heartbeat がプロセスの停止（GC、SIGSTOP、過負荷）で lease_ttl + skew より長く止まった場合、生きている dispatcher の仕事が reclaim されうる。そのときも fencing により結果は上書きされず、環境は terminate されてから `Lost` になる（handler の途中で止められうる）。
+
+### 設定配信と認可 lease（PLT-4636）
+
+決定と比較は `docs/adr/0007-config-distribution-and-auth-leases.md`。control plane（`role = "combined"`）と data plane（`role = "data_plane"`）を分け、invoke は data plane の cache だけを読む。`combined` の gateway は自分の publication を同じプロセスで読むので、1 プロセス構成でも invoke は同じ経路を通る。
+
+```
+management gateway (combined)                          data-plane gateway (data_plane)
+  state.db: functions / aliases / revisions ─┐           ConfigCache (entry ごとに generation, valid_until)
+  [[identity.tokens]], allowed_egress ────────┤ publish    ▲  refresh: refresh_interval_ms、失敗時は backoff
+                                              ▼            │
+  config_publication（generation を 1 txn で刻印）── GET /v1/internal/config?since=<gen> (Bearer internal_token)
+                                                           │
+                                                 invoke: authenticate(grant) → resolve(function, route,
+                                                 revision, policy) → [cold start なら permit_cold_start]
+```
+
+| 仕組み | 内容 |
+|---|---|
+| 配信 | key（function / route / revision / grant / tenant / policy）ごとの entry と tombstone。grant の key は bearer token の HMAC-SHA256（鍵は `internal_token`）で、token そのものも secret の値も配信しない。revision は artifact digest・limits・egress・secret binding の参照を含む |
+| generation | `config_publication` 表と `store_meta.config_generation`（migration 004）。publish は ledger の読みと刻印を 1 トランザクションで行い、内容が変わった key だけに次の generation を付け、消えた key を tombstone にする。値の版（alias generation など）が保存済みより小さい観測は無視。counter は `state.db` にあるので再起動をまたいで単調 |
+| 有効期限 | entry の `valid_until` = 最後に確認した refresh の開始 + TTL（function / route / revision / policy は `config_ttl_seconds`、grant / tenant は `auth_lease_seconds`。control plane が配信で示す値と小さい方）。成功した refresh はすべての entry を確認し直す。状態は `unknown` / `fresh` / `stale_but_valid` / `expired` |
+| 順序 | entry は保持より大きい generation でしか置き換えない。cache より小さい generation の配信は丸ごと無視し、何も延命しない |
+| request 経路 | data plane は control plane を待たない。`combined` だけは自プロセスの設定書き込み（signal）か同じ `state.db` への他プロセスの commit（`PRAGMA data_version`）の後、または期限が近いときに答える前に refresh する |
+| 既存実行と新規起動 | 実行中の invocation と warm 環境の利用は止めない。新しい invocation は有効な grant と設定が要る。cold start はさらに、起動時点で revision と tenant の認可が有効、provider の preflight が失敗していない、control plane 到達不能なら `allow_cold_start = true` を要する。`/readyz` の `control_plane` が `existing_executions` / `new_invocations` / `new_cold_starts` / `refusal` / `reason` と cache の状態を返す |
+| 管理 API | data plane では 503 `control_plane_unavailable`（`Host.ControlPlaneUnavailable`）。store が応答しない（`RepoError::Store` / `Io`）ときも 503（`Host.StoreUnavailable`） |
+| dispatcher | 再接続（失敗の後の成功）で dispatcher lease を即座に更新し直す。停止中に reclaim されていれば fenced のまま新しい仕事を拒否する |
+| cell | data plane は control plane と同じ `data_dir` を使う（台帳・artifact store は cell で共有、判断に使う設定だけを配信で受け取る） |
+
+revoke の遅延は、control plane に届く data plane で 1 refresh、届かない data plane で最大 `auth_lease_seconds`。
 
 ### 環境 pool と再利用キー（PLT-4632）
 
@@ -292,6 +346,7 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 10. 「動いた」証跡: 環境の `BootEvidence`（guest_boot_id, host_pid, provider details）を Invocation の attempt に残し、API と CLI で表示する。
 11. 再起動で「開始したかもしれない」ものを `Failed` にしない。dispatch 済みは `OutcomeUnknown`、未 dispatch だけ `Failed`（§4「起動時の後始末」）。孤児環境の回収は listener を開ける前に済ませる。
 12. 永続化は `<data_dir>/state.db`（埋め込み SQLite、§4「永続化」、`docs/adr/0003-execution-state-persistence.md`）。repository を経由しない読み書きをしない。更新は「読んだ値を条件にした CAS」で、負けたら読み直す（`AliasService::apply`）。新しい列や表は migration を追加して入れ、適用済みの migration を書き換えない。TiDB は将来の adapter で §6 のとおり非対象のまま。
+13. invoke の経路（認証・function / route / revision / policy の解決・cold start の可否）は `ConfigCache` / `InvokeGate`（`crates/application/src/control/`）だけを読み、`FunctionRepository` / `AliasRepository` / `RevisionRepository` を直接読まない。設定の有効期限切れで実行中の invocation を止めない（§4「設定配信と認可 lease」、ADR-0007）。
 
 ## 6. 非対象（P1）
 

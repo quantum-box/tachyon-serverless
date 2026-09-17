@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4633、PLT-4645、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4633、PLT-4636、PLT-4645、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -395,6 +395,31 @@ Issue 名は「Kata 統合試験」だが、ADR-0001 により KVM 統合は Fir
 | 9 | 検証: 意図的な fixture 破損で CI 失敗を確認 | 実装済み（ローカル） | `scripts/ci/prove-gates.sh`、`docs/evidence/ci-gates-20260917T041348Z/`（origin/main（PR #13 まで）へ rebase した commit `88c0a92` で実行。baseline 3 gate PASS、既知の悪い変更 16 件すべて検出。golden fixture の手編集、`docs/openapi.json` の手編集、wire field / tag / header の rename、API schema field の rename を含む）。破損を含む branch は push していないので、GitHub Actions 上での失敗は確認していない |
 | 10 | runtime profile 変更時の canary / rollback 手順を残す | 実装済み（文書） / 未検証（実施） | `docs/ci.md` §6、`kvm-integration.yml` の `workflow_dispatch` 入力 `firecracker_version` / `ci_version` / `guest_kernel_series` |
 
+## PLT-4636 regional 設定 cache・認可 lease・control plane 停止時の挙動
+
+control plane（`combined`）が generation 付きの設定を配信し、data plane（`data_plane`、または `combined` 自身）が期限付き cache と認可 lease だけで invoke を受け付ける構成を実装した（`docs/adr/0007-config-distribution-and-auth-leases.md`、`docs/architecture.md` §4「設定配信と認可 lease」、`docs/api.md` §7、`docs/threat-model.md` B5・T25・T26・§14-9）。記録日 2026-09-17、branch `feat/plt-4636-config-cache`。単一 region / cell のみ。テストは次で再現する: `cargo test -p tachyon-serverless-application --test config_cache`、`cargo test -p tachyon-serverless-application --lib -- control repository::config config::tests::control_plane error::tests`、`cargo test -p tachyon-serverless-gateway --test gateway_integration`、`scripts/control-plane/outage-e2e.sh`。単体・結合テストの provider は fake、E2E は process provider（隔離なし）で、**Firecracker では実行していない**。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 有効期限内の配信済み設定だけで、既存環境への Invoke を継続できる | 実装済み（fake provider / process provider の 2 プロセス E2E） | `tests/config_cache.rs::invokes_continue_from_the_cache_while_the_control_plane_is_down`（refresh 失敗後、TTL の半分まで invoke 成功、entry は `stale_but_valid`、`/readyz` 相当の view は `control_plane_reachable: false` / `new_invocations: accepted`）、warm 環境の継続は `the_outage_policy_restricts_cold_starts_but_not_running_environments`（`allow_cold_start = false` でも `StartKind::Warm` で成功）。HTTP: `gateway_integration.rs::a_data_plane_gateway_serves_invokes_from_delivered_configuration`。E2E: `docs/evidence/20260917T045347Z-split-process/` step 10（管理 gateway を SIGTERM で止めた後も data plane の invoke が 200、`readyz-control-plane-down.json`）と step 12（停止の前から走っていた cpu-burn の invocation が TTL 切れの後に 200） |
+| 2 | 認可 lease 期限切れ / 不明な tenant / 未配信版は新規受付を拒否する | 実装済み | lease 切れ: `tests/config_cache.rs::new_work_is_refused_exactly_at_valid_until_with_the_matching_reason`（`valid_until - 1 ms` は成功、`valid_until` で `Host.AuthLeaseExpired`、台帳に invocation が増えない）。不明な tenant: `unknown_tenants_and_undelivered_revisions_are_refused`（grant だけ届いた credential は `Host.UnknownTenant`、tenant が届くと成功）。未配信版: 同テスト（management で作った pin 用 revision は data plane で `Host.ConfigNotDelivered`、同じ時点の management では成功、次の refresh 後は data plane でも成功）。初回配信前: `invokes_continue_...`（`Host.ConfigNotDelivered`）。E2E step 13（`refusal-auth-lease-expired.json`） |
+| 3 | 管理 API / Kubernetes API 停止時に、既存実行と新規起動の制限を区別して返す | 実装済み（Kubernetes は provider 制御 API に読み替え） | `/readyz` の `control_plane.{existing_executions, new_invocations, new_cold_starts, refusal, reason}`。管理 API 停止: `tests/config_cache.rs::{new_work_is_refused_exactly_at_valid_until_with_the_matching_reason, the_outage_policy_restricts_cold_starts_but_not_running_environments}`（`existing_executions: continue` のまま `new_invocations: refused` / `Host.ConfigExpired`、`allow_cold_start = false` では再利用 off なら受付前に 503 `Host.ColdStartRestricted`、on なら warm は成功し cold が要る invocation だけ `Failed{Host.ColdStartRestricted}` / HTTP 503）。provider 制御 API 停止: `a_failing_provider_control_api_refuses_cold_starts_only`（preflight 失敗後の cold start は 503 `Host.ProviderControlUnavailable`、`control_plane_reachable: true` のまま）。data plane の管理 API は 503 `Host.ControlPlaneUnavailable`、store 障害は 503 `Host.StoreUnavailable`: `gateway_integration.rs::a_data_plane_gateway_serves_invokes_from_delivered_configuration`、`error.rs::tests::control_refusals_are_distinct_and_retryable_ones_are_503`。E2E step 6・11（`readyz-config-expired.json`: `ready: false`、`existing_executions: continue`、`refusal: Host.ConfigExpired`）。**provider 制御 API の停止は fake provider でだけ確認し、E2E では再現していない** |
+| 4 | 古い generation が新設定を巻き戻さず、接続回復後に収束する | 実装済み | 順序逆転: `tests/config_cache.rs::older_generations_never_roll_back_a_newer_configuration`（新しい配信の後に古い全量配信 → 丸ごと無視、現在の generation を名乗る古い route entry → entry 単位で無視、後退した配信は有効期限を延ばさない）、刻印側: `repository/config.rs::tests::stamps_changes_ignores_stale_values_and_tombstones_removals`、再起動をまたぐ単調性: `generations_are_monotonic_across_control_plane_restarts`。収束: `a_reconnect_converges_to_the_latest_generation`（切断中に publish した rev2 に、再接続の最初の refresh で generation ごと追いつく）、`a_revoked_token_stops_working_within_one_refresh_or_one_auth_lease`。E2E step 7（deploy v2 の 0.9 s 以内に data plane が v2）・step 15（管理 gateway の再起動から 0.5 s で受付再開、`readyz-reconnected.json` の `cache.reconnects = 1`、tenant B の token を消した再起動で B は 401） |
+
+検証項目:
+
+| 検証 | 状態 | 証跡 |
+|---|---|---|
+| 接続断 | 実装済み | 上の #1、E2E（管理 gateway の SIGTERM） |
+| 期限境界 | 実装済み（注入した `FixedClock`） / 実時間は E2E で 1 回 | `new_work_is_refused_exactly_at_valid_until_with_the_matching_reason`（config TTL 20 s と auth lease 30 s のそれぞれ ±1 ms）。E2E: 停止から 7.9 s で最初の `Host.ConfigExpired`（config TTL 8 s、refresh 0.5 s。script は TTL - refresh - 1 s 〜 TTL + 3 s を要求） |
+| 設定順序逆転 | 実装済み | 上の #4 |
+| revoke の遅延上限 | 実装済み（文書化: 1 refresh / 最大 `auth_lease_seconds`） | `a_revoked_token_stops_working_within_one_refresh_or_one_auth_lease`、`docs/threat-model.md` §14-9 |
+| dispatcher owner の再接続 | 実装済み（1 プロセス内に 2 つの `Application`） | `a_dispatcher_fenced_during_the_outage_stays_fenced_after_the_reconnect`（停止中に reclaim された data plane は再接続で即座に `Fenced` を知り、invoke は 503 `provider_unavailable` のまま）。E2E の再接続ログ `control plane reachable again; ... dispatcher lease re-validated`（`data-plane.log`） |
+| 2 プロセス E2E | 実装済み（process provider） / 未検証（Firecracker） | `scripts/control-plane/outage-e2e.sh`、`docs/evidence/20260917T045347Z-split-process/`（19/19 PASS）。既存 E2E の回帰: `docs/evidence/20260917T045324Z-process/`（`scripts/e2e/demo.sh`、28/28 PASS） |
+| 予算 token との接続 | 未着手（P3、PLT-4643） | policy は egress profile の許可だけ |
+
+残り・制約: data plane は control plane と同じ `data_dir`（台帳と artifact store を共有する 1 cell）でしか動かない（独立した store と artifact 配布は後続）。配信は平文 HTTP で `internal_token` の rotation 手順は無い。`combined` の gateway は同じ `state.db` への他プロセスの commit のたびに publication を刻印し直す（function 数に比例）。期限は data plane の wall-clock で判定し、時計のずれの補正は無い。複数 region / cell、push 配信は未着手。
+
 ## ADR-0001 残る測定の状況
 
 測定の定義は `docs/adr/0001-execution-provider-firecracker-first.md` §「残る測定」。値はすべて aarch64 の nested virtualization 上の参考値（§「証跡」の制約を参照）。
@@ -433,4 +458,4 @@ Issue 名は「Kata 統合試験」だが、ADR-0001 により KVM 統合は Fir
 ## 更新ルール
 
 - 各 PR で該当行の状態と証跡を更新する。「実装済み」にするときはテスト名・ファイルが実在することを、「KVM実測あり」にするときは `docs/evidence/` の該当ディレクトリを PR で示す。
-- 実機の記録の置き場所: `scripts/e2e/demo.sh` は `docs/evidence/<UTC>-<provider>/`、`scripts/kvm/smoke.sh` は `docs/evidence/kvm-<UTC>/` に書く。profile（host arch、nested virtualization の有無、vCPU / memory、kernel / rootfs の sha256）を読み取れるようにする。
+- 実機の記録の置き場所: `scripts/e2e/demo.sh` は `docs/evidence/<UTC>-<provider>/`、`scripts/control-plane/outage-e2e.sh` は `docs/evidence/<UTC>-split-process/`、`scripts/kvm/smoke.sh` は `docs/evidence/kvm-<UTC>/` に書く。profile（host arch、nested virtualization の有無、vCPU / memory、kernel / rootfs の sha256）を読み取れるようにする。

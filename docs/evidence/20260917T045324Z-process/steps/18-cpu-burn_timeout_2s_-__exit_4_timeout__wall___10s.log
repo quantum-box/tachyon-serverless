@@ -1,0 +1,9 @@
+uploading /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a27f5b94059720f62/target/debug/example-cpu-burn (3528720 bytes, arch aarch64)
+artifact sha256:7dac9429921a6e8698e84a05378291e4d9f9635899081c0a467993e2b81d5ae7
+revision rev_01m2pvd4cbzb7sz0edf86yc200 (#2) created: pending
+revision rev_01m2pvd4cbzb7sz0edf86yc200 is preparing
+revision rev_01m2pvd4cbzb7sz0edf86yc200 is ready
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: timeout (HTTP 504): invocation inv_01m2pvd4nh3003335gdngg776g failed: Host.Timeout: handler did not finish within 2 s [type=Host.Timeout] [invocation=inv_01m2pvd4nh3003335gdngg776g] [request=01m2pvd4nef3pv6atswwrbvrqn]
+[e2e] timeout invoke took 3322 ms
+[e2e] host-enforced execution window: 3000 ms (timeout 2000 ms + grace 1000 ms)
