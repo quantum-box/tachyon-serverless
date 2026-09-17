@@ -6,8 +6,12 @@
 //! request asked for `publish_to_prod`, the `prod` alias is pointed at the
 //! revision once it is Ready.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+
+use parking_lot::Mutex;
+use tokio::sync::watch;
 
 use tachyon_serverless_api_types::{ArtifactRequest, CreateRevisionRequest};
 use tachyon_serverless_domain::{
@@ -34,6 +38,12 @@ pub struct RevisionService {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGenerator>,
     limits: Limits,
+    /// Background validations still running in this process, each resolved
+    /// once the task is completely done — including the `prod` publish that
+    /// follows `Ready`. Marking the revision `Ready` and moving the alias are
+    /// two store writes, so "the revision is Ready" alone does not mean "the
+    /// alias points at it yet".
+    validations: Mutex<HashMap<RevisionId, watch::Receiver<bool>>>,
 }
 
 impl RevisionService {
@@ -54,6 +64,7 @@ impl RevisionService {
             clock,
             ids,
             limits,
+            validations: Mutex::new(HashMap::new()),
         }
     }
 
@@ -194,8 +205,12 @@ impl RevisionService {
         let this = Arc::clone(self);
         let id = revision.id.clone();
         let publish = req.publish_to_prod;
+        let (done_tx, done_rx) = watch::channel(false);
+        self.validations.lock().insert(id.clone(), done_rx);
         tokio::spawn(async move {
             this.validate(&id, publish).await;
+            this.validations.lock().remove(&id);
+            let _ = done_tx.send(true);
         });
         Ok(revision)
     }
@@ -226,12 +241,22 @@ impl RevisionService {
     }
 
     /// Poll until the revision reaches a terminal status or `timeout` elapses.
+    ///
+    /// When this process runs the revision's validation, it also waits for
+    /// that task to finish, so a `Ready` revision created with
+    /// `publish_to_prod` is already behind the `prod` alias when this returns
+    /// (the two are separate store writes; without the wait a caller could
+    /// see `Ready` and still find no alias).
     pub async fn wait_terminal(
         &self,
         revision_id: &RevisionId,
         timeout: Duration,
     ) -> Result<FunctionRevision, AppError> {
         let deadline = tokio::time::Instant::now() + timeout;
+        let validation = self.validations.lock().get(revision_id).cloned();
+        if let Some(mut done) = validation {
+            let _ = tokio::time::timeout_at(deadline, done.wait_for(|finished| *finished)).await;
+        }
         loop {
             let rev = self
                 .repos
