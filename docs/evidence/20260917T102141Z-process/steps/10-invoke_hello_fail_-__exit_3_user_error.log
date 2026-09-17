@@ -1,0 +1,2 @@
+!! WARNING: this provider has NO isolation (dev_only). Functions run as plain host processes. Never use it outside development. !!
+error: user_error (HTTP 502): invocation inv_01m2qe6c80sht6hv6h34stbteg failed: Demo.Failure: fail requested [type=Demo.Failure] [invocation=inv_01m2qe6c80sht6hv6h34stbteg] [request=01m2qe6c80rk0be07gfrnd298e]

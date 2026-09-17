@@ -31,7 +31,7 @@
 | Method | Path | 役割 | 200 系 | 主なエラー |
 |---|---|---|---|---|
 | GET | `/healthz` | liveness | 200 | — |
-| GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）、`usage`（usage journal・collector・ledger の運用状態、PLT-4642、§5.10.1）。usage journal が満杯・停止で受付を拒否している間も 503） | 200 | 503 |
+| GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）、`usage`（usage journal・collector・ledger の運用状態、PLT-4642、§5.10.1）、`budget`（予算の強制の運用状態、PLT-4643、§5.10.2）。usage journal が満杯・停止、または予算 store の停止・collector の停止で受付を拒否している間も 503） | 200 | 503 |
 | GET | `/metrics` | Prometheus text exposition（PLT-4637、`docs/metrics.md`）。全 tenant の revision・待ちを含むので `[metrics] bearer_token` の operator credential だけを受け付ける（tenant の token は operator role でも 401）。未設定の gateway には無い | 200 `text/plain; version=0.0.4` | 401, 404 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
 | GET | `/v1/capacity` | node の容量と予約・状態別の環境数・待ち行列・start rate・拒否数・自 tenant の revision（PLT-4634、§5.1.1）、scale policy・route 状態・最後の scale event と `scaling`（PLT-4635、§8） | 200 `CapacityInfo` | 401 |
@@ -54,6 +54,7 @@
 | POST | `/v1/invocations/{invocation_id}:cancel`<br>`/v1/invocations/{invocation_id}/cancel` | 実行中の Invocation を cancel | 200 `InvocationResponse` (`cancelled`) | 404, 409（既に terminal） |
 | GET | `/v1/invocations/{invocation_id}/logs` | ログ（invocation 単位、行数 / bytes 上限あり） | 200 `LogsResponse` | 404 |
 | GET | `/v1/functions/{function_id}/usage` | 使用量集計（課金ではない） | 200 `UsageSummaryResponse` | 404 |
+| GET | `/v1/budget` | token の tenant の予算（PLT-4643、§5.10.2。仮料金の単位、決済はしない）。query: `period`（`YYYY-MM`、既定は今月 UTC） | 200 `BudgetReportResponse` | 400（`period`）, 401, 403（`invoke` role が無い）, 503 `budget_unavailable`（store 停止） |
 | GET | `/v1/usage` | token の tenant の**仮**利用量・仮料金の報告（PLT-4642、§5.10.1。請求書ではない）。query: `from`, `to`（RFC 3339 か `YYYY-MM-DD`）、`group_by`（`function` / `day` / `function,day` / `none`）、`function_id` | 200 `UsageReportResponse` | 400（範囲・`group_by`）, 401, 403（`invoke` role が無い） |
 | POST | `/v1/functions/{function_id}/triggers` | cron / webhook trigger の作成（PLT-4641、§5.11、`deploy` role）。webhook の `secret` はこの応答にだけ入る | 201 `TriggerResponse` | 400, 403, 404, 409（function 削除済み・`max_triggers_per_function`）, 413（cron payload）, 503 `async_unavailable`（`not_configured`） |
 | GET | `/v1/functions/{function_id}/triggers`<br>`/v1/functions/{function_id}/triggers/{trigger_id}` | 一覧・取得（削除済みは含まない。secret は返さない） | 200 `ListResponse<TriggerResponse>` / `TriggerResponse` | 404 |
@@ -149,6 +150,8 @@ admission（PLT-4634、`docs/adr/0006-autoscaling-and-admission.md`）が拒否�
 
 | `async_unavailable` | 503 | 非同期 invoke を今は durable に受け付けられない（PLT-4639、§5.6.1）。`reason`: `queue_unavailable`（queue に届かず outbox も上限）、`object_store_unavailable`、`not_configured`（`[queue]` が無い、または台帳が揮発）。何も記録しない | 6 |
 | `usage_journal_full` | 503 | 利用量を計測できないので新しい invoke を受け付けない（PLT-4642、fail closed）。`reason`: `usage_journal_full`（`error_type = Host.UsageJournalFull`、未回収 event が上限の headroom に達した）/ `usage_journal_unavailable`（`Host.UsageJournalUnavailable`、journal を開けない・書けない）。invocation を作らず、`Idempotency-Key` も消費しない（結び付いた key の replay は答える） | 6 |
+| `budget_exhausted` | 429 | tenant / function の hard limit が、この invocation の最大料金を認めない（PLT-4643、§5.10.2）。`reason = budget`、`error_type = Host.BudgetExhausted`。quota（`capacity_exceeded` / `reason = quota`）とは別。invocation を作らず capacity の grant も取らない。queue で待った後、grant の時点の再確認で拒否された invocation は `Failed{platform_error, Host.BudgetExhausted}` で同じ code | 2 |
+| `budget_unavailable` | 503 | 予算を強制できないので新しい invoke を受け付けない（PLT-4643、fail closed）。`reason = budget`。`error_type`: `Host.BudgetUnknown`（予算が未配信・削除・auth lease 切れ・価格表の不一致、または終わった run の精算が `max_unsettled_age_seconds` より遅れている = collector 停止）/ `Host.BudgetStoreUnavailable`（予算 store を開けない・書けない）。実行中の invocation は止めない | 6 |
 
 `forbidden`（403）には PLT-4636 で `Host.UnknownTenant`（grant はあるが tenant が配信されていない / 削除された）と `Host.PolicyDenied`（revision の egress profile が配信された policy で許可されていない）が加わった。
 
@@ -847,6 +850,64 @@ token の tenant の、host が測った利用量を version 付き価格表で�
 - `from` の既定は `to` の 31 日前（価格表の `effective_from` より前には伸ばさない）。範囲は最大 92 日、`from` が `effective_from` より前なら 400。日付は event の host wall clock（UTC）。
 - `/readyz` の `usage`: `accepting` / `metered` / `policy` / `billing_enabled` / `price_table_version`、`journal`（`healthy`、`pending_events` / `pending_bytes`、`cursor_seq`、`limits`、`admitting`、`unjournaled_events`、`last_error`）、`collector`（`runs`、`last_success_at`、`last_error`、`delivered` / `inserted` / `duplicates`）、`ledger`（`events`、`duplicates_ignored`）。tenant の情報は含まない。
 
+### 5.10.2 `GET /v1/budget` → `BudgetReportResponse`（PLT-4643）
+
+token の tenant の、1 期間（UTC の暦月）の予算（`docs/adr/0016-budget-reservation-and-admission.md`）。金額は PLT-4642 の価格表の通貨の 10⁻⁶ 単位で、**仮料金**。`provisional` は常に true、`billing_enabled` は常に false。予算の設定は control plane から設定 cache で配信され（§7、`ConfigKey::Budget`、auth lease で失効）、予約・精算は `<data_dir>/usage/budget.db`。
+
+```json
+{
+  "enabled": true,
+  "provisional": true,
+  "billing_enabled": false,
+  "notice": "provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype",
+  "tenant_id": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+  "period": "2026-09",
+  "period_kind": "calendar_month_utc",
+  "period_start": "2026-09-01T00:00:00Z",
+  "period_end": "2026-10-01T00:00:00Z",
+  "currency": "JPY",
+  "price_table_version": "provisional-dev-2026-09-v1",
+  "config_state": "valid",
+  "config_generation": 12,
+  "admitting": true,
+  "tenant": {
+    "soft_limit_micros": 15717,
+    "alert_thresholds_percent": [50, 100],
+    "hard_limit_micros": 526857,
+    "reserved_micros": 146040,
+    "settled_micros": 19911,
+    "unmetered_hold_micros": 0,
+    "committed_micros": 165951,
+    "remaining_micros": 360906,
+    "overrun_micros": 0,
+    "active_reservations": 1,
+    "reservations": 5, "settlements": 4, "releases": 0, "expiries": 0, "refusals": 5,
+    "alerts_fired": [{"threshold_percent": 50, "soft_limit_micros": 15717, "consumed_micros": 19911, "fired_at": "2026-09-17T09:28:41Z"}]
+  },
+  "functions": [],
+  "guarantee": ["covers only the provisional rating of PLT-4642: ...", "..."]
+}
+```
+
+| field | 意味 |
+|---|---|
+| `enabled` | この gateway が予算を強制するか（`[budget] enabled`） |
+| `config_state` / `config_generation` | 配信された予算の状態（`valid` / `expired`（auth lease 切れ）/ `not_delivered`（未配信・削除））と generation |
+| `admitting` / `refusal` | 予算の面で新規 invoke を受け付けるか、受け付けないならその `error_type`（function ごとの上限は含まない） |
+| `soft_limit_micros` / `alert_thresholds_percent` | **alert** の設定。消費（settled + unmetered hold）が閾値を初めて越えたとき 1 回ずつ `alerts_fired` に載る。何も止めない |
+| `hard_limit_micros` | **停止**の設定。`committed` + 次の run の最大料金がこれを超えるなら 429 `budget_exhausted`。無ければ止めない |
+| `reserved_micros` | 未精算の run が予約している**最大料金**の合計（timeout・初期化 timeout・要求 vCPU / memory・課金区間・最大 response size から計算） |
+| `settled_micros` | 精算済み run の仮料金（ledger の `AttemptSettled` を rating した値。run ごとに丸めるので `GET /v1/usage` とは run 1 件あたり数 micro-unit 以内でずれうる） |
+| `unmetered_hold_micros` | 計測しきれなかった run の予約の残り（終わりを報告しなかった run は最大額、journal に入らなかった・unknown の区間があった run は差額）。上限には数えるが**課金額ではない** |
+| `committed_micros` / `remaining_micros` | `reserved + settled + unmetered_hold`、`hard_limit - committed`（0 で止まる。hard limit が無ければ省略） |
+| `overrun_micros` | 実測が予約を超えた額（全額精算）。確約が上限を超えるのはこの分だけ |
+| `functions[]` | 予算のある function と、期間内に予約のあった function。同じ欄 |
+| `guarantee` | 金額が保証する範囲と保証しない範囲（ADR-0016 §7） |
+
+- operator role は 403。他 tenant の予算・function は含まれない（`period` 以外の指定は無い）。
+- 予約は run（同期 invoke は invocation）ごとに 1 つ。queue で待った invocation は grant の時点で予算を再確認する。
+- `/readyz` の `budget`: `enabled`、`accepting`、`refusal`、`period`、`price_table_version`、`store`（`healthy`、`durable`、`path`、`stats`（`active_reservations`、`finished_unsettled`、`oldest_finished_unsettled_at`）、`last_error`）、`collector_stalled`、`max_unsettled_age_seconds`、`oldest_unsettled_age_seconds`、`expiry_grace_seconds`、このプロセスの `counters`、`publication`（control plane: file、再読込回数、最後のエラー）。tenant の情報は含まない。
+
 ## 6. invoke のステータス早見表
 
 | 状況 | HTTP | `error.code` |
@@ -909,7 +970,7 @@ data plane は `[[identity.tokens]]` を持てない（token は control plane �
 }
 ```
 
-- key の `kind`: `function` / `route` / `revision` / `grant`（`token_digest` = HMAC-SHA256(internal_token, bearer token) の hex）/ `tenant` / `policy`。
+- key の `kind`: `function` / `route` / `revision` / `grant`（`token_digest` = HMAC-SHA256(internal_token, bearer token) の hex）/ `tenant` / `policy` / `budget`（`tenant_id`、tenant の予算。auth lease で失効、PLT-4643 §5.10.2）。
 - `value: null` は tombstone（削除・revoke）。
 - generation は control plane の `state.db` に刻まれ、再起動をまたいで単調に増える。
 

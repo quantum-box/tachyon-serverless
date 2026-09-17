@@ -125,6 +125,10 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      UsageEvent は計測点で usage journal に同期 append してから次へ進む。attempt の後始末の後に AttemptSettled
      (区間・outcome・bytes)、環境の終わりに EnvironmentStopped (PLT-4642、§4「usage の計測と仮料金」)。
      新規 invoke は受付前に journal の残量を確認し、満杯・停止なら 503 usage_journal_full で何も記録しない。
+     [budget] enabled の gateway は、static admission（placement・quota 0 等）の後・queue / capacity の前に
+     run の最大料金を予算 store に予約し（上限を超えるなら 429 budget_exhausted、予算不明・collector 停止・
+     store 停止なら 503 budget_unavailable）、queue で待った run は grant の時点で再確認する。run の終わりに
+     AttemptSettled を出した attempt id を記録し、collector の後に ledger の実測で精算する (PLT-4643、§4「予算」)。
  11 client 切断は完了と見なさない。invoke タスクは spawn され、切断後も deadline まで追跡し記録する。
 ```
 
@@ -276,6 +280,25 @@ collect_batch = 500
 # price_table = "config/price-table.toml"   # 省略時は組み込みの provisional-dev-2026-09-v1
 [usage.billing]
 enabled = false                # true は設定エラー（prototype では請求を無効に固定）
+
+[budget]                       # PLT-4643。予算の予約・上限・alert（仮料金の単位。決済はしない）
+enabled = false                # true: 実行前に最大料金を予約し、予算が分からなければ受付を止める
+period = "calendar_month_utc"  # 唯一の期間
+# file = "config/budgets.toml" # publication のたびに読み直す（inline の tenants と併用不可）
+reservation_slack_ms = 250     # 最大料金の billable ms に足す余裕
+expiry_grace_seconds = 30      # 終わりを報告しない run は run deadline + これで失効（最大額を hold）
+max_unsettled_age_seconds = 30 # 終わった run の精算がこれより遅れたら 503 Host.BudgetUnknown
+settle_batch = 500
+# [[budget.tenants]]
+# tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+# soft_limit_micros = 1000000          # alert の基準（止めない）
+# alert_thresholds_percent = [50, 80, 100]
+# hard_limit_micros = 5000000          # 停止（確約 = 予約 + 精算済み + unmetered hold）
+# [[budget.tenants.functions]]
+# function_id = "fn_..."
+# hard_limit_micros = 1000000
+# [budget.default_tenant]              # entry の無い tenant の予算。無ければその tenant は Host.BudgetUnknown
+# hard_limit_micros = 0
 
 [[identity.tokens]]
 token = "dev-token-tenant-a"
@@ -501,7 +524,34 @@ GET /v1/usage ── ledger（token の tenant だけ）──▶ rating（価�
 | 重複・再起動 | ledger は `event_id` で重複を捨てる。collector は ledger commit の後にだけ cursor を進めるので、crash は再配送になり二重計上にならない |
 | 時計 | 量は monotonic。wall clock は日付への振り分けと `wall_clock_skew_ms` の記録だけ。環境寿命（原価）は台帳の wall clock の差で参考値 |
 | 境界 | 利用量（`usage`）・仮料金（`provisional_charges_micros`、価格表 version 付き）・原価（`cost`）・不明（`unmetered` / `unjournaled_events`）・guest 申告を別の欄に出す。表は `function_usage_*` で、tachyon-apps の build 課金とは別 pipeline。`[usage.billing] enabled = true` は設定エラー |
-| 範囲外 | 実請求・決済、予算上限、stream（JetStream）経由の配送、regional ledger、Firecracker 実機での cgroup 値の確認 |
+| 範囲外 | 実請求・決済、stream（JetStream）経由の配送、regional ledger、Firecracker 実機での cgroup 値の確認。予算上限は次節（PLT-4643） |
+
+### 予算の予約・上限・fail closed（PLT-4643）
+
+決定は `docs/adr/0016-budget-reservation-and-admission.md`、API は `docs/api.md` §5.10.2。
+
+```
+control plane: [budget] (inline / file を publication ごとに再読込) ──ConfigKey::Budget{tenant} (auth lease, generation)──▶ ConfigCache
+invoke: 設定 cache → usage journal → static admission (precheck) → BudgetService::reserve → queue / capacity (admit)
+          reserve: 最大料金 = f(timeout・初期化 timeout・handshake・cancel grace、要求 vCPU / memory、課金区間、
+                   request × 2 + max response bytes、invocation 1) を <data_dir>/usage/budget.db に
+                   BEGIN IMMEDIATE で「totals を読む → 上限検査 → 行と totals を書く」(CAS)
+          admit が拒否 / idempotency の競合に負け → release
+driver:   queue で待った run は grant 時に recheck → run の終わりに finish(AttemptSettled を出した attempt id、journal head)
+collector の後 (Application::collect_usage): settle_ready
+          finish 済み: ledger に attempt が揃う or journal cursor ≥ head → rating で置き換え（不足分は unmetered hold）
+          未 finish で run deadline + grace を過ぎた: expire（最大額を unmetered hold）
+```
+
+| 項目 | 内容 |
+|---|---|
+| 状態 | `reserved → settled \| released \| expired`。遷移は `WHERE state = 'reserved'` で冪等、totals は同じトランザクションで動き `CHECK (>= 0)` |
+| 判定 | 停止は確約（reserved + settled + unmetered hold）と `hard_limit_micros`、alert は消費（settled + hold）と `soft_limit_micros × alert_thresholds_percent`。別の設定 |
+| 拒否 | 429 `budget_exhausted`（`Host.BudgetExhausted`）、503 `budget_unavailable`（`Host.BudgetUnknown` / `Host.BudgetStoreUnavailable`）。`reason` は常に `budget`。quota / capacity の拒否とは別 |
+| fail closed | 予算の未配信・tombstone・auth lease 切れ・価格表の不一致、finish 済み run の精算の遅れ（`max_unsettled_age_seconds`）、store 停止 → 新規を拒否。開始済みの run は止めない |
+| 設定変更 | 上げ下げは以後の受付に効く。確約より下げても実行中は継続、queue の run は grant 時に拒否 |
+| 金額の範囲 | PLT-4642 の仮料金（課金区間・要求資源・転送・invocation）だけ。原価・複数 region・決済は対象外。overrun は全額精算し数える |
+| 非同期 | PLT-4640 の `run_async` も同じ precheck → reserve → admit を通り、driver に `BudgetRun` を渡す（run id `<invocation>:run-<attempt_base>:<ulid>`）。予算による拒否は dispatcher が attempt を数えずに defer する。`invokeAsync` の受付（202）は予算を見ない |
 
 ### 非同期 invoke と outbox（PLT-4639）
 
