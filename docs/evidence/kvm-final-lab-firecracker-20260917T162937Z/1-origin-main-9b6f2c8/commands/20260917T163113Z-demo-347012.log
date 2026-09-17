@@ -1,0 +1,9 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh --provider firecracker demo all
+# started:  2026-09-17T16:31:13Z
+# lab_dir:  /home/takanorifukuyama.guest/lab-main/.lab
+# lab_id:   lab-5d68f8c4
+# host:     Linux 7.0.0-31-generic aarch64 user=takanorifukuyama
+# git:      9b6f2c845be90703f9a2b93a2a9e9a034c38fb04
+2026-09-17T16:31:14Z [lab] ERROR: gateway is not running (run: scripts/lab/lab.sh up)
+# finished: 2026-09-17T16:31:14Z exit=1

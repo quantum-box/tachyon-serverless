@@ -1,0 +1,187 @@
+[e2e] benchmark 20260917T155921Z (arch aarch64, evidence /home/takanorifukuyama.guest/tsls/docs/evidence/bench-20260917T155921Z)
+[e2e] step 1: preflight (sudo, kvm, jailer + cgroup required, host not shared, disk)
+[e2e]   PASS (17 ms)
+[e2e] step 2: build (release gateway / cli, musl guests)
+[e2e]   PASS (73 ms)
+[e2e] step 3: metadata
+[e2e]   PASS (857 ms)
+[e2e] step 4: calibration before the run (BENCH_MAX_CALIBRATION_MS)
+[e2e]   PASS (252 ms)
+[e2e] calibration (before-hello): awk loop ms = 81 80 77
+[e2e] hello: fresh host trial 1
+[e2e] gateway cold (hello-fresh-1) ready in 817 ms, pid 307445
+[e2e] step 5: hello: create + deploy (fresh host 1)
+[e2e]   PASS (331 ms)
+  fresh trial 1 http=200 client=6267 boot=5520
+[e2e] hello: fresh host trial 2
+[e2e] gateway cold (hello-fresh-2) ready in 496 ms, pid 307667
+[e2e] step 6: hello: create + deploy (fresh host 2)
+[e2e]   PASS (297 ms)
+  fresh trial 2 http=200 client=5915 boot=5217
+[e2e] hello: fresh host trial 3
+[e2e] gateway cold (hello-fresh-3) ready in 467 ms, pid 307848
+[e2e] step 7: hello: create + deploy (fresh host 3)
+[e2e]   PASS (300 ms)
+  fresh trial 3 http=200 client=5931 boot=5243
+[e2e] hello: fresh host trial 4
+[e2e] gateway cold (hello-fresh-4) ready in 446 ms, pid 308028
+[e2e] step 8: hello: create + deploy (fresh host 4)
+[e2e]   PASS (289 ms)
+  fresh trial 4 http=200 client=5880 boot=5181
+[e2e] hello: fresh host trial 5
+[e2e] gateway cold (hello-fresh-5) ready in 445 ms, pid 308209
+[e2e] step 9: hello: create + deploy (fresh host 5)
+[e2e]   PASS (295 ms)
+  fresh trial 5 http=200 client=5967 boot=5210
+[e2e] step 10: hello: cold x20 (cache hit, pool off)
+[e2e]   PASS (117765 ms)
+[e2e] step 11: hello: concurrency sweep, pool off
+[e2e]   PASS (322802 ms)
+[e2e] gateway warm (hello-warm) ready in 474 ms, pid 312820
+[e2e] step 12: hello: warm prime
+[e2e]   PASS (6098 ms)
+[e2e] step 13: hello: warm x20 (pool on)
+[e2e]   PASS (6894 ms)
+[e2e] step 14: hello: paused environment cost over 60s
+[e2e]   PASS (59847 ms)
+[e2e] step 15: hello: concurrency sweep, pool on
+[e2e]   PASS (33402 ms)
+[e2e] step 16: hello: pooled environments after the sweep
+[e2e]   PASS (121 ms)
+[e2e] file system use after hello: 41%
+[e2e] calibration (before-http-axum): awk loop ms = 80 80 80
+[e2e] http-axum: fresh host trial 1
+[e2e] gateway cold (http-axum-fresh-1) ready in 527 ms, pid 316860
+[e2e] step 17: http-axum: create + deploy (fresh host 1)
+[e2e]   PASS (307 ms)
+  fresh trial 1 http=200 client=5959 boot=5226
+[e2e] http-axum: fresh host trial 2
+[e2e] gateway cold (http-axum-fresh-2) ready in 489 ms, pid 317038
+[e2e] step 18: http-axum: create + deploy (fresh host 2)
+[e2e]   PASS (324 ms)
+  fresh trial 2 http=200 client=5827 boot=5132
+[e2e] http-axum: fresh host trial 3
+[e2e] gateway cold (http-axum-fresh-3) ready in 493 ms, pid 317217
+[e2e] step 19: http-axum: create + deploy (fresh host 3)
+[e2e]   PASS (321 ms)
+  fresh trial 3 http=200 client=5841 boot=5125
+[e2e] http-axum: fresh host trial 4
+[e2e] gateway cold (http-axum-fresh-4) ready in 483 ms, pid 317400
+[e2e] step 20: http-axum: create + deploy (fresh host 4)
+[e2e]   PASS (321 ms)
+  fresh trial 4 http=200 client=5689 boot=4974
+[e2e] http-axum: fresh host trial 5
+[e2e] gateway cold (http-axum-fresh-5) ready in 510 ms, pid 317579
+[e2e] step 21: http-axum: create + deploy (fresh host 5)
+[e2e]   PASS (319 ms)
+  fresh trial 5 http=200 client=5644 boot=4951
+[e2e] step 22: http-axum: cold x20 (cache hit, pool off)
+[e2e]   PASS (114735 ms)
+[e2e] step 23: http-axum: concurrency sweep, pool off
+[e2e]   PASS (316372 ms)
+[e2e] gateway warm (http-axum-warm) ready in 478 ms, pid 322147
+[e2e] step 24: http-axum: warm prime
+[e2e]   PASS (6125 ms)
+[e2e] step 25: http-axum: warm x20 (pool on)
+[e2e]   PASS (6721 ms)
+[e2e] step 26: http-axum: paused environment cost over 60s
+[e2e]   PASS (59845 ms)
+[e2e] step 27: http-axum: concurrency sweep, pool on
+[e2e]   PASS (26815 ms)
+[e2e] step 28: http-axum: pooled environments after the sweep
+[e2e]   PASS (139 ms)
+[e2e] file system use after http-axum: 41%
+[e2e] calibration (before-cpu-burn): awk loop ms = 85 77 79
+[e2e] cpu-burn: fresh host trial 1
+[e2e] gateway cold (cpu-burn-fresh-1) ready in 493 ms, pid 326183
+[e2e] step 29: cpu-burn: create + deploy (fresh host 1)
+[e2e]   PASS (314 ms)
+  fresh trial 1 http=200 client=5895 boot=4993
+[e2e] cpu-burn: fresh host trial 2
+[e2e] gateway cold (cpu-burn-fresh-2) ready in 478 ms, pid 326362
+[e2e] step 30: cpu-burn: create + deploy (fresh host 2)
+[e2e]   PASS (310 ms)
+  fresh trial 2 http=200 client=5702 boot=4883
+[e2e] cpu-burn: fresh host trial 3
+[e2e] gateway cold (cpu-burn-fresh-3) ready in 480 ms, pid 326545
+[e2e] step 31: cpu-burn: create + deploy (fresh host 3)
+[e2e]   PASS (316 ms)
+  fresh trial 3 http=200 client=5728 boot=4916
+[e2e] cpu-burn: fresh host trial 4
+[e2e] gateway cold (cpu-burn-fresh-4) ready in 482 ms, pid 326723
+[e2e] step 32: cpu-burn: create + deploy (fresh host 4)
+[e2e]   PASS (314 ms)
+  fresh trial 4 http=200 client=5867 boot=5053
+[e2e] cpu-burn: fresh host trial 5
+[e2e] gateway cold (cpu-burn-fresh-5) ready in 478 ms, pid 326902
+[e2e] step 33: cpu-burn: create + deploy (fresh host 5)
+[e2e]   PASS (307 ms)
+  fresh trial 5 http=200 client=5619 boot=4739
+[e2e] step 34: cpu-burn: cold x20 (cache hit, pool off)
+[e2e]   PASS (113564 ms)
+[e2e] step 35: cpu-burn: concurrency sweep, pool off
+[e2e]   PASS (312042 ms)
+[e2e] gateway warm (cpu-burn-warm) ready in 425 ms, pid 331467
+[e2e] step 36: cpu-burn: warm prime
+[e2e]   PASS (6085 ms)
+[e2e] step 37: cpu-burn: warm x20 (pool on)
+[e2e]   PASS (11474 ms)
+[e2e] step 38: cpu-burn: paused environment cost over 60s
+[e2e]   PASS (59844 ms)
+[e2e] step 39: cpu-burn: concurrency sweep, pool on
+[e2e]   PASS (42548 ms)
+[e2e] step 40: cpu-burn: pooled environments after the sweep
+[e2e]   PASS (139 ms)
+[e2e] file system use after cpu-burn: 41%
+[e2e] calibration (end): awk loop ms = 84 75 76
+[e2e] step 41: cleanup proof (no gateway, VMM, jail, cgroup, tap, env dir)
+[e2e]   PASS (24 ms)
+wrote /home/takanorifukuyama.guest/tsls/docs/evidence/bench-20260917T155921Z/summary.json and /home/takanorifukuyama.guest/tsls/docs/evidence/bench-20260917T155921Z/summary.md
+
+#    STATUS MS        STEP
+---- ------ --------- ----------------------------------------
+1    PASS   17        preflight (sudo, kvm, jailer + cgroup required, host not shared, disk)
+2    PASS   73        build (release gateway / cli, musl guests)
+3    PASS   857       metadata
+4    PASS   252       calibration before the run (BENCH_MAX_CALIBRATION_MS)
+5    PASS   331       hello: create + deploy (fresh host 1)
+6    PASS   297       hello: create + deploy (fresh host 2)
+7    PASS   300       hello: create + deploy (fresh host 3)
+8    PASS   289       hello: create + deploy (fresh host 4)
+9    PASS   295       hello: create + deploy (fresh host 5)
+10   PASS   117765    hello: cold x20 (cache hit, pool off)
+11   PASS   322802    hello: concurrency sweep, pool off
+12   PASS   6098      hello: warm prime
+13   PASS   6894      hello: warm x20 (pool on)
+14   PASS   59847     hello: paused environment cost over 60s
+15   PASS   33402     hello: concurrency sweep, pool on
+16   PASS   121       hello: pooled environments after the sweep
+17   PASS   307       http-axum: create + deploy (fresh host 1)
+18   PASS   324       http-axum: create + deploy (fresh host 2)
+19   PASS   321       http-axum: create + deploy (fresh host 3)
+20   PASS   321       http-axum: create + deploy (fresh host 4)
+21   PASS   319       http-axum: create + deploy (fresh host 5)
+22   PASS   114735    http-axum: cold x20 (cache hit, pool off)
+23   PASS   316372    http-axum: concurrency sweep, pool off
+24   PASS   6125      http-axum: warm prime
+25   PASS   6721      http-axum: warm x20 (pool on)
+26   PASS   59845     http-axum: paused environment cost over 60s
+27   PASS   26815     http-axum: concurrency sweep, pool on
+28   PASS   139       http-axum: pooled environments after the sweep
+29   PASS   314       cpu-burn: create + deploy (fresh host 1)
+30   PASS   310       cpu-burn: create + deploy (fresh host 2)
+31   PASS   316       cpu-burn: create + deploy (fresh host 3)
+32   PASS   314       cpu-burn: create + deploy (fresh host 4)
+33   PASS   307       cpu-burn: create + deploy (fresh host 5)
+34   PASS   113564    cpu-burn: cold x20 (cache hit, pool off)
+35   PASS   312042    cpu-burn: concurrency sweep, pool off
+36   PASS   6085      cpu-burn: warm prime
+37   PASS   11474     cpu-burn: warm x20 (pool on)
+38   PASS   59844     cpu-burn: paused environment cost over 60s
+39   PASS   42548     cpu-burn: concurrency sweep, pool on
+40   PASS   139       cpu-burn: pooled environments after the sweep
+41   PASS   24        cleanup proof (no gateway, VMM, jail, cgroup, tap, env dir)
+
+41 steps, 0 failed
+evidence: /home/takanorifukuyama.guest/tsls/docs/evidence/bench-20260917T155921Z
+wrote /home/takanorifukuyama.guest/tsls/docs/evidence/bench-20260917T155921Z/summary.json and /home/takanorifukuyama.guest/tsls/docs/evidence/bench-20260917T155921Z/summary.md

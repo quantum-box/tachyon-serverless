@@ -1,0 +1,10 @@
+{"key":"setup.pids","value":"bridge=297222 user= env=env_01m2r19re0s99da1aa9r989j58"}
+{"key":"client.answer","value":"502 outcome_unknown Host.OutcomeUnknown"}
+{"key":"ledger.status","value":"outcome_unknown Host.OutcomeUnknown"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":3}
+{"key":"usage.environment_stopped_events","value":4}
+{"key":"usage.environment_stopped_with_cgroup_usage","value":4}
+{"key":"usage.environment_stopped_with_unknown_host_usage","value":0}
+{"key":"usage.terminal_environments","value":4}
+{"key":"usage.environments_without_stop_event","value":0}

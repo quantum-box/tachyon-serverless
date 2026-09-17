@@ -1,0 +1,14 @@
+[e2e] scenario: mixed
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qyaprne5jaw1nchx7yvajw (#1) created: pending
+revision rev_01m2qyaprne5jaw1nchx7yvajw is preparing
+revision rev_01m2qyaprne5jaw1nchx7yvajw is ready
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qyaq6k9hntg4g23x9t7kjg (#1) created: pending
+revision rev_01m2qyaq6k9hntg4g23x9t7kjg is preparing
+revision rev_01m2qyaq6k9hntg4g23x9t7kjg is ready
+tsls-load: sent 28 requests in this scenario so far
+PASS  mixed  /home/takanorifukuyama.guest/verify/load/evidence/load-mixed-20260917T150353Z-firecracker
+PASS  mixed  /home/takanorifukuyama.guest/verify/load/evidence/load-mixed-20260917T150353Z-firecracker

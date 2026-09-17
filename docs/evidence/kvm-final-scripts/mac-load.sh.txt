@@ -1,0 +1,10 @@
+#!/bin/bash
+# sample the Mac's load average every 10 s (UTC epoch, ISO, 1/5/15-min load)
+out=/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-af65d2ddfc8d8e218/.kvm/vm/mac-load.tsv
+[ -f "$out" ] || printf 'epoch\tutc\tload1\tload5\tload15\n' > "$out"
+while :; do
+  l="$(sysctl -n vm.loadavg | tr -d '{}')"
+  set -- $l
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%s)" "$(date -u +%FT%TZ)" "$1" "$2" "$3" >> "$out"
+  sleep 10
+done

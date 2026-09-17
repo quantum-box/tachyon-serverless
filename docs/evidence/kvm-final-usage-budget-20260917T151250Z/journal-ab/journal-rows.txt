@@ -1,0 +1,2 @@
+ledger-A1.db {'attempt_settled': 41, 'environment_started': 1, 'environment_stopped': 1, 'handler_finished': 41, 'handler_started': 41}
+ledger-A2.db {'attempt_settled': 41, 'environment_started': 1, 'environment_stopped': 1, 'handler_finished': 41, 'handler_started': 41}

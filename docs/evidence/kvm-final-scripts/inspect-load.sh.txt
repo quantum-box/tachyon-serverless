@@ -1,0 +1,8 @@
+#!/bin/bash
+cd ~/verify/load/evidence || exit 1
+for d in load-*; do
+  echo "== $d"
+  jq -c '{ok, checks, reuse: .reuse, detectors: (.detectors | {findings: (.overshoot|length) + (.starvation|length) + (.idle_cpu|length) + (.boot_identity|length), coverage}), requests: .requests.latency_ms, n: .requests.count}' "$d/summary.json" 2>/dev/null | head -c 3000; echo
+  # environment stats series from samples
+  tail -n 400 "$d/samples.jsonl" | jq -c '.metrics | with_entries(select(.key | test("tsls_environment_stats|tsls_environment_cpu_seconds_total|tsls_environment_memory|tsls_idle_environment|tsls_idle_environments_sampled|tsls_boot_identity"))) ' | awk 'length > 2' | sort | uniq -c | sort -rn | head -5
+done

@@ -1,0 +1,10 @@
+#!/bin/bash
+w="$(ls -dt /home/takanorifukuyama.guest/w/tsls-chaos.* 2>/dev/null | head -1)"
+echo "work=$w"
+sudo python3 - "$w/data/usage/ledger.db" <<'PY' | tee /home/takanorifukuyama.guest/verify/chaos/stale-owner-environment-stopped.txt
+import json, sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+for (b,) in c.execute("select body from function_usage_events where event_type = 'environment_stopped'"):
+    e = json.loads(b)
+    print(e["event_id"], e.get("environment_id"), e["resources"]["cgroup_cpu_usec"], e["resources"]["cgroup_memory_peak_bytes"], e.get("monotonic_duration_ms"), e.get("evidence_quality"))
+PY

@@ -1,0 +1,26 @@
+#!/bin/bash
+# which EnvironmentStopped events lack cgroup usage, per kept chaos work dir
+for log in ~/verify/chaos-run2/matrix/scenarios/*.attempt-1.log; do
+  w="$(grep -o 'work=[^ ]*' "$log" | head -1 | cut -d= -f2)"
+  [ -n "$w" ] || continue
+  echo "== $(basename "$log") $w"
+  sudo python3 - "$w/data/usage/ledger.db" "$w/data/state.db" <<'PY'
+import json, sqlite3, sys
+c = sqlite3.connect(sys.argv[1]); s = sqlite3.connect(sys.argv[2])
+for (b,) in c.execute("select body from function_usage_events where event_type = 'environment_stopped' order by rowid"):
+    e = json.loads(b)
+    r = e["resources"]
+    st = s.execute("select state, owner_id from environments where id = ?", (e["environment_id"],)).fetchone()
+    print(e["event_id"], r["cgroup_cpu_usec"]["measurement"], r["cgroup_cpu_usec"]["value"], "outcome", e.get("outcome"), "seg.teardown", e["segments"].get("teardown_ms"), "state", st)
+PY
+  for e in $(sudo python3 -c "
+import json,sqlite3,sys
+c=sqlite3.connect('$w/data/usage/ledger.db')
+for (b,) in c.execute(\"select body from function_usage_events where event_type='environment_stopped'\"):
+    e=json.loads(b)
+    if e['resources']['cgroup_cpu_usec']['measurement']!='provider_reported': print(e['environment_id'])
+"); do
+    echo "-- $e"
+    sudo grep -h "$e" "$w"/gateway-*.log | grep -o '"timestamp":"[^"]*","level":"[A-Z]*","message":"[^"]*"' | head -20
+  done
+done

@@ -1,0 +1,4 @@
+{"end_t_ms":9050,"phase":"before","result":{"not_sent_duration_limit":0,"sent":6},"spec":{"concurrency":2,"handler_ms":300,"jitter_ms":100,"kind":"invoke","name":"before","requests":6,"tenant":"a"},"start_t_ms":1074}
+{"end_t_ms":11341,"phase":"idle","result":{"reached_zero_t_ms":11341},"spec":{"kind":"idle_until_zero","name":"idle","tenant":"a","timeout_ms":30000},"start_t_ms":9050}
+{"end_t_ms":33961,"phase":"after","result":{"not_sent_duration_limit":0,"sent":4},"spec":{"concurrency":2,"handler_ms":300,"jitter_ms":100,"kind":"invoke","name":"after","requests":4,"tenant":"a"},"start_t_ms":20231}
+{"end_t_ms":36234,"phase":"idle-after","result":{"reached_zero_t_ms":36234},"spec":{"kind":"idle_until_zero","name":"idle-after","tenant":"a","timeout_ms":30000},"start_t_ms":33962}

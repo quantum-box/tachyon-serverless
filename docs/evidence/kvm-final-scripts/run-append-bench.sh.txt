@@ -1,0 +1,11 @@
+#!/bin/bash
+# the journal append microbenchmark on the VM's root file system (where data_dir lives), not /tmp
+. "$(dirname "$0")/common.sh"
+W=$VERIFY/journal-ab
+df -h /tmp "$HOME/w" > "$W/append-bench-filesystems.txt" 2>&1
+findmnt -T /tmp >> "$W/append-bench-filesystems.txt" 2>&1
+findmnt -T "$HOME/w" >> "$W/append-bench-filesystems.txt" 2>&1
+echo "vm load: $(cat /proc/loadavg) mac: $(tail -n 1 "$MACLOAD" | cut -f2-5)" >> "$W/append-bench-filesystems.txt"
+python3 "$(dirname "$0")/journal-append-bench.py" 500 "$HOME/w" > "$W/journal-append-bench-rootfs.json"
+mv "$W/journal-append-bench.json" "$W/journal-append-bench-tmp-tmpfs.json" 2>/dev/null
+cat "$W/append-bench-filesystems.txt" "$W/journal-append-bench-rootfs.json"

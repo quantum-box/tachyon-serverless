@@ -1,0 +1,98 @@
+[e2e] run 20260917T145357Z-firecracker (arch aarch64, evidence /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T145357Z-firecracker)
+[e2e] step 1: build
+[e2e]   PASS (18 ms)
+[e2e] using explicit config /home/takanorifukuyama.guest/verify/demo/gateway.toml (api http://127.0.0.1:18481)
+[e2e] gateway pid 238499, log /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T145357Z-firecracker/gateway.log
+[e2e] step 2: gateway healthz/readyz
+[e2e]   PASS (10087 ms)
+[e2e] step 3: tokens for tenant A and B
+[e2e]   PASS (46 ms)
+[e2e] step 4: provider capability table
+[e2e]   PASS (49 ms)
+[e2e] step 5: create functions (idempotent)
+[e2e]   PASS (106 ms)
+[e2e] step 6: deploy hello (GREETING=v1, DEMO_SECRET)
+[e2e]   PASS (640 ms)
+[e2e] step 7: deploy http-axum
+[e2e]   PASS (792 ms)
+[e2e] step 8: deploy cpu-burn
+[e2e]   PASS (633 ms)
+[e2e] step 9: invoke hello ok (message, secret_present, greeting)
+[e2e]   PASS (16398 ms)
+[e2e] step 10: invoke hello fail -> exit 3 user_error
+[e2e]   PASS (14668 ms)
+[e2e] step 11: invoke hello panic -> exit 3 crash
+[e2e]   PASS (14494 ms)
+[e2e] step 12: init failure revision -> exit 3 init_error
+[e2e]   PASS (21146 ms)
+[e2e] step 13: http GET / -> 200 ok
+[e2e]   PASS (18097 ms)
+[e2e] step 14: http POST /echo -> body echoed
+[e2e]   PASS (15685 ms)
+[e2e] step 15: http GET /status/404 -> 404 passthrough
+[e2e]   PASS (15244 ms)
+[e2e] step 16: http GET /headers -> custom header visible
+[e2e]   PASS (13903 ms)
+[e2e] step 17: invoke cpu-burn 1s ok
+[e2e]   PASS (14808 ms)
+[e2e] step 18: cpu-burn timeout 2s -> exit 4 timeout, wall < 10s
+[e2e]   PASS (18168 ms)
+[e2e] step 19: no orphan bridge / VMM processes
+[e2e]   PASS (1940 ms)
+[e2e] step 20: logs contain handler lines
+[e2e]   PASS (25 ms)
+[e2e] step 21: history shows attempts with boot evidence
+[e2e]   PASS (49 ms)
+[e2e] step 22: rollback: v2 -> rollback -> v1
+[e2e]   PASS (31366 ms)
+[e2e] step 23: cross-tenant get/invoke -> 404
+[e2e]   PASS (67 ms)
+[e2e] step 24: cancel running invocation
+[e2e]   PASS (649 ms)
+[e2e] step 25: collect evidence
+[e2e]   PASS (214 ms)
+[e2e] gateway exit status 0
+[e2e] step 26: gateway stops on SIGTERM with exit 0
+[e2e]   PASS (45 ms)
+[e2e] step 27: invocation logs survive a gateway restart
+[e2e]   PASS (11106 ms)
+[e2e] step 28: secret values absent from gateway log, evidence, state and logs.db
+[e2e]   PASS (29 ms)
+[e2e] step 29: no orphans after gateway shutdown
+[e2e]   PASS (52 ms)
+[e2e] summary: /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T145357Z-firecracker/summary.json
+[e2e] gateway log: /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T145357Z-firecracker/gateway.log
+
+#    STATUS MS        STEP
+---- ------ --------- ----------------------------------------
+1    PASS   18        build
+2    PASS   10087     gateway healthz/readyz
+3    PASS   46        tokens for tenant A and B
+4    PASS   49        provider capability table
+5    PASS   106       create functions (idempotent)
+6    PASS   640       deploy hello (GREETING=v1, DEMO_SECRET)
+7    PASS   792       deploy http-axum
+8    PASS   633       deploy cpu-burn
+9    PASS   16398     invoke hello ok (message, secret_present, greeting)
+10   PASS   14668     invoke hello fail -> exit 3 user_error
+11   PASS   14494     invoke hello panic -> exit 3 crash
+12   PASS   21146     init failure revision -> exit 3 init_error
+13   PASS   18097     http GET / -> 200 ok
+14   PASS   15685     http POST /echo -> body echoed
+15   PASS   15244     http GET /status/404 -> 404 passthrough
+16   PASS   13903     http GET /headers -> custom header visible
+17   PASS   14808     invoke cpu-burn 1s ok
+18   PASS   18168     cpu-burn timeout 2s -> exit 4 timeout, wall < 10s
+19   PASS   1940      no orphan bridge / VMM processes
+20   PASS   25        logs contain handler lines
+21   PASS   49        history shows attempts with boot evidence
+22   PASS   31366     rollback: v2 -> rollback -> v1
+23   PASS   67        cross-tenant get/invoke -> 404
+24   PASS   649       cancel running invocation
+25   PASS   214       collect evidence
+26   PASS   45        gateway stops on SIGTERM with exit 0
+27   PASS   11106     invocation logs survive a gateway restart
+28   PASS   29        secret values absent from gateway log, evidence, state and logs.db
+29   PASS   52        no orphans after gateway shutdown
+
+29 steps, 0 failed

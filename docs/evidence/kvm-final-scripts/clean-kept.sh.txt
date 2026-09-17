@@ -1,0 +1,4 @@
+#!/bin/bash
+sudo rm -rf /home/takanorifukuyama.guest/w/tsls-chaos.* /home/takanorifukuyama.guest/w/jab-* /home/takanorifukuyama.guest/w/l-*
+ls -la /home/takanorifukuyama.guest/w
+df -h / | tail -1

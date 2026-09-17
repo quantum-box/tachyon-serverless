@@ -1,0 +1,8 @@
+#!/bin/bash
+# sync the host worktree (virtiofs mount) into the VM-local ~/tsls
+set -euo pipefail
+SRC=/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-af65d2ddfc8d8e218/
+rsync -a --delete --exclude target --exclude .git --exclude .kvm --exclude data \
+  --exclude docs/evidence --exclude .lab "$SRC" ~/tsls/
+cd /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-af65d2ddfc8d8e218
+echo "synced $(date -u +%FT%TZ)"

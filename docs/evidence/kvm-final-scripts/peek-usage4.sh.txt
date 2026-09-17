@@ -1,0 +1,12 @@
+#!/bin/bash
+S=~/verify/chaos-run2/matrix/scenarios/orphan_recovery_after_crash/attempt-1
+W=/home/takanorifukuyama.guest/w/tsls-chaos.uogCTe
+sudo grep -h -E '"message":"(fenced environment terminated and settled|orphaned environment reclaimed|environment terminated|gateway listening|startup reconcile finished|shutting down|graceful shutdown[^"]*)"' $S/gateway-a.log | sed -E 's/"target":"[^"]*"//' | cut -c1-260
+grep -n 'start (failpoints' $S/gateway-a.log
+sudo grep -n 'fault injected\|fault removed\|converged' ~/verify/chaos-run2/matrix/scenarios/orphan_recovery_after_crash.attempt-1.log
+sudo python3 - "$W/data/state.db" <<'PY'
+import sqlite3, sys
+s = sqlite3.connect(sys.argv[1])
+for r in s.execute("select id, state, owner_id, epoch, created_at, updated_at from environments order by created_at"):
+    print(r)
+PY

@@ -1,0 +1,31 @@
+#!/bin/bash
+# item 6 (PLT-4647): the full benchmark on the latest main + this branch's scripts, with calibration gating
+. "$(dirname "$0")/common.sh"
+W=$VERIFY/bench; mkdir -p "$W"
+C="$(cat "$HOSTWT/.kvm/vm/commit.txt" 2>/dev/null)"
+hostinfo "$W/host.txt" before
+t0=$(date -u +%s)
+vmload_sampler "$W/vm-load.tsv"; S=$!
+cargo build --release -p tachyon-serverless-gateway -p tachyon-serverless-cli > "$W/build.txt" 2>&1 || { echo "release build failed"; tail "$W/build.txt"; exit 2; }
+echo "build done $(date -u +%FT%TZ) vm: $(cat /proc/loadavg) mac: $(tail -n 1 "$MACLOAD" | cut -f3-5)" | tee -a "$W/host.txt"
+df -h / | tail -1 | tee -a "$W/host.txt"
+BENCH_COMMIT="$C" BENCH_DIRTY=false TSLS_SKIP_BUILD=1 \
+  BENCH_MAX_CALIBRATION_MS="${BENCH_MAX_CALIBRATION_MS:-150}" \
+  BENCH_HOST_NOTE="Apple M4 (macOS, Darwin 25.6.0) -> Lima 'tsls-kvm' vmType vz with nested virtualization, 4 vCPU / 8 GiB guest; the Mac is a shared developer machine (see physical-host-load.tsv)" \
+  bash scripts/kvm/bench.sh > "$W/stdout.txt" 2>&1
+rc=$?
+kill $S
+echo "bench exit=$rc" | tee -a "$W/host.txt"
+t1=$(date -u +%s)
+hostinfo "$W/host.txt" after
+macload_window "$t0" "$t1" "$W/mac-load.tsv"
+dir="$(ls -d "$REPO"/docs/evidence/bench-* 2>/dev/null | tail -n 1)"
+echo "evidence: $dir" | tee -a "$W/host.txt"
+if [ -n "$dir" ]; then
+  # physical-host-load.tsv in the format bench-report.sh reads (<UTC>\t{ l1 l5 l15 })
+  awk -F'\t' 'NR > 1 {printf "%s\t{ %s %s %s }\n", $2, $3, $4, $5}' "$W/mac-load.tsv" > "$dir/physical-host-load.tsv"
+  bash scripts/kvm/bench-report.sh "$dir" >> "$W/stdout.txt" 2>&1
+fi
+leftovers >> "$W/host.txt" 2>&1
+fix_owner "$W" "$REPO/docs/evidence"
+tail -30 "$W/stdout.txt"

@@ -41,46 +41,44 @@
 | 機能 | 区分 | 証跡 | 残り |
 |---|---|---|---|
 | P1 縦断（登録 → publish → invoke → logs → timeout → rollback → 他 tenant 404 → cancel → 破棄） | KVM 実測 / process 実測 | [evidence/20260915T171631Z-firecracker/](evidence/20260915T171631Z-firecracker/)（28/28）、[evidence/20260917T114908Z-firecracker/](evidence/20260917T114908Z-firecracker/)（28/28、jailer・cgroup required）、process は [evidence/20260917T110054Z-process/](evidence/20260917T110054Z-process/) ほか | x86_64・bare metal |
-| host 強制 timeout・terminate・孤児 0 | KVM 実測（M5 は条件違い、M6 の 2 回目 terminate は未測定） | [evidence/kvm-20260915T080221Z/](evidence/kvm-20260915T080221Z/)、[evidence/bench-20260917T055450Z/](evidence/bench-20260917T055450Z/) `cleanup.txt`（714 request・370 環境の後に残留 0） | M6、M11（Running 中の VMM kill → OutcomeUnknown は fake のみ） |
+| host 強制 timeout・terminate・孤児 0 | KVM 実測（M5 は条件違い、M6 の 2 回目 terminate は未測定） | [evidence/kvm-20260915T080221Z/](evidence/kvm-20260915T080221Z/)、[evidence/bench-20260917T055450Z/](evidence/bench-20260917T055450Z/) `cleanup.txt`（714 request・370 環境の後に残留 0）、[evidence/kvm-final-chaos-20260917T152228Z/](evidence/kvm-final-chaos-20260917T152228Z/)（gateway SIGKILL 後に残った VMM を reclaim が jail・cgroup ごと回収、Running 中の VMM kill → `outcome_unknown`） | M6 |
 | egress `none` / `restricted` / `public-web`、metadata・管理網・RFC1918・IPv6 の遮断、2 tenant 間遮断、起動前の policy 検証 | KVM 実測 | [evidence/isolation-20260916T020934Z/](evidence/isolation-20260916T020934Z/)、[evidence/isolation-20260917T011555Z/](evidence/isolation-20260917T011555Z/)、[evidence/isolation-20260917T031126Z/](evidence/isolation-20260917T031126Z/)、[ADR-0005](adr/0005-egress-profiles.md) | hostname allowlist、帯域上限、gateway kill 後の tap / nft 孤児 sweep の実機試験 |
 | vCPU / memory / ephemeral storage 上限、VMM ごとの cgroup v2、jailer（uid 64000・CapEff 0・seccomp）、2 tenant の noisy neighbor | KVM 実測（1 回） | [evidence/isolation-20260917T041930Z/](evidence/isolation-20260917T041930Z/)（NOISY: 隣の CPU 部分 ×1.245、上限 ×1.30） | IO 帯域（`io.max`・drive `rate_limiter`）、環境ごとの uid、network namespace、複数回の分布 |
 | warm 再利用（idle 休止・再開） | KVM 実測 | [evidence/warm-20260916T162532Z/](evidence/warm-20260916T162532Z/)（6 中 5 が warm、休止中 CPU tick 0）、[evidence/kvm-verify-plt4634-20260917T064519Z/](evidence/kvm-verify-plt4634-20260917T064519Z/)（warm 5/6） | 長時間 idle 後の再開、N ≥ 20 の再開分布、`[pool]` の既定は off |
 | admission（burst・queue 上限・jp-only placement） | KVM 実測（burst 1 回）/ process 実測 / fake | [evidence/kvm-verify-plt4634-20260917T064519Z/](evidence/kvm-verify-plt4634-20260917T064519Z/)、[evidence/20260917T051238Z-burst-process/](evidence/20260917T051238Z-burst-process/)、[ADR-0006](adr/0006-autoscaling-and-admission.md) | 状態はプロセスのメモリだけ、1 host 1 gateway 前提、overhead は設定値（実測値ではない） |
 | zero-scale・alias 切替 drain・削除 | KVM 実測（1 回）/ process 実測 / fake | [evidence/kvm-verify-plt4635-20260917T064940Z/](evidence/kvm-verify-plt4635-20260917T064940Z/)、[evidence/20260917T062958Z-zero-scale-process/](evidence/20260917T062958Z-zero-scale-process/)、[ADR-0009](adr/0009-scale-to-zero-and-drain.md) | `min_ready` 先行起動と cooldown は fake のみ |
 | slot lease・fencing（同じ data_dir の 2 gateway） | KVM 実測（1 回）/ process 実測（故障マトリクス）/ fake | [evidence/kvm-verify-plt4631-fencing-20260917T070522Z/](evidence/kvm-verify-plt4631-fencing-20260917T070522Z/)、[ADR-0003](adr/0003-execution-state-persistence.md) | 実行中 attempt の lease 失効を FC で、時刻の飛び |
-| cold / warm first response・同時実行・資源原価 | KVM 実測（1 回、共用 Mac） | [benchmark.md](benchmark.md)、[evidence/bench-20260917T055450Z/](evidence/bench-20260917T055450Z/) | PLT-4634 以降の main で再計測していない、x86_64・bare metal・専用 host |
+| cold / warm first response・同時実行・資源原価 | KVM 実測（2 回、共用 Mac。2 回目は最新 main、calibration で混雑を確認して開始） | [benchmark.md](benchmark.md) §6・§6.6、[evidence/bench-20260917T055450Z/](evidence/bench-20260917T055450Z/)、[evidence/bench-20260917T155921Z/](evidence/bench-20260917T155921Z/)（714 request 失敗 0、warm の基盤追加 p95 15 / 10 / 6 ms、cold p95 約 5.8〜6.1 s） | cold p95 ≤ 3 s 未達、gateway の常駐 RSS・idle CPU は main で増えた（19.5 → 30〜32 MiB、3 → 16〜18 tick / 60 s）、x86_64・bare metal・専用 host |
 | Rust SDK の初期化保存点（X1） | KVM 実測（cold 経路のみ）/ process 実測 | [evidence/kvm-verify-plt4651-restore-aware-20260917T065206Z/](evidence/kvm-verify-plt4651-restore-aware-20260917T065206Z/)、[evidence/restore-aware-20260917T025043Z-process/](evidence/restore-aware-20260917T025043Z-process/) | restore 経路の hook は PLT-4653 の実験経路でだけ |
 | snapshot / clone（X1、実験） | KVM 実測（実験経路、capability `Unverified`、既定無効） | [evidence/x1-restore-20260917T085700Z/](evidence/x1-restore-20260917T085700Z/)、[evidence/x1-clone-20260917T114231Z/](evidence/x1-clone-20260917T114231Z/)、[ADR-0015](adr/0015-snapshot-restore-feasibility.md)、[ADR-0017](adr/0017-snapshot-manifest-and-clone.md) | restore 後の secret 配送、egress 付き clone、別 host / 別 CPU、GC・容量上限。Cloud Hypervisor は検証 host で guest が handshake に届かず、Kata 経由は未対応 |
 | public 公開 | **1 回だけ** ephemeral quick tunnel で公開（閉鎖済み） | [evidence/public-20260916T120349Z/](evidence/public-20260916T120349Z/)、[ADR-0004](adr/0004-public-ingress.md)（Proposed） | 安定した ingress は未実施。**第三者の海外 edge を通った記録で、国内完結の証拠ではない** |
 
-### 1.3 durable・非同期・計測（process provider で実測、Firecracker では未実行）
+### 1.3 durable・非同期・計測（process provider で実測。2026-09-17 の KVM 最終検証で Firecracker でも実行したものは区分に併記）
 
 | 機能 | 区分 | 証跡 | 残り |
 |---|---|---|---|
 | durable queue（NATS JetStream 単一 node）・暗号化 object store | process 実測（kill -9 1 回） | [evidence/queue-objects-20260917T052554Z/](evidence/queue-objects-20260917T052554Z/)、[ADR-0008](adr/0008-durable-queue-and-object-store.md) | cluster・TLS・鍵 rotation・S3 互換・tenant ごとの queue 上限 |
 | `invokeAsync` の永続受付・transactional outbox | process 実測（SIGKILL 4 回、nats 停止 1 回） | [evidence/async-e2e-20260917T064155Z/](evidence/async-e2e-20260917T064155Z/)、[ADR-0010](adr/0010-invoke-async-and-outbox.md) | 受付 throughput 未計測、複数 gateway の HTTP E2E |
-| async dispatcher・retry・DLQ・redrive | process 実測 | [evidence/async-dispatch-e2e-20260917T091034Z/](evidence/async-dispatch-e2e-20260917T091034Z/)、[ADR-0013](adr/0013-async-dispatch-retry-dlq.md) | **Firecracker での非同期実行は未検証**、DLQ・redrive 記録・inline 入力に保持期限なし |
-| cron・署名付き webhook | process 実測 | [evidence/triggers-e2e-20260917T081400Z/](evidence/triggers-e2e-20260917T081400Z/)、[evidence/triggers-e2e-dispatch-20260917T091055Z/](evidence/triggers-e2e-dispatch-20260917T091055Z/)、[ADR-0014](adr/0014-cron-and-webhook-triggers.md) | source 別 webhook 検証、concurrency policy、data plane の trigger |
+| async dispatcher・retry・DLQ・redrive | KVM 実測（1 回）/ process 実測 | [evidence/kvm-final-async-triggers-20260917T150658Z/](evidence/kvm-final-async-triggers-20260917T150658Z/)（40/40、SIGKILL 2 窓・redrive・副作用は外部 store で各 1 回）、[evidence/async-dispatch-e2e-20260917T091034Z/](evidence/async-dispatch-e2e-20260917T091034Z/)、[ADR-0013](adr/0013-async-dispatch-retry-dlq.md) | DLQ・redrive 記録・inline 入力に保持期限なし。実行時間が ack wait を超えると実行中に 1 回再配送され duplicate として ACK される（ack wait 4 s の KVM 実行で観測） |
+| cron・署名付き webhook | KVM 実測（1 回、SQLite queue）/ process 実測 | [evidence/kvm-final-async-triggers-20260917T150658Z/](evidence/kvm-final-async-triggers-20260917T150658Z/) `triggers/`（39/39）、[evidence/triggers-e2e-20260917T081400Z/](evidence/triggers-e2e-20260917T081400Z/)、[evidence/triggers-e2e-dispatch-20260917T091055Z/](evidence/triggers-e2e-dispatch-20260917T091055Z/)、[ADR-0014](adr/0014-cron-and-webhook-triggers.md) | source 別 webhook 検証、concurrency policy、data plane の trigger |
 | 設定 cache・認可 lease・control plane 停止 | process 実測（2 プロセス）/ fake（provider 制御 API 停止） | [evidence/20260917T045347Z-split-process/](evidence/20260917T045347Z-split-process/)、[ADR-0007](adr/0007-config-distribution-and-auth-leases.md) | Firecracker 未実行、配信は平文 HTTP、`internal_token` の rotation 手順なし |
-| host 由来 UsageEvent・ledger・仮料金 | process 実測 / fake（`provider_reported` の cgroup CPU） | [evidence/usage-20260917T075537Z-process/](evidence/usage-20260917T075537Z-process/)、[ADR-0012](adr/0012-usage-ledger-and-rating.md) | **Firecracker の cgroup CPU を `provider_reported` で記録した実測なし**、実請求は無効 |
-| 予算予約・hard / soft limit・fail closed | process 実測 / fake（非同期 run の予約） | [evidence/budget-20260917T102104Z-process/](evidence/budget-20260917T102104Z-process/)、[ADR-0016](adr/0016-budget-reservation-and-admission.md) | Firecracker 未実行、予算 store の fsync が遅延に与える影響は未計測 |
-| metrics・負荷シナリオ・detector | process 実測 / fake（boot identity・idle CPU） | [evidence/load-lifecycle-20260917T072540Z-process/](evidence/load-lifecycle-20260917T072540Z-process/) ほか `load-*`、[metrics.md](metrics.md) | Firecracker 未実行、promtool 未実行 |
-| 故障マトリクス 20 シナリオ | process 実測（4 回、最終回 20/20） | [failure-matrix.md](failure-matrix.md)、[evidence/chaos-20260917T115316Z/](evidence/chaos-20260917T115316Z/) | **Firecracker 未実行**、host 喪失・disk 破損・電源断・partition は対象外 |
+| host 由来 UsageEvent・ledger・仮料金 | KVM 実測（1 回）/ process 実測 | [evidence/kvm-final-usage-budget-20260917T151250Z/](evidence/kvm-final-usage-budget-20260917T151250Z/)（18/18、`EnvironmentStopped` に VMM cgroup の CPU usec・memory.peak が `provider_reported`、ledger = journal）、[evidence/usage-20260917T075537Z-process/](evidence/usage-20260917T075537Z-process/)、[ADR-0012](adr/0012-usage-ledger-and-rating.md) | 実請求は無効。`AttemptSettled` 単位の host CPU は無い（環境単位）。journal を含む durable store の fsync は warm invoke の host platform に約 7 ms（上限値、KVM の A/B 1 回） |
+| 予算予約・hard / soft limit・fail closed | KVM 実測（1 回）/ process 実測 / fake（非同期 run の予約） | [evidence/kvm-final-usage-budget-20260917T151250Z/](evidence/kvm-final-usage-budget-20260917T151250Z/)（19/19）、[evidence/budget-20260917T102104Z-process/](evidence/budget-20260917T102104Z-process/)、[ADR-0016](adr/0016-budget-reservation-and-admission.md) | 予算 store の fsync が遅延に与える影響は未計測 |
+| metrics・負荷シナリオ・detector | KVM 実測（5 シナリオ各 1 回、warm pool）/ process 実測 / fake（idle CPU を使う環境の検出） | [evidence/kvm-final-metrics-load-20260917T150242Z/](evidence/kvm-final-metrics-load-20260917T150242Z/)（cgroup の environment_stats、`warm_reuse`・`boot_changed` 0、休止中の idle CPU 0、findings 0）、[evidence/load-lifecycle-20260917T072540Z-process/](evidence/load-lifecycle-20260917T072540Z-process/) ほか `load-*`、[metrics.md](metrics.md) | promtool 未実行 |
+| 故障マトリクス 20 シナリオ | process 実測（4 回、最終回 20/20）/ KVM 実測（Firecracker で挙動が変わる 6 シナリオ + guest OOM、3 回） | [failure-matrix.md](failure-matrix.md)、[evidence/chaos-20260917T115316Z/](evidence/chaos-20260917T115316Z/)、[evidence/kvm-final-chaos-20260917T152228Z/](evidence/kvm-final-chaos-20260917T152228Z/)（最終回 6/7、`stale_owner_sync_lease` は state.db lock で失敗） | provider 非依存の 13 シナリオは Firecracker 未実行。reclaim が終わらせた環境の host 原価は未計測。凍結した gateway が state.db の書込み lock を持つと同じ data_dir の他 gateway も止まる。host 喪失・disk 破損・電源断・partition は対象外 |
 | 最小 console | process 実測（Playwright 15/15、OutcomeUnknown と loading 等は mock） | [evidence/console-20260917T110152Z/](evidence/console-20260917T110152Z/)、[console.md](console.md) | Tachyon Console 統合は設計のみ（[console-integration.md](console-integration.md)） |
 | TiDB 版 migration・repository 契約 | 実 TiDB v8.5.8 で実測（試験専用 adapter、loopback 1 node 構成） | [evidence/tidb-20260917T103330Z/](evidence/tidb-20260917T103330Z/)、[db-index-review.md](db-index-review.md) | **製品の store は SQLite のまま**、outbox / trigger / dispatch の repository 未実装、TLS、複数 node、hotspot |
-| fresh 環境からの lab runbook | process 実測（**自動化 agent による** clean clone 追試） | [evidence/lab-20260917T1219Z-process-clean-clone/](evidence/lab-20260917T1219Z-process-clean-clone/)、[runbook.md](runbook.md) | lab.sh の firecracker 経路、別の人間による追試 |
+| fresh 環境からの lab runbook | process 実測・KVM 実測（どちらも **自動化 agent による** clean clone 追試） | [evidence/lab-20260917T1219Z-process-clean-clone/](evidence/lab-20260917T1219Z-process-clean-clone/)、[evidence/kvm-final-lab-firecracker-20260917T162937Z/](evidence/kvm-final-lab-firecracker-20260917T162937Z/)（firecracker: origin/main では `up` で止まり、lab.sh を 5 件直して demo all 49/49・teardown clean）、[runbook.md](runbook.md) | 別の人間による追試、x86_64、`LAB_FC_PRIVILEGED=0` |
 | CI gate | hosted runner で実行確認、破損検出はローカル | [evidence/ci-gates-20260917T041348Z/](evidence/ci-gates-20260917T041348Z/)、[ci.md](ci.md) | **self-hosted KVM runner 未登録で `kvm` job は一度も実行されていない**、branch protection 未設定 |
 
 ### 1.4 fake provider / 単体テストだけのもの（実行基盤での記録なし）
 
 | 項目 | テストの場所 | 何が足りないか |
 |---|---|---|
-| Running 中の VMM を外から kill → `OutcomeUnknown`（M11） | `crates/application/tests/pipeline.rs` | KVM での記録 |
 | 2 回目の `terminate_environment` の冪等性（M6） | `crates/providers/firecracker/src/provider.rs` | 同上 |
 | provider 制御 API 停止時に cold start だけ拒否 | `crates/application/tests/config_cache.rs` | E2E での再現 |
 | `min_ready` 先行起動・scale-down cooldown の pool 挙動 | `crates/application/tests/scaling.rs` | Firecracker での記録 |
-| Firecracker cgroup からの CPU / memory 読み取り（metrics・usage） | `cgroup::tests`（tempdir の file） | 実 cgroup での記録 |
-| idle CPU detector・boot identity の warm 判定 | `metrics::tests`、`scaling.rs` | Firecracker warm pool での記録 |
+| idle CPU detector が CPU を使う idle 環境を検出する側 | `metrics::tests`、`scaling.rs` | Firecracker での記録（検出 0 の側と boot identity は KVM 実測済み） |
 | 他 tenant snapshot の拒否 | `crates/domain/src/snapshot_tests.rs`、`tests/restore.rs` | 2 tenant を並べた KVM run |
 | client 切断後の deadline までの追跡 | テストなし（コードのみ） | テスト自体 |
 | 非同期 run の予算予約 | `invoke_async::dispatch_tests` | E2E |
@@ -96,7 +94,7 @@
 | 実請求・決済・請求書・訂正 | 無効（設定で有効化できない） | [ADR-0012](adr/0012-usage-ledger-and-rating.md)、[ADR-0016](adr/0016-budget-reservation-and-admission.md) |
 | 安定した public ingress、TLS 終端、内部通信の相互認証 | 無い（ADR-0004 は Proposed） | [ADR-0004](adr/0004-public-ingress.md) |
 | request rate limit、abuse 対応手順、WAF / DDoS 対策 | 無い | [ADR-0004](adr/0004-public-ingress.md)「demo より長く上げる前に必要なもの」、[threat-model.md](threat-model.md) §15 |
-| log の検索・転送（OTel）・保存時暗号化 | 無い。invocation log の永続化と保持期限・総量上限は実装済み（`<data_dir>/logs/logs.db`、process の E2E と unit / integration テストで確認、Firecracker では restart step 未実行） | [ADR-0018](adr/0018-durable-invocation-logs.md)、[architecture.md](architecture.md) §4「invocation log」 |
+| log の検索・転送（OTel）・保存時暗号化 | 無い。invocation log の永続化と保持期限・総量上限は実装済み（`<data_dir>/logs/logs.db`、process の E2E と unit / integration テストで確認、Firecracker の restart step も [evidence/kvm-final-logs-restart-20260917T145357Z/](evidence/kvm-final-logs-restart-20260917T145357Z/) で通過） | [ADR-0018](adr/0018-durable-invocation-logs.md)、[architecture.md](architecture.md) §4「invocation log」 |
 | OCI image の pull・実行 | 無い（参照を受理して理由付き `Failed`） | [acceptance.md](acceptance.md) PLT-4620 |
 | Kata / Cloud Hypervisor adapter、Knative との比較 | 無い | [ADR-0001](adr/0001-execution-provider-firecracker-first.md)、[benchmark.md](benchmark.md) §6.5 |
 | tachyon-apps の secret backend・利用者認証との接続 | 無い | [acceptance.md](acceptance.md) PLT-4623 #6、[console-integration.md](console-integration.md) §3.1 |
@@ -339,7 +337,7 @@ RFC §19 の数値は RFC 自身が「設計用の仮目標であり、達成済
 - log の検索・転送・国内拠点（RFC §15 の OTel、payload を既定で記録しない）と、tenant ごとの log 保持期限。invocation log の永続化・保持期限・総量上限は ADR-0018 で入った。
 - 保持期限の実装（invocation metadata、DLQ、redrive 記録、inline 入力、`dispatchers` 表）。
 - OCI image の pull・署名検証、DB を使う Rust sample（RFC §22 M1）。
-- 別の人間による runbook 追試、lab.sh の firecracker 経路。
+- 別の人間による runbook 追試（lab.sh の firecracker 経路は aarch64 nested の KVM で自動化 agent が実行済み）。
 
 ---
 

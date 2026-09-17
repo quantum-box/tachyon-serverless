@@ -1,0 +1,16 @@
+[e2e] scenario: lifecycle
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qyd1vfy2tpgrc6wwhp0f31 (#1) created: pending
+revision rev_01m2qyd1vfy2tpgrc6wwhp0f31 is preparing
+revision rev_01m2qyd1vfy2tpgrc6wwhp0f31 is ready
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qyd2bwg8b3bs6vgafhnygh (#1) created: pending
+revision rev_01m2qyd2bwg8b3bs6vgafhnygh is preparing
+revision rev_01m2qyd2bwg8b3bs6vgafhnygh is ready
+tsls-load: sent 36 requests in this scenario so far
+restarting the gateway while idle
+tsls-load: sent 42 requests in this scenario so far
+PASS  lifecycle  /home/takanorifukuyama.guest/verify/load/evidence/load-lifecycle-20260917T150508Z-firecracker
+PASS  lifecycle  /home/takanorifukuyama.guest/verify/load/evidence/load-lifecycle-20260917T150508Z-firecracker

@@ -1,0 +1,32 @@
+kind               firecracker
+isolation          micro_vm
+dev_only           false
+environment_reuse  off (the provider's idle support is measured); [pool] enabled is false
+capabilities:
+CAPABILITY               STATUS       NOTE
+create_terminate         supported
+egress_none              supported
+egress_public_web        unsupported  unavailable on this host: net.ipv4.ip_forward is not 1 (guests could not reach anything)
+egress_restricted        unsupported  unavailable on this host: net.ipv4.ip_forward is not 1 (guests could not reach anything)
+enforce_deadline         supported
+enforce_resource_limits  supported
+host_metering            unverified   host-side timings only; no cgroup/KVM stats
+idle_quiesce             supported
+idle_resume              supported
+observe                  supported
+snapshot_clone           unsupported  not built: the provider was compiled without experimental-restore
+snapshot_create          unsupported  not built: the provider was compiled without experimental-restore
+preflight: ok=true
+CHECK               OK     DETAIL
+os                  true   host os is linux; Firecracker requires linux
+arch                true   host architecture aarch64
+kvm                 true   /dev/kvm is readable and writable
+firecracker_binary  true   /home/takanorifukuyama.guest/tsls/.kvm/bin/firecracker (version v1.17.0)
+kernel              true   /home/takanorifukuyama.guest/tsls/.kvm/vmlinux sha256:e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+rootfs              true   /home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4 sha256:73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064
+mkfs_ext4           true   /usr/sbin/mkfs.ext4
+workdir             true   /home/takanorifukuyama.guest/tsls/.kvm/run
+socket_path_length  true   longest socket path would be 71 bytes (max 107); ok
+egress_network      false  optional: egress restricted / public-web unavailable: net.ipv4.ip_forward is not 1 (guests could not reach anything)
+host_cgroup         true   mode required: cgroup v2 at /sys/fs/cgroup with cpu, memory, pids (environments under /sys/fs/cgroup/tachyon/)
+jailer              true   /home/takanorifukuyama.guest/tsls/.kvm/bin/jailer -> /srv/jailer/firecracker/<id>/root as uid 64000 gid 64000, new PID namespace

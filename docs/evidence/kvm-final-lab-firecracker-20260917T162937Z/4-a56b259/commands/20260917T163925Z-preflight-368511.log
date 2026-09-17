@@ -1,0 +1,49 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh --provider firecracker preflight
+# started:  2026-09-17T16:39:25Z
+# lab_dir:  /home/takanorifukuyama.guest/lab/.lab
+# lab_id:   (new)
+# host:     Linux 7.0.0-31-generic aarch64 user=takanorifukuyama
+# git:      a56b259d4f2cdc0120dced1040a155691d4951cf
+2026-09-17T16:39:26Z lab preflight: provider=firecracker lab_dir=/home/takanorifukuyama.guest/lab/.lab lab_id=lab-6c6786c8
+2026-09-17T16:39:26Z 
+2026-09-17T16:39:26Z ok    os                         Linux 7.0.0-31-generic
+2026-09-17T16:39:26Z ok    arch                       aarch64
+2026-09-17T16:39:26Z ok    kvm                        /dev/kvm is rw for takanorifukuyama
+2026-09-17T16:39:26Z WARN  nested_virt                running inside apple: nested virtualization; boot times are reference values only
+2026-09-17T16:39:26Z ok    kernel                     7.0.0-31-generic
+2026-09-17T16:39:26Z ok    cgroup_v2                  cpuset cpu io memory hugetlb pids rdma misc dmem 
+2026-09-17T16:39:26Z ok    disk_lab                   25327 MiB free for /home/takanorifukuyama.guest/lab/.lab (need 6144)
+2026-09-17T16:39:26Z ok    disk_build                 25327 MiB free for target/ (cargo build needs ~8 GiB)
+2026-09-17T16:39:26Z ok    memory                     7913 MiB
+2026-09-17T16:39:26Z ok    tool:bash                  /usr/bin/bash (GNU bash, version 5.3.9(1)-release (aarch64-unknown-linux-gnu))
+2026-09-17T16:39:26Z ok    tool:curl                  /usr/bin/curl (curl 8.18.0 (aarch64-unknown-linux-gnu) libcurl/8.18.0 OpenSSL/3.5.5 zlib/1.3.1 brotli/1.2.0 zstd/1.5.7 libidn2/2.3.8 libpsl/0.21.2 libssh2/1.11.1 nghttp2/1.68.0 librtmp/2.3 mit-krb5/1.22.1 OpenLDAP/2.6.10)
+2026-09-17T16:39:26Z ok    tool:jq                    /usr/bin/jq (jq-1.8.1)
+2026-09-17T16:39:26Z ok    tool:python3               /usr/bin/python3 (Python 3.14.4)
+2026-09-17T16:39:26Z ok    tool:openssl               /usr/bin/openssl (OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026))
+2026-09-17T16:39:26Z ok    tool:tar                   /usr/bin/tar (tar (GNU tar) 1.35)
+2026-09-17T16:39:26Z ok    tool:git                   /usr/bin/git (git version 2.53.0)
+2026-09-17T16:39:26Z ok    tool:cargo                 /home/takanorifukuyama.guest/.cargo/bin/cargo (cargo 1.95.0 (f2d3ce0bd 2026-03-21))
+2026-09-17T16:39:26Z ok    tool:cc                    /usr/bin/cc (cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0)
+2026-09-17T16:39:26Z ok    tool:perl                  /usr/bin/perl (perl 5.040001)
+2026-09-17T16:39:26Z skip  tool:mise                  not found (optional)
+2026-09-17T16:39:26Z ok    tool:sha256                /usr/bin/sha256sum
+2026-09-17T16:39:26Z ok    pin:rust                   rust-toolchain.toml 1.95.0 = versions.lock
+2026-09-17T16:39:26Z ok    rustc                      1.95.0 (from the repository toolchain file)
+2026-09-17T16:39:26Z ok    pin:nats                   versions.lock = deploy/nats/versions.env (v2.14.7)
+2026-09-17T16:39:26Z ok    pin:firecracker            v1.17.0 + kernel pinned for aarch64
+2026-09-17T16:39:26Z ok    tool:rustup                /home/takanorifukuyama.guest/.cargo/bin/rustup (rustup 1.29.1 (d95a37b6a 2026-08-13))
+2026-09-17T16:39:26Z ok    tool:mkfs.ext4             /usr/sbin/mkfs.ext4 (mke2fs 1.47.2 (1-Jan-2025))
+2026-09-17T16:39:26Z ok    tool:ip                    /usr/sbin/ip (ip utility, iproute2-6.19.0, libbpf 1.6.3)
+2026-09-17T16:39:26Z ok    tool:nft                   /usr/sbin/nft (nftables v1.1.6 (Commodore Bullmoose #7))
+2026-09-17T16:39:26Z ok    socket_path                105 bytes (max 107): /home/takanorifukuyama.guest/lab/.lab/fc/jail/firecracker/env-00000000000000000000000000/root/v.sock_5000
+2026-09-17T16:39:26Z ok    privileges                 passwordless sudo: gateway runs as root (jailer chroot/uid drop, cgroup v2, tap/nft cleanup)
+2026-09-17T16:39:26Z ok    port:GATEWAY_PORT          not assigned yet (up picks a free 127.0.0.1 port)
+2026-09-17T16:39:26Z ok    port:NATS_PORT             not assigned yet (up picks a free 127.0.0.1 port)
+2026-09-17T16:39:26Z ok    port:NATS_HTTP_PORT        not assigned yet (up picks a free 127.0.0.1 port)
+2026-09-17T16:39:26Z ok    network                    github.com releases reachable (nats-server, firecracker)
+2026-09-17T16:39:27Z ok    network:kernel             S3 guest kernel reachable
+2026-09-17T16:39:27Z 
+2026-09-17T16:39:27Z READY with warnings (read the WARN rows)
+2026-09-17T16:39:27Z next: scripts/lab/lab.sh --provider firecracker bootstrap
+# finished: 2026-09-17T16:39:27Z exit=0

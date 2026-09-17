@@ -1,0 +1,9 @@
+{"key":"reclaim_detect_ms","value":39572}
+{"key":"client.a_answer_to_the_stale_invocation","value":"000 "}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":9}
+{"key":"usage.environment_stopped_events","value":7}
+{"key":"usage.environment_stopped_with_cgroup_usage","value":6}
+{"key":"usage.environment_stopped_with_unknown_host_usage","value":1}
+{"key":"usage.terminal_environments","value":11}
+{"key":"usage.environments_without_stop_event","value":4}

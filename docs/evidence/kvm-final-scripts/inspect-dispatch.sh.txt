@@ -1,0 +1,6 @@
+#!/bin/bash
+E=~/verify/queue/dispatch
+acl="$(awk '$1 == "acklost-1" {print $2}' "$E/accepted.txt")"
+echo "acklost invocation=$acl"
+sudo grep -n -E 'gateway start|startup reconcile finished|dispatcher registered|gateway listening' "$E/gateway.log" | cut -c1-300
+sudo grep -n "$acl" "$E/gateway.log" | grep -E 'delivery handled|Skipped|redeliver' | cut -c1-400 | head

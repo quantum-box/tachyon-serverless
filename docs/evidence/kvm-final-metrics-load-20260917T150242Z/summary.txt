@@ -1,0 +1,58 @@
+KVM final batch — PLT-4637 load scenarios against a Firecracker gateway (metrics, detectors, timeline)
+
+run      2026-09-17T15:02:42Z .. 15:06:50Z (UTC), Lima VM tsls-kvm (Apple M4 -> vz nested virtualization,
+         aarch64, 4 vCPU / 8 GiB). One run per scenario; observations, not an SLA.
+tree     commit c986bbd (origin/main 9b6f2c8 + the harness commits of this branch; scenarios.sh only gained
+         the TSLS_COMMIT fallback). NOTE: run.json says d6e729f28ab8 because ~/tsls in the VM still carried
+         a stale .git from an older clone (rsync excluded .git); it was moved away after this run.
+command  per scenario: sudo -n env ... TSLS_PROVIDER=firecracker TSLS_GATEWAY_CONFIG=<generated>
+           TSLS_API_URL=http://127.0.0.1:18490 TSLS_TOKEN_A/B TSLS_METRICS_TOKEN=<[metrics] bearer_token>
+           TSLS_GUEST_DIR=target/aarch64-unknown-linux-musl/release scripts/load/scenarios.sh <scenario>
+         (../kvm-final-scripts/run-load.sh.txt). Gateway config (each evidence/load-*/gateway.toml, tokens redacted):
+         profile production, [provider.firecracker] from config/gateway.firecracker.toml (jailer +
+         cgroup required, workdir on the jailer's file system), [capacity] max_concurrency 4 /
+         max_queue 64 / queue_timeout 120 s, tenant quota 3, [scaling] reconcile 500 ms / cooldown 1 s,
+         [pool] enabled (max_idle_per_revision 3, max_total_idle 8), [metrics] bearer_token.
+         Revision (scenarios.sh): example-cpu-burn, max_concurrency 3, idle TTL 2 s, cooldown 1 s.
+load     VM 1-min load max 2.18 during the run (vm-load.tsv); Mac 1-min load p50 21.5 / max 34.1 (n=22,
+         mac-load.tsv; the 5- and 15-min averages were still 50-87 from earlier builds).
+
+RESULT   5/5 scenarios ok (exit 0 each; every check true, 0 detector findings)
+
+scenario      requests  client p50/p95/max ms   start kinds       envs  boot_changed  same_boot  findings (overshoot/starvation/idle_cpu/boot_identity)  idle-cpu samples
+burst            36       1794 / 6006 / 6285    cold 4 warm 32      4       0            32        0/0/0/0                                             22
+idle-to-zero      9       7010 / 11778 / 11778  cold 4 warm 5       4       0             5        0/0/0/0                                             18
+mixed (A+B)      28       4237 / 15455 / 16159  cold 5 warm 23      5       0            23        0/0/0/0                                             33
+restart          10        610 / 13196 / 13196  cold 4 warm 6       4       0             4        0/0/0/0                                             17
+lifecycle        42       3275 / 12049 / 12967  cold 6 warm 36      6       0            32        0/0/0/0                                             31
+
+- reuse: GET /v1/capacity reuse.mode = warm_reuse in every scenario; check `warm_reuse` true (boot id never
+  changed for an environment, every environment served several attempts except one per idle-to-zero /
+  restart); tsls_boot_identity_checks_total{result="boot_changed"} stayed 0, {result="same_boot"} as above.
+- cgroup-backed environment_stats: samples.jsonl carries tsls_environment_cpu_seconds_total and
+  tsls_environment_memory_bytes / _memory_peak_bytes with scope="cgroup_v2" for every pooled environment
+  (4 / 4 / 5 / 4 / 6 environments), memory.peak max 41.0-41.4 MiB (256 MiB guests, memory.max 320 MiB),
+  tsls_environment_stats{result="available"} up to 5.
+  tsls_environment_stats{result="unavailable"} is non-zero while environments start: in 411 of the 416
+  samples where it was > 0, the starting + promised environments covered the count (the VMM cgroup does
+  not exist yet); the other 5 samples (single scrapes) are not explained by that and were not
+  investigated further. Recorded, not a failure (no check uses it).
+- idle CPU detector: tsls_idle_environments_sampled up to 3 (paused pool environments were measured in 17-33
+  samples per scenario) and tsls_idle_environment_cpu_ratio_max was 0.0 in every sample: a paused microVM
+  used no CPU between scrapes.
+- overshoot / starvation: 0 findings; in-flight max 3 (burst, lifecycle = revision cap), 4 (mixed = node
+  cap), queue max 5; mixed served both tenants (two_tenants_served) without a starvation finding.
+- timeline graph: evidence/load-lifecycle-*/timeline.svg (0 -> ramp -> cap 3 / queue 5 -> down -> 0 ->
+  gateway restart at 47.4-49.4 s -> active -> 0), timeline.txt for the terminal; same files per scenario.
+- latency: cold boots of 5-13 s dominate the p95 (nested virtualization); p50 includes queueing behind
+  the caps.
+
+ABORTED FIRST ATTEMPT (15:00, not in this directory): the generated config put the provider workdir
+  under /tmp, which is a different file system than the jailer chroot_base /srv/jailer; /readyz stayed
+  503 (preflight `jailer`: "is on another file system than chroot_base") and burst / idle-to-zero
+  timed out waiting for readiness. The run was stopped and restarted with the workdir under $HOME/w.
+
+CLEANUP  host.txt after every scenario and at the end: no gateway / firecracker / jailer process, no
+         /sys/fs/cgroup/tachyon/*, no jail, no env dir, no tsls* tap, nft only `table ip nat`, disk 40%.
+
+LIMITS   `single` was not run (process-only value); promtool still not run; one host, one run each.

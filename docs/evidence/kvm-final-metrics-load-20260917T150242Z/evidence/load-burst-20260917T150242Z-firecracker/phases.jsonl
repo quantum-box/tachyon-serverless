@@ -1,0 +1,5 @@
+{"end_t_ms":8146,"phase":"ramp-1","result":{"not_sent_duration_limit":0,"sent":3},"spec":{"concurrency":1,"handler_ms":300,"jitter_ms":100,"kind":"invoke","name":"ramp-1","requests":3,"tenant":"a"},"start_t_ms":1130}
+{"end_t_ms":14485,"phase":"ramp-2","result":{"not_sent_duration_limit":0,"sent":6},"spec":{"concurrency":2,"handler_ms":300,"jitter_ms":100,"kind":"invoke","name":"ramp-2","requests":6,"tenant":"a"},"start_t_ms":8147}
+{"end_t_ms":23270,"phase":"burst","result":{"not_sent_duration_limit":0,"sent":24},"spec":{"concurrency":8,"handler_ms":500,"jitter_ms":100,"kind":"invoke","name":"burst","requests":24,"tenant":"a"},"start_t_ms":14485}
+{"end_t_ms":24773,"phase":"down","result":{"not_sent_duration_limit":0,"sent":3},"spec":{"concurrency":1,"handler_ms":300,"jitter_ms":100,"kind":"invoke","name":"down","requests":3,"tenant":"a"},"start_t_ms":23270}
+{"end_t_ms":27031,"phase":"idle","result":{"reached_zero_t_ms":27031},"spec":{"kind":"idle_until_zero","name":"idle","tenant":"a","timeout_ms":30000},"start_t_ms":24773}

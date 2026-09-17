@@ -227,8 +227,10 @@ restart_gateway() {
 
 write_run_json() { # write_run_json NAME PHASES_DESCRIPTION
   local commit dirty
-  commit="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-  dirty="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+  # A tree copied to a KVM host is not a git checkout: TSLS_COMMIT / TSLS_DIRTY_FILES name it.
+  commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "${TSLS_COMMIT:-unknown}")"
+  dirty="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null | wc -l | tr -d ' ')"
+  if ! git -C "$REPO_ROOT" rev-parse HEAD >/dev/null 2>&1; then dirty="${TSLS_DIRTY_FILES:-0}"; fi
   jq -n --arg scenario "$1" --arg plan "$2" --arg commit "$commit" --argjson dirty_files "$dirty" \
     --arg provider "$PROVIDER" --argjson seed "$SEED" --argjson sample_ms "$SAMPLE_MS" \
     --argjson max_concurrency "$MAX_CONCURRENCY" --argjson max_requests "$MAX_REQUESTS" \

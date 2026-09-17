@@ -1,0 +1,28 @@
+{
+  "stamp": "20260917T153644Z",
+  "commit": "360dbcb1100976336bf02ccd3a0746a83b219628",
+  "uncommitted_files": 0,
+  "os": "Linux 7.0.0-31-generic aarch64",
+  "os_version": "Ubuntu 26.04 LTS",
+  "cpus": "4",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "nats_server": "v2.14.7 (nats-server: v2.14.7)",
+  "bash": "5.3.9(1)-release",
+  "python_sqlite": "3.46.1",
+  "provider": "firecracker (jailed microVMs, host cgroup required, warm pool true)",
+  "build": "debug gateway with --features failpoints",
+  "gateway_sha256": "3ab2df14d73675b1f669cf9e0755eba2269f88bf439ebab49a173c5d55a0e979",
+  "harness_sha256": {
+    "lib": "25bfa0dffe3f20f7c87a3847dab10c475d548681915d6ca9a56a130e8db8c504",
+    "scenarios": "80f7ecc878f88104a7c66d8021fba18afabe240a22df30b049d3fc6390b63fe2"
+  },
+  "config_digest_note": "each attempt stores its gateway configuration (secret redacted) next to its result; results carry their sha256",
+  "scenarios": [
+    "stale_owner_sync_lease",
+    "orphan_recovery_after_crash",
+    "worker_user_process_oom_sync"
+  ],
+  "retries": 0,
+  "seeds": "none: scenarios use fixed timings; secrets and keys are random per scenario",
+  "scope": "single host; not evidence of multi-host HA"
+}

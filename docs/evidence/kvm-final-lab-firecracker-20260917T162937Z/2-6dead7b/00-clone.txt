@@ -1,0 +1,3 @@
+$ git clone <host repo> /home/takanorifukuyama.guest/lab && git checkout --detach 6dead7b
+6dead7be607e8c4bd0a7bd6c5634436b25f82a82 fix(lab): firecracker preflight counts the jail's socket path; status reads root-owned state.db
+0

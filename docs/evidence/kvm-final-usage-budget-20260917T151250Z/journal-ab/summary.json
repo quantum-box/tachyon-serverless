@@ -1,0 +1,46 @@
+{
+  "sqlite": {
+    "n_warm_ok": 80,
+    "n": 80,
+    "failures": 0,
+    "not_warm": 0,
+    "client_ms_p50_p95": [
+      106,
+      136
+    ],
+    "total_ms_p50_p95": [
+      89,
+      116
+    ],
+    "handler_ms_p50_p95": [
+      77,
+      102
+    ],
+    "host_platform_ms_p50_p95": [
+      12,
+      17
+    ]
+  },
+  "memory": {
+    "n_warm_ok": 80,
+    "n": 80,
+    "failures": 0,
+    "not_warm": 0,
+    "client_ms_p50_p95": [
+      103,
+      132
+    ],
+    "total_ms_p50_p95": [
+      99,
+      127
+    ],
+    "handler_ms_p50_p95": [
+      94,
+      123
+    ],
+    "host_platform_ms_p50_p95": [
+      4,
+      7
+    ]
+  }
+}

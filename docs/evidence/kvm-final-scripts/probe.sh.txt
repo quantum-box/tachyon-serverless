@@ -1,0 +1,8 @@
+cd ~/tsls
+du -sh target/* 2>/dev/null
+du -sh target/debug/* target/release/* 2>/dev/null | sort -h | tail -8
+ls -la .kvm/run .kvm/run/* .kvm/x1 | head -20
+ls ~/bin ~/fc
+du -sh ~/.cargo ~/.rustup /tmp 2>/dev/null
+sudo du -sh /var /srv 2>/dev/null
+cat .kvm/manifest.json

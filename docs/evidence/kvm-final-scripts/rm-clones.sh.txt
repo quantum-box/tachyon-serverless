@@ -1,0 +1,3 @@
+#!/bin/bash
+sudo rm -rf ~/lab ~/lab-main
+df -h / | tail -1

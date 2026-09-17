@@ -1,0 +1,27 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh --provider firecracker teardown
+# started:  2026-09-17T16:43:28Z
+# lab_dir:  /home/takanorifukuyama.guest/lab/.lab
+# lab_id:   lab-6c6786c8
+# host:     Linux 7.0.0-31-generic aarch64 user=takanorifukuyama
+# git:      a56b259d4f2cdc0120dced1040a155691d4951cf
+2026-09-17T16:43:28Z teardown of lab lab-6c6786c8 (provider firecracker, dir /home/takanorifukuyama.guest/lab/.lab)
+2026-09-17T16:43:28Z ledger environments recorded by this lab: 31
+2026-09-17T16:43:28Z 1. processes
+2026-09-17T16:43:28Z [lab] stopping gateway pid 376703 (SIGTERM: in-flight invocations are cancelled and environments destroyed)
+2026-09-17T16:43:28Z [queue] nats-server (pid 376675) stopped with SIGTERM
+2026-09-17T16:43:28Z 2. Linux host resources named after this lab (jails, cgroups, taps, nft chains)
+2026-09-17T16:43:29Z 3. files owned by this lab
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/fc/jail
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/fc
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/nats
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/data/objects
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/data
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/demo
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/run
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/config
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/secrets
+2026-09-17T16:43:29Z   remove /home/takanorifukuyama.guest/lab/.lab/cache
+2026-09-17T16:43:29Z 4. orphan check
+2026-09-17T16:43:29Z orphan check: clean (lab lab-6c6786c8)
+# finished: 2026-09-17T16:43:29Z exit=0

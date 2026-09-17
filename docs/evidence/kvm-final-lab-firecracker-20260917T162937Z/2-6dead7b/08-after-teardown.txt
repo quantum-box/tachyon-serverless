@@ -1,0 +1,7 @@
+-- after teardown: leftovers of the lab
+total 20
+drwxrwxr-x  3 takanorifukuyama takanorifukuyama 4096 Sep 18 01:34 .
+drwxrwxr-x 14 takanorifukuyama takanorifukuyama 4096 Sep 18 01:33 ..
+-rw-rw-r--  1 takanorifukuyama takanorifukuyama   13 Sep 18 01:33 .tsls-lab
+drwxrwxr-x  3 takanorifukuyama takanorifukuyama 4096 Sep 18 01:34 logs
+-rw-rw-r--  1 takanorifukuyama takanorifukuyama  947 Sep 18 01:34 manifest.env

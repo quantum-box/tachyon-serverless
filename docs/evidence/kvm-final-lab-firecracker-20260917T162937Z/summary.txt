@@ -1,0 +1,55 @@
+KVM final batch — PLT-4648 runbook: scripts/lab/lab.sh --provider firecracker, full path from a clean clone
+
+host      Lima VM tsls-kvm (Apple M4 -> vz nested virtualization, aarch64, 4 vCPU / 8 GiB), VM user's home,
+          passwordless sudo (LAB_FC_PRIVILEGED=1 default: gateway as root, jailer + cgroup required)
+procedure (../kvm-final-scripts/run-lab.sh.txt) git clone of the repository into ~/<dir>, git checkout --detach
+          <ref> (clean: 0 changed files, 00-clone.txt), then in that clone:
+          preflight -> bootstrap -> up -> status -> demo all -> status -> teardown, each command's output in
+          NN-*.txt, lab transcripts in commands/, host load before/after + leftover audit in host.txt
+load      Mac 1-min load p50 2.8-3.2 / max 3.6-4.0 in all four runs (mac-load.tsv); VM load <= 2.7
+
+RUNS
+dir                     ref       clone path            result
+1-origin-main-9b6f2c8   9b6f2c8   ~/lab-main            preflight ok, bootstrap ok (64 s), UP FAILED (exit 1), demo not run
+2-6dead7b               6dead7b   ~/lab                 up ok, status ok, DEMO REFUSED ("gateway is not running"), status exit 141
+3-264db3e               264db3e   ~/lab                 demo aborted in P3 after p3.async_succeeded (exit 1)
+4-a56b259               a56b259   ~/lab                 preflight 0, bootstrap 0 (61 s), up 0, status 0, demo all 49/49 PASS
+                                                        (174 s), status 0, teardown 0 with "orphan check: clean"
+Every run ended with the host clean (host.txt: no gateway/firecracker/jailer/nats process, no tachyon or
+tsls-* cgroup, no jail, no env dir, no tsls* tap, no netns; nft only Lima's `table ip nat`; the lab directory
+keeps only .tsls-lab, logs/ and manifest.env, 08-after-teardown.txt).
+
+GAPS FOUND ON origin/main AND FIXED (all in scripts/lab, commits 6dead7b, 264db3e, a56b259; docs/runbook.md §2, §6.3)
+1. preflight socket_path measured only <lab>/fc/run/env_<26>/v.sock_5000 (92 bytes: ok) but with the jailer
+   the vsock listener lives in <lab>/fc/jail/firecracker/env-<26>/root/v.sock_5000 (110 bytes for
+   /home/takanorifukuyama.guest/lab-main/.lab). `up` then failed its health table: provider preflight
+   `socket_path_length` false, config-cache `refused` (1-origin-main-9b6f2c8/03-up.txt). preflight now takes
+   the longer path and prints it; runbook §2 says the lab directory path must be <= 39 bytes with the jailer,
+   §6.3 explains the symptom. The later runs used the shorter clone path ~/lab (105 bytes) - the fix makes
+   the too-long path fail in preflight, it does not make a 110-byte path work.
+2. status/up health table read the gateway's root-owned state.db (0600) as the lab user and reported the
+   ledger `unreadable/8` (same file). sqlite_ro now retries through sudo.
+3. demo checked the gateway pid with kill -0 as the lab user (EPERM for a root gateway) and refused to run
+   (2-6dead7b/05-demo-all.txt). status and demo now use sudo when it is available (lab_sudo_optional).
+4. status exited 141 (SIGPIPE): metric_value's awk exited on the first match while printf was still writing
+   the metrics body (2-6dead7b/06-status-after-demo.txt).
+5. demo P3 aborted under errexit on `find` of the root-owned object root (3-264db3e/05-demo-all.txt). The
+   ciphertext check and the final secret scan had the same root cause in a worse form: `grep` on an
+   unreadable file exits 2, which the demo counted as "not found", so on a privileged firecracker lab both
+   checks would have passed without reading state.db or the objects. They now read through sudo and count an
+   unreadable file as a failure (4-a56b259: "20 locations x 5 values checked, 0 hits").
+
+DEMO (4-a56b259/05-demo-all.txt, 49 checks)
+P1 17: provider firecracker / micro_vm / not dev-only, register + publish, sync invoke, env + secret binding,
+       logs, boot evidence with guest boot id, user error exit 3, HTTP adapter, host-enforced timeout exit 4,
+       publish v2 + rollback, tenant B 404 (get and invoke), no environment left
+P2 11: revision max_concurrency 2, burst of 5 all served and bounded at 2 environments, scale to zero, cold
+       re-access, alias switch + rollback, jp placement label admitted / us refused, metrics snapshot,
+       metrics operator-only
+P3 20: invokeAsync 202 + succeeded, 100 KiB input in the object store and not readable as plaintext, retries
+       -> dead letter (hello {"fail":true}; idempotent-async needs the host file system, NOTE in the demo),
+       redrive needs the role / accepted / ran, cron created / fired / ran, webhook created / signed 202 /
+       bad signature 401 / ran, usage report, budget hard limit stops / per function / released
+secrets.not_leaked 1
+
+NOT COVERED: a second human; x86_64; LAB_FC_PRIVILEGED=0 (unprivileged, no jailer) on KVM; `up --console`.

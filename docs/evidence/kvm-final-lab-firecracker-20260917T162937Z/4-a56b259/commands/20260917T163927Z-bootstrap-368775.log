@@ -1,0 +1,422 @@
+# tachyon-serverless lab transcript
+# command:  scripts/lab/lab.sh --provider firecracker bootstrap
+# started:  2026-09-17T16:39:27Z
+# lab_dir:  /home/takanorifukuyama.guest/lab/.lab
+# lab_id:   lab-6c6786c8
+# host:     Linux 7.0.0-31-generic aarch64 user=takanorifukuyama
+# git:      a56b259d4f2cdc0120dced1040a155691d4951cf
+2026-09-17T16:39:27Z [lab] lab lab-6c6786c8 provider=firecracker arch=aarch64
+2026-09-17T16:39:27Z [lab] step 1/4: nats-server v2.14.7
+2026-09-17T16:39:27Z [queue] downloading https://github.com/nats-io/nats-server/releases/download/v2.14.7/nats-server-v2.14.7-linux-arm64.tar.gz
+2026-09-17T16:39:28Z [queue] verified nats-server-v2.14.7-linux-arm64 (sha256 50e0258a1b7290f3fe2e4f17506b74a90ffb1dd77867ae3a402eb0c9e2b0d40f)
+2026-09-17T16:39:28Z [lab] nats-server: nats-server: v2.14.7
+2026-09-17T16:39:28Z [lab] step 2/4: Firecracker v1.17.0 + jailer + guest kernel (pinned sha256)
+2026-09-17T16:39:28Z [lab] downloading https://github.com/firecracker-microvm/firecracker/releases/download/v1.17.0/firecracker-v1.17.0-aarch64.tgz
+2026-09-17T16:39:28Z   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+2026-09-17T16:39:28Z                                  Dload  Upload  Total   Spent   Left   Speed
+2026-09-17T16:39:28Z   0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0  0      0   0      0   0      0      0      0                              0
+2026-09-17T16:39:29Z   0      0   0      0   0      0      0      0                              0100  6.95M 100  6.95M   0      0  9.86M      0                              0100  6.95M 100  6.95M   0      0  9.86M      0                              0100  6.95M 100  6.95M   0      0  9.86M      0                              0
+2026-09-17T16:39:29Z [lab] sha256 verified: firecracker-v1.17.0-aarch64.tgz e351ebe4f7a16b5873bbd51005d2e6767103cff4d5ebc829df2d3f95a93e2256
+2026-09-17T16:39:29Z [lab] Firecracker v1.17.0; Jailer v1.17.0
+2026-09-17T16:39:29Z [lab] downloading https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/aarch64/vmlinux-6.1.155
+2026-09-17T16:39:29Z   % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+2026-09-17T16:39:29Z                                  Dload  Upload  Total   Spent   Left   Speed
+2026-09-17T16:39:31Z   0      0   0      0   0      0      0      0                              0  0 16.31M   0  69151   0      0  66223      0   04:18   00:01   04:17  66236 34 16.31M  34  5.62M   0      0  2.70M      0   00:06   00:02   00:04  2.70M100 16.31M 100 16.31M   0      0  6.57M      0   00:02   00:02          2.70M100 16.31M 100 16.31M   0      0  6.57M      0   00:02   00:02          2.70M100 16.31M 100 16.31M   0      0  6.57M      0   00:02   00:02          2.70M
+2026-09-17T16:39:31Z [lab] sha256 verified: vmlinux e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+2026-09-17T16:39:31Z [lab] step 3/4: cargo build (toolchain 1.95.0 from rust-toolchain.toml)
+2026-09-17T16:39:31Z + cargo build -p tachyon-serverless-gateway -p tachyon-serverless-cli
+2026-09-17T16:39:31Z    Compiling proc-macro2 v1.0.107
+2026-09-17T16:39:31Z    Compiling unicode-ident v1.0.24
+2026-09-17T16:39:31Z    Compiling quote v1.0.47
+2026-09-17T16:39:31Z    Compiling libc v0.2.189
+2026-09-17T16:39:31Z    Compiling cfg-if v1.0.4
+2026-09-17T16:39:31Z    Compiling serde_core v1.0.229
+2026-09-17T16:39:31Z    Compiling serde v1.0.229
+2026-09-17T16:39:32Z    Compiling version_check v0.9.5
+2026-09-17T16:39:32Z    Compiling syn v3.0.5
+2026-09-17T16:39:32Z    Compiling syn v2.0.119
+2026-09-17T16:39:32Z    Compiling getrandom v0.2.17
+2026-09-17T16:39:32Z    Compiling generic-array v0.14.7
+2026-09-17T16:39:32Z    Compiling typenum v1.20.1
+2026-09-17T16:39:32Z    Compiling rand_core v0.6.4
+2026-09-17T16:39:32Z    Compiling pin-project-lite v0.2.17
+2026-09-17T16:39:32Z    Compiling memchr v2.8.3
+2026-09-17T16:39:32Z    Compiling crypto-common v0.1.7
+2026-09-17T16:39:32Z    Compiling itoa v1.0.18
+2026-09-17T16:39:32Z    Compiling errno v0.3.14
+2026-09-17T16:39:33Z    Compiling futures-core v0.3.34
+2026-09-17T16:39:33Z    Compiling signal-hook-registry v1.4.8
+2026-09-17T16:39:33Z    Compiling socket2 v0.6.5
+2026-09-17T16:39:33Z    Compiling mio v1.2.3
+2026-09-17T16:39:33Z    Compiling once_cell v1.21.4
+2026-09-17T16:39:33Z    Compiling zerocopy v0.8.57
+2026-09-17T16:39:33Z    Compiling block-buffer v0.10.4
+2026-09-17T16:39:33Z    Compiling smallvec v1.16.1
+2026-09-17T16:39:33Z    Compiling synstructure v0.13.2
+2026-09-17T16:39:33Z    Compiling futures-sink v0.3.34
+2026-09-17T16:39:33Z    Compiling digest v0.10.7
+2026-09-17T16:39:33Z    Compiling cpufeatures v0.2.17
+2026-09-17T16:39:33Z    Compiling zmij v1.0.23
+2026-09-17T16:39:33Z    Compiling find-msvc-tools v0.1.12
+2026-09-17T16:39:33Z    Compiling shlex v2.0.1
+2026-09-17T16:39:33Z    Compiling serde_derive v1.0.229
+2026-09-17T16:39:33Z    Compiling tokio-macros v2.7.2
+2026-09-17T16:39:33Z    Compiling zerofrom-derive v0.1.7
+2026-09-17T16:39:34Z    Compiling yoke-derive v0.8.2
+2026-09-17T16:39:34Z    Compiling zerofrom v0.1.8
+2026-09-17T16:39:34Z    Compiling stable_deref_trait v1.2.1
+2026-09-17T16:39:34Z    Compiling ppv-lite86 v0.2.21
+2026-09-17T16:39:34Z    Compiling cc v1.4.6
+2026-09-17T16:39:34Z    Compiling tracing-core v0.1.36
+2026-09-17T16:39:34Z    Compiling yoke v0.8.3
+2026-09-17T16:39:34Z    Compiling log v0.4.34
+2026-09-17T16:39:34Z    Compiling serde_json v1.0.151
+2026-09-17T16:39:34Z    Compiling zerovec-derive v0.11.6
+2026-09-17T16:39:34Z    Compiling futures-channel v0.3.34
+2026-09-17T16:39:35Z    Compiling zeroize v1.9.0
+2026-09-17T16:39:35Z    Compiling getrandom v0.3.4
+2026-09-17T16:39:35Z    Compiling bytes v1.12.1
+2026-09-17T16:39:35Z    Compiling tracing-attributes v0.1.31
+2026-09-17T16:39:35Z    Compiling tokio v1.53.1
+2026-09-17T16:39:35Z    Compiling zerovec v0.11.8
+2026-09-17T16:39:35Z    Compiling futures-macro v0.3.34
+2026-09-17T16:39:35Z    Compiling displaydoc v0.2.7
+2026-09-17T16:39:35Z    Compiling futures-task v0.3.34
+2026-09-17T16:39:35Z    Compiling futures-io v0.3.34
+2026-09-17T16:39:35Z    Compiling subtle v2.6.1
+2026-09-17T16:39:35Z    Compiling autocfg v1.5.1
+2026-09-17T16:39:35Z    Compiling slab v0.4.12
+2026-09-17T16:39:35Z    Compiling futures-util v0.3.34
+2026-09-17T16:39:36Z    Compiling tracing v0.1.44
+2026-09-17T16:39:36Z    Compiling num-traits v0.2.19
+2026-09-17T16:39:36Z    Compiling rand_core v0.9.5
+2026-09-17T16:39:36Z    Compiling sha2 v0.10.9
+2026-09-17T16:39:36Z    Compiling thiserror v2.0.20
+2026-09-17T16:39:36Z    Compiling rand_chacha v0.9.0
+2026-09-17T16:39:36Z    Compiling tinystr v0.8.4
+2026-09-17T16:39:36Z    Compiling thiserror-impl v2.0.20
+2026-09-17T16:39:36Z    Compiling iana-time-zone v0.1.65
+2026-09-17T16:39:36Z    Compiling litemap v0.8.3
+2026-09-17T16:39:36Z    Compiling writeable v0.6.4
+2026-09-17T16:39:36Z    Compiling icu_locale_core v2.3.0
+2026-09-17T16:39:36Z    Compiling chrono v0.4.45
+2026-09-17T16:39:37Z    Compiling rand v0.9.5
+2026-09-17T16:39:37Z    Compiling zerotrie v0.2.5
+2026-09-17T16:39:37Z    Compiling potential_utf v0.1.6
+2026-09-17T16:39:37Z    Compiling http v1.5.0
+2026-09-17T16:39:37Z    Compiling ring v0.17.14
+2026-09-17T16:39:37Z    Compiling utf8_iter v1.0.4
+2026-09-17T16:39:37Z    Compiling percent-encoding v2.3.2
+2026-09-17T16:39:37Z    Compiling icu_properties_data v2.3.0
+2026-09-17T16:39:37Z    Compiling icu_normalizer_data v2.3.0
+2026-09-17T16:39:37Z    Compiling icu_collections v2.3.0
+2026-09-17T16:39:37Z    Compiling icu_provider v2.3.1
+2026-09-17T16:39:37Z    Compiling ulid v1.2.1
+2026-09-17T16:39:37Z    Compiling rustls-pki-types v1.15.1
+2026-09-17T16:39:37Z    Compiling getrandom v0.4.3
+2026-09-17T16:39:37Z    Compiling rand_core v0.10.1
+2026-09-17T16:39:37Z    Compiling foldhash v0.2.0
+2026-09-17T16:39:37Z    Compiling hex v0.4.3
+2026-09-17T16:39:37Z    Compiling hashbrown v0.17.1
+2026-09-17T16:39:38Z    Compiling tachyon-serverless-domain v0.1.0 (/home/takanorifukuyama.guest/lab/crates/domain)
+2026-09-17T16:39:38Z    Compiling http-body v1.1.0
+2026-09-17T16:39:38Z    Compiling untrusted v0.9.0
+2026-09-17T16:39:38Z    Compiling httparse v1.10.1
+2026-09-17T16:39:38Z    Compiling icu_properties v2.3.0
+2026-09-17T16:39:38Z    Compiling icu_normalizer v2.3.0
+2026-09-17T16:39:38Z    Compiling form_urlencoded v1.2.2
+2026-09-17T16:39:38Z    Compiling tokio-util v0.7.19
+2026-09-17T16:39:38Z    Compiling async-trait v0.1.92
+2026-09-17T16:39:38Z    Compiling tower-service v0.3.3
+2026-09-17T16:39:38Z    Compiling base64 v0.22.1
+2026-09-17T16:39:38Z    Compiling rustls v0.23.45
+2026-09-17T16:39:39Z    Compiling rustls-webpki v0.103.15
+2026-09-17T16:39:39Z    Compiling idna_adapter v1.2.2
+2026-09-17T16:39:39Z    Compiling scopeguard v1.2.0
+2026-09-17T16:39:39Z    Compiling base64ct v1.8.3
+2026-09-17T16:39:39Z    Compiling utf8parse v0.2.2
+2026-09-17T16:39:39Z    Compiling equivalent v1.0.2
+2026-09-17T16:39:39Z    Compiling semver v1.0.28
+2026-09-17T16:39:39Z    Compiling httpdate v1.0.3
+2026-09-17T16:39:39Z    Compiling try-lock v0.2.5
+2026-09-17T16:39:39Z    Compiling mime v0.3.17
+2026-09-17T16:39:39Z    Compiling bitflags v2.13.2
+2026-09-17T16:39:39Z    Compiling want v0.3.1
+2026-09-17T16:39:39Z    Compiling rustc_version v0.4.1
+2026-09-17T16:39:39Z    Compiling indexmap v2.14.2
+2026-09-17T16:39:39Z    Compiling anstyle-parse v1.0.0
+2026-09-17T16:39:39Z    Compiling pem-rfc7468 v0.7.0
+2026-09-17T16:39:39Z    Compiling idna v1.1.0
+2026-09-17T16:39:39Z    Compiling sync_wrapper v1.0.2
+2026-09-17T16:39:39Z    Compiling aho-corasick v1.1.5
+2026-09-17T16:39:39Z    Compiling rustversion v1.0.23
+2026-09-17T16:39:39Z    Compiling is_terminal_polyfill v1.70.2
+2026-09-17T16:39:39Z    Compiling unicase v2.9.0
+2026-09-17T16:39:39Z    Compiling anstyle v1.0.14
+2026-09-17T16:39:39Z    Compiling const-oid v0.9.6
+2026-09-17T16:39:39Z    Compiling regex-syntax v0.8.11
+2026-09-17T16:39:39Z    Compiling tower-layer v0.3.3
+2026-09-17T16:39:39Z    Compiling colorchoice v1.0.5
+2026-09-17T16:39:40Z    Compiling anstyle-query v1.1.5
+2026-09-17T16:39:40Z    Compiling atomic-waker v1.1.2
+2026-09-17T16:39:40Z    Compiling hyper v1.11.1
+2026-09-17T16:39:40Z    Compiling anstream v1.0.0
+2026-09-17T16:39:40Z    Compiling regex-automata v0.4.18
+2026-09-17T16:39:40Z    Compiling tokio-rustls v0.26.5
+2026-09-17T16:39:40Z    Compiling der v0.7.10
+2026-09-17T16:39:41Z    Compiling mime_guess v2.0.5
+2026-09-17T16:39:41Z    Compiling url v2.5.8
+2026-09-17T16:39:41Z    Compiling curve25519-dalek v4.1.3
+2026-09-17T16:39:41Z    Compiling tachyon-serverless-provider-port v0.1.0 (/home/takanorifukuyama.guest/lab/crates/provider-port)
+2026-09-17T16:39:41Z    Compiling http-body-util v0.1.5
+2026-09-17T16:39:41Z    Compiling signature v2.2.0
+2026-09-17T16:39:41Z    Compiling ipnet v2.12.2
+2026-09-17T16:39:41Z    Compiling heck v0.5.0
+2026-09-17T16:39:41Z    Compiling strsim v0.11.1
+2026-09-17T16:39:41Z    Compiling clap_lex v1.1.1
+2026-09-17T16:39:42Z    Compiling parking_lot_core v0.9.12
+2026-09-17T16:39:42Z    Compiling clap_builder v4.6.7
+2026-09-17T16:39:42Z    Compiling clap_derive v4.6.7
+2026-09-17T16:39:42Z    Compiling hyper-util v0.1.20
+2026-09-17T16:39:42Z    Compiling spki v0.7.3
+2026-09-17T16:39:42Z    Compiling tower v0.5.3
+2026-09-17T16:39:42Z    Compiling serde_spanned v0.6.9
+2026-09-17T16:39:42Z    Compiling toml_datetime v0.6.11
+2026-09-17T16:39:43Z    Compiling utoipa-gen v5.5.0
+2026-09-17T16:39:43Z    Compiling inout v0.1.4
+2026-09-17T16:39:43Z    Compiling toml_write v0.1.2
+2026-09-17T16:39:43Z    Compiling winnow v0.7.15
+2026-09-17T16:39:43Z    Compiling ryu v1.0.23
+2026-09-17T16:39:43Z    Compiling vcpkg v0.2.15
+2026-09-17T16:39:43Z    Compiling pkg-config v0.3.34
+2026-09-17T16:39:43Z    Compiling libsqlite3-sys v0.38.2
+2026-09-17T16:39:43Z    Compiling toml_edit v0.22.27
+2026-09-17T16:39:43Z    Compiling serde_urlencoded v0.7.1
+2026-09-17T16:39:43Z    Compiling cipher v0.4.4
+2026-09-17T16:39:43Z    Compiling encoding_rs v0.8.41
+2026-09-17T16:39:43Z    Compiling pkcs8 v0.10.2
+2026-09-17T16:39:44Z    Compiling clap v4.6.7
+2026-09-17T16:39:44Z    Compiling ed25519 v2.2.3
+2026-09-17T16:39:44Z    Compiling lock_api v0.4.14
+2026-09-17T16:39:44Z    Compiling uuid v1.26.1
+2026-09-17T16:39:44Z    Compiling webpki-roots v1.0.9
+2026-09-17T16:39:44Z    Compiling futures-executor v0.3.34
+2026-09-17T16:39:44Z    Compiling universal-hash v0.5.1
+2026-09-17T16:39:44Z    Compiling rand_chacha v0.3.1
+2026-09-17T16:39:44Z    Compiling portable-atomic v1.15.0
+2026-09-17T16:39:44Z    Compiling opaque-debug v0.3.1
+2026-09-17T16:39:44Z    Compiling siphasher v1.0.3
+2026-09-17T16:39:44Z    Compiling http-range-header v0.4.2
+2026-09-17T16:39:44Z    Compiling phf_shared v0.12.1
+2026-09-17T16:39:44Z    Compiling tower-http v0.6.11
+2026-09-17T16:39:44Z    Compiling polyval v0.6.2
+2026-09-17T16:39:44Z    Compiling rand v0.8.8
+2026-09-17T16:39:44Z    Compiling toml v0.8.23
+2026-09-17T16:39:45Z    Compiling futures v0.3.34
+2026-09-17T16:39:45Z    Compiling hyper-rustls v0.27.9
+2026-09-17T16:39:45Z    Compiling parking_lot v0.12.5
+2026-09-17T16:39:45Z    Compiling ed25519-dalek v2.2.0
+2026-09-17T16:39:45Z    Compiling utoipa v5.5.0
+2026-09-17T16:39:45Z    Compiling signatory v0.27.1
+2026-09-17T16:39:45Z    Compiling chacha20 v0.10.2
+2026-09-17T16:39:45Z    Compiling pin-project-internal v1.1.13
+2026-09-17T16:39:45Z    Compiling deranged v0.5.8
+2026-09-17T16:39:45Z    Compiling multer v3.1.0
+2026-09-17T16:39:45Z    Compiling lazy_static v1.5.0
+2026-09-17T16:39:45Z    Compiling data-encoding v2.11.1
+2026-09-17T16:39:45Z    Compiling openssl-probe v0.2.1
+2026-09-17T16:39:45Z    Compiling num-conv v0.2.2
+2026-09-17T16:39:45Z    Compiling powerfmt v0.2.0
+2026-09-17T16:39:45Z    Compiling tachyon-serverless-api-types v0.1.0 (/home/takanorifukuyama.guest/lab/crates/api-types)
+2026-09-17T16:39:46Z    Compiling anyhow v1.0.104
+2026-09-17T16:39:46Z    Compiling chrono-tz v0.10.4
+2026-09-17T16:39:46Z    Compiling simdutf8 v0.1.5
+2026-09-17T16:39:46Z    Compiling multiversion_no_op v1.0.0
+2026-09-17T16:39:46Z    Compiling rustix v1.1.4
+2026-09-17T16:39:46Z    Compiling time-core v0.1.9
+2026-09-17T16:39:46Z    Compiling time v0.3.55
+2026-09-17T16:39:47Z    Compiling nkeys v0.4.5
+2026-09-17T16:39:47Z    Compiling rustls-native-certs v0.8.4
+2026-09-17T16:39:47Z    Compiling pin-project v1.1.13
+2026-09-17T16:39:47Z    Compiling sharded-slab v0.1.7
+2026-09-17T16:39:47Z    Compiling rand v0.10.2
+2026-09-17T16:39:47Z    Compiling reqwest v0.12.28
+2026-09-17T16:39:47Z    Compiling ghash v0.5.1
+2026-09-17T16:39:47Z    Compiling phf v0.12.1
+2026-09-17T16:39:47Z    Compiling aes v0.8.4
+2026-09-17T16:39:48Z    Compiling ctr v0.9.2
+2026-09-17T16:39:48Z    Compiling matchers v0.2.0
+2026-09-17T16:39:48Z    Compiling regex v1.13.1
+2026-09-17T16:39:48Z    Compiling tachyon-serverless-durable-port v0.1.0 (/home/takanorifukuyama.guest/lab/crates/durable-port)
+2026-09-17T16:39:48Z    Compiling tachyon-serverless-protocol v0.1.0 (/home/takanorifukuyama.guest/lab/crates/protocol)
+2026-09-17T16:39:48Z    Compiling hashlink v0.12.2
+2026-09-17T16:39:48Z    Compiling tokio-stream v0.1.19
+2026-09-17T16:39:48Z    Compiling tryhard v0.5.2
+2026-09-17T16:39:48Z    Compiling tracing-serde v0.2.0
+2026-09-17T16:39:48Z    Compiling serde_nanos v0.1.4
+2026-09-17T16:39:48Z    Compiling tracing-log v0.2.0
+2026-09-17T16:39:48Z    Compiling serde_repr v0.1.21
+2026-09-17T16:39:48Z    Compiling aead v0.5.2
+2026-09-17T16:39:48Z    Compiling thread_local v1.1.10
+2026-09-17T16:39:48Z    Compiling fallible-iterator v0.3.0
+2026-09-17T16:39:48Z    Compiling spin v0.9.9
+2026-09-17T16:39:48Z    Compiling fallible-streaming-iterator v0.1.9
+2026-09-17T16:39:48Z    Compiling linux-raw-sys v0.12.1
+2026-09-17T16:39:48Z    Compiling nu-ansi-term v0.50.3
+2026-09-17T16:39:48Z    Compiling rusqlite v0.40.2
+2026-09-17T16:39:49Z    Compiling tracing-subscriber v0.3.23
+2026-09-17T16:39:49Z    Compiling async-nats v0.50.0
+2026-09-17T16:39:49Z    Compiling aes-gcm v0.10.3
+2026-09-17T16:39:49Z    Compiling axum-core v0.5.6
+2026-09-17T16:39:50Z    Compiling axum-macros v0.5.1
+2026-09-17T16:39:50Z    Compiling serde_path_to_error v0.1.20
+2026-09-17T16:39:50Z    Compiling matchit v0.8.4
+2026-09-17T16:39:50Z    Compiling fastrand v2.5.0
+2026-09-17T16:39:50Z    Compiling tempfile v3.27.0
+2026-09-17T16:39:50Z    Compiling axum v0.8.9
+2026-09-17T16:39:50Z    Compiling tachyon-serverless-provider-firecracker v0.1.0 (/home/takanorifukuyama.guest/lab/crates/providers/firecracker)
+2026-09-17T16:39:51Z    Compiling tachyon-serverless-application v0.1.0 (/home/takanorifukuyama.guest/lab/crates/application)
+2026-09-17T16:39:52Z    Compiling tachyon-serverless-queue-nats v0.1.0 (/home/takanorifukuyama.guest/lab/crates/adapters/queue-nats)
+2026-09-17T16:39:53Z    Compiling tachyon-serverless-provider-process v0.1.0 (/home/takanorifukuyama.guest/lab/crates/providers/process)
+2026-09-17T16:39:53Z    Compiling tachyon-serverless-cli v0.1.0 (/home/takanorifukuyama.guest/lab/apps/cli)
+2026-09-17T16:39:57Z    Compiling tachyon-serverless-gateway v0.1.0 (/home/takanorifukuyama.guest/lab/apps/gateway)
+2026-09-17T16:40:06Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 35.12s
+2026-09-17T16:40:06Z + rustup target add aarch64-unknown-linux-musl
+2026-09-17T16:40:06Z info: component rust-std for target aarch64-unknown-linux-musl is up to date
+2026-09-17T16:40:06Z + cargo build --release --target aarch64-unknown-linux-musl -p tachyon-serverless-runtime-bridge -p example-hello -p example-http-axum -p example-cpu-burn
+2026-09-17T16:40:06Z    Compiling proc-macro2 v1.0.107
+2026-09-17T16:40:06Z    Compiling unicode-ident v1.0.24
+2026-09-17T16:40:06Z    Compiling quote v1.0.47
+2026-09-17T16:40:06Z    Compiling libc v0.2.189
+2026-09-17T16:40:06Z    Compiling cfg-if v1.0.4
+2026-09-17T16:40:06Z    Compiling pin-project-lite v0.2.17
+2026-09-17T16:40:06Z    Compiling futures-core v0.3.34
+2026-09-17T16:40:06Z    Compiling itoa v1.0.18
+2026-09-17T16:40:06Z    Compiling version_check v0.9.5
+2026-09-17T16:40:06Z    Compiling bytes v1.12.1
+2026-09-17T16:40:06Z    Compiling futures-sink v0.3.34
+2026-09-17T16:40:06Z    Compiling autocfg v1.5.1
+2026-09-17T16:40:07Z    Compiling serde_core v1.0.229
+2026-09-17T16:40:07Z    Compiling syn v3.0.5
+2026-09-17T16:40:07Z    Compiling memchr v2.8.3
+2026-09-17T16:40:07Z    Compiling errno v0.3.14
+2026-09-17T16:40:07Z    Compiling futures-channel v0.3.34
+2026-09-17T16:40:07Z    Compiling serde v1.0.229
+2026-09-17T16:40:07Z    Compiling signal-hook-registry v1.4.8
+2026-09-17T16:40:07Z    Compiling socket2 v0.6.5
+2026-09-17T16:40:07Z    Compiling mio v1.2.3
+2026-09-17T16:40:07Z    Compiling generic-array v0.14.7
+2026-09-17T16:40:07Z    Compiling once_cell v1.21.4
+2026-09-17T16:40:07Z    Compiling zerocopy v0.8.57
+2026-09-17T16:40:08Z    Compiling getrandom v0.3.4
+2026-09-17T16:40:08Z    Compiling tracing-core v0.1.36
+2026-09-17T16:40:08Z    Compiling syn v2.0.119
+2026-09-17T16:40:08Z    Compiling http v1.5.0
+2026-09-17T16:40:08Z    Compiling tokio-macros v2.7.2
+2026-09-17T16:40:08Z    Compiling serde_derive v1.0.229
+2026-09-17T16:40:08Z    Compiling tokio v1.53.1
+2026-09-17T16:40:08Z    Compiling futures-macro v0.3.34
+2026-09-17T16:40:09Z    Compiling typenum v1.20.1
+2026-09-17T16:40:09Z    Compiling futures-io v0.3.34
+2026-09-17T16:40:09Z    Compiling slab v0.4.12
+2026-09-17T16:40:09Z    Compiling zmij v1.0.23
+2026-09-17T16:40:09Z    Compiling rustversion v1.0.23
+2026-09-17T16:40:09Z    Compiling futures-task v0.3.34
+2026-09-17T16:40:09Z    Compiling futures-util v0.3.34
+2026-09-17T16:40:10Z    Compiling httparse v1.10.1
+2026-09-17T16:40:10Z    Compiling log v0.4.34
+2026-09-17T16:40:10Z    Compiling serde_json v1.0.151
+2026-09-17T16:40:10Z    Compiling rand_core v0.9.5
+2026-09-17T16:40:10Z    Compiling tracing-attributes v0.1.31
+2026-09-17T16:40:10Z    Compiling http-body v1.1.0
+2026-09-17T16:40:10Z    Compiling num-traits v0.2.19
+2026-09-17T16:40:11Z    Compiling encoding_rs v0.8.41
+2026-09-17T16:40:11Z    Compiling tracing v0.1.44
+2026-09-17T16:40:11Z    Compiling ppv-lite86 v0.2.21
+2026-09-17T16:40:11Z    Compiling rand_chacha v0.9.0
+2026-09-17T16:40:11Z    Compiling block-buffer v0.10.4
+2026-09-17T16:40:11Z    Compiling crypto-common v0.1.7
+2026-09-17T16:40:11Z    Compiling thiserror v2.0.20
+2026-09-17T16:40:11Z    Compiling smallvec v1.16.1
+2026-09-17T16:40:11Z    Compiling tower-service v0.3.3
+2026-09-17T16:40:11Z    Compiling digest v0.10.7
+2026-09-17T16:40:12Z    Compiling rand v0.9.5
+2026-09-17T16:40:12Z    Compiling thiserror-impl v2.0.20
+2026-09-17T16:40:12Z    Compiling cpufeatures v0.2.17
+2026-09-17T16:40:12Z    Compiling multer v3.1.0
+2026-09-17T16:40:12Z    Compiling mime v0.3.17
+2026-09-17T16:40:12Z    Compiling httpdate v1.0.3
+2026-09-17T16:40:12Z    Compiling simdutf8 v0.1.5
+2026-09-17T16:40:12Z    Compiling atomic-waker v1.1.2
+2026-09-17T16:40:12Z    Compiling scopeguard v1.2.0
+2026-09-17T16:40:12Z    Compiling iana-time-zone v0.1.65
+2026-09-17T16:40:12Z    Compiling percent-encoding v2.3.2
+2026-09-17T16:40:12Z    Compiling sync_wrapper v1.0.2
+2026-09-17T16:40:12Z    Compiling multiversion_no_op v1.0.0
+2026-09-17T16:40:12Z    Compiling tower-layer v0.3.3
+2026-09-17T16:40:12Z    Compiling form_urlencoded v1.2.2
+2026-09-17T16:40:12Z    Compiling chrono v0.4.45
+2026-09-17T16:40:13Z    Compiling hyper v1.11.1
+2026-09-17T16:40:14Z    Compiling sha2 v0.10.9
+2026-09-17T16:40:14Z    Compiling ulid v1.2.1
+2026-09-17T16:40:14Z    Compiling http-body-util v0.1.5
+2026-09-17T16:40:14Z    Compiling futures-executor v0.3.34
+2026-09-17T16:40:14Z    Compiling ryu v1.0.23
+2026-09-17T16:40:14Z    Compiling spin v0.9.9
+2026-09-17T16:40:14Z    Compiling hex v0.4.3
+2026-09-17T16:40:14Z    Compiling serde_urlencoded v0.7.1
+2026-09-17T16:40:14Z    Compiling tachyon-serverless-domain v0.1.0 (/home/takanorifukuyama.guest/lab/crates/domain)
+2026-09-17T16:40:14Z    Compiling axum-core v0.5.6
+2026-09-17T16:40:15Z    Compiling futures v0.3.34
+2026-09-17T16:40:15Z    Compiling hyper-util v0.1.20
+2026-09-17T16:40:15Z    Compiling tower v0.5.3
+2026-09-17T16:40:15Z    Compiling tokio-util v0.7.19
+2026-09-17T16:40:15Z    Compiling axum-macros v0.5.1
+2026-09-17T16:40:15Z    Compiling serde_path_to_error v0.1.20
+2026-09-17T16:40:16Z    Compiling memoffset v0.9.1
+2026-09-17T16:40:16Z    Compiling matchit v0.8.4
+2026-09-17T16:40:16Z    Compiling cfg_aliases v0.2.2
+2026-09-17T16:40:16Z    Compiling nix v0.31.3
+2026-09-17T16:40:16Z    Compiling axum v0.8.9
+2026-09-17T16:40:16Z    Compiling tachyon-serverless-protocol v0.1.0 (/home/takanorifukuyama.guest/lab/crates/protocol)
+2026-09-17T16:40:16Z    Compiling utf8parse v0.2.2
+2026-09-17T16:40:16Z    Compiling base64 v0.22.1
+2026-09-17T16:40:16Z    Compiling anstyle-parse v1.0.0
+2026-09-17T16:40:16Z    Compiling colorchoice v1.0.5
+2026-09-17T16:40:16Z    Compiling regex-syntax v0.8.11
+2026-09-17T16:40:16Z    Compiling is_terminal_polyfill v1.70.2
+2026-09-17T16:40:16Z    Compiling anstyle v1.0.14
+2026-09-17T16:40:16Z    Compiling bitflags v2.13.2
+2026-09-17T16:40:16Z    Compiling anstyle-query v1.1.5
+2026-09-17T16:40:16Z    Compiling anstream v1.0.0
+2026-09-17T16:40:17Z    Compiling regex-automata v0.4.18
+2026-09-17T16:40:17Z    Compiling tachyon-serverless-sdk v0.1.0 (/home/takanorifukuyama.guest/lab/crates/sdk)
+2026-09-17T16:40:19Z    Compiling heck v0.5.0
+2026-09-17T16:40:19Z    Compiling strsim v0.11.1
+2026-09-17T16:40:19Z    Compiling clap_lex v1.1.1
+2026-09-17T16:40:19Z    Compiling lazy_static v1.5.0
+2026-09-17T16:40:19Z    Compiling sharded-slab v0.1.7
+2026-09-17T16:40:19Z    Compiling clap_builder v4.6.7
+2026-09-17T16:40:19Z    Compiling clap_derive v4.6.7
+2026-09-17T16:40:19Z    Compiling vsock v0.5.4
+2026-09-17T16:40:20Z    Compiling matchers v0.2.0
+2026-09-17T16:40:20Z    Compiling tracing-log v0.2.0
+2026-09-17T16:40:20Z    Compiling tracing-serde v0.2.0
+2026-09-17T16:40:20Z    Compiling thread_local v1.1.10
+2026-09-17T16:40:20Z    Compiling nu-ansi-term v0.50.3
+2026-09-17T16:40:20Z    Compiling tracing-subscriber v0.3.23
+2026-09-17T16:40:20Z    Compiling clap v4.6.7
+2026-09-17T16:40:20Z    Compiling tokio-vsock v0.7.2
+2026-09-17T16:40:20Z    Compiling example-http-axum v0.1.0 (/home/takanorifukuyama.guest/lab/examples/http-axum)
+2026-09-17T16:40:21Z    Compiling tachyon-serverless-runtime-bridge v0.1.0 (/home/takanorifukuyama.guest/lab/crates/runtime-bridge)
+2026-09-17T16:40:23Z    Compiling example-hello v0.1.0 (/home/takanorifukuyama.guest/lab/examples/hello)
+2026-09-17T16:40:24Z    Compiling example-cpu-burn v0.1.0 (/home/takanorifukuyama.guest/lab/examples/cpu-burn)
+2026-09-17T16:40:28Z     Finished `release` profile [optimized] target(s) in 21.59s
+2026-09-17T16:40:28Z [lab] step 4/4: base rootfs from this checkout's musl bridge
+2026-09-17T16:40:28Z + env BRIDGE_BIN=/home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/tachyon-serverless-runtime-bridge ROOTFS=/home/takanorifukuyama.guest/lab/.lab/cache/kvm/rootfs.ext4 ROOTFS_SIZE=64M /home/takanorifukuyama.guest/lab/scripts/kvm/build-rootfs.sh
+2026-09-17T16:40:28Z rootfs: /home/takanorifukuyama.guest/lab/.lab/cache/kvm/rootfs.ext4 (64M)
+2026-09-17T16:40:28Z   /sbin/tachyon-init <- /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/tachyon-serverless-runtime-bridge
+2026-09-17T16:40:28Z   sha256 15eb01a10b39810940449ed9e5240aedf772ba2852a75d8f2cf4a1b4f5f31767
+2026-09-17T16:40:28Z 
+2026-09-17T16:40:28Z [lab] bootstrap complete. next: scripts/lab/lab.sh up
+# finished: 2026-09-17T16:40:28Z exit=0

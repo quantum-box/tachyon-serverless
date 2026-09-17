@@ -1,0 +1,7 @@
+stamp=20260917T150813Z
+host=Linux 7.0.0-31-generic aarch64
+git_commit=d6e729f28ab8a953babbc4307b35ed9740035203
+queue=sqlite
+provider=firecracker
+cron_fires=11
+downtime_seconds=7

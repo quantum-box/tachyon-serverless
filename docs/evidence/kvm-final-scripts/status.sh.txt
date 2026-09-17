@@ -1,0 +1,15 @@
+#!/bin/bash
+# print what runs + leftovers (kill with KILL=1)
+. "$(dirname "$0")/common.sh"
+if [ "${KILL:-0}" = 1 ]; then
+  for p in $(pgrep -f 'run-(load|chaos|queue|usage|bench|journal|lab)' ); do [ "$p" != $$ ] && sudo kill "$p" 2>/dev/null; done
+  sudo pkill -f 'scripts/(load/scenarios|queue/|usage/|chaos/matrix|kvm/bench)' 2>/dev/null
+  sleep 2
+  sudo pkill -f '(^|/)tsls-load ' 2>/dev/null
+  sudo pkill -TERM -f '(^|/)tachyon-serverless-gateway ' 2>/dev/null
+  sleep 8
+  sudo pkill -KILL -f '(^|/)(firecracker|jailer) ' 2>/dev/null
+fi
+pgrep -a -f '(^|/)(tsls-load|tachyon-serverless-gateway|firecracker|jailer|nats-server) |scripts/(load|queue|usage|chaos|kvm)/' | grep -v pgrep
+echo "---"
+leftovers

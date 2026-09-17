@@ -1,0 +1,83 @@
+#!/bin/bash
+# item 1 (PLT-4637): load scenarios against a Firecracker gateway with [metrics] bearer_token and the warm pool
+. "$(dirname "$0")/common.sh"
+SCEN="${*:-burst idle-to-zero mixed restart lifecycle}"
+W=$VERIFY/load; sudo rm -rf "$W"; mkdir -p "$W"
+OUTROOT="$W/evidence"; mkdir -p "$OUTROOT"
+hostinfo "$W/host.txt" before
+t0=$(date -u +%s)
+vmload_sampler "$W/vm-load.tsv"; S=$!
+PORT=18490
+for sc in $SCEN; do
+  D="$HOME/w/l-$sc"; sudo rm -rf "$D"; mkdir -p "$D"
+  {
+    cat <<EOF
+listen = "127.0.0.1:$PORT"
+profile = "production"
+data_dir = "$D/data"
+
+EOF
+    awk '/^\[/ { keep = ($0 ~ /^\[provider(\.[a-z_.]+)?\]/) } keep' config/gateway.firecracker.toml \
+      | sed -e "s#\"\\.kvm/#\"$REPO/.kvm/#g" -e "s#^workdir = \"[^\"]*\"#workdir = \"$D/fc\"#"
+    cat <<EOF
+
+[capacity]
+max_concurrency = 4
+max_queue = 64
+queue_timeout_seconds = 120
+
+[capacity.node]
+name = "kvm-load"
+vmm_overhead_memory_mib = 64
+bridge_overhead_memory_mib = 0
+
+[capacity.tenant_defaults]
+max_concurrency = 3
+
+[capacity.start_rate]
+per_second = 50
+burst = 50
+
+[scaling]
+reconcile_interval_ms = 500
+scale_down_cooldown_seconds = 1
+
+[pool]
+enabled = true
+max_idle_per_revision = 3
+max_total_idle = 8
+
+
+[metrics]
+bearer_token = "load-metrics-operator-token"
+
+[[identity.tokens]]
+token = "load-token-tenant-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "load-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "load-token-tenant-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "load-b"
+roles = ["deploy", "invoke"]
+EOF
+  } > "$D/gateway.toml"
+  echo "== scenario $sc $(date -u +%FT%TZ) vm: $(cat /proc/loadavg) mac: $(tail -n 1 "$MACLOAD")" | tee -a "$W/host.txt"
+  sudo -n env PATH="$PATH" HOME="$HOME" TMPDIR=/tmp TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 \
+    TSLS_COMMIT="$(cat "$HOSTWT/.kvm/vm/commit.txt" 2>/dev/null)" \
+    TSLS_GATEWAY_CONFIG="$D/gateway.toml" TSLS_API_URL="http://127.0.0.1:$PORT" \
+    TSLS_TOKEN_A=load-token-tenant-a TSLS_TOKEN_B=load-token-tenant-b \
+    TSLS_METRICS_TOKEN=load-metrics-operator-token \
+    TSLS_GUEST_DIR="$REPO/target/aarch64-unknown-linux-musl/release" TSLS_EVIDENCE_DIR="$OUTROOT" \
+    bash scripts/load/scenarios.sh "$sc" > "$W/stdout-$sc.txt" 2>&1
+  echo "scenario $sc exit=$?" | tee -a "$W/host.txt"
+  sudo rm -rf "$D"
+  leftovers >> "$W/host.txt" 2>&1
+done
+kill $S
+hostinfo "$W/host.txt" after
+macload_window "$t0" "$(date -u +%s)" "$W/mac-load.tsv"
+fix_owner "$W"
+grep -h -E '^(PASS|FAIL)' "$W"/stdout-*.txt

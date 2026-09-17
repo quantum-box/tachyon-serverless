@@ -1,0 +1,26 @@
+[chaos worker_user_process_oom_sync] begin (user process allocates 512 MiB in a 128 MiB guest (guest OOM killer; firecracker only)) work=/home/takanorifukuyama.guest/w/tsls-chaos.8dE92r
+[chaos worker_user_process_oom_sync]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos worker_user_process_oom_sync]   ok   workload.async_accepted accepted=2 refused=0
+[chaos worker_user_process_oom_sync] fault injected
+[chaos worker_user_process_oom_sync] fault removed
+[chaos worker_user_process_oom_sync]   ok   classify.guest_oom_is_user_process_crash status=failed Runtime.Crash client=502/crash message=invocation inv_01m2r1e2gthm0anjsj7k5tv8cg failed: Runtime.Crash: user process exited while the attempt was in flight (exit_code=None, signal=Some(9))
+[chaos worker_user_process_oom_sync]   ok   evidence.guest_kernel_oom_killer console=data/fc/_archive/env_01m2r1e2gvv49f1smx89xqqvv3/console.log oom_lines=6
+[chaos worker_user_process_oom_sync] converged
+[chaos worker_user_process_oom_sync]   ok   cleanup.environment_terminated env=env_01m2r1e2gvv49f1smx89xqqvv3 state=failed host_leftovers=0
+[chaos worker_user_process_oom_sync]   ok   host.vmm_cgroup_peak_below_memory_max memory.peak=135667712 bytes, memory.max=201326592
+[chaos worker_user_process_oom_sync]   ok   recovery.next_invoke_of_the_same_function_succeeds code=200
+[chaos worker_user_process_oom_sync]   ok   cv.accepted_never_lost accepted=2 missing_rows=0
+[chaos worker_user_process_oom_sync]   ok   cv.accepted_all_terminal accepted=2 not_terminal=0
+[chaos worker_user_process_oom_sync]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos worker_user_process_oom_sync]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos worker_user_process_oom_sync]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=2
+[chaos worker_user_process_oom_sync]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos worker_user_process_oom_sync]   ok   cv.ledger_all_terminal invocations=5 non_terminal=0 by_status=failed:1,succeeded:4
+[chaos worker_user_process_oom_sync]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos worker_user_process_oom_sync]   ok   cv.usage_counted_once journal_pending=0 ledger_events=22 distinct=22 attempts_settled_twice=0 duplicates_ignored=0
+[chaos worker_user_process_oom_sync]   ok   cv.usage_from_cgroup_accounting environment_stopped=2 with provider_reported cgroup cpu usec and memory.peak=2 unknown=0; terminal environments=2, without a stop event=0
+[chaos worker_user_process_oom_sync]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos worker_user_process_oom_sync]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos worker_user_process_oom_sync]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos worker_user_process_oom_sync]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.8dE92r (data_dir, provider workdir with function/scratch drives, console and fc logs, snapshots) /srv/jailer (jails))
+[chaos worker_user_process_oom_sync]   ok   cv.no_vmm_jail_cgroup_tap_or_table_left firecracker/jailer processes, /sys/fs/cgroup/tachyon/*, /srv/jailer/firecracker/*, tsls* taps, table inet tachyon_egress: 0

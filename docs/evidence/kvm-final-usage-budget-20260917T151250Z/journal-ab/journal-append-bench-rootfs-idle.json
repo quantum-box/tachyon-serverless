@@ -1,0 +1,22 @@
+{"vm_loadavg": "0.08 0.71 1.03", "mac_load": "2026-09-17T16:46:16Z 1.50 2.24 5.09", "result":
+{
+  "directory": "/home/takanorifukuyama.guest/w",
+  "body_bytes": 1444,
+  "appends": {
+    "synchronous_full": {
+      "n": 500,
+      "p50_ms": 0.405,
+      "p95_ms": 1.634,
+      "p99_ms": 2.858,
+      "max_ms": 5.662
+    },
+    "synchronous_off": {
+      "n": 500,
+      "p50_ms": 0.013,
+      "p95_ms": 0.017,
+      "p99_ms": 0.047,
+      "max_ms": 0.198
+    }
+  }
+}
+}

@@ -1,0 +1,9 @@
+#!/bin/bash
+. "$(dirname "$0")/common.sh"
+O="$HOSTWT/docs/evidence/kvm-final-usage-budget-20260917T151250Z/journal-ab/journal-append-bench-rootfs-idle.json"
+{
+  echo "{\"vm_loadavg\": \"$(cut -d' ' -f1-3 /proc/loadavg)\", \"mac_load\": \"$(tail -n 1 "$MACLOAD" | cut -f2-5 | tr '\t' ' ')\", \"result\":"
+  python3 "$(dirname "$0")/journal-append-bench.py" 500 "$HOME/w"
+  echo "}"
+} > "$O"
+cat "$O"

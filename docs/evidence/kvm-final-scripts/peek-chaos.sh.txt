@@ -1,0 +1,7 @@
+#!/bin/bash
+w="$(ls -dt /home/takanorifukuyama.guest/w/tsls-chaos.* 2>/dev/null | head -1)"
+echo "work=$w"
+sudo ls "$w" "$w/nats" 2>&1 | head -30
+sudo tail -5 "$w/nats-up.log" 2>&1
+sudo tail -c 1500 "$w"/gateway-a.log 2>&1
+ps -eo pid,etime,args | grep -E 'nats|gateway|curl|up.sh|firecracker' | grep -v grep | cut -c1-200

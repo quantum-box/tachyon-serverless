@@ -1,0 +1,5 @@
+#!/bin/bash
+# ~/tsls carries a stale .git (rsync excludes .git), so scripts recorded a wrong commit: move it out
+cd ~ || exit 1
+if [ -d tsls/.git ]; then mv tsls/.git tsls-stale-dotgit && echo "moved ~/tsls/.git -> ~/tsls-stale-dotgit"; fi
+ls -d tsls/.git 2>/dev/null || echo "no .git in ~/tsls"

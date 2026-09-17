@@ -1,0 +1,20 @@
+#!/bin/bash
+# item 4 (PLT-4646): the Firecracker-relevant subset of the failure matrix
+. "$(dirname "$0")/common.sh"
+ONLY="${ONLY:-baseline,sync_gateway_kill,stale_owner_sync_lease,worker_bridge_kill_sync,worker_bridge_kill_async,worker_user_process_oom_sync,orphan_recovery_after_crash}"
+W=$VERIFY/chaos${SUFFIX:-}; mkdir -p "$W"
+E="$W/matrix"; sudo rm -rf "$E"
+C="$(cat "$HOSTWT/.kvm/vm/commit.txt" 2>/dev/null)"
+hostinfo "$W/host.txt" before
+t0=$(date -u +%s)
+vmload_sampler "$W/vm-load.tsv"; S=$!
+sudo -n env PATH="$PATH" HOME="$HOME" TMPDIR="$HOME/w" CHAOS_TMP="$HOME/w" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 TSLS_COMMIT="$C" CHAOS_KEEP_WORK="${CHAOS_KEEP_WORK:-0}" \
+  bash scripts/chaos/matrix.sh --only "$ONLY" --retries "${RETRIES:-1}" --evidence "$E" > "$W/stdout.txt" 2>&1
+rc=$?
+kill $S
+echo "matrix exit=$rc commit=$C" | tee -a "$W/host.txt"
+hostinfo "$W/host.txt" after
+macload_window "$t0" "$(date -u +%s)" "$W/mac-load.tsv"
+leftovers >> "$W/host.txt" 2>&1
+fix_owner "$W"
+cat "$E/summary.md"

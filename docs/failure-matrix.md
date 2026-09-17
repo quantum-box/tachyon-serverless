@@ -2,7 +2,7 @@
 
 - 対象: `scripts/chaos/matrix.sh`（実行・集計）、`scripts/chaos/scenarios.sh`（シナリオ）、`scripts/chaos/lib.sh`（構成・workload・収束検査）
 - 関連: [adr/0003](adr/0003-execution-state-persistence.md)（lease・fencing・restart reconcile）、[adr/0008](adr/0008-durable-queue-and-object-store.md)、[adr/0010](adr/0010-invoke-async-and-outbox.md)、[adr/0012](adr/0012-usage-ledger-and-rating.md)、[adr/0013](adr/0013-async-dispatch-retry-dlq.md)、[adr/0014](adr/0014-cron-and-webhook-triggers.md)、[acceptance.md](acceptance.md)「PLT-4646」
-- 状態: macOS arm64 の 1 host・process provider で全 20 シナリオを 4 回実行した記録がある（§5、最終回は rebase 後の commit で 20 / 20 が初回試行で pass）。Firecracker では未検証（§8）。
+- 状態: macOS arm64 の 1 host・process provider で全 20 シナリオを 4 回実行した記録がある（§5、最終回は rebase 後の commit で 20 / 20 が初回試行で pass）。Firecracker では挙動が変わる 6 シナリオと guest OOM を KVM で実行した（§8、最終回 6 / 7、`stale_owner_sync_lease` は state.db の lock で失敗）。
 
 **ここにある結果は単一 host の結果であり、HA の保証ではない。** 2 つの gateway は同じ host・同じ `data_dir`（1 つの SQLite ファイル）を共有し、nats-server は 1 process・local disk・複製なし、object store は local の directory である。host そのもの・disk・network が壊れたときの挙動は何も示していない（§9）。
 
@@ -265,22 +265,25 @@ harness を作る途中の部分実行（scratchpad、commit 前、evidence に�
 | 同期は開始状況に応じ OutcomeUnknown、非同期は policy どおり retry / DLQ | 確認済み | 1、3a、8a、8b（同期）。2a〜2e、3b、5、6、7、8c（非同期、今回の workload はすべて成功に収束。DLQ への収束は `scripts/queue/async-dispatch-e2e.sh` が既に確認） |
 | 古い owner が新しい状態を上書きしない | 確認済み（2 gateway process・同じ `data_dir`） | 3a（同期 slot lease）、3b（非同期 claim） |
 | UsageEvent 再送で二重計上しない | 確認済み | 7（ledger commit 後・cursor 前の crash と replay）、全シナリオの `cv.usage_counted_once` |
-| 復旧後の孤児環境 / Secret / object を安全に回収 | 確認済み（process provider） / 未検証（Firecracker） | 10、1、6、全シナリオの `cv.no_orphan_processes` / `cv.no_open_environments` / `cv.no_secret_value_on_disk` |
+| 復旧後の孤児環境 / Secret / object を安全に回収 | 確認済み（process provider） / 確認済み（Firecracker、§8。回収した環境の host 原価は未計上） | 10、1、6、全シナリオの `cv.no_orphan_processes` / `cv.no_open_environments` / `cv.no_secret_value_on_disk` |
 | 制約・残課題の記録 | 記録済み | §6.2、§8、§9 |
 | 故障マトリクス・機械可読結果・実行 profile・復旧時間の保存 | 保存済み | `docs/evidence/chaos-*/`（`results.jsonl`、`profile.json`、`summary.md`） |
 
-## 8. Firecracker（未検証）
+## 8. Firecracker（KVM 最終検証 2026-09-17、一部）
 
-Firecracker provider では 1 回も実行していない（KVM 検証 VM は別の検証に使用中だった）。provider に触れない故障（2a〜2c・2e の受付と配送、4、5、6、7、9）は driver・台帳・queue が共通なので同じ結果になるはずだが、**それも測っていない**。次は挙動か後始末の経路が違う:
+`TSLS_PROVIDER=firecracker scripts/chaos/matrix.sh --only ...`（root、jailer・cgroup required、warm pool 有効、`CHAOS_TMP` は jailer の `chroot_base` と同じ file system）で、Firecracker で挙動か後始末の経路が違うシナリオと Firecracker 専用の guest OOM を Lima VM（nested virtualization、1 host）で 3 回実行した。証跡は `docs/evidence/kvm-final-chaos-20260917T152228Z/`（`summary.txt`、3 回分の `results.jsonl` と gateway log をすべて保存）。provider に触れない残りの 13 シナリオ（2a〜2e の failpoint、3b、4、5、6、7、9）は Firecracker では実行していない。
 
-| シナリオ | Firecracker で違うところ |
-|---|---|
-| 1 `sync_gateway_kill`、10 `orphan_recovery_after_crash` | gateway を SIGKILL しても VMM（jailer 配下の firecracker process）は残る。再起動後の reconcile が `.kvm/run` の環境・jail の chroot・cgroup（`<cgroup root>/<parent>/<env_id>`）・tap device・nft table を見つけて terminate する経路を通る（process provider では worker が自分で止まるので通らない）。残った VMM は SIGKILL 後も guest の handler を実行し続ける |
-| 3a `stale_owner_sync_lease` | B が A の環境を terminate するには A が起動した jailer / VMM の pid・cgroup・tap を host 上で見つけて止める必要がある（root、同じ run directory）。fence 後の terminate 失敗（`pending`）が起きやすい |
-| 8a / 8c worker 切断 | bridge は guest 内。host から壊せるのは VMM process の kill か vsock の切断で、分類（`outcome_unknown`）は同じ driver だが、後始末は VMM・jailer・cgroup・tap・drive file |
-| 8b user process の kill | guest 内の process で host から直接 kill できない。guest の OOM（`docs/evidence/isolation-*` の `Runtime.Crash`）で代替する |
-| 10 の Secret | secret は vsock の Init で guest に渡り host の disk には書かないが、function drive・scratch drive・VM の memory snapshot（PLT-4653）に残らないことは未確認 |
-| 7 usage | Firecracker は cgroup の CPU usec を `provider_reported` として出す。crash 時にその値が欠けた event の扱いは未確認 |
+Firecracker での harness の違い（`scripts/chaos/lib.sh`、`scripts/kvm/provider-lib.sh`）: 環境の「終了した」判定は VMM / jailer の process に加えて jail（`/srv/jailer/firecracker/env-*`）・VMM cgroup（`/sys/fs/cgroup/tachyon/env_*`）・env dir が消えたこと、graceful stop の後に firecracker / jailer の process・cgroup・jail・`tsls*` tap・`table inet tachyon_egress` が 0、secret の走査は scratch dir（drive・console / fc log・snapshot dir を含む）と `/srv/jailer`、`examples/idempotent-async` は egress `restricted` で届く外部 store（`scripts/queue/effects-netns.sh`）に副作用を置く。
+
+| シナリオ | Firecracker で違うところ | 結果（最終回 `run3-final/`） |
+|---|---|---|
+| 1 `sync_gateway_kill` | gateway の SIGKILL 後も VMM が残る | pass。VMM が生きていることを確認（`fault.vmm_survived_gateway_sigkill`）、再起動後の reclaim が 4 環境を terminate し VMM・jail・cgroup・env dir が消えた。dispatch 済みは `outcome_unknown`、未 dispatch は `failed`（`Host.Restarted`） |
+| 10 `orphan_recovery_after_crash` | busy な microVM・未送信 outbox・scheduler lease・孤児 object を残した SIGKILL | pass（1 回目の初回試行だけ孤児 object が 0 件で前提不成立）。旧環境 4 → 0、outbox 5 → 0、lease 引き継ぎ、孤児 object 回収、secret 0 件（`/srv/jailer` を含む） |
+| 3a `stale_owner_sync_lease` | B が A の VMM・jail・cgroup を終わらせる | 1・2 回目は回収・fencing の検査がすべて pass（B は lease + skew の後に回収、A の VMM を terminate、A の遅れた完了は拒否、A は fenced、B は 200）。**最終回は 2 試行とも失敗**: SIGSTOP した A が state.db の書込み lock を持ったまま止まり、B は A の SIGCONT までの 2 分間 heartbeat も回収もできず自分の lease を失った（503 `Host.AuthLeaseExpired`）。1 つの SQLite file を 2 process で共有する構成では、凍結した writer が他のすべての writer を止め、lease と fencing では防げない。どの transaction の途中だったかは特定していない |
+| 8a / 8c worker 切断 | VMM process の SIGKILL（vsock も切れる） | pass。sync は `outcome_unknown`（client 502）、async は retry で成功・副作用 1 回、環境は host から消えた |
+| 8b user process（→ guest OOM） | host から guest 内の process は kill できない。128 MiB の guest で 512 MiB を確保（`worker_user_process_oom_sync`、Firecracker 専用） | pass（1 回目は harness の不具合で中断、修正後の 2・3 回目は pass）。`Runtime.Crash`（signal 9）、guest console に OOM の行、VMM cgroup の memory.peak 129.7 MiB ≤ memory.max 192 MiB、同じ関数の次の invoke は 200 |
+| 10 の Secret | drive・jail・snapshot dir | secret 値を含む file は全シナリオ・全回で 0 |
+| 7 usage | cgroup の CPU usec / memory.peak を `provider_reported` で出す | 通常の停止（pool の回収・destroy-after-invoke・VMM kill・OOM）はすべて `provider_reported`。**残り**: (a) reclaim が先に終わらせた fenced 環境を旧 owner が後で確定した場合と、graceful shutdown 中に起動途中で放棄された環境は `unknown`（cgroup が既に無い。値は作らない）、(b) reclaim / 起動時 reconcile が終わらせた環境には `EnvironmentStopped` 自体が出ない（最終回で sync_gateway_kill 7 環境中 4、orphan 14 中 6、stale owner 11 中 4）。その microVM の寿命全体の host 原価は計上されない。attempt 単位の `AttemptSettled` と「各 event 1 回」は全回で成立 |
 
 ## 9. 対象外（この結果が何も言わないもの）
 

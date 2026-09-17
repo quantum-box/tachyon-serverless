@@ -1,0 +1,3 @@
+#!/bin/bash
+df -h / | tail -1
+env CLONE_NAME=lab REF=a56b259 SUFFIX=-fixed3 /bin/bash "$(dirname "$0")/run-lab.sh"

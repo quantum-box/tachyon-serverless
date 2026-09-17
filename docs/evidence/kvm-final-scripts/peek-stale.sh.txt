@@ -1,0 +1,7 @@
+#!/bin/bash
+D=~/verify/chaos-final/matrix/scenarios/stale_owner_sync_lease/attempt-1
+ls "$D"
+sudo grep -h -E '"level":"(WARN|ERROR)"' "$D"/gateway-b.log | sed -E 's/"target":"[^"]*"//' | cut -c1-330 | head -30
+echo ----- A
+sudo grep -h -E '"level":"(WARN|ERROR)"' "$D"/gateway-a.log | sed -E 's/"target":"[^"]*"//' | cut -c1-330 | head -20
+grep -h 'SIGSTOP\|fault injected' ~/verify/chaos-final/matrix/scenarios/stale_owner_sync_lease.attempt-1.log

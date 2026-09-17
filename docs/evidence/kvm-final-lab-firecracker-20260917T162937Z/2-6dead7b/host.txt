@@ -1,0 +1,43 @@
+== before 2026-09-17T16:33:19Z
+vm:  01:33:19 up 14:22,  1 user,  load average: 0.21, 0.85, 1.05
+               total        used        free      shared  buff/cache   available
+Mem:            7913         564        6445           1        1082        7349
+/dev/vda1        38G   13G   25G  35% /
+mac (latest sample): 1789662794	2026-09-17T16:33:14Z	2.38	3.14	9.10
+== 2026-09-17T16:33:19Z scripts/lab/lab.sh --provider firecracker preflight (vm: 0.21 0.85 1.05, mac: 2.38 3.14 9.10)
+   exit=0 seconds=2
+== 2026-09-17T16:33:21Z scripts/lab/lab.sh --provider firecracker bootstrap (vm: 0.21 0.85 1.05, mac: 2.38 3.14 9.10)
+   exit=0 seconds=61
+== 2026-09-17T16:34:22Z scripts/lab/lab.sh --provider firecracker up (vm: 2.62 1.40 1.23, mac: 3.45 3.30 8.75)
+   exit=0 seconds=4
+== 2026-09-17T16:34:26Z scripts/lab/lab.sh --provider firecracker status (vm: 2.49 1.40 1.22, mac: 3.61 3.34 8.70)
+   exit=0 seconds=1
+== 2026-09-17T16:34:27Z scripts/lab/lab.sh --provider firecracker demo all (vm: 2.49 1.40 1.22, mac: 3.61 3.34 8.70)
+   exit=1 seconds=0
+== 2026-09-17T16:34:27Z scripts/lab/lab.sh --provider firecracker status (vm: 2.49 1.40 1.22, mac: 3.61 3.34 8.70)
+   exit=141 seconds=0
+== 2026-09-17T16:34:27Z scripts/lab/lab.sh --provider firecracker teardown (vm: 2.49 1.40 1.22, mac: 3.61 3.34 8.70)
+   exit=0 seconds=1
+== after 2026-09-17T16:34:28Z
+vm:  01:34:28 up 14:24,  1 user,  load average: 2.49, 1.40, 1.22
+               total        used        free      shared  buff/cache   available
+Mem:            7913         659        3365           1        4094        7253
+/dev/vda1        38G   16G   22G  42% /
+mac (latest sample): 1789662864	2026-09-17T16:34:24Z	3.61	3.34	8.70
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   16G   22G  42% /
