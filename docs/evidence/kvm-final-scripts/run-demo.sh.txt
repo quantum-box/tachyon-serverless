@@ -1,0 +1,20 @@
+#!/bin/bash
+# item 7: durable invocation logs survive a gateway restart, Firecracker provider (demo.sh)
+. "$(dirname "$0")/common.sh"
+W=$VERIFY/demo; sudo rm -rf "$W"; mkdir -p "$W"
+mkcfg "$W/gateway.toml" 18481 "$W/data"
+hostinfo "$W/host.txt" before
+t0=$(date -u +%s)
+vmload_sampler "$W/vm-load.tsv"; S=$!
+sudo -n env PATH="$PATH" HOME="$HOME" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 \
+  TSLS_GATEWAY_CONFIG="$W/gateway.toml" TSLS_API_URL=http://127.0.0.1:18481 \
+  bash scripts/e2e/demo.sh > "$W/stdout.txt" 2>&1
+rc=$?
+kill $S
+echo "demo exit=$rc" | tee -a "$W/host.txt"
+hostinfo "$W/host.txt" after
+macload_window "$t0" "$(date -u +%s)" "$W/mac-load.tsv"
+fix_owner "$REPO/docs/evidence" "$W" "$REPO/.kvm/run"
+leftovers >> "$W/host.txt" 2>&1
+tail -50 "$W/stdout.txt"
+ls -d "$REPO"/docs/evidence/*-firecracker | tail -1

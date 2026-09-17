@@ -1,0 +1,16 @@
+[e2e] scenario: restart
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qybm0fy3rg1tez8y7k6hyw (#1) created: pending
+revision rev_01m2qybm0fy3rg1tez8y7k6hyw is preparing
+revision rev_01m2qybm0fy3rg1tez8y7k6hyw is ready
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qybmdakr2zs7zccks91dr2 (#1) created: pending
+revision rev_01m2qybmdakr2zs7zccks91dr2 is preparing
+revision rev_01m2qybmdakr2zs7zccks91dr2 is ready
+tsls-load: sent 6 requests in this scenario so far
+restarting the gateway while idle
+tsls-load: sent 10 requests in this scenario so far
+PASS  restart  /home/takanorifukuyama.guest/verify/load/evidence/load-restart-20260917T150425Z-firecracker
+PASS  restart  /home/takanorifukuyama.guest/verify/load/evidence/load-restart-20260917T150425Z-firecracker

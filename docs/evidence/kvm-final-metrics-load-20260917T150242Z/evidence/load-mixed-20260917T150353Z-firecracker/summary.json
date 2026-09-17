@@ -1,0 +1,218 @@
+{
+  "checks": {
+    "all_succeeded": true,
+    "cap": true,
+    "no_findings": true,
+    "queue": true,
+    "rose": true,
+    "two_tenants_served": true,
+    "warm_reuse": true,
+    "zero_after": true
+  },
+  "detectors": {
+    "boot_identity": [],
+    "coverage": {
+      "idle_cpu_samples": 33,
+      "overshoot_samples_with_load": 80,
+      "same_boot_reuses": 23.0,
+      "samples": 99,
+      "samples_up": 99,
+      "tenants_served": 2
+    },
+    "findings": 0,
+    "idle_cpu": [],
+    "overshoot": [],
+    "starvation": [],
+    "thresholds": {
+      "idle_cpu_ratio": 0.05,
+      "starvation_min_other_grants": 1.0,
+      "starvation_seconds": 5.0
+    }
+  },
+  "lifecycle": {
+    "active_after_restart": false,
+    "decreased": true,
+    "max_in_flight": 4.0,
+    "max_provisioned": 6.0,
+    "max_queue": 4.0,
+    "reached_cap": true,
+    "restarts": [],
+    "rose": true,
+    "zero_after_peak": true,
+    "zero_after_peak_t_ms": 23807,
+    "zero_after_restart": false,
+    "zero_before": true
+  },
+  "limits": {
+    "max_concurrency": 12,
+    "max_duration_seconds": 240,
+    "max_requests": 150
+  },
+  "limits_observed": {
+    "last_response_t_ms": 21088,
+    "max_in_flight_requests": 8,
+    "requests": 28,
+    "respected": true
+  },
+  "note": "observations of one run on one machine; not an SLA",
+  "ok": true,
+  "phases": [
+    {
+      "end_t_ms": 15657,
+      "phase": "b-short",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 16
+      },
+      "spec": {
+        "concurrency": 2,
+        "handler_ms": 100,
+        "jitter_ms": 300,
+        "kind": "invoke",
+        "name": "b-short",
+        "requests": 16,
+        "tenant": "b",
+        "wave": 1
+      },
+      "start_t_ms": 1074
+    },
+    {
+      "end_t_ms": 21089,
+      "phase": "a-long",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 12
+      },
+      "spec": {
+        "concurrency": 6,
+        "handler_ms": 2000,
+        "jitter_ms": 200,
+        "kind": "invoke",
+        "name": "a-long",
+        "requests": 12,
+        "tenant": "a",
+        "wave": 1
+      },
+      "start_t_ms": 1074
+    },
+    {
+      "end_t_ms": 23762,
+      "phase": "idle",
+      "result": {
+        "reached_zero_t_ms": 23762
+      },
+      "spec": {
+        "kind": "idle_until_zero",
+        "name": "idle",
+        "tenant": "a",
+        "timeout_ms": 30000
+      },
+      "start_t_ms": 21089
+    }
+  ],
+  "requests": {
+    "count": 28,
+    "latency_ms": {
+      "max": 16159,
+      "p50": 4237,
+      "p95": 15455
+    },
+    "statuses": {
+      "200": 28
+    }
+  },
+  "requests_by_phase": {
+    "a-long": {
+      "count": 12,
+      "latency_ms": {
+        "max": 16159,
+        "p50": 11184,
+        "p95": 15455
+      },
+      "statuses": {
+        "200": 12
+      }
+    },
+    "b-short": {
+      "count": 16,
+      "latency_ms": {
+        "max": 9465,
+        "p50": 568,
+        "p95": 8639
+      },
+      "statuses": {
+        "200": 16
+      }
+    }
+  },
+  "requests_by_tenant": {
+    "a": {
+      "count": 12,
+      "latency_ms": {
+        "max": 16159,
+        "p50": 11184,
+        "p95": 15455
+      },
+      "statuses": {
+        "200": 12
+      }
+    },
+    "b": {
+      "count": 16,
+      "latency_ms": {
+        "max": 9465,
+        "p50": 568,
+        "p95": 8639
+      },
+      "statuses": {
+        "200": 16
+      }
+    }
+  },
+  "reuse": {
+    "evidence": {
+      "attempts": 28,
+      "environments": 5,
+      "environments_whose_boot_id_changed": 0,
+      "environments_with_a_boot_id": 5,
+      "environments_with_several_attempts": 5,
+      "every_attempt_booted_its_own_environment": false,
+      "start_kinds": {
+        "cold": 5,
+        "warm": 23
+      }
+    },
+    "mode": "warm_reuse"
+  },
+  "run": {
+    "commit": "d6e729f28ab8a953babbc4307b35ed9740035203",
+    "dirty_tracked_files": 102,
+    "gateway_config": "gateway.toml",
+    "gateway_config_sha256": "13382d30a809feffd55413b2926012d7b137ea8f9b7b2d452b2d3d3cf88a2202",
+    "host": "Linux 7.0.0-31-generic aarch64",
+    "limits": {
+      "max_concurrency": 12,
+      "max_duration_seconds": 240,
+      "max_requests": 150
+    },
+    "note": "observations of one run on one machine; not an SLA",
+    "plan": "tenant A 6 workers x 2 s handlers and tenant B 2 workers x 0.1 s handlers at once (node 4, tenant quota 3)",
+    "provider": "firecracker",
+    "revision": {
+      "idle_ttl_seconds": 2,
+      "max_concurrency": 3,
+      "scale_down_cooldown_seconds": 1
+    },
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "sample_interval_ms": 250,
+    "scenario": "mixed",
+    "seed": 20260917,
+    "started_at": "2026-09-17T15:04:00Z",
+    "target": "http://127.0.0.1:18490"
+  },
+  "samples": {
+    "count": 99,
+    "up": 99
+  },
+  "title": "mixed: long tenant A and short tenant B at once"
+}

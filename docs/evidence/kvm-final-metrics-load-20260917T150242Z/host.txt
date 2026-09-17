@@ -1,0 +1,107 @@
+== before 2026-09-17T15:02:42Z
+vm:  00:02:42 up 12:51,  1 user,  load average: 0.16, 0.35, 0.40
+               total        used        free      shared  buff/cache   available
+Mem:            7913         631        2285           1        5202        7281
+/dev/vda1        38G   15G   23G  40% /
+mac (latest sample): 1789657359	2026-09-17T15:02:39Z	39.13	89.53	81.78
+== scenario burst 2026-09-17T15:02:42Z vm: 0.16 0.35 0.40 1/213 242639 mac: 1789657359	2026-09-17T15:02:39Z	39.13	89.53	81.78
+scenario burst exit=0
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   15G   23G  40% /
+== scenario idle-to-zero 2026-09-17T15:03:16Z vm: 0.67 0.46 0.43 1/228 242856 mac: 1789657389	2026-09-17T15:03:09Z	26.38	81.61	79.17
+scenario idle-to-zero exit=0
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   15G   23G  40% /
+== scenario mixed 2026-09-17T15:03:53Z vm: 0.83 0.51 0.46 1/234 243072 mac: 1789657429	2026-09-17T15:03:49Z	21.50	73.33	76.25
+scenario mixed exit=0
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   15G   23G  40% /
+== scenario restart 2026-09-17T15:04:25Z vm: 1.25 0.65 0.50 1/241 243295 mac: 1789657459	2026-09-17T15:04:19Z	16.52	67.18	73.91
+scenario restart exit=0
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   15G   23G  40% /
+== scenario lifecycle 2026-09-17T15:05:08Z vm: 1.18 0.70 0.53 1/241 243539 mac: 1789657499	2026-09-17T15:04:59Z	22.01	61.83	71.62
+scenario lifecycle exit=0
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   15G   23G  40% /
+== after 2026-09-17T15:06:25Z
+vm:  00:06:25 up 12:55,  1 user,  load average: 1.92, 1.05, 0.67
+               total        used        free      shared  buff/cache   available
+Mem:            7913         632        2254           1        5233        7280
+/dev/vda1        38G   15G   23G  40% /
+mac (latest sample): 1789657579	2026-09-17T15:06:19Z	16.00	51.44	66.83

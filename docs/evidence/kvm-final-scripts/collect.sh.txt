@@ -1,0 +1,13 @@
+#!/bin/bash
+# collect.sh DEST_NAME SRC... : copy VM evidence into the host worktree docs/evidence/DEST_NAME,
+# plus the run scripts (as .txt so shellcheck/CI do not treat them as scripts)
+. "$(dirname "$0")/common.sh"
+name="$1"; shift
+D="$HOSTWT/docs/evidence/$name"
+mkdir -p "$D"
+for s in "$@"; do
+  sudo cp -r "$s" "$D/" || echo "copy failed: $s"
+done
+sudo chown -R "$(id -u):$(id -g)" "$D"
+du -sh "$D"
+find "$D" -type f | wc -l

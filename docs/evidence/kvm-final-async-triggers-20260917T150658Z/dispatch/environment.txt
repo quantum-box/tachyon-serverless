@@ -1,0 +1,8 @@
+nats_server_version=v2.14.7
+platform=linux-arm64
+provider=firecracker
+stamp=20260917T150658Z
+host=Linux 7.0.0-31-generic aarch64
+git_commit=d6e729f28ab8a953babbc4307b35ed9740035203
+accepted=9
+executions=16

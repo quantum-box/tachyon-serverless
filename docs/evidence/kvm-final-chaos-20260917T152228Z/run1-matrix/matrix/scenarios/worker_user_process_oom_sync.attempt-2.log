@@ -1,0 +1,7 @@
+[chaos worker_user_process_oom_sync] begin (user process allocates 512 MiB in a 128 MiB guest (guest OOM killer; firecracker only)) work=/home/takanorifukuyama.guest/w/tsls-chaos.knCjF9
+[chaos worker_user_process_oom_sync]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos worker_user_process_oom_sync]   ok   workload.async_accepted accepted=2 refused=0
+[chaos worker_user_process_oom_sync] fault injected
+[chaos worker_user_process_oom_sync] fault removed
+[chaos worker_user_process_oom_sync]   ok   classify.guest_oom_is_user_process_crash status=failed Runtime.Crash client=502/crash message=invocation inv_01m2r04r8kvykvqh67mtttxywt failed: Runtime.Crash: user process exited while the attempt was in flight (exit_code=None, signal=Some(9))
+[chaos worker_user_process_oom_sync]   FAIL harness.scenario_completed the scenario stopped before its last step (see the attempt log)

@@ -1,0 +1,9 @@
+{"done_t_ms":8133,"error_reason":null,"error_type":null,"handler_seconds":0.335,"invocation_id":"inv_01m2qy9j9ty040vnetat0ztmd8","latency_ms":7010,"phase":"burst","sent_t_ms":1123,"seq":3,"status":200,"tenant":"a"}
+{"done_t_ms":8169,"error_reason":null,"error_type":null,"handler_seconds":0.355,"invocation_id":"inv_01m2qy9j9nt9vxmhndh11wwmrh","latency_ms":7052,"phase":"burst","sent_t_ms":1117,"seq":1,"status":200,"tenant":"a"}
+{"done_t_ms":8352,"error_reason":null,"error_type":null,"handler_seconds":0.335,"invocation_id":"inv_01m2qy9jaz12py958fxz7gj64d","latency_ms":7193,"phase":"burst","sent_t_ms":1159,"seq":2,"status":200,"tenant":"a"}
+{"done_t_ms":8525,"error_reason":null,"error_type":null,"handler_seconds":0.301,"invocation_id":"inv_01m2qy9jb40j1p4tt65wrhf17e","latency_ms":7362,"phase":"burst","sent_t_ms":1163,"seq":0,"status":200,"tenant":"a"}
+{"done_t_ms":8647,"error_reason":null,"error_type":null,"handler_seconds":0.371,"invocation_id":"inv_01m2qy9s5sc4bb61f4q465400e","latency_ms":486,"phase":"burst","sent_t_ms":8161,"seq":4,"status":200,"tenant":"a"}
+{"done_t_ms":8838,"error_reason":null,"error_type":null,"handler_seconds":0.392,"invocation_id":"inv_01m2qy9s6gn5mxhfrw7sn3p7bc","latency_ms":653,"phase":"burst","sent_t_ms":8185,"seq":5,"status":200,"tenant":"a"}
+{"done_t_ms":8920,"error_reason":null,"error_type":null,"handler_seconds":0.335,"invocation_id":"inv_01m2qy9sd2ghqazf32s49s7x5w","latency_ms":527,"phase":"burst","sent_t_ms":8393,"seq":6,"status":200,"tenant":"a"}
+{"done_t_ms":9143,"error_reason":null,"error_type":null,"handler_seconds":0.397,"invocation_id":"inv_01m2qy9sj8nfcvqy2xe1x68m17","latency_ms":582,"phase":"burst","sent_t_ms":8561,"seq":7,"status":200,"tenant":"a"}
+{"done_t_ms":28191,"error_reason":null,"error_type":null,"handler_seconds":0.1,"invocation_id":"inv_01m2qya17pbcerfz34jjb4fcem","latency_ms":11778,"phase":"reaccess","sent_t_ms":16413,"seq":0,"status":200,"tenant":"a"}

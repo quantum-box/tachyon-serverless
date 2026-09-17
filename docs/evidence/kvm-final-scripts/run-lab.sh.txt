@@ -1,0 +1,48 @@
+#!/bin/bash
+# item 5 (PLT-4648): scripts/lab/lab.sh --provider firecracker, full path, from a clean clone
+. "$(dirname "$0")/common.sh"
+REF="${REF:-9b6f2c8}"
+CLONE="$HOME/lab-main"
+W=$VERIFY/lab; sudo rm -rf "$W"; mkdir -p "$W"
+hostinfo "$W/host.txt" before
+t0=$(date -u +%s)
+vmload_sampler "$W/vm-load.tsv"; S=$!
+if [ -d "$CLONE" ]; then sudo rm -rf "$CLONE"; fi
+{
+  echo "\$ git clone <host repo> $CLONE && git checkout --detach $REF"
+  git -c safe.directory='*' clone -q /Users/takanorifukuyama/git/tachyon-serverless "$CLONE" 2>&1
+  git -C "$CLONE" checkout -q --detach "$REF" 2>&1
+  git -C "$CLONE" log -1 --format='%H %s'
+  git -C "$CLONE" status --porcelain | wc -l
+} > "$W/00-clone.txt" 2>&1
+cd "$CLONE" || exit 1
+run() { # run NAME ARGS...
+  local name="$1"; shift
+  echo "== $(date -u +%FT%TZ) scripts/lab/lab.sh --provider firecracker $* (vm: $(cut -d' ' -f1-3 /proc/loadavg), mac: $(tail -n 1 "$MACLOAD" | cut -f3-5 | tr '\t' ' '))" | tee -a "$W/host.txt"
+  local s; s=$(date +%s)
+  scripts/lab/lab.sh --provider firecracker "$@" > "$W/$name.txt" 2>&1
+  local rc=$?
+  echo "   exit=$rc seconds=$(( $(date +%s) - s ))" | tee -a "$W/host.txt"
+  return $rc
+}
+run 01-preflight preflight
+run 02-bootstrap bootstrap
+run 03-up up
+run 04-status-after-up status
+run 05-demo-all demo all
+run 06-status-after-demo status
+run 07-teardown teardown
+{
+  echo "-- after teardown: leftovers of the lab"
+  ls -la "$CLONE/.lab" 2>&1 | head
+  find /sys/fs/cgroup -maxdepth 1 -name 'tsls-*' 2>/dev/null
+  sudo find "$CLONE/.lab/fc" -mindepth 1 -maxdepth 3 2>/dev/null | head
+} >> "$W/08-after-teardown.txt" 2>&1
+cp -r "$CLONE/.lab/logs/commands" "$W/commands" 2>/dev/null
+kill $S
+hostinfo "$W/host.txt" after
+macload_window "$t0" "$(date -u +%s)" "$W/mac-load.tsv"
+leftovers >> "$W/host.txt" 2>&1
+fix_owner "$W"
+tail -5 "$W"/0*.txt
+du -sh "$CLONE" 2>/dev/null

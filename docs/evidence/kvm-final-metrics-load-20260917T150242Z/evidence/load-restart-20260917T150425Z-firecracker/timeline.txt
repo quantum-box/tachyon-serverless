@@ -1,0 +1,77 @@
+t(s)    up  start busy idle queue  provisioned
+   0.0  yes     0    0    0     0  
+   0.5  yes     0    0    0     0  
+   1.0  yes     2    0    0     0  ##
+   1.5  yes     2    0    0     0  ##
+   2.0  yes     2    0    0     0  ##
+   2.5  yes     2    0    0     0  ##
+   3.0  yes     2    0    0     0  ##
+   3.5  yes     2    0    0     0  ##
+   4.0  yes     2    0    0     0  ##
+   4.5  yes     2    0    0     0  ##
+   5.0  yes     2    0    0     0  ##
+   5.5  yes     2    0    0     0  ##
+   6.0  yes     2    0    0     0  ##
+   6.5  yes     2    0    0     0  ##
+   7.0  yes     2    0    0     0  ##
+   7.5  yes     0    1    1     0  ##
+   8.0  yes     0    2    0     0  ##
+   8.5  yes     0    1    1     0  ##
+   9.0  yes     0    0    2     0  ##
+   9.5  yes     0    0    2     0  ##
+  10.0  yes     0    0    2     0  ##
+  10.5  yes     0    0    2     0  ##
+  11.0  yes     0    0    2     0  ##
+  11.5  no      0    0    0     0  (gateway down)
+  12.1  no      0    0    0     0  (gateway down)
+  12.6  no      0    0    0     0  (gateway down)
+  13.1  no      0    0    0     0  (gateway down)
+  13.6  no      0    0    0     0  (gateway down)
+  14.1  yes     0    0    0     0  
+  14.6  yes     0    0    0     0  
+  15.1  yes     0    0    0     0  
+  15.6  yes     0    0    0     0  
+  16.1  yes     0    0    0     0  
+  16.6  yes     0    0    0     0  
+  17.1  yes     0    0    0     0  
+  17.6  yes     0    0    0     0  
+  18.1  yes     0    0    0     0  
+  18.6  yes     0    0    0     0  
+  19.1  yes     0    0    0     0  
+  19.6  yes     0    0    0     0  
+  20.1  yes     2    0    0     0  ##
+  20.6  yes     2    0    0     0  ##
+  21.1  yes     2    0    0     0  ##
+  21.6  yes     2    0    0     0  ##
+  22.1  yes     2    0    0     0  ##
+  22.6  yes     2    0    0     0  ##
+  23.1  yes     2    0    0     0  ##
+  23.6  yes     2    0    0     0  ##
+  24.0  yes     2    0    0     0  ##
+  24.5  yes     2    0    0     0  ##
+  25.0  yes     2    0    0     0  ##
+  25.5  yes     2    0    0     0  ##
+  26.0  yes     2    0    0     0  ##
+  26.5  yes     2    0    0     0  ##
+  27.0  yes     2    0    0     0  ##
+  27.5  yes     2    0    0     0  ##
+  28.0  yes     2    0    0     0  ##
+  28.5  yes     2    0    0     0  ##
+  29.0  yes     2    0    0     0  ##
+  29.5  yes     2    0    0     0  ##
+  30.0  yes     2    0    0     0  ##
+  30.5  yes     2    0    0     0  ##
+  31.0  yes     2    0    0     0  ##
+  31.5  yes     2    0    0     0  ##
+  32.0  yes     1    1    0     0  ##
+  32.5  yes     1    0    1     0  ##
+  33.0  yes     0    2    0     0  ##
+  33.5  yes     0    1    1     0  ##
+  34.0  yes     0    0    2     0  ##
+  34.5  yes     0    0    2     0  ##
+  35.0  yes     0    0    2     0  ##
+  35.5  yes     0    0    1     0  ##
+  36.0  yes     0    0    0     0  #
+  36.5  yes     0    0    0     0  
+  37.0  yes     0    0    0     0  
+# = provisioned environment, ~ = queued invocation

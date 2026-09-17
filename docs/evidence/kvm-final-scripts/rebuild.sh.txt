@@ -1,0 +1,18 @@
+#!/bin/bash
+# incremental rebuild after a sync (guest examples + host binaries used by the harnesses)
+set -euo pipefail
+source ~/.cargo/env 2>/dev/null || true
+cd ~/tsls
+A=aarch64-unknown-linux-musl
+cargo build -q -p tachyon-serverless-gateway --features failpoints
+cargo build -q -p tachyon-serverless-cli -p tachyon-serverless-load -p tachyon-serverless-runtime-bridge \
+  -p example-idempotent-async -p example-hello -p example-cpu-burn
+cargo build -q -p tachyon-serverless-queue-nats --bin tachyon-queue-probe
+cargo build -q --release --target $A -p tachyon-serverless-runtime-bridge -p example-hello \
+  -p example-http-axum -p example-cpu-burn -p example-isolation-probe -p example-idempotent-async
+# the rootfs must carry the bridge just built
+want="$(sha256sum target/$A/release/tachyon-serverless-runtime-bridge | cut -d' ' -f1)"
+have="$(debugfs -R 'cat /sbin/tachyon-init' .kvm/rootfs.ext4 2>/dev/null | sha256sum | cut -d' ' -f1)"
+if [ "$want" != "$have" ]; then scripts/kvm/build-rootfs.sh; else echo "rootfs bridge up to date ($want)"; fi
+df -h / | tail -1
+echo REBUILD-DONE

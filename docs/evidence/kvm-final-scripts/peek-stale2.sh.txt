@@ -1,0 +1,23 @@
+#!/bin/bash
+for n in 1 2; do
+D=~/verify/chaos-final/matrix/scenarios/stale_owner_sync_lease/attempt-$n
+echo "===== attempt $n"
+jq -r '.injected_at, .restored_at' "$D/result.json"
+inj="$(jq -r '.injected_at' "$D/result.json" | cut -c1-19)"
+echo "-- A log lines in the 10 s before the SIGSTOP ($inj)"
+sudo python3 - "$D/gateway-a.log" "$(jq -r '.injected_at' "$D/result.json")" <<'PY'
+import json, sys, datetime
+t0 = datetime.datetime.fromisoformat(sys.argv[2].replace('Z', '+00:00'))
+for line in open(sys.argv[1]):
+    try:
+        e = json.loads(line)
+    except Exception:
+        continue
+    t = datetime.datetime.fromisoformat(e['timestamp'].replace('Z', '+00:00'))
+    if -10 <= (t - t0).total_seconds() <= 1:
+        e.pop('target', None)
+        print(json.dumps(e)[:300])
+PY
+echo "-- first B lock warning"
+sudo grep -m1 -h 'database is locked\|busy for 5 s' "$D/gateway-b.log" | cut -c1-200
+done

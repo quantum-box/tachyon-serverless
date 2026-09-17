@@ -1,0 +1,82 @@
+KVM final batch — PLT-4642 usage metering and PLT-4643 budget on Firecracker, and the latency cost of the
+fsynced usage journal
+
+host     Lima VM tsls-kvm (Apple M4 -> vz nested virtualization, aarch64, 4 vCPU / 8 GiB), one run each
+provider TSLS_PROVIDER=firecracker (scripts/kvm/provider-lib.sh): jailer + host cgroup required, gateway as
+         root, profile dev (as the process-provider runs), pool off, musl example-cpu-burn, workdir under
+         $HOME/w (root ext4, same file system as /srv/jailer)
+trees    usage/ and budget/ = de10fc7; usage-first-attempt/ = 9bb8750; journal-ab/ = de10fc7 (+ the VM-side
+         script ../kvm-final-scripts/run-journal-ab.sh.txt)
+
+RUNS
+dir                                         started (UTC)  result                    Mac load1 p50/max  VM load1 max
+usage/usage/usage-*-firecracker/            15:12:50Z      18 PASS / 0 FAIL, exit 0  5.6 / 24.5         0.53
+usage/budget/budget-*-firecracker/          15:13:49Z      19 PASS / 0 FAIL, exit 0  17.9 / 26.4        0.98
+usage-first-attempt/ (usage, budget)        15:11:00Z      17 / 18 PASS, then exit 1 5.5 / 6.2, 4.4/4.5 0.70
+journal-ab/                                 15:16:03Z      80 + 80 warm invokes, 0 failures  38.0 / 51.4  0.86
+
+usage-first-attempt: every product check passed in both scripts; both then aborted in the new leftover step
+because scripts/kvm/provider-lib.sh::provider_leftovers returned non-zero under errexit + pipefail when
+/srv/jailer/firecracker did not exist (nothing was left). Harness bug, fixed in de10fc7; usage/ is the rerun.
+
+usage-e2e (usage/usage/usage-20260917T151250Z-firecracker/summary.txt)
+- 3 x cpu-burn 1.0 s -> 200, 5 s under a 2 s timeout -> 504 timeout, idempotent resend replayed.
+- journal holds 25 events (5 attempt_settled), ledger 0; kill -9; collector SIGKILLed after committing a
+  batch of 4 to the ledger (cursor 0); restart: ledger 25 = journal 25, distinct 25, duplicates_ignored 4
+  (ledger = journal, each event once).
+- known durations, host measured: handler 1169 / 1202 / 1260 ms for the 1.0 s runs, 2002 ms for the 2 s
+  timeout, 400 ms for 0.2 s (tolerance 700 ms; guest-reported 1022 / 1031 / 1084 / - / 276); total handler
+  6033 ms in [5200, 8700]; every handler segment host_measured; billable = init 3609 + handler 6033;
+  vCPU charge follows the price table; provisional, not an invoice; tenant B sees nothing.
+- cgroup accounting (check 11): all 5 EnvironmentStopped events carry resources.cgroup_cpu_usec and
+  cgroup_memory_peak_bytes as provider_reported (VMM cgroup = guest + VMM): CPU 3556 / 4390 / 4928 / 5619 /
+  5089 ms over lifetimes of 7.4-10.1 s (boot included), memory.peak 40 MiB each (resources.json).
+  AttemptSettled events carry the requested resources only and report cgroup_cpu_usec as unknown: the
+  host sample is read just before the environment is terminated (docs/adr/0012 §2), so it belongs to the
+  environment, not to one attempt. The task statement expected it on AttemptSettled; the implementation
+  (and the ADR) put it on EnvironmentStopped. Recorded as found, not changed.
+- check 12: no VMM, jail, cgroup, tap or egress table after the gateway stopped.
+
+budget-e2e (usage/budget/budget-20260917T151349Z-firecracker/summary.txt)
+- probe reserved 146040 micros (maximum charge) and settled 981; hard limit = settled + 3.5 maximum charges;
+  8 parallel 1.0 s invocations -> exactly 3 x 200 and 5 x 429 budget_exhausted / Host.BudgetExhausted;
+  reserved during the burst 3 x 146040, committed never above the limit.
+- after collection: reserved 0, hold 0, 4 settlements, settled 8080 vs usage ledger 8082 (|diff| 2 <= 8),
+  remaining = limit - settled, store totals = rows; new work admitted; soft alerts 50 / 100 % only.
+- collector paused: 503 Host.BudgetUnknown after 3 s, /readyz 503 collector_stalled, the running 1.0 s
+  invocation finished 200; resumed -> admitted; limit lowered to committed -> 429, raised -> 200;
+  tenant B without an entry -> 503 Host.BudgetUnknown and sees nothing of A; metrics and `tsls budget` ok.
+- check 12: nothing left on the host.
+
+journal fsync latency (journal-ab/)
+A/B on Firecracker with the warm pool, examples/hello, 1 priming + 40 sequential warm invokes per gateway,
+order A1 B1 A2 B2 (summary.json, attempts.jsonl, gateway-*.toml):
+  A = [store] backend "sqlite": state.db, usage/journal.db (WAL, synchronous = FULL, one BEGIN IMMEDIATE
+      transaction per event) and logs/logs.db on the root ext4
+  B = [store] backend "memory": the journal and the state are in-memory SQLite (no fsync); logs as well
+Per warm invoke the journal appended 3 events (handler_started, handler_finished, attempt_settled; the
+ledger of A1 and A2: 41 each, plus one environment_started / environment_stopped per gateway).
+
+label  backend  n   client p50/p95  total p50/p95  handler p50/p95  host platform (total-handler)  client-handler
+A1     sqlite   40  79 / 128        63 / 112       51 / 102         11 / 16                        26 / 39
+B1     memory   40  74 / 112        68 / 108       64 / 103          4 / 7                          9 / 12
+A2     sqlite   40  112 / 139       94 / 121       82 / 101         12 / 17                        30 / 41
+B2     memory   40  118 / 164       113 / 159      108 / 150         5 / 6                          9 / 12
+
+- The durable stores add about 7 ms to the host-measured platform time (p50 11-12 vs 4-5 ms, p95 16-17 vs
+  6-7 ms) and about 19 ms to what the client sees beyond the handler (client - handler p50 26-30 vs 9 ms,
+  p95 39-41 vs 12 ms): part of the durable writes (the attempt's settlement, the logs flush) happens after
+  total_ms is stamped but before the HTTP response. B removes the fsyncs of state.db and logs.db too, so
+  this is an upper bound of the journal's share, not the journal alone.
+- Handler times drifted with the Mac's load (51 -> 108 ms p50 across the four runs, Mac load1 22 -> 50);
+  the host-platform difference between A and B stayed the same in both pairs.
+- Append microbenchmark (journal-append-bench.py, the same statements as journal.rs::append from python's
+  sqlite3, 500 appends of a 1444-byte body):
+    journal-append-bench-rootfs.json (root ext4, run while the benchmark's cargo release build was running
+    in the VM, VM load 1.49): synchronous=FULL p50 6.48 / p95 19.3 / p99 25.4 ms; synchronous=OFF p50 0.03 ms
+    journal-append-bench-tmp-tmpfs.json: the first attempt ran on /tmp, which is tmpfs in this VM (fsync is a
+    no-op there: 0.03 ms either way) and is not a measurement of the disk; kept only to show that.
+  An idle-VM rerun is in journal-append-bench-rootfs-idle.json when present (see below).
+- No journal-disabled mode exists in the product (only the in-memory store); nothing was changed for this.
+
+LIMITS   one host, one run each; nested virtualization; Mac shared with other builds (loads above).

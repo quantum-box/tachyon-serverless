@@ -1,0 +1,40 @@
+deploy.revision_ready                            ok rev_01m2qymw8w33q30rb1h4qv2y25
+accept.all_202                                   ok 6 accepted
+poison.published                                 ok published=1 duplicates=0 queue_full=0 other_errors=0 first_error= 
+retry.flaky_succeeded                            ok status=succeeded attempts=3 dispatch=done
+retry.flaky_three_attempts                       ok attempts=3 dispatch_attempts=3
+retry.flaky_pinned_revision                      ok rev_01m2qymw8w33q30rb1h4qv2y25
+retry.flaky_side_effect_once                     ok failed=2 applied=1
+retry.plain_orders_succeeded                     ok succeeded=3/3
+deadletter.exhausted_failed                      ok status=failed error=Downstream.Unavailable dlq=dlq_01m2qyn7hjy5r5r4wtqbgc13cb
+deadletter.exhausted_after_max_attempts          ok executions=3
+deadletter.non_retryable_once                    ok status=failed error=Runtime.ResponseTooLarge executions=1
+deadletter.listed_by_reason                      ok attempts_exhausted,non_retryable
+tenant.dead_letters_not_listed_for_other_tenant  ok items=0
+tenant.dead_letter_404_for_other_tenant          ok code=404
+poison.dead_lettered_and_terminated              ok log=1
+crash.after_commit.killed                        ok 
+crash.after_commit.side_effect_applied_once      ok applied=1
+crash.after_commit.redelivery_recognised_as_done ok redelivery acked without running: 1
+crash.after_commit.not_run_again                 ok status=succeeded attempts=1 executions=1
+crash.before_commit.killed                       ok 
+crash.before_commit.side_effect_happened         ok applied=1
+crash.before_commit.converged                    ok status=succeeded attempts=2 output={"applied":false,"execution":2,"order_id":"side-1"}
+crash.before_commit.executed_again_harmlessly    ok executions=2 applied=1 skipped=1
+crash.before_commit.effect_exactly_once          ok effect=1
+redrive.without_role_403                         ok code=403
+redrive.other_tenant_404                         ok code=404
+redrive.accepted_202                             ok code=202
+redrive.audit_record                             ok by=dispatch-e2e-oncall source=inv_01m2qymwek40prdp18mja59ygb revision=rev_01m2qymw8w33q30rb1h4qv2y25
+redrive.new_invocation_succeeded                 ok status=succeeded attempts=3 from=dlq_01m2qyn7hjy5r5r4wtqbgc13cb
+redrive.input_reused                             ok digest=sha256:f66050c2e07f0e506fa065f44642d86417549fed870e34422b42ac5d45ed613a
+redrive.entry_marked_redriven                    ok status=redriven redrives=1
+redrive.second_redrive_409                       ok code=409
+redrive.side_effect_once                         ok applied=1 effect=1
+converge.every_invocation_terminal               ok not_terminal=0
+microvm.every_attempt_in_a_jailed_firecracker_vm ok attempts=16 not_microvm=0 warm=11
+converge.one_dead_letter_per_invocation          ok invocations_with_more_than_one_dead_letter=0
+converge.dead_letter_reasons                     ok dead_letters_by_reason={"attempts_exhausted": 1, "non_retryable": 1, "poison": 1}
+converge.no_async_invocation_left_open           ok non_terminal_async_invocations=0
+converge.redrive_audited_once                    ok redrives=1
+converge.each_side_effect_exactly_once           ok effects=7 applied_executions=7

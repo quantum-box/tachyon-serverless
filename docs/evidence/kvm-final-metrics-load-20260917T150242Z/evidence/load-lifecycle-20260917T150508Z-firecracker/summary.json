@@ -1,0 +1,326 @@
+{
+  "checks": {
+    "active_after_restart": true,
+    "all_succeeded": true,
+    "cap": true,
+    "decreased": true,
+    "no_findings": true,
+    "queue": true,
+    "restart": true,
+    "rose": true,
+    "warm_reuse": true,
+    "zero_after": true,
+    "zero_after_restart": true,
+    "zero_before": true
+  },
+  "detectors": {
+    "boot_identity": [],
+    "coverage": {
+      "idle_cpu_samples": 31,
+      "overshoot_samples_with_load": 201,
+      "same_boot_reuses": 32.0,
+      "samples": 273,
+      "samples_up": 265,
+      "tenants_served": 1
+    },
+    "findings": 0,
+    "idle_cpu": [],
+    "overshoot": [],
+    "starvation": [],
+    "thresholds": {
+      "idle_cpu_ratio": 0.05,
+      "starvation_min_other_grants": 1.0,
+      "starvation_seconds": 5.0
+    }
+  },
+  "lifecycle": {
+    "active_after_restart": true,
+    "decreased": true,
+    "max_in_flight": 3.0,
+    "max_provisioned": 4.0,
+    "max_queue": 5.0,
+    "reached_cap": true,
+    "restarts": [
+      [
+        47395,
+        49442
+      ]
+    ],
+    "rose": true,
+    "zero_after_peak": true,
+    "zero_after_peak_t_ms": 44120,
+    "zero_after_restart": true,
+    "zero_before": true
+  },
+  "limits": {
+    "max_concurrency": 12,
+    "max_duration_seconds": 240,
+    "max_requests": 150
+  },
+  "limits_observed": {
+    "last_response_t_ms": 64620,
+    "max_in_flight_requests": 8,
+    "requests": 42,
+    "respected": true
+  },
+  "note": "observations of one run on one machine; not an SLA",
+  "ok": true,
+  "phases": [
+    {
+      "end_t_ms": 14486,
+      "phase": "ramp-1",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 3
+      },
+      "spec": {
+        "concurrency": 1,
+        "handler_ms": 400,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "ramp-1",
+        "requests": 3,
+        "tenant": "a"
+      },
+      "start_t_ms": 1142
+    },
+    {
+      "end_t_ms": 25368,
+      "phase": "ramp-2",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 6
+      },
+      "spec": {
+        "concurrency": 2,
+        "handler_ms": 400,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "ramp-2",
+        "requests": 6,
+        "tenant": "a"
+      },
+      "start_t_ms": 14487
+    },
+    {
+      "end_t_ms": 40038,
+      "phase": "cap",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 24
+      },
+      "spec": {
+        "concurrency": 8,
+        "handler_ms": 600,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "cap",
+        "requests": 24,
+        "tenant": "a"
+      },
+      "start_t_ms": 25369
+    },
+    {
+      "end_t_ms": 41832,
+      "phase": "down",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 3
+      },
+      "spec": {
+        "concurrency": 1,
+        "handler_ms": 400,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "down",
+        "requests": 3,
+        "tenant": "a"
+      },
+      "start_t_ms": 40039
+    },
+    {
+      "end_t_ms": 44111,
+      "phase": "idle",
+      "result": {
+        "reached_zero_t_ms": 44111
+      },
+      "spec": {
+        "kind": "idle_until_zero",
+        "name": "idle",
+        "tenant": "a",
+        "timeout_ms": 30000
+      },
+      "start_t_ms": 41832
+    },
+    {
+      "end_t_ms": 47114,
+      "phase": "stay-idle",
+      "result": {},
+      "spec": {
+        "kind": "pause",
+        "ms": 3000,
+        "name": "stay-idle"
+      },
+      "start_t_ms": 44111
+    },
+    {
+      "end_t_ms": 64620,
+      "phase": "after-restart",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 6
+      },
+      "spec": {
+        "concurrency": 2,
+        "handler_ms": 400,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "after-restart",
+        "requests": 6,
+        "tenant": "a"
+      },
+      "start_t_ms": 54436
+    },
+    {
+      "end_t_ms": 67041,
+      "phase": "idle-after",
+      "result": {
+        "reached_zero_t_ms": 67041
+      },
+      "spec": {
+        "kind": "idle_until_zero",
+        "name": "idle-after",
+        "tenant": "a",
+        "timeout_ms": 30000
+      },
+      "start_t_ms": 64620
+    }
+  ],
+  "requests": {
+    "count": 42,
+    "latency_ms": {
+      "max": 12967,
+      "p50": 3275,
+      "p95": 12049
+    },
+    "statuses": {
+      "200": 42
+    }
+  },
+  "requests_by_phase": {
+    "after-restart": {
+      "count": 6,
+      "latency_ms": {
+        "max": 9045,
+        "p50": 516,
+        "p95": 9045
+      },
+      "statuses": {
+        "200": 6
+      }
+    },
+    "cap": {
+      "count": 24,
+      "latency_ms": {
+        "max": 12967,
+        "p50": 4674,
+        "p95": 12864
+      },
+      "statuses": {
+        "200": 24
+      }
+    },
+    "down": {
+      "count": 3,
+      "latency_ms": {
+        "max": 505,
+        "p50": 502,
+        "p95": 505
+      },
+      "statuses": {
+        "200": 3
+      }
+    },
+    "ramp-1": {
+      "count": 3,
+      "latency_ms": {
+        "max": 12049,
+        "p50": 549,
+        "p95": 12049
+      },
+      "statuses": {
+        "200": 3
+      }
+    },
+    "ramp-2": {
+      "count": 6,
+      "latency_ms": {
+        "max": 10827,
+        "p50": 568,
+        "p95": 10827
+      },
+      "statuses": {
+        "200": 6
+      }
+    }
+  },
+  "requests_by_tenant": {
+    "a": {
+      "count": 42,
+      "latency_ms": {
+        "max": 12967,
+        "p50": 3275,
+        "p95": 12049
+      },
+      "statuses": {
+        "200": 42
+      }
+    }
+  },
+  "reuse": {
+    "evidence": {
+      "attempts": 42,
+      "environments": 6,
+      "environments_whose_boot_id_changed": 0,
+      "environments_with_a_boot_id": 6,
+      "environments_with_several_attempts": 6,
+      "every_attempt_booted_its_own_environment": false,
+      "start_kinds": {
+        "cold": 6,
+        "warm": 36
+      }
+    },
+    "mode": "warm_reuse"
+  },
+  "run": {
+    "commit": "d6e729f28ab8a953babbc4307b35ed9740035203",
+    "dirty_tracked_files": 102,
+    "gateway_config": "gateway.toml",
+    "gateway_config_sha256": "1f50147930c1ddb24e3e4e5328c2f0645d38f64a56fbe1d9b5cf993f121e06dc",
+    "host": "Linux 7.0.0-31-generic aarch64",
+    "limits": {
+      "max_concurrency": 12,
+      "max_duration_seconds": 240,
+      "max_requests": 150
+    },
+    "note": "observations of one run on one machine; not an SLA",
+    "plan": "0 -> ramp 1,2 -> burst 8 workers over a cap of 3 -> down 1 -> idle until zero -> gateway restart -> 2 workers -> idle until zero",
+    "provider": "firecracker",
+    "revision": {
+      "idle_ttl_seconds": 2,
+      "max_concurrency": 3,
+      "scale_down_cooldown_seconds": 1
+    },
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "sample_interval_ms": 250,
+    "scenario": "lifecycle",
+    "seed": 20260917,
+    "started_at": "2026-09-17T15:05:17Z",
+    "target": "http://127.0.0.1:18490"
+  },
+  "samples": {
+    "count": 273,
+    "up": 265
+  },
+  "title": "lifecycle: 0 -> up -> cap (3) -> down -> 0 -> restart -> up -> 0"
+}

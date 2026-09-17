@@ -1,0 +1,20 @@
+{
+  "directory": "/home/takanorifukuyama.guest/w",
+  "body_bytes": 1444,
+  "appends": {
+    "synchronous_full": {
+      "n": 500,
+      "p50_ms": 6.48,
+      "p95_ms": 19.344,
+      "p99_ms": 25.434,
+      "max_ms": 35.792
+    },
+    "synchronous_off": {
+      "n": 500,
+      "p50_ms": 0.034,
+      "p95_ms": 0.097,
+      "p99_ms": 2.607,
+      "max_ms": 14.916
+    }
+  }
+}

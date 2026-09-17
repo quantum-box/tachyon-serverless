@@ -1,0 +1,24 @@
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qyqpf1n53z20d0fnhzafa5 (#1) created: pending
+revision rev_01m2qyqpf1n53z20d0fnhzafa5 is preparing
+revision rev_01m2qyqpf1n53z20d0fnhzafa5 is ready
+function=fn_01m2qyqpaw4c8vwvaxf21g946d revision=rev_01m2qyqpf1n53z20d0fnhzafa5
+PASS  1-known-duration-invocations  200s=3/3 (payload seconds=1.0)
+PASS  2-timeout  status=504 code=timeout
+PASS  3-duplicate-request-replayed  same invocation id for both sends: inv_01m2qyrja7fjwceys67ekkje77 / inv_01m2qyrja7fjwceys67ekkje77
+PASS  4-journal-holds-events-ledger-empty  journal pending=25 (attempt_settled=5) ledger events=0
+PASS  5-kill-9-gateway-1  exit=137 (nothing was collected)
+PASS  6-collector-killed-between-ledger-commit-and-cursor  exit=137 ledger events=4 journal cursor=0
+PASS  7-journal-drained-no-double-count  ledger events=25 (journal had 25) distinct=25 duplicates_ignored=4
+PASS  8a-counts  invocations=5 attempts=5 retries=0 timeouts=1
+PASS  8b-host-measured-handler-time  handler_ms=5643 expected [5200, 8700]
+PASS  8c-every-handler-segment-host-measured  non-host handler segments=0
+PASS  8c-known-duration-samples  tolerance 700 ms: [{"outcome":"succeeded","ms":1113,"guest":1020},{"outcome":"succeeded","ms":1109,"guest":1018},{"outcome":"succeeded","ms":1101,"guest":1052},{"outcome":"timeout","ms":2001,"guest":null},{"outcome":"succeeded","ms":319,"guest":276}]
+PASS  8d-billable-is-init-plus-handler  billable_ms=7997 user_init_ms=2354 handler_ms=5643 vcpu_milli_ms=3998500
+PASS  8e-provisional-charge-follows-price-table  vcpu charge=9996 micros (expected 9996, table provisional-dev-2026-09-v1)
+PASS  8f-provisional-not-an-invoice  {"provisional":true,"not_an_invoice":true,"billing_enabled":false}
+PASS  9-tenant-b-sees-nothing  attempts=0 lines=0
+PASS  10-tsls-usage  PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+PASS  11-environment-stopped-carries-cgroup-cpu-and-memory-peak  environment_stopped=5 provider_reported(cpu_usec>0, memory.peak>0)=5; [{"cpu_ms":3370,"peak_mib":40},{"cpu_ms":3318,"peak_mib":40},{"cpu_ms":3351,"peak_mib":40},{"cpu_ms":3856,"peak_mib":40},{"cpu_ms":2955,"peak_mib":40}]
+note  attempt_settled events with resources.cgroup_cpu_usec unknown (by design): 5

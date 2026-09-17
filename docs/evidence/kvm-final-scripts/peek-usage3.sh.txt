@@ -1,0 +1,10 @@
+#!/bin/bash
+S=~/verify/chaos-run2/matrix/scenarios
+for pair in "orphan_recovery_after_crash env_01m2r0c1msb3gq4vkf2h0kjqtv" "orphan_recovery_after_crash env_01m2r0c191jnk5sd24gxexthr7" "stale_owner_sync_lease env_01m2r08s3kjtdyxvhjn07mac5g"; do
+  set -- $pair
+  echo "===== $1 $2"
+  for f in "$S/$1"/attempt-1/gateway-*.log; do
+    echo "--- $(basename "$f")"
+    sudo grep -h "$2" "$f" | grep -v '"message":"cgroup stats' | sed -E 's/"target":"[^"]*"//' | cut -c1-420
+  done
+done

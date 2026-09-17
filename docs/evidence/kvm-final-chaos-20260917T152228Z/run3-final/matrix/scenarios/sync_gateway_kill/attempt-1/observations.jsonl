@@ -1,0 +1,10 @@
+{"key":"before.running_status","value":"running"}
+{"key":"before.queued_status","value":"queued"}
+{"key":"before.worker_processes_after_kill","value":4}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":6}
+{"key":"usage.environment_stopped_events","value":3}
+{"key":"usage.environment_stopped_with_cgroup_usage","value":3}
+{"key":"usage.environment_stopped_with_unknown_host_usage","value":0}
+{"key":"usage.terminal_environments","value":7}
+{"key":"usage.environments_without_stop_event","value":4}

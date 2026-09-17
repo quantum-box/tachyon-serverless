@@ -1,0 +1,8 @@
+{"key":"client.answer","value":"502 crash Runtime.Crash"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":2}
+{"key":"usage.environment_stopped_events","value":2}
+{"key":"usage.environment_stopped_with_cgroup_usage","value":2}
+{"key":"usage.environment_stopped_with_unknown_host_usage","value":0}
+{"key":"usage.terminal_environments","value":2}
+{"key":"usage.environments_without_stop_event","value":0}

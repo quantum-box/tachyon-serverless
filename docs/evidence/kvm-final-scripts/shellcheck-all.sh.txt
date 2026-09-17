@@ -1,0 +1,8 @@
+#!/bin/bash
+cd /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-af65d2ddfc8d8e218 || exit 2
+SC=~/.local/share/mise/installs/shellcheck/0.10.0/shellcheck-v0.10.0/shellcheck
+files=()
+while IFS= read -r f; do files+=("$f"); done < .kvm/vm/sh.list
+for f in "${files[@]}"; do bash -n "$f" || echo "bash -n failed: $f"; done
+"$SC" -x -P scripts/e2e "${files[@]}"
+echo "shellcheck rc=$? files=${#files[@]}"

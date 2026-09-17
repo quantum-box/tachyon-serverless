@@ -1,0 +1,33 @@
+== before 2026-09-17T15:16:03Z
+vm:  00:16:03 up 13:05,  1 user,  load average: 0.32, 0.56, 0.58
+               total        used        free      shared  buff/cache   available
+Mem:            7913         630        2164           1        5324        7283
+/dev/vda1        38G   15G   23G  40% /
+mac (latest sample): 1789658161	2026-09-17T15:16:01Z	22.37	19.51	40.04
+== A1 backend=sqlite 2026-09-17T15:16:10Z vm: 0.42 0.58 0.59 1/245 253628 mac: 22.37	19.51	40.04
+== B1 backend=memory 2026-09-17T15:16:42Z vm: 0.34 0.54 0.57 1/244 254106 mac: 32.64	22.40	40.14
+== A2 backend=sqlite 2026-09-17T15:17:16Z vm: 0.34 0.51 0.56 1/246 254563 mac: 41.91	25.48	40.64
+== B2 backend=memory 2026-09-17T15:17:55Z vm: 0.53 0.54 0.57 1/244 255017 mac: 50.28	29.90	41.57
+== after 2026-09-17T15:18:27Z
+vm:  00:18:27 up 13:07,  1 user,  load average: 0.74, 0.60, 0.59
+               total        used        free      shared  buff/cache   available
+Mem:            7913         636        2155           1        5328        7276
+/dev/vda1        38G   15G   23G  40% /
+mac (latest sample): 1789658301	2026-09-17T15:18:21Z	38.03	28.87	40.79
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   15G   23G  40% /

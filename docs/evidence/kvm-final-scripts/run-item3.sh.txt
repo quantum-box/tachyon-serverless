@@ -1,0 +1,6 @@
+#!/bin/bash
+# keep the first (aborted-at-leftover-step) usage/budget runs, rerun both, then the journal A/B
+d=/home/takanorifukuyama.guest/verify
+if [ -d $d/usage ] && [ ! -d $d/usage-first-attempt ]; then mv $d/usage $d/usage-first-attempt; fi
+/bin/bash "$(dirname "$0")/run-usage.sh"
+/bin/bash "$(dirname "$0")/run-journal-ab.sh"

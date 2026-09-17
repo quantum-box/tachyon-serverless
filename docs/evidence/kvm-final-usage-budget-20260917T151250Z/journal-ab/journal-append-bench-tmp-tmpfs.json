@@ -1,0 +1,20 @@
+{
+  "directory": "/tmp",
+  "body_bytes": 1444,
+  "appends": {
+    "synchronous_full": {
+      "n": 500,
+      "p50_ms": 0.027,
+      "p95_ms": 0.112,
+      "p99_ms": 0.167,
+      "max_ms": 1.375
+    },
+    "synchronous_off": {
+      "n": 500,
+      "p50_ms": 0.025,
+      "p95_ms": 0.077,
+      "p99_ms": 0.124,
+      "max_ms": 0.501
+    }
+  }
+}

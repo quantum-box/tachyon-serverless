@@ -1,0 +1,26 @@
+#!/bin/bash
+# item 2 (PLT-4640 / PLT-4641): async dispatch + triggers on Firecracker
+. "$(dirname "$0")/common.sh"
+WHICH="${*:-dispatch triggers}"
+W=$VERIFY/queue; mkdir -p "$W"
+C="$(cat "$HOSTWT/.kvm/vm/commit.txt" 2>/dev/null)"
+for what in $WHICH; do
+  case "$what" in
+    dispatch) script=scripts/queue/async-dispatch-e2e.sh ;;
+    triggers) script=scripts/queue/triggers-e2e.sh ;;
+  esac
+  E="$W/$what${SUFFIX:-}"; sudo rm -rf "$E"; mkdir -p "$E"
+  hostinfo "$W/host-$what${SUFFIX:-}.txt" before
+  t0=$(date -u +%s)
+  vmload_sampler "$W/vm-load-$what${SUFFIX:-}.tsv"; S=$!
+  sudo -n env PATH="$PATH" HOME="$HOME" TMPDIR="$HOME/w" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 TSLS_COMMIT="$C" \
+    bash "$script" --evidence "$E" > "$W/stdout-$what${SUFFIX:-}.txt" 2>&1
+  rc=$?
+  kill $S
+  echo "$what exit=$rc" | tee -a "$W/host-$what${SUFFIX:-}.txt"
+  hostinfo "$W/host-$what${SUFFIX:-}.txt" after
+  macload_window "$t0" "$(date -u +%s)" "$W/mac-load-$what${SUFFIX:-}.tsv"
+  leftovers >> "$W/host-$what${SUFFIX:-}.txt" 2>&1
+  fix_owner "$W"
+  grep -c ' ok ' "$E/results.txt"; grep ' FAIL ' "$E/results.txt"
+done

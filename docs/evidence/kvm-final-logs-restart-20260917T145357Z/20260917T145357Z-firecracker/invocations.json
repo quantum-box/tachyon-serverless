@@ -1,0 +1,1066 @@
+[
+  {
+    "id": "inv_01m2qxy9e0sx70tz6gpe0xz0wd",
+    "function_id": "fn_01m2qxrn6q23an4qyj12h2spxn",
+    "revision_id": "rev_01m2qxrnkxhqax89jv2pa9203y",
+    "alias": "prod",
+    "alias_generation": 3,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v1",
+      "message": "hello, v1-again",
+      "secret_present": true,
+      "unisolated": false
+    },
+    "trace_id": "inv_01m2qxy9e0sx70tz6gpe0xz0wd",
+    "input_digest": "sha256:6afd324d6bd5d45deb8b8e52437a69be5a0265a5f628b8c5bf4d37ff767af1ad",
+    "input_size_bytes": 19,
+    "accepted_at": "2026-09-17T14:57:12.128657905Z",
+    "started_at": "2026-09-17T14:57:25.252160132Z",
+    "finished_at": "2026-09-17T14:57:25.540571801Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:57:22.128657905Z",
+      "init_deadline": "2026-09-17T14:57:42.132519233Z",
+      "execution_deadline": "2026-09-17T14:57:55.252160132Z",
+      "client_deadline": "2026-09-17T14:58:22.128657905Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxyp84tzx2z3wbq2p4n981",
+        "number": 1,
+        "environment_id": "env_01m2qxy9e4h5drn5cwm69gczzf",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12051,
+          "runtime_init_ms": 1077,
+          "handler_ms": 285,
+          "response_ms": 0,
+          "total_ms": 13548
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 12051,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxy9e4h5drn5cwm69gczzf",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxy9e4h5drn5cwm69gczzf/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxy9e4h5drn5cwm69gczzf",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 31,
+            "guest_init_ms": 642,
+            "host_disk_budget_bytes": 292119960,
+            "instance_id": "env-01m2qxy9e4h5drn5cwm69gczzf",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxy9e4h5drn5cwm69gczzf/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 7,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "6a0f1034-545d-4e0c-87d4-49bf0306e690",
+          "host_pid": 239383
+        },
+        "dispatched_at": "2026-09-17T14:57:25.252160132Z",
+        "finished_at": "2026-09-17T14:57:25.540571801Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxxrtraq9d7exnm3gdjr5k",
+    "function_id": "fn_01m2qxrn6q23an4qyj12h2spxn",
+    "revision_id": "rev_01m2qxxrh55bpzmdzdsf1zgrq1",
+    "alias": "prod",
+    "alias_generation": 2,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v2",
+      "message": "hello, v2",
+      "secret_present": true,
+      "unisolated": false
+    },
+    "trace_id": "inv_01m2qxxrtraq9d7exnm3gdjr5k",
+    "input_digest": "sha256:cac80308dfca66ed7ea92110517c31c44e6234a7eb4ca260872b87135ba400ad",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T14:56:55.128335811Z",
+    "started_at": "2026-09-17T14:57:11.370404358Z",
+    "finished_at": "2026-09-17T14:57:11.674718809Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:57:05.128335811Z",
+      "init_deadline": "2026-09-17T14:57:25.130670047Z",
+      "execution_deadline": "2026-09-17T14:57:41.370404358Z",
+      "client_deadline": "2026-09-17T14:58:05.128335811Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxy8pakaw7k23m355zf0fn",
+        "number": 1,
+        "environment_id": "env_01m2qxxrttyh4pne74jn0q4y8b",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 14999,
+          "runtime_init_ms": 1112,
+          "handler_ms": 298,
+          "response_ms": 0,
+          "total_ms": 16544
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 14999,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxxrttyh4pne74jn0q4y8b",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxxrttyh4pne74jn0q4y8b/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxxrttyh4pne74jn0q4y8b",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 106,
+            "guest_init_ms": 714,
+            "host_disk_budget_bytes": 292119960,
+            "instance_id": "env-01m2qxxrttyh4pne74jn0q4y8b",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxxrttyh4pne74jn0q4y8b/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 5,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "3461a696-d741-42f6-b95c-fab42d4bdccc",
+          "host_pid": 239335
+        },
+        "dispatched_at": "2026-09-17T14:57:11.370404358Z",
+        "finished_at": "2026-09-17T14:57:11.674718809Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxt4fkw7g0jpm2rx8xbczx",
+    "function_id": "fn_01m2qxrn6q23an4qyj12h2spxn",
+    "revision_id": "rev_01m2qxt4654msddfemq6z908za",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "init_error",
+      "error_type": "Runtime.InitError",
+      "message": "HELLO_FAIL_INIT set"
+    },
+    "trace_id": "inv_01m2qxt4fkw7g0jpm2rx8xbczx",
+    "input_digest": "sha256:90215511fc4037d9290c56da6ef2052bcea2f8d4b0b8e1911520ad0499ec6a46",
+    "input_size_bytes": 15,
+    "accepted_at": "2026-09-17T14:54:55.987883070Z",
+    "finished_at": "2026-09-17T14:55:16.435830271Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:55:05.987883070Z",
+      "client_deadline": "2026-09-17T14:56:05.987883070Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2qxsnq91q3j823p75qqpvtc",
+    "function_id": "fn_01m2qxrn6q23an4qyj12h2spxn",
+    "revision_id": "rev_01m2qxrnkxhqax89jv2pa9203y",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "crash",
+      "error_type": "Runtime.Panic",
+      "message": "panic requested"
+    },
+    "trace_id": "inv_01m2qxsnq91q3j823p75qqpvtc",
+    "input_digest": "sha256:8df974e80ac3f41bf7a597c6e708e10516faaee21d6e9001b1d3f276bef1237a",
+    "input_size_bytes": 14,
+    "accepted_at": "2026-09-17T14:54:40.873923587Z",
+    "started_at": "2026-09-17T14:54:54.555014489Z",
+    "finished_at": "2026-09-17T14:54:54.953801018Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:54:50.873923587Z",
+      "init_deadline": "2026-09-17T14:55:10.876843853Z",
+      "execution_deadline": "2026-09-17T14:55:24.555014489Z",
+      "client_deadline": "2026-09-17T14:55:50.873923587Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxt32vte2261208b2rk8p3",
+        "number": 1,
+        "environment_id": "env_01m2qxsnqc7z5h9zvrebhp0425",
+        "epoch": 1,
+        "status": "failed",
+        "error": {
+          "class": "crash",
+          "error_type": "Runtime.Panic",
+          "message": "panic requested"
+        },
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12512,
+          "runtime_init_ms": 1100,
+          "handler_ms": 396,
+          "response_ms": 0,
+          "total_ms": 14209
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 12512,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxsnqc7z5h9zvrebhp0425",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxsnqc7z5h9zvrebhp0425/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxsnqc7z5h9zvrebhp0425",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 199,
+            "guest_init_ms": 706,
+            "host_disk_budget_bytes": 292119960,
+            "instance_id": "env-01m2qxsnqc7z5h9zvrebhp0425",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxsnqc7z5h9zvrebhp0425/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 9,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "47a72ccf-923d-4e01-aaa3-834ccad9c2c0",
+          "host_pid": 238858
+        },
+        "dispatched_at": "2026-09-17T14:54:54.555014489Z",
+        "finished_at": "2026-09-17T14:54:54.953801018Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxs7dxfj78kc0t2k7ffmv7",
+    "function_id": "fn_01m2qxrn6q23an4qyj12h2spxn",
+    "revision_id": "rev_01m2qxrnkxhqax89jv2pa9203y",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "user_error",
+      "error_type": "Demo.Failure",
+      "message": "fail requested"
+    },
+    "trace_id": "inv_01m2qxs7dxfj78kc0t2k7ffmv7",
+    "input_digest": "sha256:8f368cf8ea5ee799673942b99a77375e53d42df26dd48415385612db04fc3097",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T14:54:26.237989801Z",
+    "started_at": "2026-09-17T14:54:40.162789638Z",
+    "finished_at": "2026-09-17T14:54:40.378103166Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:54:36.237989801Z",
+      "init_deadline": "2026-09-17T14:54:56.289809069Z",
+      "execution_deadline": "2026-09-17T14:55:10.162789638Z",
+      "client_deadline": "2026-09-17T14:55:36.237989801Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxsn129y6vzc4vzzsbtyvh",
+        "number": 1,
+        "environment_id": "env_01m2qxs7fhksnacar7gdcj4rz4",
+        "epoch": 1,
+        "status": "failed",
+        "error": {
+          "class": "user_error",
+          "error_type": "Demo.Failure",
+          "message": "fail requested"
+        },
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12692,
+          "runtime_init_ms": 1004,
+          "handler_ms": 212,
+          "response_ms": 0,
+          "total_ms": 14088
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 12692,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxs7fhksnacar7gdcj4rz4",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxs7fhksnacar7gdcj4rz4/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxs7fhksnacar7gdcj4rz4",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 87,
+            "guest_init_ms": 629,
+            "host_disk_budget_bytes": 292119960,
+            "instance_id": "env-01m2qxs7fhksnacar7gdcj4rz4",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxs7fhksnacar7gdcj4rz4/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 9,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "24e07939-5b7d-4993-badc-309f50f85fc2",
+          "host_pid": 238812
+        },
+        "dispatched_at": "2026-09-17T14:54:40.162789638Z",
+        "finished_at": "2026-09-17T14:54:40.378103166Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxrqbwdra529c6cpehxm7r",
+    "function_id": "fn_01m2qxrn6q23an4qyj12h2spxn",
+    "revision_id": "rev_01m2qxrnkxhqax89jv2pa9203y",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v1",
+      "message": "hello, demo",
+      "secret_present": true,
+      "unisolated": false
+    },
+    "trace_id": "inv_01m2qxrqbwdra529c6cpehxm7r",
+    "input_digest": "sha256:d7d234f759ec34fd6298b7e32318614760070aaef9f4e92ced928324b49a0602",
+    "input_size_bytes": 15,
+    "accepted_at": "2026-09-17T14:54:09.788250890Z",
+    "started_at": "2026-09-17T14:54:25.434139379Z",
+    "finished_at": "2026-09-17T14:54:25.771804061Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:54:19.788250890Z",
+      "init_deadline": "2026-09-17T14:54:39.795723965Z",
+      "execution_deadline": "2026-09-17T14:54:55.434139379Z",
+      "client_deadline": "2026-09-17T14:55:19.788250890Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxs6mtdwhz79kt5espgge7",
+        "number": 1,
+        "environment_id": "env_01m2qxrqc3e64c00pe1djgg3ns",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 13905,
+          "runtime_init_ms": 1717,
+          "handler_ms": 334,
+          "response_ms": 0,
+          "total_ms": 16125
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 13905,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxrqc3e64c00pe1djgg3ns",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxrqc3e64c00pe1djgg3ns/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxrqc3e64c00pe1djgg3ns",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 106,
+            "guest_init_ms": 1212,
+            "host_disk_budget_bytes": 292119960,
+            "instance_id": "env-01m2qxrqc3e64c00pe1djgg3ns",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxrqc3e64c00pe1djgg3ns/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 71,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "7e60e3de-501f-4ed9-87e6-b6fc3e3a5c96",
+          "host_pid": 238750
+        },
+        "dispatched_at": "2026-09-17T14:54:25.434139379Z",
+        "finished_at": "2026-09-17T14:54:25.771804061Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxw8dxgqvhze91hmve99w7",
+    "function_id": "fn_01m2qxrn7q6egembtwyatx9nwd",
+    "revision_id": "rev_01m2qxrpdx330d212k3bw8xsnz",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "eyJhY2NlcHQiOiIqLyoiLCJob3N0IjoiMTI3LjAuMC4xOjE4NDgxIiwieC1kZW1vLWhlYWRlciI6ImRlbW8tdmFsdWUifQ==",
+      "headers": [
+        [
+          "content-type",
+          "application/json"
+        ],
+        [
+          "content-length",
+          "70"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2qxw8dxgqvhze91hmve99w7",
+    "input_digest": "sha256:2aef7616c1d533e6c5ee2f31a91447c0263964e168956163f47d73b4b4f575e1",
+    "input_size_bytes": 173,
+    "accepted_at": "2026-09-17T14:56:05.565422519Z",
+    "started_at": "2026-09-17T14:56:18.678745308Z",
+    "finished_at": "2026-09-17T14:56:18.987970183Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:56:15.565422519Z",
+      "init_deadline": "2026-09-17T14:56:35.567606136Z",
+      "execution_deadline": "2026-09-17T14:56:48.678745308Z",
+      "client_deadline": "2026-09-17T14:57:15.565422519Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxwn7pnae8d4waa8xta4ca",
+        "number": 1,
+        "environment_id": "env_01m2qxw8dz1fewbhccqmts83sd",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 11796,
+          "runtime_init_ms": 1129,
+          "handler_ms": 306,
+          "response_ms": 0,
+          "total_ms": 13420
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 11796,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxw8dz1fewbhccqmts83sd",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxw8dz1fewbhccqmts83sd/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxw8dz1fewbhccqmts83sd",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 164,
+            "guest_init_ms": 728,
+            "host_disk_budget_bytes": 292694744,
+            "instance_id": "env-01m2qxw8dz1fewbhccqmts83sd",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxw8dz1fewbhccqmts83sd/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 6,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "f96994e4-905b-4672-8188-3d00ab603ec3",
+          "host_pid": 239080
+        },
+        "dispatched_at": "2026-09-17T14:56:18.678745308Z",
+        "finished_at": "2026-09-17T14:56:18.987970183Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxvshnw3zf2x0vg7ftaa7j",
+    "function_id": "fn_01m2qxrn7q6egembtwyatx9nwd",
+    "revision_id": "rev_01m2qxrpdx330d212k3bw8xsnz",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "c3RhdHVzIDQwNA==",
+      "headers": [
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ],
+        [
+          "content-length",
+          "10"
+        ]
+      ],
+      "status": 404
+    },
+    "http_status": 404,
+    "trace_id": "inv_01m2qxvshnw3zf2x0vg7ftaa7j",
+    "input_digest": "sha256:50072164a479e7ed4afec19993d3693bb5b1bd02308e5cbac9bf5d5de3e2f7a6",
+    "input_size_bytes": 145,
+    "accepted_at": "2026-09-17T14:55:50.325763836Z",
+    "started_at": "2026-09-17T14:56:04.897333309Z",
+    "finished_at": "2026-09-17T14:56:05.180272314Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:56:00.325763836Z",
+      "init_deadline": "2026-09-17T14:56:20.357029552Z",
+      "execution_deadline": "2026-09-17T14:56:34.897333309Z",
+      "client_deadline": "2026-09-17T14:57:00.325763836Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxw7s1qk4wadvc717nkw4d",
+        "number": 1,
+        "environment_id": "env_01m2qxvsjnzfxvjfetdew69bdr",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 13140,
+          "runtime_init_ms": 1189,
+          "handler_ms": 279,
+          "response_ms": 0,
+          "total_ms": 14963
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 13140,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxvsjnzfxvjfetdew69bdr",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxvsjnzfxvjfetdew69bdr/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxvsjnzfxvjfetdew69bdr",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 93,
+            "guest_init_ms": 861,
+            "host_disk_budget_bytes": 292694744,
+            "instance_id": "env-01m2qxvsjnzfxvjfetdew69bdr",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxvsjnzfxvjfetdew69bdr/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 30,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "c49cf2da-cbcf-4f3e-b7b2-1c0b2e70f7c6",
+          "host_pid": 239046
+        },
+        "dispatched_at": "2026-09-17T14:56:04.897333309Z",
+        "finished_at": "2026-09-17T14:56:05.180272314Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxva6x12mx0pw9ckaw698d",
+    "function_id": "fn_01m2qxrn7q6egembtwyatx9nwd",
+    "revision_id": "rev_01m2qxrpdx330d212k3bw8xsnz",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "aGVsbG8tZWNoby1ib2R5",
+      "headers": [
+        [
+          "content-type",
+          "text/plain"
+        ],
+        [
+          "content-length",
+          "15"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2qxva6x12mx0pw9ckaw698d",
+    "input_digest": "sha256:717ba09756c31f10b3befadbcbf0b62914f84ac433122b128132b8c168f79473",
+    "input_size_bytes": 214,
+    "accepted_at": "2026-09-17T14:55:34.621740768Z",
+    "started_at": "2026-09-17T14:55:49.288905021Z",
+    "finished_at": "2026-09-17T14:55:49.774325989Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:55:44.621740768Z",
+      "init_deadline": "2026-09-17T14:56:04.624773895Z",
+      "execution_deadline": "2026-09-17T14:56:19.288905021Z",
+      "client_deadline": "2026-09-17T14:56:44.621740768Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxvrh8mrc5x915pnykrvfw",
+        "number": 1,
+        "environment_id": "env_01m2qxva70tr43xzpknp4ey9cs",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12842,
+          "runtime_init_ms": 1523,
+          "handler_ms": 480,
+          "response_ms": 0,
+          "total_ms": 15149
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 12842,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxva70tr43xzpknp4ey9cs",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxva70tr43xzpknp4ey9cs/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxva70tr43xzpknp4ey9cs",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 117,
+            "guest_init_ms": 1186,
+            "host_disk_budget_bytes": 292694744,
+            "instance_id": "env-01m2qxva70tr43xzpknp4ey9cs",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxva70tr43xzpknp4ey9cs/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 11,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "b6aeeaa7-2a5a-4dcc-899d-d249e3ea5cd9",
+          "host_pid": 239009
+        },
+        "dispatched_at": "2026-09-17T14:55:49.288905021Z",
+        "finished_at": "2026-09-17T14:55:49.774325989Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxtrhahmyk6tng1k6v9r49",
+    "function_id": "fn_01m2qxrn7q6egembtwyatx9nwd",
+    "revision_id": "rev_01m2qxrpdx330d212k3bw8xsnz",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "b2s=",
+      "headers": [
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ],
+        [
+          "content-length",
+          "2"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2qxtrhahmyk6tng1k6v9r49",
+    "input_digest": "sha256:edd2fe88a1c2dcd49c19f785c450557a3ab8373d7f2eec59122e96a4a0b51f71",
+    "input_size_bytes": 135,
+    "accepted_at": "2026-09-17T14:55:16.522436662Z",
+    "started_at": "2026-09-17T14:55:33.912428622Z",
+    "finished_at": "2026-09-17T14:55:34.226212208Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:55:26.522436662Z",
+      "init_deadline": "2026-09-17T14:55:46.526305819Z",
+      "execution_deadline": "2026-09-17T14:56:03.912428622Z",
+      "client_deadline": "2026-09-17T14:56:26.522436662Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxv9gr6ctzp5awe6yw4rvj",
+        "number": 1,
+        "environment_id": "env_01m2qxtrhem7ym1fdff0myfamb",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 16019,
+          "runtime_init_ms": 1089,
+          "handler_ms": 299,
+          "response_ms": 0,
+          "total_ms": 17840
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 16019,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxtrhem7ym1fdff0myfamb",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxtrhem7ym1fdff0myfamb/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxtrhem7ym1fdff0myfamb",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 95,
+            "guest_init_ms": 720,
+            "host_disk_budget_bytes": 292694744,
+            "instance_id": "env-01m2qxtrhem7ym1fdff0myfamb",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxtrhem7ym1fdff0myfamb/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 14,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "29ac8049-dc30-4255-b6b5-4eb91241e91d",
+          "host_pid": 238963
+        },
+        "dispatched_at": "2026-09-17T14:55:33.912428622Z",
+        "finished_at": "2026-09-17T14:55:34.226212208Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxypz0kbfbn1r9ky0s9w9n",
+    "function_id": "fn_01m2qxrn8k70nefnd7t9ct7e6e",
+    "revision_id": "rev_01m2qxrq0crwxcmc9qte6kaast",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "cancelled",
+    "trace_id": "inv_01m2qxypz0kbfbn1r9ky0s9w9n",
+    "input_digest": "sha256:d8b6baac143209b32a8a5f85b5fba77b4e052d6cdfd2978929fb11fc0255eafa",
+    "input_size_bytes": 14,
+    "accepted_at": "2026-09-17T14:57:25.984431190Z",
+    "finished_at": "2026-09-17T14:57:26.573938650Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:57:35.984431190Z",
+      "client_deadline": "2026-09-17T14:58:35.984431190Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2qxx55xnknnjw1fp57d6j5w",
+    "function_id": "fn_01m2qxrn8k70nefnd7t9ct7e6e",
+    "revision_id": "rev_01m2qxx4wk50rqxmr6axjdjej5",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "timeout",
+      "error_type": "Host.Timeout",
+      "message": "handler did not finish within 2 s"
+    },
+    "trace_id": "inv_01m2qxx55xnknnjw1fp57d6j5w",
+    "input_digest": "sha256:b2037123731fd3579b1c4953c496a601e1e8570ee626a566861bf5f3068b040a",
+    "input_size_bytes": 36,
+    "accepted_at": "2026-09-17T14:56:35.005238061Z",
+    "started_at": "2026-09-17T14:56:48.910143989Z",
+    "finished_at": "2026-09-17T14:56:52.120297049Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:56:45.005238061Z",
+      "init_deadline": "2026-09-17T14:57:05.008014614Z",
+      "execution_deadline": "2026-09-17T14:56:50.910143989Z",
+      "client_deadline": "2026-09-17T14:57:17.005238061Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxxjre4bm7dqj1aq6pv77q",
+        "number": 1,
+        "environment_id": "env_01m2qxx560g1xv44na7q747pzq",
+        "epoch": 1,
+        "status": "failed",
+        "error": {
+          "class": "timeout",
+          "error_type": "Host.Timeout",
+          "message": "handler did not finish within 2 s"
+        },
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12740,
+          "runtime_init_ms": 1022,
+          "handler_ms": 2006,
+          "response_ms": 1201,
+          "total_ms": 17112
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 12740,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxx560g1xv44na7q747pzq",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxx560g1xv44na7q747pzq/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxx560g1xv44na7q747pzq",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_init_ms": 701,
+            "host_disk_budget_bytes": 292115880,
+            "instance_id": "env-01m2qxx560g1xv44na7q747pzq",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxx560g1xv44na7q747pzq/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 9,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "c96c0757-521d-43ae-8ca0-ab2bc558e4da",
+          "host_pid": 239179
+        },
+        "dispatched_at": "2026-09-17T14:56:48.910143989Z",
+        "finished_at": "2026-09-17T14:56:52.120297049Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2qxwp0zsdah51qej6f9gmvj",
+    "function_id": "fn_01m2qxrn8k70nefnd7t9ct7e6e",
+    "revision_id": "rev_01m2qxrq0crwxcmc9qte6kaast",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "burned_seconds": 1.000194083,
+      "cancelled": false,
+      "iterations": 162300000
+    },
+    "trace_id": "inv_01m2qxwp0zsdah51qej6f9gmvj",
+    "input_digest": "sha256:fd839bdef3efc7f83657dc6dfd87ac89eda36d5756deb4cbfb8db4596c2de7a6",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T14:56:19.487023455Z",
+    "started_at": "2026-09-17T14:56:32.601975522Z",
+    "finished_at": "2026-09-17T14:56:33.908497611Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T14:56:29.487023455Z",
+      "init_deadline": "2026-09-17T14:56:49.489141725Z",
+      "execution_deadline": "2026-09-17T14:57:02.601975522Z",
+      "client_deadline": "2026-09-17T14:57:29.487023455Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2qxx2tsmepy67qxma4r8yw5",
+        "number": 1,
+        "environment_id": "env_01m2qxwp117qdhqbzvh2k6gsf5",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12097,
+          "runtime_init_ms": 1015,
+          "handler_ms": 1303,
+          "response_ms": 0,
+          "total_ms": 14559
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 12097,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2qxwp117qdhqbzvh2k6gsf5",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxwp117qdhqbzvh2k6gsf5/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2qxwp117qdhqbzvh2k6gsf5",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1096,
+            "guest_init_ms": 693,
+            "host_disk_budget_bytes": 292115880,
+            "instance_id": "env-01m2qxwp117qdhqbzvh2k6gsf5",
+            "jail_root": "/srv/jailer/firecracker/env-01m2qxwp117qdhqbzvh2k6gsf5/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "73b3e3b6cfccf93d5038c9fb20a0800207aad524e77e047bcceaf2d9ac399064",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 5,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "0f51951c-c34b-4a2b-99a2-e1db8118910c",
+          "host_pid": 239127
+        },
+        "dispatched_at": "2026-09-17T14:56:32.601975522Z",
+        "finished_at": "2026-09-17T14:56:33.908497611Z"
+      }
+    ]
+  }
+]

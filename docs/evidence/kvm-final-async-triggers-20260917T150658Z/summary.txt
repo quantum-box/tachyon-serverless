@@ -1,0 +1,76 @@
+KVM final batch — PLT-4640 async dispatch and PLT-4641 triggers executed in Firecracker microVMs
+
+host     Lima VM tsls-kvm (Apple M4 -> vz nested virtualization, aarch64, 4 vCPU / 8 GiB), one run each
+provider TSLS_PROVIDER=firecracker (scripts/kvm/provider-lib.sh): [provider.firecracker] tables of
+         config/gateway.firecracker.toml (jailer + host cgroup required; the gateway runs as root, profile dev
+         as in the process runs), workdir under $HOME/w (same file system as /srv/jailer), musl guests,
+         [pool] enabled (async-dispatch: max_idle_per_revision 4; triggers: 2)
+commits  NOTE: environment.txt says git_commit=d6e729f28ab8 (a stale .git left in the VM's ~/tsls, moved away
+         afterwards). Real trees: dispatch/ and triggers/ = ccfc7fa, dispatch-ackwait30/ = 9bb8750.
+
+idempotency store (examples/idempotent-async)
+         A microVM cannot reach the host file system and its /tmp dies with the environment, so the
+         example's side effect store runs outside: scripts/queue/effects-netns.sh starts
+         scripts/queue/effects-store.py in network namespace `effx` behind a veth on 192.31.196.0/30, the
+         revision gets IDEMPOTENT_ASYNC_URL=http://192.31.196.2:8787 and egress `restricted` with
+         egress_allow 192.31.196.2/32:8787 (a tap + nftables chain per environment). The store writes the
+         same executions.log / effects/<order>.json files the checks read (effects-store.log = one line
+         per request from the guests).
+
+RUNS
+dir                    started (UTC)  result            Mac load1 p50/max  VM load1 max
+dispatch/              15:06:58Z      39 ok / 1 FAIL    14.6 / 16.8        1.14    (JetStream ack_wait 4 s)
+dispatch-ackwait30/    15:09:31Z      40 ok / 0 FAIL    5.9 / 8.3          0.74    (ack_wait 30 s)
+triggers/              15:08:13Z      39 ok / 0 FAIL    12.8 / 14.4        0.94
+
+async dispatch (dispatch-ackwait30/results.txt, all ok):
+- retries: flaky-1 (fail_first 2) succeeded on attempt 3 of the pinned revision, applied once (2 failed + 1
+  applied executions); 3 plain orders succeeded.
+- DLQ: exhaust-1 failed after 3 executions -> one attempts_exhausted dead letter; big-1 (100 kB response)
+  Runtime.ResponseTooLarge after 1 execution -> non_retryable; a poison event published straight to
+  JetStream dead-lettered as poison and never executed; tenant B sees no dead letter (list empty, get 404).
+- SIGKILL after the terminal commit, before the ACK (failpoint dispatch.after_commit=kill): the side effect
+  was applied once; after the restart JetStream redelivered and the dispatcher acked it as
+  Skipped("terminal") without running (redelivery_recognised_as_done ok), 1 attempt, 1 execution.
+- SIGKILL after the side effect, before the commit (dispatch.before_commit=kill): after the restart the run
+  executed again in a microVM, the store answered 409 -> applied=1 skipped=1, succeeded with 2 attempts,
+  exactly one effect file.
+- redrive: 403 without the role, 404 from tenant B, 202 with an audit record (requested_by, source
+  invocation, pinned revision), the new invocation succeeded (3 attempts: executions 4 and 5 still fail on
+  purpose, 6 applies), second redrive 409, side effect once.
+- converge: 9 accepted invocations terminal, dead letters {attempts_exhausted 1, non_retryable 1, poison 1},
+  one dead letter per invocation, redrives 1, 7 effects and 7 applied executions (each exactly once).
+- microVM evidence: all 16 attempts that reached an environment ran in a jailed Firecracker VM with a guest
+  boot id (attempt-environments.txt: 5 environments, cold 5 / warm 11).
+- leftovers-after.txt empty (no VMM, jail, cgroup, tap, egress table); host-dispatch-ackwait30.txt: no
+  netns / effx link left, ip_forward restored to 0.
+
+the failed check of the first run (dispatch/, ack_wait 4 s, same as the process-provider E2E):
+  crash.after_commit.redelivery_recognised_as_done FAIL. A cold microVM run took longer than the 4 s ack
+  wait, so JetStream redelivered the message while the run still held its claim; the dispatcher acked that
+  duplicate as Skipped("claimed") at 15:07:30.9 (gateway.log, delivery_count 2), which is the documented
+  path (docs/adr/0013: a live claim owns what happens next). After the SIGKILL and restart there was
+  therefore no redelivery left to observe. The outcome itself was correct in that run too
+  (not_run_again ok: succeeded, 1 attempt, 1 execution). Not a product regression: the harness now uses
+  an ack wait longer than a run with firecracker (TSLS_ACK_WAIT_SECONDS, default 30 s; commit 9bb8750),
+  and dispatch-ackwait30/ is the rerun. Observation for operators: with runs longer than ack_wait every
+  long run causes one redelivery that is acked as a duplicate.
+
+triggers (triggers/results.txt, all ok):
+- cron */2 s fired 5 times in 9 s, each fire one async invocation of the pinned revision with key
+  cron:{trigger}:{scheduled_at}; SIGKILL + 7 s downtime + SIGTERM restart: 11 fires, no scheduled time twice,
+  nothing inside the downtime (skip policy); disable stops fires and invocations.
+- webhook: openssl HMAC == tsls webhook-sign; 401 bad signature, 401 expired, 413 oversized, 400 missing id,
+  none stored; valid 202, duplicate event id -> same invocation (replayed), one fire row; 410 disabled, 404
+  deleted, sealed secret erased; the secret never appears in the evidence.
+- dispatch: 12 invocations of the hello function terminal and succeeded (11 cron + 1 webhook); the failing
+  webhook fire (idempotent-async without order_id) retried to max_attempts 2 -> one attempts_exhausted dead
+  letter; all runs metered (usage attempts 14).
+- microVM evidence: 15 attempts in jailed Firecracker VMs (4 environments; cold 4 / warm 11). One cold
+  attempt is outcome_unknown: attempt 1 of the fire accepted at 15:08:16, running when the gateway was
+  SIGKILLed; its retry was interrupted by the SIGTERM restart (rescheduled, Host.GatewayShutdown,
+  counted: false) and the next run succeeded (gateway.log).
+- leftovers-after.txt empty.
+
+LIMITS   one run each on one nested host; NATS single node; the effects store is a test double of an
+         external database (no auth, own netns), not a product component.

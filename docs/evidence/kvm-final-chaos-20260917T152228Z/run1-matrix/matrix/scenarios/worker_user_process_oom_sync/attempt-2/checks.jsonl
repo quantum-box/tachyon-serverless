@@ -1,0 +1,4 @@
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=1/1"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=2 refused=0"}
+{"name":"classify.guest_oom_is_user_process_crash","ok":true,"detail":"status=failed Runtime.Crash client=502/crash message=invocation inv_01m2r04r8kvykvqh67mtttxywt failed: Runtime.Crash: user process exited while the attempt was in flight (exit_code=None, signal=Some(9))"}
+{"name":"harness.scenario_completed","ok":false,"detail":"the scenario stopped before its last step (see the attempt log)"}

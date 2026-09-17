@@ -1,0 +1,10 @@
+PROVISIONAL - provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype
+tenant         tn_01hzzzzzzzzzzzzzzzzzzzzzza
+enforced       true
+period         2026-09 (2026-09-01T00:00:00+00:00 .. 2026-10-01T00:00:00+00:00, calendar_month_utc)
+price table    provisional-dev-2026-09-v1 (JPY)
+configuration  valid (generation 13)
+admitting      true
+SCOPE                          HARD LIMIT  RESERVED  SETTLED   UNMETERED HOLD  REMAINING  ACTIVE  REFUSALS  ALERTS
+tenant                         1.473383    0.000000  0.013964  0.000000        1.459419   0       6         -
+fn_01m2qyww630yczxn0q2g61rwhq  -           0.000000  0.013964  0.000000        -          0       6         -

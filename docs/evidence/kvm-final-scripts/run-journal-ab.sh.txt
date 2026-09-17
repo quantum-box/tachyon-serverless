@@ -1,0 +1,79 @@
+#!/bin/bash
+# item 3: per-invoke latency cost of the fsynced usage journal on Firecracker.
+#  A = [store] sqlite (state.db + usage/journal.db on disk, synchronous=FULL)
+#  B = [store] memory (the journal and the state are in-memory SQLite: no fsync at all)
+# Warm pool on, examples/hello, 1 priming invoke + N sequential warm invokes, order A B A B.
+# B also removes the state store's own fsyncs, so A-B is an upper bound of the journal's cost;
+# the append microbenchmark (journal-append-bench.py) isolates the journal transaction itself.
+. "$(dirname "$0")/common.sh"
+N="${N:-40}"
+W=$VERIFY/journal-ab; sudo rm -rf "$W"; mkdir -p "$W"
+hostinfo "$W/host.txt" before
+t0=$(date -u +%s)
+vmload_sampler "$W/vm-load.tsv"; S=$!
+GUEST="$REPO/target/aarch64-unknown-linux-musl/release/example-hello"
+PORT=18495
+API="http://127.0.0.1:$PORT"
+TOKEN=ab-token-a
+run_one() { # run_one LABEL BACKEND
+  local label="$1" backend="$2" D="$HOME/w/jab-$1" gw fn i id
+  sudo rm -rf "$D"; mkdir -p "$D"
+  {
+    printf 'listen = "127.0.0.1:%s"\nprofile = "production"\ndata_dir = "%s/data"\n\n' "$PORT" "$D"
+    awk '/^\[/ { keep = ($0 ~ /^\[provider(\.[a-z_.]+)?\]/) } keep' config/gateway.firecracker.toml \
+      | sed -e "s#\"\\.kvm/#\"$REPO/.kvm/#g" -e "s#^workdir = \"[^\"]*\"#workdir = \"$D/fc\"#"
+    printf '\n[capacity.node]\nname = "kvm-ab"\nvmm_overhead_memory_mib = 64\nbridge_overhead_memory_mib = 0\n'
+    printf '\n[pool]\nenabled = true\nmax_idle_per_revision = 1\n\n[store]\nbackend = "%s"\n' "$backend"
+    printf '\n[[identity.tokens]]\ntoken = "%s"\ntenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"\nsubject = "ab"\nroles = ["deploy", "invoke"]\n' "$TOKEN"
+  } > "$D/gateway.toml"
+  cp "$D/gateway.toml" "$W/gateway-$label.toml"
+  sudo -n env LOG_FORMAT=json target/debug/tachyon-serverless-gateway --config "$D/gateway.toml" > "$W/gateway-$label.log" 2>&1 &
+  gw=$!
+  for i in $(seq 1 120); do curl -sf "$API/readyz" >/dev/null && break; sleep 0.5; done
+  export TSLS_API_URL="$API" TSLS_TOKEN="$TOKEN"
+  fn="$(target/debug/tsls functions create --name "ab-$(echo "$label" | tr "[:upper:]" "[:lower:]")" --json | jq -r .id)"
+  target/debug/tsls functions deploy --function "$fn" --binary "$GUEST" --arch aarch64 --json > /dev/null
+  echo "== $label backend=$backend $(date -u +%FT%TZ) vm: $(cat /proc/loadavg) mac: $(tail -n 1 "$MACLOAD" | cut -f3-5)" >> "$W/host.txt"
+  for i in $(seq 0 "$N"); do
+    curl -s -o "$D/body" -D "$D/hdr" -w '%{http_code} %{time_total}\n' -X POST -H "authorization: Bearer $TOKEN" \
+      -H 'content-type: application/json' --data '{"name":"ab"}' "$API/v1/functions/$fn/invoke" > "$D/code"
+    id="$(tr -d '\r' < "$D/hdr" | awk -F': ' 'tolower($1)=="x-tachyon-invocation-id"{print $2}')"
+    curl -s -H "authorization: Bearer $TOKEN" "$API/v1/invocations/$id" \
+      | jq -c --arg label "$label" --arg backend "$backend" --argjson i "$i" --arg client "$(cut -d' ' -f2 "$D/code")" --arg code "$(cut -d' ' -f1 "$D/code")" \
+        '{label: $label, backend: $backend, i: $i, code: ($code|tonumber), client_ms: (($client|tonumber)*1000|round), status, start_kind: .attempts[-1].start_kind, total_ms: .attempts[-1].timings.total_ms, handler_ms: .attempts[-1].timings.handler_ms, resume_ms: .attempts[-1].timings.resume_ms, readiness_ms: .attempts[-1].timings.readiness_ms}' >> "$W/attempts.jsonl"
+    sleep 0.25
+  done
+  sudo kill -TERM "$gw"; wait "$gw" 2>/dev/null
+  sleep 0; sudo cp "$D/data/usage/ledger.db" "$W/ledger-$label.db" 2>/dev/null
+  sudo rm -rf "$D"
+}
+run_one A1 sqlite
+run_one B1 memory
+run_one A2 sqlite
+run_one B2 memory
+kill $S
+python3 "$(dirname "$0")/journal-append-bench.py" 500 /tmp > "$W/journal-append-bench.json"
+python3 - "$W/attempts.jsonl" > "$W/summary.json" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1])]
+def pct(v, q):
+    v = sorted(v); import math
+    return v[max(0, math.ceil(q * len(v)) - 1)] if v else None
+out = {}
+for backend in ("sqlite", "memory"):
+    w = [r for r in rows if r["backend"] == backend and r["i"] > 0 and r["start_kind"] == "warm" and r["code"] == 200]
+    allw = [r for r in rows if r["backend"] == backend and r["i"] > 0]
+    out[backend] = {"n_warm_ok": len(w), "n": len(allw), "failures": sum(1 for r in allw if r["code"] != 200),
+        "not_warm": sum(1 for r in allw if r["start_kind"] != "warm"),
+        **{f"{k}_p50_p95": [pct([r[k] for r in w if r[k] is not None], 0.5), pct([r[k] for r in w if r[k] is not None], 0.95)]
+           for k in ("client_ms", "total_ms", "handler_ms")},
+        "host_platform_ms_p50_p95": [pct([r["total_ms"] - r["handler_ms"] for r in w], 0.5), pct([r["total_ms"] - r["handler_ms"] for r in w], 0.95)]}
+print(json.dumps(out, indent=2))
+PY
+for l in A1 A2; do sudo python3 -c "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); print(sys.argv[1].split('/')[-1], dict(c.execute('select event_type, count(*) from function_usage_events group by event_type').fetchall()))" "$W/ledger-$l.db" >> "$W/journal-rows.txt" 2>&1; done
+sudo rm -f "$W"/ledger-*.db
+hostinfo "$W/host.txt" after
+macload_window "$t0" "$(date -u +%s)" "$W/mac-load.tsv"
+fix_owner "$W"
+leftovers >> "$W/host.txt" 2>&1
+cat "$W/summary.json" "$W/journal-append-bench.json" "$W/journal-rows.txt"

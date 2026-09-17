@@ -1,0 +1,30 @@
+== before 2026-09-17T15:36:44Z
+vm:  00:36:44 up 13:25,  1 user,  load average: 0.65, 1.81, 1.68
+               total        used        free      shared  buff/cache   available
+Mem:            7913         627        2262           1        5229        7285
+/dev/vda1        38G   16G   23G  41% /
+mac (latest sample): 1789659395	2026-09-17T15:36:35Z	39.07	85.75	80.72
+matrix exit=1 commit=360dbcb1100976336bf02ccd3a0746a83b219628
+== after 2026-09-17T15:42:05Z
+vm:  00:42:05 up 13:31,  1 user,  load average: 2.36, 2.11, 1.85
+               total        used        free      shared  buff/cache   available
+Mem:            7913         645        2675           1        4798        7267
+/dev/vda1        38G   16G   23G  41% /
+mac (latest sample): 1789659716	2026-09-17T15:41:56Z	24.62	49.81	65.93
+-- processes (gateway, firecracker, jailer, nats-server, effects store)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- ip_forward=0
+-- disk
+/dev/vda1        38G   16G   23G  41% /

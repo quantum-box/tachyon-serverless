@@ -1,0 +1,14 @@
+[e2e] scenario: idle-to-zero
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qy9ggkf8yaf0adbvrzkqne (#1) created: pending
+revision rev_01m2qy9ggkf8yaf0adbvrzkqne is preparing
+revision rev_01m2qy9ggkf8yaf0adbvrzkqne is ready
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2qy9gycarht4yet8sp40d35 (#1) created: pending
+revision rev_01m2qy9gycarht4yet8sp40d35 is preparing
+revision rev_01m2qy9gycarht4yet8sp40d35 is ready
+tsls-load: sent 9 requests in this scenario so far
+PASS  idle-to-zero  /home/takanorifukuyama.guest/verify/load/evidence/load-idle-to-zero-20260917T150316Z-firecracker
+PASS  idle-to-zero  /home/takanorifukuyama.guest/verify/load/evidence/load-idle-to-zero-20260917T150316Z-firecracker

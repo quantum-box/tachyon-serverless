@@ -1,0 +1,34 @@
+KVM final batch — durable invocation logs survive a gateway restart on Firecracker (PR #36 / ADR-0018)
+
+run      2026-09-17T14:53:57Z .. 14:57:38Z (UTC), Lima VM tsls-kvm (Apple M4 -> vz nested virtualization,
+         aarch64, 4 vCPU / 8 GiB, kernel 7.0.0-31)
+tree     identical to origin/main 9b6f2c8 (scripts/e2e/demo.sh unchanged); guest binaries and rootfs rebuilt
+         from that tree (rootfs sha256 73b3e3b6..., its /sbin/tachyon-init equals the bridge just built)
+command  sudo -n env PATH="$PATH" HOME="$HOME" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 \
+           TSLS_GATEWAY_CONFIG=gateway.toml TSLS_API_URL=http://127.0.0.1:18481 scripts/e2e/demo.sh
+         gateway.toml = config/gateway.firecracker.toml (profile production, jailer + cgroup required) with
+         listen and data_dir changed; the gateway runs as root
+load     VM 1-min load 0.07 -> 0.77 (vm-load.tsv); Mac 1-min load p50 113.7 / max 132.8 (n=23, mac-load.tsv;
+         shared with other cargo builds). No timing is judged in this item.
+
+RESULT   29 steps, 0 failed (20260917T145357Z-firecracker/summary.json, stdout.txt)
+
+  step 20  tsls functions logs --invocation <id> shows handler lines ([stdout/handler] ...) -> PASS;
+           that output is kept as the before-restart copy
+  step 26  gateway exits 0 on SIGTERM -> PASS
+  step 27  gateway restarted on the same data_dir, same invocation's logs read again -> PASS (11.1 s):
+           identical to the copy before the restart, /readyz .logs durable=true healthy=true,
+           stored_lines 71, the restarted gateway exits 0 as well (steps/27-*.log, gateway-restart.log)
+  step 28  no secret value in gateway log, evidence, state or logs.db -> PASS
+  step 29  no VMM, socket or drive after shutdown -> PASS
+
+The log lines themselves come from the microVM path: "[platform/boot] creating environment ... with
+provider firecracker", "bridge connected after 13905 ms", "[platform/shutdown] environment terminated
+(Completed); cleaned: process-group:..., cgroup:/sys/fs/cgroup/tachyon/env_..., jail:/srv/jailer/firecracker/env-...".
+
+CLEANUP  host.txt (after): no gateway / firecracker / jailer / nats-server process, no /sys/fs/cgroup/tachyon/*,
+         nothing under /srv/jailer, no env dir under .kvm/run, no tsls* tap, nft shows only Lima's
+         `table ip nat`, ip_forward=0, disk 39%.
+
+LIMITS   one run. Long runs / large logs (max_total_bytes, SQLite overhead) and a logs.db lock scenario in
+         the chaos matrix are still not done (ADR-0018 remainder).

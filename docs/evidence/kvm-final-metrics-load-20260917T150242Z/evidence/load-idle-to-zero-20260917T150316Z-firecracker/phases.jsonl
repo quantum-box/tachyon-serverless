@@ -1,0 +1,5 @@
+{"end_t_ms":9143,"phase":"burst","result":{"not_sent_duration_limit":0,"sent":8},"spec":{"concurrency":4,"handler_ms":300,"jitter_ms":100,"kind":"invoke","name":"burst","requests":8,"tenant":"a"},"start_t_ms":1075}
+{"end_t_ms":11406,"phase":"idle","result":{"reached_zero_t_ms":11406},"spec":{"kind":"idle_until_zero","name":"idle","tenant":"a","timeout_ms":30000},"start_t_ms":9143}
+{"end_t_ms":16411,"phase":"stay-idle","result":{},"spec":{"kind":"pause","ms":5000,"name":"stay-idle"},"start_t_ms":11406}
+{"end_t_ms":28191,"phase":"reaccess","result":{"not_sent_duration_limit":0,"sent":1},"spec":{"concurrency":1,"handler_ms":100,"jitter_ms":0,"kind":"invoke","name":"reaccess","requests":1,"tenant":"a"},"start_t_ms":16411}
+{"end_t_ms":30665,"phase":"idle-again","result":{"reached_zero_t_ms":30665},"spec":{"kind":"idle_until_zero","name":"idle-again","tenant":"a","timeout_ms":30000},"start_t_ms":28192}

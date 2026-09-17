@@ -1,0 +1,7 @@
+{"key":"setup.pids","value":"bridge=268096 user= env=env_01m2qzratx7v5tdeste03k3mhs"}
+{"key":"client.answer","value":"502 outcome_unknown Host.OutcomeUnknown"}
+{"key":"ledger.status","value":"outcome_unknown Host.OutcomeUnknown"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":3}
+{"key":"usage.environment_stopped_events","value":4}
+{"key":"usage.environment_stopped_with_cgroup_usage","value":4}

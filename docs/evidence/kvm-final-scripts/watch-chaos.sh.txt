@@ -1,0 +1,4 @@
+#!/bin/bash
+f=/home/takanorifukuyama.guest/verify/chaos/stdout.txt
+while [ ! -f "$f" ]; do sleep 2; done
+tail -n +1 -f "$f" | grep --line-buffered -E '=== .* attempt|  FAIL |evidence: |aborted|exited during startup'

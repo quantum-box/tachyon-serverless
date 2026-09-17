@@ -1,0 +1,47 @@
+[
+  {
+    "outcome": "succeeded",
+    "handler": {
+      "value": 1169,
+      "measurement": "host_measured"
+    },
+    "kind": "first",
+    "guest": 1022
+  },
+  {
+    "outcome": "succeeded",
+    "handler": {
+      "value": 1202,
+      "measurement": "host_measured"
+    },
+    "kind": "first",
+    "guest": 1031
+  },
+  {
+    "outcome": "succeeded",
+    "handler": {
+      "value": 1260,
+      "measurement": "host_measured"
+    },
+    "kind": "first",
+    "guest": 1084
+  },
+  {
+    "outcome": "timeout",
+    "handler": {
+      "value": 2002,
+      "measurement": "host_measured"
+    },
+    "kind": "first",
+    "guest": null
+  },
+  {
+    "outcome": "succeeded",
+    "handler": {
+      "value": 400,
+      "measurement": "host_measured"
+    },
+    "kind": "first",
+    "guest": 276
+  }
+]

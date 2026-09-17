@@ -1,0 +1,26 @@
+{
+  "scenario": "lifecycle",
+  "plan": "0 -> ramp 1,2 -> burst 8 workers over a cap of 3 -> down 1 -> idle until zero -> gateway restart -> 2 workers -> idle until zero",
+  "commit": "d6e729f28ab8a953babbc4307b35ed9740035203",
+  "dirty_tracked_files": 102,
+  "provider": "firecracker",
+  "seed": 20260917,
+  "sample_interval_ms": 250,
+  "limits": {
+    "max_concurrency": 12,
+    "max_requests": 150,
+    "max_duration_seconds": 240
+  },
+  "gateway_config": "gateway.toml",
+  "gateway_config_sha256": "1f50147930c1ddb24e3e4e5328c2f0645d38f64a56fbe1d9b5cf993f121e06dc",
+  "host": "Linux 7.0.0-31-generic aarch64",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "target": "http://127.0.0.1:18490",
+  "started_at": "2026-09-17T15:05:17Z",
+  "revision": {
+    "max_concurrency": 3,
+    "idle_ttl_seconds": 2,
+    "scale_down_cooldown_seconds": 1
+  },
+  "note": "observations of one run on one machine; not an SLA"
+}
