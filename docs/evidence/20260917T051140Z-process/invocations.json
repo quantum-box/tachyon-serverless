@@ -1,0 +1,747 @@
+[
+  {
+    "id": "inv_01m2pwf4jc8apcqp3jqhgeb60y",
+    "function_id": "fn_01m2pwebds15mgs0bpyqhsprtw",
+    "revision_id": "rev_01m2pweccd06fwzx50v8f726qh",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v1",
+      "message": "hello, v1-again",
+      "secret_present": true,
+      "unisolated": true
+    },
+    "trace_id": "inv_01m2pwf4jc8apcqp3jqhgeb60y",
+    "input_digest": "sha256:6afd324d6bd5d45deb8b8e52437a69be5a0265a5f628b8c5bf4d37ff767af1ad",
+    "input_size_bytes": 19,
+    "accepted_at": "2026-09-17T05:12:12.620646Z",
+    "started_at": "2026-09-17T05:12:13.061870Z",
+    "finished_at": "2026-09-17T05:12:13.067053Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:22.620646Z",
+      "init_deadline": "2026-09-17T05:12:42.621539Z",
+      "execution_deadline": "2026-09-17T05:12:43.061870Z",
+      "client_deadline": "2026-09-17T05:13:22.620646Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwf5052jfgkqfb0120sxse",
+        "number": 1,
+        "environment_id": "env_01m2pwf4jd7925th9t5b09880a",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12,
+          "runtime_init_ms": 13,
+          "handler_ms": 3,
+          "response_ms": 0,
+          "total_ms": 445
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1,
+            "guest_init_ms": 11,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10560
+        },
+        "dispatched_at": "2026-09-17T05:12:13.061870Z",
+        "finished_at": "2026-09-17T05:12:13.067053Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwf40df97mw90rxj8r8gf4",
+    "function_id": "fn_01m2pwebds15mgs0bpyqhsprtw",
+    "revision_id": "rev_01m2pwf3e5fvfvv82cn6ewq8z0",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v2",
+      "message": "hello, v2",
+      "secret_present": true,
+      "unisolated": true
+    },
+    "trace_id": "inv_01m2pwf40df97mw90rxj8r8gf4",
+    "input_digest": "sha256:cac80308dfca66ed7ea92110517c31c44e6234a7eb4ca260872b87135ba400ad",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T05:12:12.045306Z",
+    "started_at": "2026-09-17T05:12:12.441503Z",
+    "finished_at": "2026-09-17T05:12:12.452740Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:22.045306Z",
+      "init_deadline": "2026-09-17T05:12:42.045923Z",
+      "execution_deadline": "2026-09-17T05:12:42.441503Z",
+      "client_deadline": "2026-09-17T05:13:22.045306Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwf4csmd6tpsf2fxqf3xgf",
+        "number": 1,
+        "environment_id": "env_01m2pwf40dh9m449hrjmv1vqab",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 14,
+          "runtime_init_ms": 17,
+          "handler_ms": 6,
+          "response_ms": 0,
+          "total_ms": 406
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1,
+            "guest_init_ms": 14,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10537
+        },
+        "dispatched_at": "2026-09-17T05:12:12.441503Z",
+        "finished_at": "2026-09-17T05:12:12.452740Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwemjt3bzy42n9nvm37pj3",
+    "function_id": "fn_01m2pwebds15mgs0bpyqhsprtw",
+    "revision_id": "rev_01m2pwem11varshw0k266bythd",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "init_error",
+      "error_type": "Runtime.InitError",
+      "message": "HELLO_FAIL_INIT set"
+    },
+    "trace_id": "inv_01m2pwemjt3bzy42n9nvm37pj3",
+    "input_digest": "sha256:90215511fc4037d9290c56da6ef2052bcea2f8d4b0b8e1911520ad0499ec6a46",
+    "input_size_bytes": 15,
+    "accepted_at": "2026-09-17T05:11:56.250274Z",
+    "finished_at": "2026-09-17T05:11:56.653364Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:06.250274Z",
+      "client_deadline": "2026-09-17T05:13:06.250274Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2pwejrfz7m6f0k4kaemm1fy",
+    "function_id": "fn_01m2pwebds15mgs0bpyqhsprtw",
+    "revision_id": "rev_01m2pweccd06fwzx50v8f726qh",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "crash",
+      "error_type": "Runtime.Panic",
+      "message": "panic requested"
+    },
+    "trace_id": "inv_01m2pwejrfz7m6f0k4kaemm1fy",
+    "input_digest": "sha256:8df974e80ac3f41bf7a597c6e708e10516faaee21d6e9001b1d3f276bef1237a",
+    "input_size_bytes": 14,
+    "accepted_at": "2026-09-17T05:11:54.383174Z",
+    "started_at": "2026-09-17T05:11:54.784060Z",
+    "finished_at": "2026-09-17T05:11:54.787431Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:04.383174Z",
+      "init_deadline": "2026-09-17T05:12:24.384174Z",
+      "execution_deadline": "2026-09-17T05:12:24.784060Z",
+      "client_deadline": "2026-09-17T05:13:04.383174Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwek50m603wy960m7echfw",
+        "number": 1,
+        "environment_id": "env_01m2pwejrgg6c22c56qjg7qfdb",
+        "epoch": 1,
+        "status": "failed",
+        "error": {
+          "class": "crash",
+          "error_type": "Runtime.Panic",
+          "message": "panic requested"
+        },
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 11,
+          "runtime_init_ms": 16,
+          "handler_ms": 1,
+          "response_ms": 0,
+          "total_ms": 403
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1,
+            "guest_init_ms": 13,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10008
+        },
+        "dispatched_at": "2026-09-17T05:11:54.784060Z",
+        "finished_at": "2026-09-17T05:11:54.787431Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwej58yng1g91tr2x4n82m",
+    "function_id": "fn_01m2pwebds15mgs0bpyqhsprtw",
+    "revision_id": "rev_01m2pweccd06fwzx50v8f726qh",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "user_error",
+      "error_type": "Demo.Failure",
+      "message": "fail requested"
+    },
+    "trace_id": "inv_01m2pwej58yng1g91tr2x4n82m",
+    "input_digest": "sha256:8f368cf8ea5ee799673942b99a77375e53d42df26dd48415385612db04fc3097",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T05:11:53.768719Z",
+    "started_at": "2026-09-17T05:11:54.188421Z",
+    "finished_at": "2026-09-17T05:11:54.191949Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:03.768719Z",
+      "init_deadline": "2026-09-17T05:12:23.769594Z",
+      "execution_deadline": "2026-09-17T05:12:24.188421Z",
+      "client_deadline": "2026-09-17T05:13:03.768719Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwejjc9825rjyp7aa9jmvj",
+        "number": 1,
+        "environment_id": "env_01m2pwej596k0v6sqfetryd4ks",
+        "epoch": 1,
+        "status": "failed",
+        "error": {
+          "class": "user_error",
+          "error_type": "Demo.Failure",
+          "message": "fail requested"
+        },
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 13,
+          "runtime_init_ms": 19,
+          "handler_ms": 2,
+          "response_ms": 0,
+          "total_ms": 422
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1,
+            "guest_init_ms": 15,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 9977
+        },
+        "dispatched_at": "2026-09-17T05:11:54.188421Z",
+        "finished_at": "2026-09-17T05:11:54.191949Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pweg9ex5rxavea61rbvsr6",
+    "function_id": "fn_01m2pwebds15mgs0bpyqhsprtw",
+    "revision_id": "rev_01m2pweccd06fwzx50v8f726qh",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v1",
+      "message": "hello, demo",
+      "secret_present": true,
+      "unisolated": true
+    },
+    "trace_id": "inv_01m2pweg9ex5rxavea61rbvsr6",
+    "input_digest": "sha256:d7d234f759ec34fd6298b7e32318614760070aaef9f4e92ced928324b49a0602",
+    "input_size_bytes": 15,
+    "accepted_at": "2026-09-17T05:11:51.854621Z",
+    "started_at": "2026-09-17T05:11:53.585749Z",
+    "finished_at": "2026-09-17T05:11:53.589641Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:01.854621Z",
+      "init_deadline": "2026-09-17T05:12:21.855545Z",
+      "execution_deadline": "2026-09-17T05:12:23.585749Z",
+      "client_deadline": "2026-09-17T05:13:01.854621Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwehzhw945gm8acym9q5v0",
+        "number": 1,
+        "environment_id": "env_01m2pweg9fztta01263gw88kt6",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 848,
+          "runtime_init_ms": 500,
+          "handler_ms": 2,
+          "response_ms": 0,
+          "total_ms": 1734
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1,
+            "guest_init_ms": 497,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 9940
+        },
+        "dispatched_at": "2026-09-17T05:11:53.585749Z",
+        "finished_at": "2026-09-17T05:11:53.589641Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwerereh1afz6vs5abzz9m",
+    "function_id": "fn_01m2pwebft543sdz5m71ephg5a",
+    "revision_id": "rev_01m2pwee2p9pgt98h16z8fhd06",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "eyJhY2NlcHQiOiIqLyoiLCJob3N0IjoiMTI3LjAuMC4xOjYxNDgxIiwieC1kZW1vLWhlYWRlciI6ImRlbW8tdmFsdWUifQ==",
+      "headers": [
+        [
+          "content-type",
+          "application/json"
+        ],
+        [
+          "content-length",
+          "70"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2pwerereh1afz6vs5abzz9m",
+    "input_digest": "sha256:30b5d80c66e6167af6955352b9c7c5de9669992bf8024393e34fe7cf98a4e05d",
+    "input_size_bytes": 173,
+    "accepted_at": "2026-09-17T05:12:00.216558Z",
+    "started_at": "2026-09-17T05:12:00.921213Z",
+    "finished_at": "2026-09-17T05:12:00.929258Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:10.216558Z",
+      "init_deadline": "2026-09-17T05:12:30.217515Z",
+      "execution_deadline": "2026-09-17T05:12:30.921213Z",
+      "client_deadline": "2026-09-17T05:13:10.216558Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwes4snc5yefmj6wt8spjq",
+        "number": 1,
+        "environment_id": "env_01m2pweres0x053p0n7gecpabb",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 11,
+          "runtime_init_ms": 19,
+          "handler_ms": 4,
+          "response_ms": 0,
+          "total_ms": 711
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 2,
+            "guest_init_ms": 16,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10130
+        },
+        "dispatched_at": "2026-09-17T05:12:00.921213Z",
+        "finished_at": "2026-09-17T05:12:00.929258Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pweqbnx5ss3bw9ta75dgg1",
+    "function_id": "fn_01m2pwebft543sdz5m71ephg5a",
+    "revision_id": "rev_01m2pwee2p9pgt98h16z8fhd06",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "c3RhdHVzIDQwNA==",
+      "headers": [
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ],
+        [
+          "content-length",
+          "10"
+        ]
+      ],
+      "status": 404
+    },
+    "http_status": 404,
+    "trace_id": "inv_01m2pweqbnx5ss3bw9ta75dgg1",
+    "input_digest": "sha256:6281dd71b1753157912196842e49c4e9456edc9a67f2d440e7009daca4bd6945",
+    "input_size_bytes": 145,
+    "accepted_at": "2026-09-17T05:11:59.093525Z",
+    "started_at": "2026-09-17T05:11:59.956854Z",
+    "finished_at": "2026-09-17T05:11:59.984845Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:09.093525Z",
+      "init_deadline": "2026-09-17T05:12:29.094615Z",
+      "execution_deadline": "2026-09-17T05:12:29.956854Z",
+      "client_deadline": "2026-09-17T05:13:09.093525Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwer6mj09nbae3va5z8p55",
+        "number": 1,
+        "environment_id": "env_01m2pweqbpg7t41eb9c53vxec4",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 16,
+          "runtime_init_ms": 72,
+          "handler_ms": 23,
+          "response_ms": 0,
+          "total_ms": 890
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 13,
+            "guest_init_ms": 56,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10105
+        },
+        "dispatched_at": "2026-09-17T05:11:59.956854Z",
+        "finished_at": "2026-09-17T05:11:59.984845Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwepdnzcby5qx0ndh5j8p1",
+    "function_id": "fn_01m2pwebft543sdz5m71ephg5a",
+    "revision_id": "rev_01m2pwee2p9pgt98h16z8fhd06",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "aGVsbG8tZWNoby1ib2R5",
+      "headers": [
+        [
+          "content-type",
+          "text/plain"
+        ],
+        [
+          "content-length",
+          "15"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2pwepdnzcby5qx0ndh5j8p1",
+    "input_digest": "sha256:4f948cfbcc411e5fcdcc0044098f50cbaf10f3cc27dc76d7d23febfcde4fe9b4",
+    "input_size_bytes": 214,
+    "accepted_at": "2026-09-17T05:11:58.133918Z",
+    "started_at": "2026-09-17T05:11:58.841903Z",
+    "finished_at": "2026-09-17T05:11:58.853047Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:08.133918Z",
+      "init_deadline": "2026-09-17T05:12:28.134800Z",
+      "execution_deadline": "2026-09-17T05:12:28.841903Z",
+      "client_deadline": "2026-09-17T05:13:08.133918Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pweq3sf1za3y50bgbwd0mm",
+        "number": 1,
+        "environment_id": "env_01m2pwepdp9hjgbeystxrpfyet",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 21,
+          "runtime_init_ms": 64,
+          "handler_ms": 9,
+          "response_ms": 0,
+          "total_ms": 718
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 4,
+            "guest_init_ms": 55,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10085
+        },
+        "dispatched_at": "2026-09-17T05:11:58.841903Z",
+        "finished_at": "2026-09-17T05:11:58.853047Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwen3met00gsbv4qhp39ft",
+    "function_id": "fn_01m2pwebft543sdz5m71ephg5a",
+    "revision_id": "rev_01m2pwee2p9pgt98h16z8fhd06",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "b2s=",
+      "headers": [
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ],
+        [
+          "content-length",
+          "2"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2pwen3met00gsbv4qhp39ft",
+    "input_digest": "sha256:118089c90b40d7129bb191d31c9855fd5618a94d0954c2389c10c4836e330f88",
+    "input_size_bytes": 135,
+    "accepted_at": "2026-09-17T05:11:56.788666Z",
+    "started_at": "2026-09-17T05:11:58.025558Z",
+    "finished_at": "2026-09-17T05:11:58.030298Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:06.788666Z",
+      "init_deadline": "2026-09-17T05:12:26.789489Z",
+      "execution_deadline": "2026-09-17T05:12:28.025558Z",
+      "client_deadline": "2026-09-17T05:13:06.788666Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwepa9p0eyax15etnwkjf6",
+        "number": 1,
+        "environment_id": "env_01m2pwen3nvr6h5av8h1jbwxwj",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 18,
+          "runtime_init_ms": 619,
+          "handler_ms": 2,
+          "response_ms": 0,
+          "total_ms": 1240
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1,
+            "guest_init_ms": 616,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10065
+        },
+        "dispatched_at": "2026-09-17T05:11:58.025558Z",
+        "finished_at": "2026-09-17T05:11:58.030298Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwf58xcp2wepgqvxh9bzp3",
+    "function_id": "fn_01m2pwebj24b5g9jpjq9x5a5fq",
+    "revision_id": "rev_01m2pwefns6ddz2qtw1jvyketz",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "cancelled",
+    "trace_id": "inv_01m2pwf58xcp2wepgqvxh9bzp3",
+    "input_digest": "sha256:d8b6baac143209b32a8a5f85b5fba77b4e052d6cdfd2978929fb11fc0255eafa",
+    "input_size_bytes": 14,
+    "accepted_at": "2026-09-17T05:12:13.341964Z",
+    "finished_at": "2026-09-17T05:12:13.687426Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:23.341964Z",
+      "client_deadline": "2026-09-17T05:13:23.341964Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2pwewsjv0fvjr2t6fb85g63",
+    "function_id": "fn_01m2pwebj24b5g9jpjq9x5a5fq",
+    "revision_id": "rev_01m2pwew6z23e6yv1vx2ap3kc9",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "timeout",
+      "error_type": "Host.Timeout",
+      "message": "handler did not finish within 2 s"
+    },
+    "trace_id": "inv_01m2pwewsjv0fvjr2t6fb85g63",
+    "input_digest": "sha256:b2037123731fd3579b1c4953c496a601e1e8570ee626a566861bf5f3068b040a",
+    "input_size_bytes": 36,
+    "accepted_at": "2026-09-17T05:12:04.658726Z",
+    "started_at": "2026-09-17T05:12:05.040714Z",
+    "finished_at": "2026-09-17T05:12:08.069435Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:14.658726Z",
+      "init_deadline": "2026-09-17T05:12:34.659577Z",
+      "execution_deadline": "2026-09-17T05:12:07.040714Z",
+      "client_deadline": "2026-09-17T05:12:46.658726Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwex5g1pt1ha003t22e11q",
+        "number": 1,
+        "environment_id": "env_01m2pwewskefpbphayfmb3tk0g",
+        "epoch": 1,
+        "status": "failed",
+        "error": {
+          "class": "timeout",
+          "error_type": "Host.Timeout",
+          "message": "handler did not finish within 2 s"
+        },
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 9,
+          "runtime_init_ms": 15,
+          "handler_ms": 2010,
+          "response_ms": 1017,
+          "total_ms": 3409
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_init_ms": 13,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10211
+        },
+        "dispatched_at": "2026-09-17T05:12:05.040714Z",
+        "finished_at": "2026-09-17T05:12:08.069435Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2pwes9r5pjf84vhnrtvd5gj",
+    "function_id": "fn_01m2pwebj24b5g9jpjq9x5a5fq",
+    "revision_id": "rev_01m2pwefns6ddz2qtw1jvyketz",
+    "alias": "prod",
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "burned_seconds": 1.000980292,
+      "cancelled": false,
+      "iterations": 61200000
+    },
+    "trace_id": "inv_01m2pwes9r5pjf84vhnrtvd5gj",
+    "input_digest": "sha256:fd839bdef3efc7f83657dc6dfd87ac89eda36d5756deb4cbfb8db4596c2de7a6",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T05:12:01.080108Z",
+    "started_at": "2026-09-17T05:12:02.076969Z",
+    "finished_at": "2026-09-17T05:12:03.083445Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T05:12:11.080108Z",
+      "init_deadline": "2026-09-17T05:12:31.080945Z",
+      "execution_deadline": "2026-09-17T05:12:32.076969Z",
+      "client_deadline": "2026-09-17T05:13:11.080108Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2pwet8wpmc9rfve861cz77h",
+        "number": 1,
+        "environment_id": "env_01m2pwes9rnqr5myeg9k4w9yh7",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12,
+          "runtime_init_ms": 552,
+          "handler_ms": 1005,
+          "response_ms": 0,
+          "total_ms": 2002
+        },
+        "boot_evidence": {
+          "details": {
+            "bridge_binary": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge",
+            "bridge_version": "0.1.0",
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1002,
+            "guest_init_ms": 551,
+            "isolation": "none",
+            "provider": "process",
+            "workdir": "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"
+          },
+          "guest_boot_id": null,
+          "host_pid": 10157
+        },
+        "dispatched_at": "2026-09-17T05:12:02.076969Z",
+        "finished_at": "2026-09-17T05:12:03.083445Z"
+      }
+    ]
+  }
+]

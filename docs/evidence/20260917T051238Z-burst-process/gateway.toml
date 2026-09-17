@@ -1,0 +1,36 @@
+listen = "127.0.0.1:61716"
+profile = "dev"
+data_dir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-burst.bGDmuC/data"
+
+[provider]
+kind = "process"
+
+[provider.process]
+bridge_binary = "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge"
+workdir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-burst.bGDmuC/data/process"
+
+[capacity]
+max_concurrency = 8
+max_queue = 4
+queue_timeout_seconds = 20
+
+[capacity.node]
+name = "burst-local"
+region = "us"
+memory_mib = 900
+
+[[capacity.tenants]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+required_region = "jp"
+
+[[identity.tokens]]
+token = "burst-token-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "burst-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "burst-token-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "burst-b"
+roles = ["deploy", "invoke"]

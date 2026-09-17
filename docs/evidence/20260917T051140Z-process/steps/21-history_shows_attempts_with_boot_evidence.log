@@ -1,0 +1,26 @@
+id           inv_01m2pweg9ex5rxavea61rbvsr6
+function     fn_01m2pwebds15mgs0bpyqhsprtw
+revision     rev_01m2pweccd06fwzx50v8f726qh
+alias        prod
+mode         sync
+status       succeeded
+error        -
+http_status  -
+trace_id     inv_01m2pweg9ex5rxavea61rbvsr6
+input        sha256:d7d234f759ec34fd6298b7e32318614760070aaef9f4e92ced928324b49a0602 (15 bytes)
+accepted_at  2026-09-17T05:11:51.854Z
+started_at   2026-09-17T05:11:53.585Z
+finished_at  2026-09-17T05:11:53.589Z
+deadlines    queue=2026-09-17T05:12:01.854Z init=2026-09-17T05:12:21.855Z execution=2026-09-17T05:12:23.585Z client=2026-09-17T05:13:01.854Z
+output:
+{
+  "greeting": "v1",
+  "message": "hello, demo",
+  "secret_present": true,
+  "unisolated": true
+}
+attempts: 1
+  #1 att_01m2pwehzhw945gm8acym9q5v0 env=env_01m2pweg9fztta01263gw88kt6 epoch=1 status=succeeded start=cold
+     timings: queue_wait=0 ms boot=848 ms init=500 ms handler=2 ms response=0 ms total=1734 ms
+     boot_evidence: host_pid=9940 guest_boot_id=- details={"bridge_binary":"/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/debug/tachyon-serverless-runtime-bridge","bridge_version":"0.1.0","guest_architecture":"aarch64","guest_handler_ms":1,"guest_init_ms":497,"isolation":"none","provider":"process","workdir":"/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a0495f628c3b17181/target/e2e/data/process"}
+     dispatched_at=2026-09-17T05:11:53.585Z finished_at=2026-09-17T05:11:53.589Z

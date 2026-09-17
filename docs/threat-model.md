@@ -141,7 +141,8 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | `init_deadline` | `min(環境作成開始 + initialization_timeout_seconds（revision、既定 30 s、上限 120 s）, client_deadline)`。`create_environment` の `connect_timeout` と handshake / Ready の待ちもこれで打ち切る | `InitError` | 502 `init_error` | handler は未実行。ただし user process の初期化コードは走った可能性がある |
 | `execution_deadline` | `min(Invoke 送信時刻 + timeout_seconds（revision、既定 30 s、上限 15 min）, client_deadline)`。guest の `Invoke.deadline_ms` はこの値 | `Timeout` | 504 `timeout` | あり得る。再実行しない |
 | `client_deadline` | `accepted_at + min(x-tachyon-client-timeout-ms, timeout + init + queue)` | 他の 3 つはこれを超えて設定されない（host が clamp する）。到達時はその時点の phase で分類する: Queued → `QueueTimeout`。環境作成〜Ready 待ち、または Ready 後で handler 未送信 → `Timeout`（`Host.ClientDeadline`。handler は起動せず、環境は stop + `terminate(Cancelled)`、Attempt は作らない）。Running → `Timeout`（`Host.ClientDeadline`。`Cancel` → `terminate(Timeout)`） | 同左 | phase による（handler 起動前なら無し） |
-| 容量超過（queue が満杯） | `max_queue` 超え | — | 429 `capacity_exceeded` | 無し |
+| 容量超過（queue が満杯） | `max_queue` / `max_queue_bytes` / tenant の `max_queue` 超え、または 1 環境が node に収まらない | — | 429 `capacity_exceeded`（`reason` = `queue_full` / `quota` / `capacity`） | 無し |
+| 配置制約・起動 breaker（PLT-4634） | `required_region` と node の `region` の不一致、revision の breaker が open | — | 503 `provider_unavailable`（`reason` = `placement` / `circuit_open`） | 無し |
 
 補足:
 
@@ -216,7 +217,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | 環境ごとの host 側ログ（Firecracker） | `console.log` 4 MiB + marker、`fc.log` 4 MiB（1 秒ごとの watchdog） | 超過分を捨てる / truncate（`docs/kvm.md` §3.6） |
 | 環境作成時の host の空き | 環境の budget（artifact + drive 2 本 + ログ上限）+ 512 MiB | 何も書かずに `Unavailable` → invoke は `Failed{PlatformError}`（`Host.ProviderError`） |
 | egress（Firecracker） | `none`: NIC なし。`restricted`: revision の `egress_allow`（IPv4 CIDR × tcp/udp × port、1..=16 規則・各 1..=16 port）だけ。`public-web`: 公開 IPv4 unicast と設定した resolver への DNS だけ。どの profile でも管理網・node・metadata（169.254.0.0/16）・link-local・RFC1918・CGNAT・loopback・他の special-purpose 範囲・IPv6・他 tenant の guest には届かない | 400（special-purpose 範囲や IPv6 を許可しようとした deploy）。実行時は host の nftables が drop（guest からは timeout / unreachable）。host が強制できなければ環境作成が `Unavailable`（`docs/adr/0005-egress-profiles.md`） |
-| `max_concurrency`（revision） | 1..=1000。加えて gateway 全体 `capacity.max_concurrency` と `max_queue` | 429 |
+| `max_concurrency`（revision） | 1..=1000。加えて node 全体の `capacity.max_concurrency`、tenant quota、node の資源（revision の resources + VMM / bridge の overhead）、`max_queue`・`max_queue_bytes`・tenant の `max_queue`（PLT-4634、ADR-0006） | 待機のまま queue deadline → 504、待ち行列の上限 → 429 |
 | Heartbeat | 5 s ごと。host は無視してよい | 無視 |
 
 ## 12. 脅威と対策
@@ -239,7 +240,8 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | T14 | user code が bridge を乗っ取り、他 attempt の結果を送る | bridge は 1 in-flight、host は Lease 一致だけ受理。乗っ取られても host 側の判定は変わらない（§3） | guest 内の情報（自 tenant の secret / payload）は守れない。設計上受容 |
 | T15 | 別 environment の guest が他の vsock に接続する | Firecracker は VM ごとに uds path（`<uds_path>_5000`）を持ち、host は `InstanceStart` 前に listen。`Hello.environment_id` 不一致は `HelloReject` | — |
 | T16 | client 切断で invoke が放置され、資源が残る | invoke タスクは spawn され deadline まで追跡、必ず terminate。driver が panic しても環境を `terminate(Crashed)` し、Lease 解放・Attempt `Failed`・環境 `Failed`・`EnvironmentStopped` を記録する | — |
-| T17 | 同時実行数の無制限化 | revision の `max_concurrency` と gateway 全体の semaphore、bounded queue → 429 / 504 | 単一 host の容量は実測前 |
+| T17 | 同時実行数の無制限化 | revision の `max_concurrency`、node の `max_concurrency` と資源の予約（起動中を含めて 1 回だけ数える）、bounded queue → 429 / 504（ADR-0006、`crates/application/src/services/admission/tests.rs::reservations_are_counted_exactly_once_under_random_operations`） | node の資源は設定値で、host の実測ではない。overhead の既定値（24 MiB）は推定 |
+| T25 | 1 tenant の大量 / 長時間 invoke・起動の暴走・巨大 payload の待機で他 tenant を待たせる（DoS、容量の独占、PLT-4634） | tenant ごとの公平 queue（in-flight / weight の小さい tenant から）、tenant の同時数 quota と待ち行列の持ち分、待ち行列の件数・payload bytes の上限、各待機者の queue deadline、node 全体の start-rate token bucket、revision ごとの起動失敗 circuit breaker（open 中は即時 503）、起動は desired（合流）を超えない。長短 2 tenant の fake clock シミュレーションで短い tenant の待ちは 3 s 以内（`admission::tests::a_long_running_tenant_does_not_starve_a_short_one`、`tests/admission.rs::a_flooding_tenant_does_not_starve_another_one`） | admission は preemptive ではない: tenant quota を node の `max_concurrency` 未満にしないと、先に来た長時間の tenant が全枠を取り、その invoke が終わるまで他 tenant は待つ。1 tenant が多数の revision を持っても breaker は revision ごと。状態はプロセスのメモリだけで、再起動で到着率・breaker は消える。gateway の前段の rate limit（接続数、HTTP request 数）は無い（§15） |
 | T18 | operator の越権（他 tenant の出力 / ログ / secret 参照、invoke） | §7: operator は自 tenant の function / revision / alias metadata のみ。他 tenant は 404、invocation / usage / logs 403、mutation / invoke 403 | — |
 | T19 | `readyz` が provider 不能を隠す | `preflight` 失敗で `readyz` 503、invoke は 503 `provider_unavailable` | — |
 | T20 | OCI artifact を「実行できる」と誤認 | `ArtifactRef::OciImage` は受理するが validation で理由付き `Failed`（`Support::Unsupported`） | — |
@@ -285,6 +287,7 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 7. **`OutcomeUnknown` 後の副作用の可視化。** ledger は「不明」としか言えない。
 8. **lease と時計（PLT-4631）。** lease の期限は wall-clock で判定する。gateway 間の時計のずれは `[dispatcher] max_clock_skew_ms`（既定 2 s）までしか許さず、それを超える時刻の飛びや、heartbeat が `lease_ttl_seconds + max_clock_skew_ms` より長く止まる停止（SIGSTOP、過負荷、VM の pause）では、生きている dispatcher の仕事が reclaim される。その場合も fencing で台帳は守られるが、handler は terminate されて途中で止まり、外部副作用は不明のまま残る。`dispatchers` 表には retention が無く、起動のたびに 1 行増える。
 9. **revoke の遅延と設定の有効期限（PLT-4636）。** token は control plane の設定（`[[identity.tokens]]`）にしか無く、revoke は control plane の再起動で行う。data plane への反映は、届く限り次の refresh（`refresh_interval_ms` + fetch）、届かない間は最後に確認した refresh の開始から最大 `auth_lease_seconds`（既定 60 s）。function の削除・alias の変更も同様に最大 `config_ttl_seconds` 遅れうる。期限の判定は data plane の wall-clock で行い、時計が遅れると lease が長く効く（`max_clock_skew_ms` のような補正は無い）。期限切れでも実行中の invocation は止めないので、revoke した tenant の実行は最長で revision の timeout まで続く。`internal_token` の rotation 手順は無い（両側の設定を変えて再起動）。予算 token との接続は P3（PLT-4643）。
+10. **admission の前提（PLT-4634）。** 容量・予約・公平 queue は 1 gateway プロセスの中にだけあり、同じ host（`data_dir`）で 2 つ目の gateway を動かすとそれぞれが自分の分しか数えない。node の容量と per-environment overhead は設定値で、host の実測や cgroup による強制ではない（overhead の既定値は推定）。KVM 上での burst は未計測。
 
 ## 15. 非目標（P1）
 
