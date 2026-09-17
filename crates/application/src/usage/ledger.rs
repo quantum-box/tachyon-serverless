@@ -11,7 +11,6 @@
 //! build billing of tachyon-apps (a different pipeline, docs/adr/0012 §5).
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, TransactionBehavior, params};
@@ -96,7 +95,7 @@ impl UsageLedger {
             }
             None => Connection::open_in_memory().map_err(|e| e.to_string())?,
         };
-        conn.busy_timeout(Duration::from_secs(5))
+        conn.busy_timeout(crate::sqlite_wait::STORE_WAIT)
             .map_err(|e| e.to_string())?;
         if path.is_some() {
             let _: String = conn
@@ -122,6 +121,20 @@ impl UsageLedger {
         self.path.as_deref()
     }
 
+    /// The connection, waiting at most [`crate::sqlite_wait::STORE_WAIT`]:
+    /// while a delivery sits in SQLite's busy timeout (`ledger.db` locked by
+    /// another process), the other callers are refused instead of queueing
+    /// one busy timeout after the other (PLT-4646). The collector keeps its
+    /// cursor and retries on its next tick; `/readyz` shows the error.
+    fn connection(&self) -> Result<parking_lot::MutexGuard<'_, Connection>, String> {
+        crate::sqlite_wait::lock_connection(&self.conn).ok_or_else(|| {
+            format!(
+                "usage ledger unavailable: {}",
+                crate::sqlite_wait::busy_message("usage ledger")
+            )
+        })
+    }
+
     #[doc(hidden)]
     pub fn force_unavailable(&self, unavailable: bool) {
         self.unavailable
@@ -137,7 +150,7 @@ impl UsageLedger {
         if self.unavailable.load(std::sync::atomic::Ordering::SeqCst) {
             return Err("usage ledger unavailable (forced)".into());
         }
-        let mut conn = self.conn.lock();
+        let mut conn = self.connection()?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| e.to_string())?;
@@ -200,7 +213,7 @@ impl UsageLedger {
         from: Timestamp,
         to: Timestamp,
     ) -> Result<Vec<UsageEvent>, String> {
-        let conn = self.conn.lock();
+        let conn = self.connection()?;
         let mut stmt = conn
             .prepare(
                 "SELECT body FROM function_usage_events \
@@ -242,7 +255,7 @@ impl UsageLedger {
         if self.unavailable.load(std::sync::atomic::Ordering::SeqCst) {
             return Err("usage ledger unavailable (forced)".into());
         }
-        let conn = self.conn.lock();
+        let conn = self.connection()?;
         let mut stmt = conn
             .prepare(
                 "SELECT body FROM function_usage_events \
@@ -268,7 +281,7 @@ impl UsageLedger {
 
     /// Wall-clock skew recorded for `event_id` (received − observed), ms.
     pub fn recorded_skew_ms(&self, event_id: &str) -> Option<i64> {
-        let conn = self.conn.lock();
+        let conn = self.connection().ok()?;
         conn.query_row(
             "SELECT wall_clock_skew_ms FROM function_usage_events WHERE event_id = ?1",
             params![event_id],
@@ -278,7 +291,7 @@ impl UsageLedger {
     }
 
     pub fn stats(&self) -> Result<LedgerStats, String> {
-        let conn = self.conn.lock();
+        let conn = self.connection()?;
         let events: i64 = conn
             .query_row("SELECT COUNT(*) FROM function_usage_events", [], |r| {
                 r.get(0)
