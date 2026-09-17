@@ -4,6 +4,8 @@ members = [
   "crates/domain",
   "crates/protocol",
   "crates/provider-port",
+  "crates/durable-port",
+  "crates/adapters/queue-nats",
   "crates/api-types",
   "crates/application",
   "crates/providers/process",
@@ -32,6 +34,8 @@ rust-version = "1.95"
 tachyon-serverless-domain = { path = "crates/domain" }
 tachyon-serverless-protocol = { path = "crates/protocol" }
 tachyon-serverless-provider-port = { path = "crates/provider-port" }
+tachyon-serverless-durable-port = { path = "crates/durable-port" }
+tachyon-serverless-queue-nats = { path = "crates/adapters/queue-nats" }
 tachyon-serverless-api-types = { path = "crates/api-types" }
 tachyon-serverless-application = { path = "crates/application" }
 tachyon-serverless-provider-process = { path = "crates/providers/process" }
@@ -85,5 +89,11 @@ tempfile = "3"
 parking_lot = "0.12"
 # embedded control-plane store (ADR-0003); bundled builds the C SQLite
 rusqlite = { version = "0.40", features = ["bundled"] }
+# durable queue / object store (PLT-4638, docs/adr/0008). JetStream client without the
+# KV / object-store / service / websocket extras.
+async-nats = { version = "0.50", default-features = false, features = ["jetstream", "nkeys", "ring", "server_2_10", "server_2_11"] }
+# AES-256-GCM for objects at rest (RustSec aes-gcm, pure Rust)
+aes-gcm = "0.10"
+getrandom = "0.3"
 # guest vsock transport (Linux only; members reference it under a cfg(target_os = "linux") table)
 tokio-vsock = "0.7"

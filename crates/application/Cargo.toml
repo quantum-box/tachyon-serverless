@@ -11,6 +11,9 @@ description = "Application layer: configuration, repositories, local ports, host
 tachyon-serverless-domain = { workspace = true }
 tachyon-serverless-protocol = { workspace = true }
 tachyon-serverless-provider-port = { workspace = true }
+tachyon-serverless-durable-port = { workspace = true }
+aes-gcm = { workspace = true }
+getrandom = { workspace = true }
 tachyon-serverless-api-types = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
@@ -31,6 +34,8 @@ toml = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+tachyon-serverless-durable-port = { workspace = true, features = ["testkit"] }
+ulid = { workspace = true }
 tachyon-serverless-provider-fake = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }

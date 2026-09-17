@@ -1,0 +1,24 @@
+# Rendered by scripts/queue/up.sh into <state>/auth.conf (mode 0600) with a generated password.
+# The password itself is also written to <state>/gateway.password (mode 0600) for the gateway's
+# [queue.nats] password_file. Never commit a rendered copy.
+accounts {
+  TACHYON {
+    jetstream {
+      max_memory: 0
+      max_file: 1GB
+      max_streams: 256
+      max_consumers: 1024
+    }
+    users: [
+      {
+        user: "gateway"
+        password: "@PASSWORD@"
+        permissions: {
+          # The gateway publishes events, manages its own streams / consumers and acks.
+          publish: ["tachyon.>", "tachyon-test.>", "tachyon-verify.>", "$JS.API.>", "$JS.ACK.>"]
+          subscribe: ["_INBOX.>"]
+        }
+      }
+    ]
+  }
+}

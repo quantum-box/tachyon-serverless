@@ -11,6 +11,7 @@ pub mod authz;
 pub mod bridge_session;
 pub mod config;
 pub mod control;
+pub mod durable;
 pub mod entrypoint;
 pub mod error;
 pub mod local_ports;
@@ -23,6 +24,7 @@ pub use config::{
     PoolConfig, Profile, ProviderConfig, ProviderKindConfig, ReconcileConfig, StoreBackend,
     StoreConfig,
 };
+pub use durable::{DurableComponents, DurableOverrides};
 pub use error::AppError;
 pub use services::{
     AliasService, ArtifactService, Dispatcher, EnvironmentPool, FunctionService, HistoryService,

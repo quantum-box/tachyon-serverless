@@ -78,6 +78,9 @@ pub struct Application {
     pub config_publisher: Option<Arc<LedgerConfigSource>>,
     /// Capacity ledger, fair queue, quotas and autoscaler gate (PLT-4634).
     pub admission: Arc<AdmissionController>,
+    /// Durable queue, object store and object GC (PLT-4638). All `None`
+    /// unless `[queue]` / `[objects]` turn them on.
+    pub durable: crate::durable::DurableComponents,
 }
 
 impl std::fmt::Debug for Application {
@@ -144,6 +147,17 @@ impl Application {
         config: GatewayConfig,
         provider: Arc<dyn ExecutionProvider>,
         options: BootstrapOptions,
+    ) -> Result<Arc<Self>, AppError> {
+        Self::bootstrap_with_durable(config, provider, options, Default::default())
+    }
+
+    /// [`Self::bootstrap_with`] plus durable components built outside the
+    /// application crate (the JetStream queue, PLT-4638).
+    pub fn bootstrap_with_durable(
+        config: GatewayConfig,
+        provider: Arc<dyn ExecutionProvider>,
+        options: BootstrapOptions,
+        durable: crate::durable::DurableOverrides,
     ) -> Result<Arc<Self>, AppError> {
         config
             .validate()
@@ -247,6 +261,7 @@ impl Application {
 
         let clock = options.clock;
         let ids = options.ids;
+        let durable = crate::durable::build(&config, store.clone(), clock.clone(), durable)?;
         let functions = Arc::new(FunctionService::new(
             repos.clone(),
             clock.clone(),
@@ -393,6 +408,8 @@ impl Application {
             node_region = config.capacity.node.region.as_deref().unwrap_or("none"),
             node_memory_mib = ?config.capacity.node.memory_mib,
             max_concurrency = config.capacity.max_concurrency,
+            queue = config.queue.backend.as_str(),
+            objects = config.objects.backend.as_str(),
             "application bootstrapped"
         );
         if policy.reuse_enabled() && !policy.idle_verified() {
@@ -432,6 +449,7 @@ impl Application {
             invoke_gate,
             config_publisher,
             admission,
+            durable,
         }))
     }
 
@@ -469,6 +487,14 @@ impl Application {
             }
         }
         result
+    }
+
+    /// One object retention pass (PLT-4638): expired and orphaned objects
+    /// that no non-terminal invocation references. `None` without an object
+    /// store. The gateway runs it every `[objects] gc_interval_seconds`.
+    pub async fn collect_objects(&self) -> Option<crate::durable::GcReport> {
+        let gc = self.durable.object_gc.as_ref()?;
+        Some(gc.run().await)
     }
 
     /// Renew this dispatcher's lease and the slot leases of its in-flight

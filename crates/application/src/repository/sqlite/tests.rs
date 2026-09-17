@@ -82,6 +82,8 @@ fn migrations_apply_to_an_empty_database() {
         "schema_version",
         "store_meta",
         "dispatchers",
+        "object_refs",
+        "object_tombstones",
     ] {
         assert!(t.contains(&table.to_string()), "{table} in {t:?}");
     }
@@ -152,8 +154,8 @@ fn migrations_upgrade_a_database_at_an_older_version() {
         now(),
     )
     .unwrap();
-    assert_eq!(store.open_report().migrations_applied, vec![2, 3, 4]);
-    assert_eq!(store.open_report().schema_version, 4);
+    assert_eq!(store.open_report().migrations_applied, vec![2, 3, 4, 5]);
+    assert_eq!(store.open_report().schema_version, migrations::LATEST);
     assert_eq!(FunctionRepository::get(&store, &f.id).unwrap(), Some(f));
     assert_eq!(
         InvocationRepository::get(&store, &inv.id).unwrap(),
