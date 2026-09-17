@@ -1,0 +1,4 @@
+{"phase":"start","awk_loop_ms":[148,149,163],"vm_loadavg":"0.14 0.61 0.63"}
+{"phase":"after-cold-hit","awk_loop_ms":[80,80,82],"vm_loadavg":"1.00 0.81 0.71"}
+{"phase":"after-restored-hit","awk_loop_ms":[85,85,88],"vm_loadavg":"1.26 1.05 0.82"}
+{"phase":"end","awk_loop_ms":[102,86,83],"vm_loadavg":"1.07 1.34 1.02"}

@@ -1,0 +1,9 @@
+# leftovers after the run (gateways stopped, snapshots removed)
+gateway: none
+firecracker: none
+jailer: none
+jails: 
+cgroups: 
+env dirs: 
+snapshot dirs: 
+listening on 18094: 
