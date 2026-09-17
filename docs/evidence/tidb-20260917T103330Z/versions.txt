@@ -1,0 +1,54 @@
+utc: 20260917T103330Z
+commit: bcf16ce3cb9ac0ef744f2af0301e7d281d518d6a
+host: Darwin 25.6.0 arm64
+version requested: v8.5.8
+--- pd-server -V
+  Release Version: v8.5.8
+  Edition: Community
+  Git Commit Hash: 4ecadf2f59e4fa04fe0e611c6d7808e8b1806ce7
+  Git Branch: HEAD
+  UTC Build Time:  2026-08-27 07:26:19
+  sha256 e5cb2593a23c832f6df122aaf5480409e15aace72945c2501309ad1479393859
+--- tikv-server -V
+  TiKV 
+  Release Version:   8.5.8
+  Edition:           Community
+  Git Commit Hash:   a1fdd6a59bb9c8a282c15677e1894501a52425cf
+  Git Commit Branch: HEAD
+  UTC Build Time:    2026-08-21 03:10:28
+  Rust Version:      rustc 1.95.0-nightly (842bd5be2 2026-01-29)
+  Enable Features:   memory-engine pprof-fp jemalloc test-engine-kv-rocksdb test-engine-raft-raft-engine trace-async-tasks openssl-vendored
+  Profile:           dist_release
+  sha256 d822c3ed19c1bcfcceae349fdb8370d9b21d8309b05145e42237b5a5eeb22dbc
+--- tidb-server -V
+  Release Version: v8.5.8
+  Edition: Community
+  Git Commit Hash: 8b857efa20363d50a8fa2ea7dd9809a85a61b115
+  Git Branch: HEAD
+  UTC Build Time: 2026-08-27 07:18:32
+  GoVersion: go1.25.12
+  Race Enabled: false
+  Check Table Before Drop: false
+  Store: unistore
+  sha256 ceb4121f33ee8f72effe1c6a3c2d1969349edceb11877dd1c1190a44444de58b
+rustc: rustc 1.95.0 (59807616e 2026-04-14)
+mysql crate: 28.0.2
+--- SELECT tidb_version()
+  *************************** 1. row ***************************
+  Release Version: v8.5.8
+  Edition: Community
+  Git Commit Hash: 8b857efa20363d50a8fa2ea7dd9809a85a61b115
+  Git Branch: HEAD
+  UTC Build Time: 2026-08-27 07:18:32
+  GoVersion: go1.25.12
+  Race Enabled: false
+  Check Table Before Drop: false
+  Store: tikv
+--- server defaults
+  Variable_name	Value
+  innodb_lock_wait_timeout	50
+  max_allowed_packet	67108864
+  tidb_enable_clustered_index	ON
+  tidb_enable_fast_create_table	ON
+  tidb_txn_mode	pessimistic
+  transaction_isolation	REPEATABLE-READ

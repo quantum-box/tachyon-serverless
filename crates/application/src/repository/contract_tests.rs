@@ -6,7 +6,9 @@
 //! skew, reclaim and fencing, idempotency expiry; PLT-4631).
 //!
 //! Every test is a function over `&Arc<dyn StateStore>`; `contract!` runs it
-//! once on [`InMemoryStore`] and once on a volatile [`SqliteStore`].
+//! once on [`InMemoryStore`], once on a volatile [`SqliteStore`] and, when
+//! `TSLS_TIDB_URL` is set, once on a real TiDB (`tidb::TidbStore`, a database
+//! per test; skipped with a message otherwise).
 
 use std::sync::Arc;
 
@@ -197,6 +199,22 @@ fn sqlite(limits: Limits) -> Store {
     Arc::new(SqliteStore::open_volatile(limits, SqliteOptions::default()).unwrap())
 }
 
+/// A migrated database of its own on the TiDB named by `TSLS_TIDB_URL`
+/// (`scripts/db/tidb-verify.sh`), dropped with the store.
+fn tidb(limits: Limits) -> Store {
+    let url = super::tidb::test_url().expect("TSLS_TIDB_URL");
+    Arc::new(super::tidb::TidbStore::open_ephemeral(&url, limits).unwrap())
+}
+
+/// True (after saying so) when the TiDB instantiation must be skipped.
+pub(crate) fn skip_without_tidb(test: &str) -> bool {
+    if super::tidb::test_url().is_some() {
+        return false;
+    }
+    eprintln!("skipped {test}: TSLS_TIDB_URL is not set (scripts/db/tidb-verify.sh sets it)");
+    true
+}
+
 macro_rules! contract {
     ($($test:ident),* $(,)?) => {
         mod memory {
@@ -204,6 +222,12 @@ macro_rules! contract {
         }
         mod sqlite {
             $( #[test] fn $test() { super::$test(super::sqlite, ) } )*
+        }
+        mod tidb {
+            $( #[test] fn $test() {
+                if super::skip_without_tidb(stringify!($test)) { return; }
+                super::$test(super::tidb, )
+            } )*
         }
     };
 }

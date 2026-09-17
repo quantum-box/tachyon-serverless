@@ -94,6 +94,9 @@ tempfile = "3"
 parking_lot = "0.12"
 # embedded control-plane store (ADR-0003); bundled builds the C SQLite
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Test-only TiDB adapter (crates/application/src/repository/tidb). Pure-Rust
+# zlib, no TLS: the verification cluster is on loopback.
+mysql = { version = "28", default-features = false, features = ["minimal-rust"] }
 # durable queue / object store (PLT-4638, docs/adr/0008). JetStream client without the
 # KV / object-store / service / websocket extras.
 async-nats = { version = "0.50", default-features = false, features = ["jetstream", "nkeys", "ring", "server_2_10", "server_2_11"] }

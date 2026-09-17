@@ -1,0 +1,13 @@
+COMMAND     PID             USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+pd-server 34205 takanorifukuyama    7u  IPv4 0x7d61b042c34a9a8d      0t0  TCP 127.0.0.1:52737 (LISTEN)
+pd-server 34205 takanorifukuyama    8u  IPv4 0xca0741ed76e218f5      0t0  TCP 127.0.0.1:52732 (LISTEN)
+pd-server 34205 takanorifukuyama   38u  IPv4 0x78d50d04ef7aeb82      0t0  TCP 127.0.0.1:52844 (LISTEN)
+pd-server 34205 takanorifukuyama   39u  IPv4 0x1d134c93ffa681b8      0t0  TCP 127.0.0.1:52845 (LISTEN)
+tikv-serv 34208 takanorifukuyama   69u  IPv6 0x835b13604930fc54      0t0  TCP 127.0.0.1:52745 (LISTEN)
+tikv-serv 34208 takanorifukuyama   70u  IPv6 0x3d1a31837d82a345      0t0  TCP 127.0.0.1:52745 (LISTEN)
+tikv-serv 34208 takanorifukuyama   71u  IPv6 0xc63c897c85886afb      0t0  TCP 127.0.0.1:52745 (LISTEN)
+tikv-serv 34208 takanorifukuyama   72u  IPv6 0xc8eab153f937e76e      0t0  TCP 127.0.0.1:52745 (LISTEN)
+tikv-serv 34208 takanorifukuyama   73u  IPv6 0xb1d9b7bc77c604f5      0t0  TCP 127.0.0.1:52745 (LISTEN)
+tikv-serv 34208 takanorifukuyama   78u  IPv4 0xad2f3936b5b17709      0t0  TCP 127.0.0.1:52746 (LISTEN)
+tidb-serv 34211 takanorifukuyama   18u  IPv4 0xea853c427c1bd23e      0t0  TCP 127.0.0.1:52751 (LISTEN)
+tidb-serv 34211 takanorifukuyama   19u  IPv4 0xddc3b69a9fdb0211      0t0  TCP 127.0.0.1:52750 (LISTEN)

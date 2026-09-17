@@ -2,7 +2,7 @@
 
 ## ステータス
 
-Accepted（2026-09-17、PLT-4618 で決定 2〜4 と移行を実装、PLT-4631 で決定 1・5 と受入条件 A1〜A3・A6 を実装）。提案は 2026-09-16。実装の内容と、決定・受入条件のうちまだ入っていないものは「実装メモ（PLT-4618、2026-09-17）」と「実装メモ（PLT-4631、2026-09-17）」にある。後者が前者の表を上書きする。
+Accepted（2026-09-17、PLT-4618 で決定 2〜4 と移行を実装、PLT-4631 で決定 1・5 と受入条件 A1〜A3・A6 を実装、PLT-4618 の TiDB 検証を 2026-09-17 に追加。製品の store は SQLite のまま）。提案は 2026-09-16。実装の内容と、決定・受入条件のうちまだ入っていないものは「実装メモ（PLT-4618、2026-09-17）」と「実装メモ（PLT-4631、2026-09-17）」にある。後者が前者の表を上書きする。
 
 ## コンテキスト
 
@@ -206,7 +206,7 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 
 ### TiDB（MySQL protocol）adapter にするときに変わるもの
 
-**TiDB 互換は主張しない**（TiDB でも MySQL でも実行していない）。SQL は移しやすい形に寄せた（`001_initial.sql` 冒頭の規則: `CREATE TABLE` / `CREATE [UNIQUE] INDEX` / `ALTER TABLE ADD COLUMN` だけ、key は長さ付き `VARCHAR`、partial index・`WITHOUT ROWID`・trigger・`ON CONFLICT` / `INSERT OR REPLACE` を使わず、upsert は「SELECT してから INSERT / UPDATE」を 1 トランザクションで行う、CAS 条件を `UPDATE ... WHERE` に置く）。それでも次は変わる。
+**TiDB 互換は主張しない**（TiDB でも MySQL でも実行していない）。（2026-09-17 追記: 実 TiDB v8.5.8 で migration と契約テストを実行した。結果と、この節の予想との差分は「TiDB 検証（PLT-4618、2026-09-17）」。）SQL は移しやすい形に寄せた（`001_initial.sql` 冒頭の規則: `CREATE TABLE` / `CREATE [UNIQUE] INDEX` / `ALTER TABLE ADD COLUMN` だけ、key は長さ付き `VARCHAR`、partial index・`WITHOUT ROWID`・trigger・`ON CONFLICT` / `INSERT OR REPLACE` を使わず、upsert は「SELECT してから INSERT / UPDATE」を 1 トランザクションで行う、CAS 条件を `UPDATE ... WHERE` に置く）。それでも次は変わる。
 
 1. **トランザクション**: `BEGIN IMMEDIATE`（DB 全体の書き込み lock）に相当するものは無い。正しさは `UPDATE ... WHERE` の CAS 条件と一意制約に依存させ、read-modify-write で読んだ行は `SELECT ... FOR UPDATE`（pessimistic）で押さえる必要がある。「存在確認してから INSERT」は一意制約違反を `Conflict` として扱う形に寄せる（`ArtifactOwnerRepository::claim` など）。
 2. **DDL はトランザクションに入らない**: 1 migration に複数の DDL を書くと途中失敗で中途半端な schema が残る。1 DDL = 1 step とし、各 step を冪等（`IF NOT EXISTS`）にして `schema_version` を step 単位で進める。online DDL の制約（列追加の既定値、index 追加の backfill）も考える。
@@ -262,6 +262,65 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 | heartbeat の停止・時刻の飛び | 未検証（設計上の残存） | `max_clock_skew_ms` を超える時刻のずれや `lease_ttl + skew` を超える停止では生きている gateway の仕事が回収され、handler は terminate で止まる（台帳は fencing で守られる）。`docs/threat-model.md` §14-8 |
 | `dispatchers` 表の retention | 未着手 | 起動ごとに 1 行増える |
 | 複数 host | 非対象 | 本 ADR の「非対象」のまま |
+
+## TiDB 検証（PLT-4618、2026-09-17）
+
+製品の store は SQLite のまま変えない（`[store] backend` に `tidb` は足していない）。PLT-4618 の受入条件「実 TiDB 互換環境で migration と repository 統合テスト」を満たすために、**試験専用の TiDB adapter** を作り、実 TiDB で migration と契約テストを実行した。上の「TiDB（MySQL protocol）adapter にするときに変わるもの」はこの時点の予想で、実測との差分は下の「実測で分かったこと」にある。
+
+### 環境と再現
+
+| 項目 | 内容 |
+|---|---|
+| TiDB | v8.5.8 Community（PD / TiKV / TiDB 各 1、`Store: tikv`。unistore ではない）。binary は tiup mirror の `pd` / `tikv` / `tidb` v8.5.8 darwin-arm64（tiup が検証した署名付き manifest の sha256 と照合）。macOS 25.6 arm64、すべて 127.0.0.1 |
+| 起動 | `scripts/db/tidb-verify.sh`。`tiup playground` v1.17.1 は自分の command server を `*:9527`、tidb-server の status port を `*:10080` で listen し、前者を loopback に限定する flag が無いため（試走で検出、script が失敗にした）、同じ binary を script が直接起動する。全 listener が loopback であることを `listeners.txt` で検査し、終了時に process が残っていないことを `processes-after-stop.txt` に記録する |
+| client | `mysql` crate 28.0.2（`minimal-rust`、TLS なし）。dev-dependency だけで、gateway の binary には入らない |
+| 証跡 | `docs/evidence/tidb-20260917T103330Z/`（`versions.txt`、`listeners.txt`、`tests.log`、`results.tsv`、`summary.txt`、`explain-tidb.md`、`explain-sqlite.md`、`processes-after-stop.txt`、各 server の log 末尾） |
+| 結果 | 47 テスト中 47 pass（契約 30、object 契約 4、TiDB 固有 11、migration 検査 2。4 thread で 576 s、commit `bcf16ce`） |
+
+MySQL では実行していない。TiDB 版 migration は `ADD COLUMN IF NOT EXISTS` / `ADD INDEX IF NOT EXISTS`（TiDB の拡張で MySQL 8.0 には無い）と `SHARD_ROW_ID_BITS` を使うので、MySQL で通っても TiDB 適合の証拠にはならず、逆もそのまま MySQL には流せない。
+
+### 入ったもの
+
+| 項目 | 実装 |
+|---|---|
+| migration | `crates/application/src/repository/tidb/migrations/001〜008`。SQLite の 001〜008 と同じ version・名前・表・列・index 名・主キー / unique key（`versions_mirror_the_sqlite_migrations`、`migrations_apply_to_an_empty_tidb_database` が表集合と全 index 名を SQLite と突き合わせる）。型は明示: id と比較する文字列は `utf8mb4_bin`、u64 の counter と reuse key の版数は `BIGINT UNSIGNED`、`body` は `LONGTEXT`、flag は `TINYINT`。timestamp は SQLite と同じ固定幅 RFC 3339 文字列 |
+| migration の規則 | `tidb/migrations.rs` の doc。DDL は transactional でないので、全 statement を冪等（`IF NOT EXISTS`）かつ additive にし、`schema_version` は全 statement 成功後にだけ書く。migrator は `GET_LOCK` で 1 つ。expand → backfill（コード）→ 切り替え → 後の release で contract、同じ release に破壊的 DDL を入れない（`every_statement_is_idempotent_and_additive` が `DROP` 等を拒否）。詳細は `docs/db-index-review.md` §5 |
+| adapter | `crates/application/src/repository/tidb/`（`#[cfg(test)]`）。`StateStore` 全体: Function / Revision / Alias（generation CAS）、Invocation / Attempt（terminal guard）、Environment、Log（memory）、Idempotency、ArtifactOwner、`SlotStore`（dispatcher、pool、acquire / renew / complete / release / reclaim / fence / confirm）、ConfigPublication、ObjectReference。行の不変条件は SQLite と同じ `guard.rs` |
+| 契約テスト | `contract_tests.rs` と `object_contract_tests.rs` の `contract!` に `tidb` を追加（`TSLS_TIDB_URL` が無ければ理由を出して skip）。1 テスト 1 database（`tsls_t_<ulid>`、store の drop で削除） |
+| TiDB 固有テスト | `tidb/tests.rs`: 空 DB / 古い DB（001〜003 に行を入れてから open）への適用、失敗した migration、binary より新しい schema の拒否、migrator の同時実行、別 connection pool 間の競合（acquire は 2/4/8/12 並列の各 round で勝者 1、alias CAS 8 並列で勝者 1、pool claim 8 並列で 1、expired lease の回収 8 並列で 1 回、同じ idempotency key の bind 8 並列で 1、revision 番号 8×5 並列で重複なし）、index review、READ-COMMITTED の lock 挙動の固定 |
+
+### transaction の方式
+
+- 接続ごとに `tidb_txn_mode = 'pessimistic'`、`transaction_isolation = 'READ-COMMITTED'`、`CLIENT_FOUND_ROWS`（affected rows = 条件に合った行数。同値更新で 0 にならない）。
+- SQLite の `BEGIN IMMEDIATE` による全体直列化の代わりに、判断に使う行を `SELECT ... FOR UPDATE` で先に lock する（acquire: environment → dispatcher → invocation、complete: lease → environment、reclaim: 全 dispatcher → 未 release の lease）。CAS 条件は SQLite と同じく `UPDATE ... WHERE` に残し、0 行は負け。
+- deadlock（1213）、lock wait timeout（1205）、write conflict（9007）、schema 変更（8028 / 8022）は transaction 全体を最大 12 回やり直す。closure は毎回読み直す。
+
+### 実測で分かったこと（予想との差分）
+
+1. **READ-COMMITTED の `FOR UPDATE` は、行の無い key を lock しない。** 別 session の同じ key の INSERT は待たずに成功する（3 ms）。REPEATABLE-READ では待つ（1 s で lock wait timeout）。`tidb_read_committed_does_not_lock_a_missing_key` が固定する。最初の実装はこれを前提にしていて、idempotency key の bind 競合で勝者が 1 を超えた（8 並列で 2〜3）。対処:
+   - 「確認してから INSERT」は一意制約で決め、負けた側が相手の行を見る必要がある箇所（revision counter、idempotency binding）は重複キーで transaction 全体をやり直す。
+   - 古い binding の削除は「invocation が無い / 期限切れ」の行だけにした。key 指定の DELETE は、確認の後に commit された他 transaction の生きた binding まで消していた。
+   - 行の無い mutex（pool の上限判定、config の stamping）は `store_meta` の常在行（open 時に作る）を lock する。
+   - object の attach と collection claim は、tombstone の key を**先に INSERT** して直列化する（未 commit の INSERT は key の lock を持つ）。attach は仮の `attaching` tombstone を入れて最後に消す。
+   REPEATABLE-READ（TiDB の既定）にすれば行の無い key も lock されるが、lock 取得前の読みが transaction 開始時点の snapshot になり、lock 待ちの後に他者の commit が見えない。RC + 上の対処を選んだ。
+2. **同じ `ALTER TABLE` で追加した列に index を張れない**（ERROR 1072 column does not exist）。002 / 003 は列の追加と index の追加を別 statement にした。SQLite と statement 数が違う。
+3. 上の「変わるもの」3（`TEXT` の容量）は予想どおりで `LONGTEXT` にした。1 行は TiDB の `txn-entry-size-limit`（既定 6 MiB）を超えられないので、inline 出力の上限（`limits.max_response_bytes`）はこれ未満である必要がある。
+4. 上の「変わるもの」4（ULID 主キーの hotspot）は `NONCLUSTERED` + `SHARD_ROW_ID_BITS` にしたが、主キー index 自体の偏りは残る（`docs/db-index-review.md` §3）。書き込み負荷での hotspot は計測していない。
+5. 上の「変わるもの」8（reclaim を小さな transaction に割る）はしていない。1 transaction のまま、dispatcher 行の lock で直列化して契約テストを通した。回収対象が多いと大きな transaction になる。
+6. index（10k invocation の seed）: 要求経路の query はすべて index / point get。TiDB が全件走査を選んだのは周期処理（pool sweep、outbox claim、due cron、inline 出力 / 送信済み outbox / trigger fire の retention）で、表が大きくなる構成では outbox claim と inline 出力 retention が先に効く（`docs/db-index-review.md` §2）。
+
+### 残るもの（TiDB）
+
+| 項目 | 状態 | 内容 |
+|---|---|---|
+| gateway からの利用 | 未着手（意図的） | adapter は `#[cfg(test)]`。gateway が要る `AsyncInvocationRepository`（outbox、PLT-4639）、`TriggerRepository`（PLT-4641）、`AsyncDispatchRepository`（PLT-4640）と、`SqliteStore` にだけある open 時処理（P1 `state.json` の import、owner の無い行の restart reconcile）を実装していない。schema（006〜008）は適用と index の確認まで |
+| repository API の async 化 | 未着手 | adapter は同期の `mysql` crate。gateway に載せるなら blocking pool か async trait（上の「変わるもの」7） |
+| TLS・認証 | 未着手 | 検証は loopback の root（password なし）だけ |
+| 複数 TiDB node・障害注入 | 未検証 | 1 PD / 1 TiKV / 1 TiDB。region split、leader 移動、TiDB server の再起動中の transaction は試していない |
+| hotspot・負荷 | 未検証 | 10k 行の EXPLAIN ANALYZE だけ。書き込み負荷での region 分布は計測していない |
+| 時刻 | 未着手 | lease の期限は判定する側の wall clock（上の「変わるもの」9 のまま） |
+| MySQL | 対象外 | 実行していない。TiDB 版 migration は TiDB 拡張を使う |
+| budget の store（PLT-4643） | 対象外（この検証の時点） | `<data_dir>/usage/budget.db` は `state.db` の migration ではない別の SQLite（`crates/application/src/budget/store.rs`）で、TiDB 版を作っていない。`state.db` の migration は 008 まで mirror 済み（`versions_mirror_the_sqlite_migrations` が数の不一致で失敗する） |
 
 ## 参照
 

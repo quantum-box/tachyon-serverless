@@ -1,0 +1,5 @@
+tidb_url=mysql://root@127.0.0.1:52750
+tidb_version_requested=v8.5.8
+tests_passed=47
+tests_not_ok=0
+cargo_test_exit=0
