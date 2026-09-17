@@ -58,6 +58,10 @@ pub enum AppError {
         reason: AsyncRefusal,
         message: String,
     },
+    /// A disabled webhook trigger answering a correctly signed delivery
+    /// (PLT-4641): 410.
+    #[error("gone: {0}")]
+    Gone(String),
     #[error("revision not ready: {0}")]
     RevisionNotReady(String),
     #[error("function deleted: {0}")]
@@ -128,6 +132,7 @@ impl AppError {
             },
             Self::AsyncRefused { reason, .. } => reason.code(),
             Self::RevisionNotReady(_) => ErrorCode::RevisionNotReady,
+            Self::Gone(_) => ErrorCode::Gone,
             Self::FunctionDeleted(_) => ErrorCode::FunctionDeleted,
             // A queued invocation refused because its function was deleted
             // before it started (PLT-4635): the same 409 as a new one.

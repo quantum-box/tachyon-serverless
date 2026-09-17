@@ -55,6 +55,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "invoke_async_outbox",
         sql: include_str!("migrations/006_invoke_async_outbox.sql"),
     },
+    Migration {
+        version: 7,
+        name: "triggers",
+        sql: include_str!("migrations/007_triggers.sql"),
+    },
 ];
 
 pub const LATEST: i64 = MIGRATIONS[MIGRATIONS.len() - 1].version;

@@ -824,6 +824,10 @@ pub struct GatewayConfig {
     /// `[usage]`: usage journal, collector and provisional rating (PLT-4642).
     #[serde(default)]
     pub usage: crate::usage::UsageConfig,
+    /// `[triggers]` (PLT-4641): the cron scheduler, webhook limits and the
+    /// key that seals webhook secrets. Used only where `invokeAsync` is.
+    #[serde(default)]
+    pub triggers: crate::services::triggers::TriggersConfig,
 }
 
 /// `[metrics]` (PLT-4637, docs/metrics.md). `GET /metrics` exposes every
@@ -924,6 +928,9 @@ impl GatewayConfig {
             }
         }
         crate::durable::config::absolutize(&mut self.queue, &mut self.objects, base);
+        if let Some(k) = self.triggers.secret_key_file.as_mut() {
+            abs(base, k);
+        }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
@@ -1197,6 +1204,9 @@ impl GatewayConfig {
         )
         .map_err(ConfigError::Invalid)?;
         self.invoke_async.validate().map_err(ConfigError::Invalid)?;
+        self.triggers
+            .validate(self.effective_limits().max_payload_bytes)
+            .map_err(ConfigError::Invalid)?;
         if self.pool.enabled {
             if self.pool.max_idle_per_revision == 0 {
                 return Err(ConfigError::Invalid(

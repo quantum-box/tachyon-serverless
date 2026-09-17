@@ -58,7 +58,8 @@ use crate::error::AppError;
 use crate::failpoints::{self, Failpoints};
 use crate::repository::{
     AsyncAcceptOutcome, AsyncInput, AsyncInputBody, AsyncInvocationRepository, BacklogLimits,
-    IdempotencyBinding, IdempotencyRepository, InvocationRepository, OutboxEvent, OutboxStats,
+    FireClaim, FireRecord, IdempotencyBinding, IdempotencyRepository, InvocationRepository,
+    OutboxEvent, OutboxStats, Trigger, TriggerAcceptOutcome, TriggerRepository,
 };
 use crate::services::invoke::MAX_TRACE_ID_BYTES;
 
@@ -201,6 +202,18 @@ pub struct InvokeAsyncRequest {
     pub trace_id: Option<String>,
 }
 
+/// What [`AsyncInvokeService::accept_for_trigger`] did.
+#[derive(Debug, Clone)]
+pub enum TriggerAcceptance {
+    /// Accepted now, or an idempotent replay of an earlier acceptance.
+    Accepted(Box<AsyncAcceptance>),
+    /// The fire key (or signed delivery) was recorded before; nothing new.
+    AlreadyFired(FireRecord),
+    /// The trigger is gone, not enabled or at another generation; nothing
+    /// was written.
+    Inactive(Option<Box<Trigger>>),
+}
+
 #[derive(Debug, Clone)]
 pub struct AsyncAcceptance {
     pub invocation: Invocation,
@@ -328,6 +341,34 @@ impl AsyncInvokeService {
     }
 
     pub async fn accept(&self, req: InvokeAsyncRequest) -> Result<AsyncAcceptance, AppError> {
+        match self.accept_inner(req, None).await? {
+            TriggerAcceptance::Accepted(a) => Ok(*a),
+            TriggerAcceptance::AlreadyFired(_) | TriggerAcceptance::Inactive(_) => Err(
+                AppError::platform("a plain acceptance has no trigger outcome"),
+            ),
+        }
+    }
+
+    /// The same acceptance for a trigger fire (PLT-4641, docs/adr/0014): the
+    /// fire row of `claim` is written in the acceptance transaction, which
+    /// also re-reads the trigger. `claim.record.invocation_id` is filled in
+    /// here. Everything else (authorization and resolution from the cache,
+    /// the revision pinned now, input, idempotency, backlog, outbox) is
+    /// exactly [`Self::accept`].
+    pub async fn accept_for_trigger(
+        &self,
+        req: InvokeAsyncRequest,
+        triggers: &dyn TriggerRepository,
+        claim: FireClaim,
+    ) -> Result<TriggerAcceptance, AppError> {
+        self.accept_inner(req, Some((triggers, claim))).await
+    }
+
+    async fn accept_inner(
+        &self,
+        req: InvokeAsyncRequest,
+        trigger: Option<(&dyn TriggerRepository, FireClaim)>,
+    ) -> Result<TriggerAcceptance, AppError> {
         require_invoke(&req.principal)?;
         if self.draining.load(Ordering::SeqCst) {
             return Err(AppError::ProviderUnavailable(
@@ -414,7 +455,9 @@ impl AsyncInvokeService {
                 self.idempotency
                     .lookup(&function.tenant_id, &function.id, key, now)?
         {
-            return self.replay(key, &digest, binding);
+            return self
+                .replay(key, &digest, binding)
+                .map(|a| TriggerAcceptance::Accepted(Box::new(a)));
         }
 
         // 4. Early backlog refusal (re-checked inside the transaction).
@@ -470,16 +513,44 @@ impl AsyncInvokeService {
 
         // 6. The one transaction.
         let fp = self.failpoints.clone();
-        let outcome =
-            self.ledger
-                .accept_async(invocation.clone(), input, event, limits, &move || {
-                    fp.fire(failpoints::ACCEPT_BEFORE_COMMIT)
-                })?;
+        let before_commit = move || fp.fire(failpoints::ACCEPT_BEFORE_COMMIT);
+        let outcome = match trigger {
+            None => self.ledger.accept_async(
+                invocation.clone(),
+                input,
+                event,
+                limits,
+                &before_commit,
+            )?,
+            Some((triggers, mut claim)) => {
+                claim.record.invocation_id = Some(id.clone());
+                match triggers.accept_trigger_fire(
+                    invocation.clone(),
+                    input,
+                    event,
+                    limits,
+                    claim,
+                    &before_commit,
+                )? {
+                    TriggerAcceptOutcome::Accepted => AsyncAcceptOutcome::Accepted,
+                    TriggerAcceptOutcome::Existing(b) => AsyncAcceptOutcome::Existing(b),
+                    TriggerAcceptOutcome::Backlog(s) => AsyncAcceptOutcome::Backlog(s),
+                    TriggerAcceptOutcome::AlreadyFired(record) => {
+                        return Ok(TriggerAcceptance::AlreadyFired(record));
+                    }
+                    TriggerAcceptOutcome::Inactive(current) => {
+                        return Ok(TriggerAcceptance::Inactive(current));
+                    }
+                }
+            }
+        };
         match outcome {
             AsyncAcceptOutcome::Accepted => {}
             AsyncAcceptOutcome::Existing(binding) => {
                 let key = req.idempotency_key.as_deref().unwrap_or_default();
-                return self.replay(key, &digest, binding);
+                return self
+                    .replay(key, &digest, binding)
+                    .map(|a| TriggerAcceptance::Accepted(Box::new(a)));
             }
             AsyncAcceptOutcome::Backlog(stats) => {
                 return Err(
@@ -503,11 +574,11 @@ impl AsyncInvokeService {
             input_storage,
             "asynchronous invocation accepted"
         );
-        Ok(AsyncAcceptance {
+        Ok(TriggerAcceptance::Accepted(Box::new(AsyncAcceptance {
             invocation,
             input_storage,
             replayed: false,
-        })
+        })))
     }
 
     async fn put_input(

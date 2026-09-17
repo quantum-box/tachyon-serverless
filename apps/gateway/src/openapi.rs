@@ -1,11 +1,11 @@
 //! OpenAPI document (utoipa derive over the handlers and api-types schemas).
 
 use utoipa::OpenApi;
-use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 
 use tachyon_serverless_api_types as api;
 
-use crate::handlers;
+use crate::{handlers, trigger_handlers};
 
 struct SecurityAddon;
 
@@ -15,6 +15,15 @@ impl utoipa::Modify for SecurityAddon {
         components.add_security_scheme(
             "bearer",
             SecurityScheme::Http(HttpBuilder::new().scheme(HttpAuthScheme::Bearer).build()),
+        );
+        // Webhook deliveries (PLT-4641) are authenticated by an HMAC signature
+        // over the timestamp and the body, not by a bearer token.
+        components.add_security_scheme(
+            "webhook_signature",
+            SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
+                "x-tachyon-webhook-signature",
+                "v1=<hex HMAC-SHA256(trigger secret, \"{x-tachyon-webhook-timestamp}.{raw body}\")>",
+            ))),
         );
     }
 }
@@ -54,6 +63,13 @@ impl utoipa::Modify for SecurityAddon {
         handlers::usage,
         handlers::usage_report,
         handlers::internal_config,
+        trigger_handlers::create_trigger,
+        trigger_handlers::list_triggers,
+        trigger_handlers::get_trigger,
+        trigger_handlers::update_trigger,
+        trigger_handlers::delete_trigger,
+        trigger_handlers::list_trigger_fires,
+        trigger_handlers::receive_webhook,
     ),
     components(schemas(
         api::ErrorCode,
@@ -105,10 +121,21 @@ impl utoipa::Modify for SecurityAddon {
         api::HostCostFacts,
         api::ProvisionalCharges,
         api::GuestReportedTotals,
+        api::TriggerTargetRequest,
+        api::MissedRunPolicyRequest,
+        api::CronTriggerRequest,
+        api::WebhookTriggerRequest,
+        api::CreateTriggerRequest,
+        api::UpdateTriggerRequest,
+        api::CronTriggerInfo,
+        api::WebhookTriggerInfo,
+        api::TriggerResponse,
+        api::TriggerFireResponse,
+        api::WebhookAcceptedResponse,
     )),
     tags(
         (name = "meta"), (name = "provider"), (name = "artifacts"), (name = "functions"),
-        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "internal")
+        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "triggers"), (name = "internal")
     ),
     modifiers(&SecurityAddon)
 )]

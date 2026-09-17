@@ -216,3 +216,21 @@ resource_limits tachyon-serverless-application test:usage an_unavailable_journal
 resource_limits tachyon-serverless-application lib usage::tests::the_journal_bound_refuses_appends_and_counts_them_per_tenant
 resource_limits tachyon-serverless-application lib usage::tests::admission_keeps_headroom_for_work_already_admitted
 resource_limits tachyon-serverless-application lib usage::tests::billing_cannot_be_enabled_and_accept_unmetered_is_dev_only
+
+# --- PLT-4641: cron and signed webhook triggers ------------------------------------------------
+# signature / timestamp / body refusals happen before any durable write; secrets never disclosed;
+# trigger CRUD never crosses a tenant; unknown / deleted triggers do not leak existence
+tenant_authz tachyon-serverless-application lib services::triggers::tests::webhook_refusals_happen_before_any_durable_write
+tenant_authz tachyon-serverless-application lib services::triggers::webhook::tests::signature_fixtures_verify_and_refuse
+tenant_authz tachyon-serverless-application lib services::triggers::webhook::tests::timestamps_outside_the_tolerance_are_refused_both_ways
+tenant_authz tachyon-serverless-application lib services::triggers::tests::trigger_crud_never_crosses_a_tenant
+tenant_authz tachyon-serverless-application lib services::triggers::tests::a_webhook_secret_is_shown_once_and_never_stored_or_returned_in_plain
+tenant_authz tachyon-serverless-application lib services::triggers::tests::disabled_and_deleted_webhook_triggers_answer_without_leaking_existence
+tenant_authz tachyon-serverless-gateway test:triggers_http trigger_http_crud_never_returns_the_secret_and_never_crosses_a_tenant
+# one scheduled time / one event id -> one invocation (replay dedup, restart, two schedulers, disable race)
+lease_epoch tachyon-serverless-application lib services::triggers::tests::a_replayed_webhook_answers_the_same_invocation_and_creates_nothing
+lease_epoch tachyon-serverless-application lib services::triggers::tests::a_restart_on_the_same_data_dir_never_fires_a_scheduled_time_twice
+lease_epoch tachyon-serverless-application lib services::triggers::tests::two_schedulers_on_one_ledger_fire_each_scheduled_time_once
+lease_epoch tachyon-serverless-application lib services::triggers::tests::a_disable_or_delete_racing_a_scheduled_fire_commits_nothing
+# oversized webhook bodies are refused while reading (Content-Length and streaming)
+resource_limits tachyon-serverless-gateway test:triggers_http webhook_http_refuses_before_storing_and_dedups_resends

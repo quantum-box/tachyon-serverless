@@ -280,6 +280,7 @@ fn input(s: &mut AdmissionState, limits: SeriesLimits, events: &Metrics) -> Metr
             ledger_events: Some(38),
             ledger_duplicates_ignored: Some(2),
         }),
+        triggers: None,
     }
 }
 

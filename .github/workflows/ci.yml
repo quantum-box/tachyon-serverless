@@ -14,7 +14,8 @@
 # - durable-queue:       pinned nats-server (checksum-verified, local process) + scripts/queue/verify.sh:
 #                        auth refusal, kill -9 persistence, capacity, max_age, JetStream contract,
 #                        object store (PLT-4638); scripts/queue/async-e2e.sh: invokeAsync + outbox
-#                        crash/outage convergence (PLT-4639)
+#                        crash/outage convergence (PLT-4639); scripts/queue/triggers-e2e.sh: cron
+#                        and signed webhook triggers (PLT-4641)
 # - scripts:             bash -n + shellcheck + helper self-tests for scripts/
 # - ci-gate:             aggregate status
 #
@@ -248,6 +249,13 @@ jobs:
       # every accepted invocation found exactly once logically in JetStream.
       - name: scripts/queue/async-e2e.sh
         run: scripts/queue/async-e2e.sh --evidence "$RUNNER_TEMP/queue-evidence/async-e2e"
+
+      # PLT-4641: cron and signed webhook triggers with the embedded SQLite queue (no nats-server):
+      # a 6-field cron trigger fires, SIGKILL / SIGTERM restarts never fire a scheduled time twice,
+      # disable stops fires, and webhook deliveries signed with openssl are accepted, deduplicated
+      # by event id and signature, and refused (401 / 413 / 400) before anything is stored. ~1 min.
+      - name: scripts/queue/triggers-e2e.sh
+        run: scripts/queue/triggers-e2e.sh --evidence "$RUNNER_TEMP/queue-evidence/triggers-e2e"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

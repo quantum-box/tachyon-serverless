@@ -69,6 +69,8 @@ pub struct MetricsInput {
     pub limits: SeriesLimits,
     /// The asynchronous invoke outbox (PLT-4639), when this gateway has one.
     pub outbox: Option<OutboxMetrics>,
+    /// Trigger counters (PLT-4641), when this gateway has triggers.
+    pub triggers: Option<crate::services::triggers::metrics::TriggerMetricsSnapshot>,
     /// The usage journal, collector and ledger (PLT-4642).
     pub usage: Option<UsageMetrics>,
 }
@@ -744,6 +746,35 @@ pub fn render(input: &MetricsInput) -> String {
     w.sample("tsls_config_reconnects_total", &[], cfg.reconnects as f64);
     w.sample("tsls_config_entries", &[], cfg.entries as f64);
 
+    if let Some(t) = &input.triggers {
+        use crate::services::triggers::metrics::{CRON_RESULTS, MISSED_ACTIONS, WEBHOOK_RESULTS};
+        w.sample(
+            "tsls_trigger_scheduler_owner",
+            &[],
+            f64::from(u8::from(t.scheduler_owner)),
+        );
+        for result in CRON_RESULTS {
+            w.sample(
+                "tsls_trigger_cron_fires_total",
+                &[("result", result)],
+                t.cron.get(result).copied().unwrap_or(0) as f64,
+            );
+        }
+        for action in MISSED_ACTIONS {
+            w.sample(
+                "tsls_trigger_cron_missed_runs_total",
+                &[("action", action)],
+                t.missed.get(action).copied().unwrap_or(0) as f64,
+            );
+        }
+        for result in WEBHOOK_RESULTS {
+            w.sample(
+                "tsls_trigger_webhook_deliveries_total",
+                &[("result", result)],
+                t.webhook.get(result).copied().unwrap_or(0) as f64,
+            );
+        }
+    }
     if let Some(o) = &input.outbox {
         w.sample("tsls_async_outbox_pending_events", &[], o.pending as f64);
         w.sample(

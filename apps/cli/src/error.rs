@@ -40,7 +40,8 @@ impl ExitCode {
             | ErrorCode::PayloadTooLarge
             | ErrorCode::CapacityExceeded
             | ErrorCode::RevisionNotReady
-            | ErrorCode::FunctionDeleted => Self::Api,
+            | ErrorCode::FunctionDeleted
+            | ErrorCode::Gone => Self::Api,
             ErrorCode::UserError
             | ErrorCode::Crash
             | ErrorCode::InitError

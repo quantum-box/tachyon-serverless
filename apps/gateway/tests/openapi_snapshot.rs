@@ -129,9 +129,17 @@ fn every_management_route_requires_the_bearer_scheme() {
             continue;
         }
         for (method, op) in item.as_object().expect("path item") {
+            // Webhook deliveries (PLT-4641) are the one exception: they are
+            // authenticated by the trigger's HMAC signature, and only under
+            // `/v1/hooks/`.
+            let scheme = if path.starts_with("/v1/hooks/") {
+                "webhook_signature"
+            } else {
+                "bearer"
+            };
             let secured = op["security"]
                 .as_array()
-                .is_some_and(|s| s.iter().any(|req| req.get("bearer").is_some()));
+                .is_some_and(|s| s.iter().any(|req| req.get(scheme).is_some()));
             if !secured {
                 unauthenticated.push(format!("{method} {path}"));
             }

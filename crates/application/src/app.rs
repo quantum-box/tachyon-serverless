@@ -100,6 +100,9 @@ pub struct Application {
     /// The transactional outbox publisher. The gateway runs
     /// [`Application::publish_outbox`] in a loop; tests call it directly.
     pub outbox: Option<Arc<OutboxPublisher>>,
+    /// Cron and signed webhook triggers (PLT-4641). `None` without
+    /// asynchronous invoke or on a data plane.
+    pub triggers: Option<Arc<crate::services::triggers::TriggerService>>,
     /// Test-only failpoints (inert unless built with `failpoints`).
     pub failpoints: Arc<crate::failpoints::Failpoints>,
 }
@@ -509,6 +512,42 @@ impl Application {
             }
             _ => (None, None),
         };
+        // Triggers (PLT-4641): only where asynchronous invoke is, and only on
+        // the gateway that owns the management store. Every fire goes through
+        // the acceptance above.
+        let triggers = match (&invoke_async, &durable_ledger) {
+            (Some(service), Some(ledger)) if control.role == GatewayRole::Combined => {
+                let secret_key = match (
+                    &config.triggers.secret_key_file,
+                    &config.triggers.secret_key_env,
+                ) {
+                    (Some(path), _) => Some(Arc::new(
+                        crate::durable::ObjectKey::from_file(path)
+                            .map_err(|e| AppError::InvalidRequest(format!("[triggers] {e}")))?,
+                    )),
+                    (None, Some(var)) => Some(Arc::new(
+                        crate::durable::ObjectKey::from_env(var)
+                            .map_err(|e| AppError::InvalidRequest(format!("[triggers] {e}")))?,
+                    )),
+                    (None, None) => None,
+                };
+                Some(crate::services::triggers::TriggerService::new(
+                    crate::services::triggers::TriggerServiceDeps {
+                        repo: ledger.clone(),
+                        repos: repos.clone(),
+                        invoke_async: service.clone(),
+                        cache: config_cache.clone(),
+                        dispatcher: dispatcher.clone(),
+                        clock: clock.clone(),
+                        ids: ids.clone(),
+                        limits: limits.clone(),
+                        config: config.triggers.clone(),
+                        secret_key,
+                    },
+                ))
+            }
+            _ => None,
+        };
         // Reuse is visible at startup, on or off, with the gate that decided
         // it and the two capabilities behind it (PLT-4633 acceptance 4). The
         // same facts are on `GET /v1/provider`.
@@ -532,6 +571,7 @@ impl Application {
             queue = config.queue.backend.as_str(),
             objects = config.objects.backend.as_str(),
             invoke_async = invoke_async.is_some(),
+            triggers = triggers.is_some(),
             "application bootstrapped"
         );
         if policy.reuse_enabled() && !policy.idle_verified() {
@@ -577,6 +617,7 @@ impl Application {
             async_ledger,
             invoke_async,
             outbox,
+            triggers,
             failpoints,
         }))
     }
@@ -630,6 +671,15 @@ impl Application {
     pub async fn publish_outbox(&self) -> Option<PublishReport> {
         let outbox = self.outbox.as_ref()?;
         Some(outbox.run_once().await)
+    }
+
+    /// One cron scheduler pass (PLT-4641). `None` without triggers. The
+    /// gateway runs it in a loop; tests call it directly.
+    pub async fn run_trigger_scheduler(
+        &self,
+    ) -> Option<crate::services::triggers::SchedulerReport> {
+        let triggers = self.triggers.as_ref()?;
+        Some(triggers.run_scheduler_once().await)
     }
 
     /// Resolve a delivered asynchronous invoke event against the ledger
@@ -768,6 +818,7 @@ impl Application {
             },
             outbox,
             usage: Some(self.usage_metrics()),
+            triggers: self.triggers.as_ref().map(|t| t.metrics().snapshot()),
         })
     }
 

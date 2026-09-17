@@ -539,6 +539,34 @@ impl ConfigCache {
         })
     }
 
+    /// A trigger fire has no bearer token (PLT-4641): its authority is the
+    /// tenant's, and the tenant must still be delivered and inside its auth
+    /// lease, exactly like the tenant check of [`Self::authenticate`]. A
+    /// tenant removed from the grants stops its triggers within one refresh
+    /// or one auth lease.
+    pub async fn authorize_tenant(&self, tenant_id: &TenantId) -> Result<(), AppError> {
+        self.sync_if_authoritative().await;
+        let now = self.clock.now();
+        let s = self.inner.read();
+        if !s.status.ever_synced {
+            return Err(Self::not_delivered("authorization"));
+        }
+        let key = ConfigKey::Tenant {
+            tenant_id: tenant_id.clone(),
+        };
+        match Self::lookup(&s, &key, now) {
+            Lookup::Valid(ConfigValue::Tenant(_)) => Ok(()),
+            Lookup::Expired => Err(AppError::control(
+                ControlError::AuthLeaseExpired,
+                "the authorization lease of this tenant expired",
+            )),
+            _ => Err(AppError::control(
+                ControlError::UnknownTenant,
+                "the tenant of this trigger is not known to this gateway",
+            )),
+        }
+    }
+
     /// Function, alias route, revision and policy for a new invocation.
     /// Refuses with `NotFound` / `FunctionDeleted` / `RevisionNotReady`
     /// exactly like the ledger did, and with a [`ControlError`] when the

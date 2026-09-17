@@ -107,6 +107,103 @@ fn truncate(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
+/// The argument checks of an acceptance (outside the transaction).
+pub(super) fn check_accept(
+    invocation: &Invocation,
+    input: &AsyncInput,
+    event: &OutboxEvent,
+) -> Result<(), RepoError> {
+    if input.invocation_id != invocation.id
+        || event.event_id != invocation.id
+        || input.tenant_id != invocation.tenant_id
+        || event.tenant_id != invocation.tenant_id
+        || input.digest != invocation.input_digest
+        || input.size_bytes != invocation.input_size_bytes
+    {
+        return Err(RepoError::Refused(
+            "input, outbox event and invocation must name the same invocation, tenant and \
+             digest"
+                .into(),
+        ));
+    }
+    if let AsyncInputBody::Object(object) = &input.body {
+        check_attachable(&object.id, invocation.accepted_at)?;
+    }
+    Ok(())
+}
+
+/// Every row of an asynchronous acceptance, inside the caller's transaction:
+/// idempotency, the backlog bound, invocation, key, input and outbox event.
+/// Shared by [`AsyncInvocationRepository::accept_async`] and the trigger fire
+/// transaction (PLT-4641), so a trigger fire is exactly an acceptance plus its
+/// fire row.
+pub(super) fn accept_in(
+    tx: &Connection,
+    invocation: &Invocation,
+    input: &AsyncInput,
+    event: &OutboxEvent,
+    backlog: BacklogLimits,
+    max: u64,
+    retention: super::Retention,
+) -> Result<AsyncAcceptOutcome, RepoError> {
+    let now = invocation.accepted_at;
+    // 1. Idempotency first: a replay answers even under backlog.
+    if let Some(key) = &invocation.idempotency_key
+        && let Some(existing) =
+            live_binding(tx, &invocation.tenant_id, &invocation.function_id, key, now)?
+    {
+        return Ok(AsyncAcceptOutcome::Existing(existing));
+    }
+    // 2. The outbox bound, under the same write lock as the insert.
+    let stats = stats_in(tx)?;
+    if stats.exceeds(&backlog, now) {
+        return Ok(AsyncAcceptOutcome::Backlog(stats));
+    }
+    // 3. The invocation, its key, its input, its event.
+    insert_invocation_checked(tx, invocation, max, retention)?;
+    bind_idempotency(tx, invocation, retention)?;
+    let (storage, inline, object_id, region) = match &input.body {
+        AsyncInputBody::Inline(bytes) => ("inline", Some(bytes.as_slice()), None, None),
+        AsyncInputBody::Object(object) => {
+            attach_in(tx, object, &invocation.id, now)?;
+            (
+                "object",
+                None,
+                Some(object.id.as_str()),
+                Some(object.scope.region.as_str()),
+            )
+        }
+    };
+    tx.prepare_cached(
+        "INSERT INTO invocation_inputs (invocation_id, tenant_id, storage, size_bytes, digest, \
+         inline_body, object_id, region, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?
+    .execute(params![
+        input.invocation_id.as_str(),
+        input.tenant_id.as_str(),
+        storage,
+        big(input.size_bytes, "input size")?,
+        input.digest.as_str(),
+        inline,
+        object_id,
+        region,
+        ts(&now)
+    ])?;
+    tx.prepare_cached(
+        "INSERT INTO outbox (event_id, tenant_id, topic, payload, created_at, sent, \
+         publish_attempts, next_attempt_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6)",
+    )?
+    .execute(params![
+        event.event_id.as_str(),
+        event.tenant_id.as_str(),
+        event.topic,
+        event.payload,
+        ts(&event.created_at),
+        ts(&event.next_attempt_at)
+    ])?;
+    Ok(AsyncAcceptOutcome::Accepted)
+}
+
 impl AsyncInvocationRepository for SqliteStore {
     fn accept_async(
         &self,
@@ -116,90 +213,16 @@ impl AsyncInvocationRepository for SqliteStore {
         backlog: BacklogLimits,
         before_commit: &dyn Fn() -> bool,
     ) -> Result<AsyncAcceptOutcome, RepoError> {
-        if input.invocation_id != invocation.id
-            || event.event_id != invocation.id
-            || input.tenant_id != invocation.tenant_id
-            || event.tenant_id != invocation.tenant_id
-            || input.digest != invocation.input_digest
-            || input.size_bytes != invocation.input_size_bytes
-        {
-            return Err(RepoError::Refused(
-                "input, outbox event and invocation must name the same invocation, tenant and \
-                 digest"
-                    .into(),
-            ));
-        }
-        let now = invocation.accepted_at;
-        if let AsyncInputBody::Object(object) = &input.body {
-            check_attachable(&object.id, now)?;
-        }
+        check_accept(&invocation, &input, &event)?;
         let (max, retention) = (self.max_inline(), self.retention());
         self.write(|tx| {
-            // 1. Idempotency first: a replay answers even under backlog.
-            if let Some(key) = &invocation.idempotency_key
-                && let Some(existing) = live_binding(
-                    tx,
-                    &invocation.tenant_id,
-                    &invocation.function_id,
-                    key,
-                    now,
-                )?
-            {
-                return Ok(AsyncAcceptOutcome::Existing(existing));
-            }
-            // 2. The outbox bound, under the same write lock as the insert.
-            let stats = stats_in(tx)?;
-            if stats.exceeds(&backlog, now) {
-                return Ok(AsyncAcceptOutcome::Backlog(stats));
-            }
-            // 3. The invocation, its key, its input, its event.
-            insert_invocation_checked(tx, &invocation, max, retention)?;
-            bind_idempotency(tx, &invocation, retention)?;
-            let (storage, inline, object_id, region) = match &input.body {
-                AsyncInputBody::Inline(bytes) => ("inline", Some(bytes.as_slice()), None, None),
-                AsyncInputBody::Object(object) => {
-                    attach_in(tx, object, &invocation.id, now)?;
-                    (
-                        "object",
-                        None,
-                        Some(object.id.as_str()),
-                        Some(object.scope.region.as_str()),
-                    )
-                }
-            };
-            tx.prepare_cached(
-                "INSERT INTO invocation_inputs (invocation_id, tenant_id, storage, size_bytes, digest, \
-                 inline_body, object_id, region, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            )?
-            .execute(params![
-                input.invocation_id.as_str(),
-                input.tenant_id.as_str(),
-                storage,
-                big(input.size_bytes, "input size")?,
-                input.digest.as_str(),
-                inline,
-                object_id,
-                region,
-                ts(&now)
-            ])?;
-            tx.prepare_cached(
-                "INSERT INTO outbox (event_id, tenant_id, topic, payload, created_at, sent, \
-                 publish_attempts, next_attempt_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6)",
-            )?
-            .execute(params![
-                event.event_id.as_str(),
-                event.tenant_id.as_str(),
-                event.topic,
-                event.payload,
-                ts(&event.created_at),
-                ts(&event.next_attempt_at)
-            ])?;
-            if before_commit() {
+            let outcome = accept_in(tx, &invocation, &input, &event, backlog, max, retention)?;
+            if outcome == AsyncAcceptOutcome::Accepted && before_commit() {
                 return Err(RepoError::Store(
                     "failpoint accept.before_commit: the transaction is rolled back".into(),
                 ));
             }
-            Ok(AsyncAcceptOutcome::Accepted)
+            Ok(outcome)
         })
     }
 
