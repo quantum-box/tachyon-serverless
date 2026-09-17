@@ -106,6 +106,16 @@ pub enum ErrorCode {
     /// disabled webhook trigger answering a correctly signed delivery
     /// (PLT-4641).
     Gone,
+    /// The tenant's or function's hard budget limit does not admit the
+    /// maximum charge of this invocation (PLT-4643). `reason` is `budget`,
+    /// `error_type` `Host.BudgetExhausted`. Not retried automatically: the
+    /// limit or the period has to change.
+    BudgetExhausted,
+    /// The budget cannot be enforced right now, so new invocations are
+    /// refused (fail closed, PLT-4643): the budget was not delivered or its
+    /// lease expired, usage collection is stalled (`Host.BudgetUnknown`), or
+    /// the budget store is unavailable (`Host.BudgetStoreUnavailable`).
+    BudgetUnavailable,
 }
 
 impl ErrorCode {
@@ -129,6 +139,8 @@ impl ErrorCode {
             Self::AsyncUnavailable => 503,
             Self::UsageJournalFull => 503,
             Self::Gone => 410,
+            Self::BudgetExhausted => 429,
+            Self::BudgetUnavailable => 503,
         }
     }
 }
@@ -1307,4 +1319,94 @@ mod tests {
         assert_eq!(back.reuse, measuring.reuse);
         assert!(back.reuse.enabled && !back.reuse.verified);
     }
+}
+
+// ---------------------------------------------------------------------------
+// budget (PLT-4643)
+// ---------------------------------------------------------------------------
+
+/// `GET /v1/budget`: the caller's budget in one period. Amounts are integer
+/// micro-units of the price table's currency, **provisional**, and cover only
+/// what PLT-4642 rates (billable segments of `AttemptSettled`). Nothing is
+/// charged; billing is disabled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BudgetReportResponse {
+    /// Whether this gateway enforces budgets.
+    pub enabled: bool,
+    /// Always true.
+    pub provisional: bool,
+    /// Always false in the prototype.
+    pub billing_enabled: bool,
+    pub notice: String,
+    pub tenant_id: String,
+    /// `YYYY-MM`.
+    pub period: String,
+    /// `calendar_month_utc`.
+    pub period_kind: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub period_start: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub period_end: Timestamp,
+    pub currency: String,
+    pub price_table_version: String,
+    /// `valid`, `expired` or `not_delivered`: the delivered budget as this
+    /// gateway's configuration cache holds it.
+    pub config_state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_generation: Option<u64>,
+    /// Whether new invocations of this tenant are admitted as far as the
+    /// budget is concerned (before a per-function limit).
+    pub admitting: bool,
+    /// Why not, when `admitting` is false (`error_type`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+    pub tenant: BudgetScopeReport,
+    /// Functions with a budget or with reservations in the period.
+    pub functions: Vec<BudgetScopeReport>,
+    /// What the amounts do and do not guarantee.
+    pub guarantee: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BudgetScopeReport {
+    /// `None` for the tenant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub soft_limit_micros: Option<u64>,
+    pub alert_thresholds_percent: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hard_limit_micros: Option<u64>,
+    /// Maximum charges held by runs not yet settled.
+    pub reserved_micros: u64,
+    /// Rated (provisional) charges of settled runs.
+    pub settled_micros: u64,
+    /// Reserved amounts kept because the run's usage could not be fully
+    /// measured (expired runs, unjournaled or unknown segments). Counted
+    /// against the limit, never billable.
+    pub unmetered_hold_micros: u64,
+    /// `reserved + settled + unmetered_hold`: what the hard limit compares.
+    pub committed_micros: u64,
+    /// `hard_limit - committed` (0 when over). `None` without a hard limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_micros: Option<u64>,
+    /// Measured charges above their reservation (settled in full).
+    pub overrun_micros: u64,
+    pub active_reservations: u64,
+    pub reservations: u64,
+    pub settlements: u64,
+    pub releases: u64,
+    pub expiries: u64,
+    pub refusals: u64,
+    pub alerts_fired: Vec<BudgetAlert>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct BudgetAlert {
+    pub threshold_percent: u32,
+    pub soft_limit_micros: u64,
+    /// Settled + unmetered holds when it fired.
+    pub consumed_micros: u64,
+    #[schema(value_type = String, format = DateTime)]
+    pub fired_at: Timestamp,
 }

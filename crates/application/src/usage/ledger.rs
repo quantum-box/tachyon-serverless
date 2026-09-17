@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS function_usage_events (
 );
 CREATE INDEX IF NOT EXISTS function_usage_events_tenant_time
     ON function_usage_events (tenant_id, observed_at);
+CREATE INDEX IF NOT EXISTS function_usage_events_attempt
+    ON function_usage_events (attempt_id);
 CREATE TABLE IF NOT EXISTS function_usage_ledger_stats (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
     accepted    INTEGER NOT NULL,
@@ -225,6 +227,40 @@ impl UsageLedger {
             // Defence in depth: the row's tenant column and the body agree.
             if &event.tenant_id == tenant {
                 out.push(event);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The `AttemptSettled` events of `attempt_ids` of `tenant` (PLT-4643
+    /// budget settlement).
+    pub fn attempt_settled_events(
+        &self,
+        tenant: &str,
+        attempt_ids: &[String],
+    ) -> Result<Vec<UsageEvent>, String> {
+        if self.unavailable.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("usage ledger unavailable (forced)".into());
+        }
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT body FROM function_usage_events \
+                 WHERE tenant_id = ?1 AND attempt_id = ?2 AND event_type = 'attempt_settled' \
+                 ORDER BY event_id",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for attempt in attempt_ids {
+            let rows = stmt
+                .query_map(params![tenant, attempt], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?;
+            for body in rows {
+                let body = body.map_err(|e| e.to_string())?;
+                let event: UsageEvent = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+                if event.tenant_id.as_str() == tenant {
+                    out.push(event);
+                }
             }
         }
         Ok(out)

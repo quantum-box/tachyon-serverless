@@ -75,6 +75,8 @@ pub struct MetricsInput {
     pub usage: Option<UsageMetrics>,
     /// The asynchronous dispatcher (PLT-4640), when this gateway runs one.
     pub dispatch: Option<crate::metrics::dispatch::AsyncDispatchSnapshot>,
+    /// Budget reservations, settlement and refusals (PLT-4643).
+    pub budget: Option<crate::budget::BudgetMetrics>,
 }
 
 /// Usage metering pipeline state (PLT-4642, docs/adr/0012).
@@ -913,6 +915,101 @@ pub fn render(input: &MetricsInput) -> String {
                 d.reaper.get(action).copied().unwrap_or(0) as f64,
             );
         }
+    }
+
+    if let Some(b) = &input.budget {
+        let flag = |v: bool| f64::from(u8::from(v));
+        w.sample("tsls_budget_enabled", &[], flag(b.enabled));
+        w.sample("tsls_budget_store_healthy", &[], flag(b.store_healthy));
+        w.sample(
+            "tsls_budget_collector_stalled",
+            &[],
+            flag(b.collector_stalled),
+        );
+        w.sample(
+            "tsls_budget_active_reservations",
+            &[],
+            b.active_reservations as f64,
+        );
+        w.sample(
+            "tsls_budget_unsettled_runs",
+            &[],
+            b.finished_unsettled as f64,
+        );
+        if let Some(age) = b.oldest_unsettled_age_seconds {
+            w.sample("tsls_budget_oldest_unsettled_age_seconds", &[], age as f64);
+        }
+        for (tenant, t, _) in &b.tenants {
+            w.sample(
+                "tsls_budget_reserved_micros",
+                &[("tenant", tenant)],
+                t.reserved_micros as f64,
+            );
+        }
+        for (tenant, t, _) in &b.tenants {
+            w.sample(
+                "tsls_budget_settled_micros",
+                &[("tenant", tenant)],
+                t.settled_micros as f64,
+            );
+        }
+        for (tenant, t, _) in &b.tenants {
+            w.sample(
+                "tsls_budget_unmetered_hold_micros",
+                &[("tenant", tenant)],
+                t.held_micros as f64,
+            );
+        }
+        for (tenant, t, limit) in &b.tenants {
+            if let Some(limit) = limit {
+                w.sample(
+                    "tsls_budget_remaining_micros",
+                    &[("tenant", tenant)],
+                    limit.saturating_sub(t.committed()) as f64,
+                );
+            }
+        }
+        let c = &b.counters;
+        w.sample("tsls_budget_reservations_total", &[], c.reservations as f64);
+        for cause in crate::budget::RefusalCause::ALL {
+            w.sample(
+                "tsls_budget_refusals_total",
+                &[
+                    ("reason", cause.refusal().as_str()),
+                    ("cause", cause.as_str()),
+                ],
+                c.refusals.get(&cause).copied().unwrap_or(0) as f64,
+            );
+        }
+        w.sample(
+            "tsls_budget_recheck_refusals_total",
+            &[],
+            c.recheck_refusals as f64,
+        );
+        for (result, v) in [
+            ("settled", c.settlements),
+            ("settled_incomplete", c.settlements_incomplete),
+            ("released", c.releases),
+            ("expired", c.expiries),
+        ] {
+            w.sample(
+                "tsls_budget_transitions_total",
+                &[("result", result)],
+                v as f64,
+            );
+        }
+        for scope in ["tenant", "function"] {
+            w.sample(
+                "tsls_budget_alerts_total",
+                &[("scope", scope)],
+                c.alerts.get(scope).copied().unwrap_or(0) as f64,
+            );
+        }
+        w.sample(
+            "tsls_budget_overrun_micros_total",
+            &[],
+            c.overrun_micros as f64,
+        );
     }
 
     for (family, folded) in [

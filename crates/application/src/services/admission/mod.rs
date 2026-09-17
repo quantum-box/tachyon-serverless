@@ -346,6 +346,15 @@ impl AdmissionController {
         })
     }
 
+    /// The immediate refusals of [`Self::admit`] (placement, a deleted
+    /// function, an open breaker, a reservation that can never fit, a zero
+    /// quota) without queueing anything or granting anything. Asked before
+    /// the budget reservation (PLT-4643), so a request admission would refuse
+    /// anyway never holds budget, and a budget refusal never holds capacity.
+    pub fn precheck(self: &Arc<Self>, ticket: &Ticket) -> Result<(), Rejection> {
+        self.with_state(|inner, now| inner.state.precheck(ticket, now))
+    }
+
     /// Admit a new invocation. `Err` is an immediate refusal (nothing was
     /// queued); `Ok` may already be granted ([`Pending::is_waiting`]).
     pub fn admit(self: &Arc<Self>, ticket: Ticket) -> Result<Pending, Rejection> {

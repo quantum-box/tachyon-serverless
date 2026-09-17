@@ -111,7 +111,9 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/dead-letters/{dead_letter_id}/redrive",
             post(dead_letters::redrive),
-        );
+        )
+        // The tenant's budget (PLT-4643), tenant-scoped like usage.
+        .route("/v1/budget", get(handlers::budget_report));
 
     let management = Router::new()
         .route(

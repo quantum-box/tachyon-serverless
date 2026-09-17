@@ -41,7 +41,8 @@ impl ExitCode {
             | ErrorCode::CapacityExceeded
             | ErrorCode::RevisionNotReady
             | ErrorCode::FunctionDeleted
-            | ErrorCode::Gone => Self::Api,
+            | ErrorCode::Gone
+            | ErrorCode::BudgetExhausted => Self::Api,
             ErrorCode::UserError
             | ErrorCode::Crash
             | ErrorCode::InitError
@@ -53,7 +54,8 @@ impl ExitCode {
             | ErrorCode::ConfigUnavailable
             | ErrorCode::ControlPlaneUnavailable
             | ErrorCode::AsyncUnavailable
-            | ErrorCode::UsageJournalFull => Self::Platform,
+            | ErrorCode::UsageJournalFull
+            | ErrorCode::BudgetUnavailable => Self::Platform,
         }
     }
 

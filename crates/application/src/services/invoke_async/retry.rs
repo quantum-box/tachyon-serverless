@@ -303,7 +303,11 @@ pub fn classify(error: &InvocationError) -> Disposition {
         | RETRY_BUDGET_EXHAUSTED
         | INPUT_UNAVAILABLE
         | crate::error::USAGE_JOURNAL_FULL
-        | crate::error::USAGE_JOURNAL_UNAVAILABLE => return Disposition::Defer,
+        | crate::error::USAGE_JOURNAL_UNAVAILABLE
+        // Budget (PLT-4643): refused before anything started.
+        | crate::budget::BUDGET_EXHAUSTED
+        | crate::budget::BUDGET_UNKNOWN
+        | crate::budget::BUDGET_STORE_UNAVAILABLE => return Disposition::Defer,
         _ => {}
     }
     if let Some(kind) = ControlError::from_error_type(t) {

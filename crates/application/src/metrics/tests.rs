@@ -295,6 +295,28 @@ fn input(s: &mut AdmissionState, limits: SeriesLimits, events: &Metrics) -> Metr
             d.reaper("abandoned", 2);
             d.snapshot()
         }),
+        budget: Some(crate::budget::BudgetMetrics {
+            enabled: true,
+            store_healthy: true,
+            collector_stalled: false,
+            active_reservations: 2,
+            finished_unsettled: 1,
+            oldest_unsettled_age_seconds: Some(3),
+            tenants: vec![(
+                tenant(1).to_string(),
+                crate::budget::ScopeTotals {
+                    reserved_micros: 700,
+                    settled_micros: 200,
+                    held_micros: 50,
+                    ..Default::default()
+                },
+                Some(1_000),
+            )],
+            counters: crate::budget::BudgetCounters {
+                reservations: 5,
+                ..Default::default()
+            },
+        }),
     }
 }
 

@@ -832,6 +832,10 @@ pub struct GatewayConfig {
     /// the reaper. Used only where asynchronous invoke is available.
     #[serde(default)]
     pub async_dispatch: crate::services::invoke_async::AsyncDispatchConfig,
+    /// `[budget]`: tenant / function budgets, reservation at admission,
+    /// alerts and hard limits (PLT-4643). Off by default.
+    #[serde(default)]
+    pub budget: crate::budget::BudgetConfig,
 }
 
 /// `[metrics]` (PLT-4637, docs/metrics.md). `GET /metrics` exposes every
@@ -935,6 +939,7 @@ impl GatewayConfig {
         if let Some(k) = self.triggers.secret_key_file.as_mut() {
             abs(base, k);
         }
+        self.budget.absolutize(base);
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
@@ -1124,6 +1129,7 @@ impl GatewayConfig {
         self.usage
             .validate(self.profile)
             .map_err(ConfigError::Invalid)?;
+        self.budget.validate().map_err(ConfigError::Invalid)?;
         if self.capacity.max_concurrency == 0 {
             return Err(ConfigError::Invalid(
                 "capacity.max_concurrency must be >= 1".into(),

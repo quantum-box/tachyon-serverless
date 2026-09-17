@@ -1124,3 +1124,73 @@ async fn a_redrive_creates_an_audited_invocation_on_the_pinned_revision_and_inpu
     assert_eq!(overridden.invocation.revision_id, rev1.id);
     assert!(overridden.redrive.revision_overridden);
 }
+
+/// Budget (PLT-4643): every asynchronous run reserves its maximum charge at
+/// the same admission point as a synchronous invoke, and settles from the
+/// usage ledger; a tenant whose hard limit does not admit the run is deferred
+/// without counting an attempt and without booting anything.
+#[tokio::test]
+async fn asynchronous_runs_reserve_budget_and_a_refused_run_is_deferred() {
+    let env = Env::new(Knobs {
+        extra: format!(
+            "[budget]\nenabled = true\n\n[[budget.tenants]]\ntenant_id = \"{TENANT_A}\"\nhard_limit_micros = 1000000000\n\n\
+             [[budget.tenants]]\ntenant_id = \"{TENANT_B}\"\nhard_limit_micros = 0\n"
+        ),
+        ..Knobs::default()
+    });
+    let app = env.start().await;
+    let (fa, _) = deploy(&app, TENANT_A, "budgeted").await;
+    let (fb, _) = deploy(&app, TENANT_B, "broke").await;
+
+    let ida = accept(&app, &fa, serde_json::json!({})).await;
+    assert_eq!(
+        pump(&app).await.unwrap(),
+        HandleOutcome::Completed {
+            status: "succeeded"
+        }
+    );
+    let period = crate::budget::period_of(&env.clock.now());
+    let rows = app
+        .budget
+        .store()
+        .reservations_of(TENANT_A, &period)
+        .unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].reservation_id.starts_with(&format!("{ida}:run-0:")),
+        "{rows:?}"
+    );
+    assert_eq!(rows[0].attempts.len(), 1);
+    app.collect_usage().unwrap();
+    let row = app
+        .budget
+        .store()
+        .get(&rows[0].reservation_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.state, crate::budget::ReservationState::Settled);
+    assert!(row.settled_micros > 0 && row.settled_micros < row.reserved_micros);
+
+    let created = env.fake.created().len();
+    let idb = accept(&app, &fb, serde_json::json!({})).await;
+    let outcome = pump(&app).await.unwrap();
+    assert!(
+        matches!(outcome, HandleOutcome::Rescheduled { counted: false, .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(env.fake.created().len(), created, "nothing booted");
+    let record = dispatch_repo(&app).dispatch_record(&idb).unwrap().unwrap();
+    assert_eq!((record.attempts, record.deferrals), (0, 1));
+    assert_eq!(
+        record.last_error.unwrap().error_type,
+        crate::budget::BUDGET_EXHAUSTED
+    );
+    assert!(
+        app.budget
+            .store()
+            .reservations_of(TENANT_B, &period)
+            .unwrap()
+            .is_empty()
+    );
+    app.budget.store().verify_totals().unwrap();
+}

@@ -1,6 +1,7 @@
 //! Command implementations. Each module takes an [`ApiClient`] and a
 //! [`Printer`] and returns a [`CliError`] whose exit code the binary uses.
 
+pub mod budget;
 pub mod dead_letters;
 pub mod deploy;
 pub mod dev;
@@ -143,6 +144,10 @@ pub async fn dispatch(cli: Cli, p: &mut Printer<'_>) -> Result<(), CliError> {
         Command::Usage(args) => {
             let client = ApiClient::new(cfg)?;
             usage::usage(&client, &args, p).await
+        }
+        Command::Budget(args) => {
+            let client = ApiClient::new(cfg)?;
+            budget::budget(&client, &args, p).await
         }
         Command::Dev(args) => dev::run(&args, &cfg, p).await,
         Command::DeadLetters { command } => {

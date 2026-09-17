@@ -9,6 +9,7 @@
 pub mod app;
 pub mod authz;
 pub mod bridge_session;
+pub mod budget;
 pub mod config;
 pub mod control;
 pub mod durable;

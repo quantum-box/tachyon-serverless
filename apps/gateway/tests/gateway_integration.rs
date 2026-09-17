@@ -2256,3 +2256,212 @@ async fn dead_letters_and_redrive_are_authorized_audited_and_tenant_scoped() {
     let foreign_new = get(r, &format!("/v1/invocations/{new_id}"), TOKEN_B).await;
     assert_eq!(foreign_new.status, StatusCode::NOT_FOUND);
 }
+
+/// PLT-4643: a data plane enforces the budgets its control plane delivered:
+/// a function's zero hard limit answers 429 `budget_exhausted` (reason
+/// `budget`) before anything boots while its sibling runs, `GET /v1/budget`
+/// shows the caller's tenant only with the delivered limits, `/readyz` carries
+/// the budget block, an unavailable store answers 503 with its own error type,
+/// and a budget removed from the control plane refuses the tenant 503
+/// `Host.BudgetUnknown` (fail closed) once delivered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_data_plane_enforces_delivered_budgets_and_reports_them_per_tenant() {
+    use tachyon_serverless_application::GatewayRole;
+    use tachyon_serverless_application::config::ConfigToken;
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("budgets.toml");
+    let tenant_a = |extra: &str| {
+        format!(
+            "[[tenants]]\ntenant_id = \"{TENANT_A}\"\nsoft_limit_micros = 1\nalert_thresholds_percent = [100]\nhard_limit_micros = 50000000\n{extra}"
+        )
+    };
+    std::fs::write(&file, tenant_a("")).unwrap();
+    let mut mgmt_cfg = config(dir.path());
+    mgmt_cfg.control_plane.internal_token = Some(ConfigToken::new(INTERNAL));
+    mgmt_cfg.dispatcher.instance = Some("management".into());
+    mgmt_cfg.budget.file = Some(file.clone());
+    let mgmt = Application::bootstrap_with(
+        mgmt_cfg,
+        Arc::new(FakeExecutionProvider::new()),
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let mgmt_router = router(mgmt);
+    let (fa, _) = deploy(&mgmt_router, "budget-open").await;
+    let (fa0, _) = deploy(&mgmt_router, "budget-zero").await;
+    std::fs::write(
+        &file,
+        tenant_a(&format!(
+            "\n[[tenants.functions]]\nfunction_id = \"{fa0}\"\nhard_limit_micros = 0\n"
+        )),
+    )
+    .unwrap();
+    let delivery = get(&mgmt_router, "/v1/internal/config?since=0", INTERNAL)
+        .await
+        .json();
+    let budgets = delivery["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["key"]["kind"] == "budget" && !e["value"].is_null())
+        .count();
+    assert_eq!(budgets, 1, "one budget entry, for tenant A only");
+
+    let mut dp_cfg = config(dir.path());
+    dp_cfg.identity.tokens.clear();
+    dp_cfg.dispatcher.instance = Some("data-plane".into());
+    dp_cfg.control_plane.role = GatewayRole::DataPlane;
+    dp_cfg.control_plane.url = Some("http://management.invalid".into());
+    dp_cfg.control_plane.internal_token = Some(ConfigToken::new(INTERNAL));
+    dp_cfg.budget.enabled = true;
+    let dp_fake = Arc::new(FakeExecutionProvider::new());
+    dp_fake.set_default_script(Some(FakeGuestScript::Echo));
+    let dp = Application::bootstrap_with(
+        dp_cfg,
+        dp_fake.clone(),
+        BootstrapOptions {
+            persist_state: true,
+            config_source: Some(Arc::new(RouterSource {
+                router: mgmt_router.clone(),
+                token: INTERNAL,
+                down: std::sync::atomic::AtomicBool::new(false),
+            })),
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    dp.refresh_config().await.unwrap();
+    let dp_router = router(dp.clone());
+
+    let refused = post_json(
+        &dp_router,
+        &format!("/v1/functions/{fa0}/invoke"),
+        TOKEN_A,
+        serde_json::json!({"x": 1}),
+    )
+    .await;
+    assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS);
+    let e = &refused.json()["error"];
+    assert_eq!(e["code"], "budget_exhausted");
+    assert_eq!(e["reason"], "budget");
+    assert_eq!(e["error_type"], "Host.BudgetExhausted");
+    assert!(dp_fake.created().is_empty(), "nothing booted");
+
+    let ok = post_json(
+        &dp_router,
+        &format!("/v1/functions/{fa}/invoke"),
+        TOKEN_A,
+        serde_json::json!({"x": 2}),
+    )
+    .await;
+    assert_eq!(
+        ok.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&ok.body)
+    );
+    dp.collect_usage().unwrap();
+
+    let a = get(&dp_router, "/v1/budget", TOKEN_A).await;
+    assert_eq!(a.status, StatusCode::OK);
+    let aj = a.json();
+    assert_eq!(aj["tenant_id"], TENANT_A);
+    assert_eq!(aj["enabled"], true);
+    assert_eq!(aj["provisional"], true);
+    assert_eq!(aj["billing_enabled"], false);
+    assert_eq!(aj["config_state"], "valid");
+    assert_eq!(aj["tenant"]["hard_limit_micros"], 50_000_000);
+    assert_eq!(aj["tenant"]["settlements"], 1);
+    assert_eq!(aj["tenant"]["reserved_micros"], 0);
+    let settled = aj["tenant"]["settled_micros"].as_u64().unwrap();
+    assert!(settled > 0);
+    assert_eq!(aj["tenant"]["remaining_micros"], 50_000_000 - settled);
+    assert_eq!(aj["tenant"]["alerts_fired"][0]["threshold_percent"], 100);
+    let zero = aj["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["function_id"] == fa0.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(zero["hard_limit_micros"], 0);
+    assert_eq!(zero["refusals"], 1);
+    assert!(!aj["guarantee"].as_array().unwrap().is_empty());
+
+    // Tenant B sees its own (undelivered) budget, nothing of A's.
+    let b = get(&dp_router, "/v1/budget", TOKEN_B).await;
+    assert_eq!(b.status, StatusCode::OK);
+    assert_eq!(b.json()["tenant_id"], TENANT_B);
+    assert_eq!(b.json()["config_state"], "not_delivered");
+    let text = String::from_utf8_lossy(&b.body).to_string();
+    assert!(!text.contains(TENANT_A) && !text.contains(&fa0));
+    assert_eq!(
+        get(&dp_router, "/v1/budget?period=2026-13", TOKEN_A)
+            .await
+            .status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        get(&dp_router, "/v1/budget", TOKEN_A_OP).await.status,
+        StatusCode::FORBIDDEN
+    );
+
+    let ready = call(
+        &dp_router,
+        Request::get("/readyz").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(ready.status, StatusCode::OK);
+    assert_eq!(ready.json()["budget"]["enabled"], true);
+    assert_eq!(ready.json()["budget"]["accepting"], true);
+    assert!(
+        !String::from_utf8_lossy(&ready.body).contains(TENANT_A),
+        "no tenant data on /readyz"
+    );
+
+    // A store that cannot be written: 503 with its own error type, not ready.
+    dp.budget.store().force_unavailable(true);
+    let down = post_json(
+        &dp_router,
+        &format!("/v1/functions/{fa}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(down.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(down.json()["error"]["code"], "budget_unavailable");
+    assert_eq!(
+        down.json()["error"]["error_type"],
+        "Host.BudgetStoreUnavailable"
+    );
+    let not_ready = call(
+        &dp_router,
+        Request::get("/readyz").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(not_ready.status, StatusCode::SERVICE_UNAVAILABLE);
+    dp.budget.store().force_unavailable(false);
+
+    // The control plane stops publishing A's budget: once delivered, A is
+    // refused fail-closed.
+    std::fs::write(&file, "# no tenants\n").unwrap();
+    dp.refresh_config().await.unwrap();
+    let unknown = post_json(
+        &dp_router,
+        &format!("/v1/functions/{fa}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(unknown.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(unknown.json()["error"]["reason"], "budget");
+    assert_eq!(unknown.json()["error"]["error_type"], "Host.BudgetUnknown");
+    assert_eq!(
+        get(&dp_router, "/v1/budget", TOKEN_A).await.json()["config_state"],
+        "not_delivered"
+    );
+}

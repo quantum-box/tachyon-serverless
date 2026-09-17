@@ -483,6 +483,21 @@ impl UsageJournal {
         })
     }
 
+    /// The highest sequence ever appended (or the cursor, if higher): every
+    /// event appended before this call has a sequence at or below it
+    /// (PLT-4643 settles a run once the cursor passed this mark).
+    pub fn head_seq(&self) -> Result<u64, String> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT MAX(COALESCE((SELECT MAX(seq) FROM function_usage_journal), 0), cursor_seq) \
+                 FROM function_usage_journal_state WHERE id = 1",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+        })
+        .map(|v| v.max(0) as u64)
+    }
+
     /// Events of `tenant` the journal refused (full or unavailable).
     pub fn unjournaled_for(&self, tenant: &str) -> u64 {
         let in_memory = self
