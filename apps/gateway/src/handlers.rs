@@ -547,6 +547,7 @@ fn invocation_response(detail: &InvocationDetail) -> InvocationResponse {
         finished_at: inv.finished_at,
         deadlines: DeadlinesResponse::from(&inv.deadlines),
         attempts,
+        dispatch: None,
     }
 }
 
@@ -1025,7 +1026,9 @@ pub async fn get_invocation(
         .history
         .get_invocation(&ctx.principal, &id)
         .ctx(&ctx.request_id)?;
-    Ok(Json(invocation_response(&detail)))
+    let mut body = invocation_response(&detail);
+    body.dispatch = crate::dead_letters::dispatch_section(&state, &detail);
+    Ok(Json(body))
 }
 
 async fn run_cancel(state: AppState, ctx: Ctx, raw: &str) -> ApiResult<Json<InvocationResponse>> {

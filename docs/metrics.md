@@ -207,6 +207,22 @@ trigger を持つ gateway（`invokeAsync` が有効な `combined`）だけが出
 
 `signature_refused` と `timestamp_refused` の急増は偽造・再送の試行か sender の時計ずれ、`deferred` の継続は outbox の滞留（`tsls_async_outbox_*`）を示す。
 
+### 3.9 非同期 dispatcher・retry・dead letter（PLT-4640）
+
+dispatcher を動かす gateway（`[queue]` と durable ledger があり `[async_dispatch] enabled = true`）だけが出す。label はすべて固定の文字列で、tenant・function・invocation の id は載せない（dead letter の中身は `GET /v1/functions/{id}/dead-letters` で tenant ごとに読む）。counter はプロセスのメモリにあり再起動で 0 に戻る。
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_async_dispatch_deliveries_total` | counter | `outcome` | 処理した配送の結果: `completed`（terminal を確定して ACK）、`rescheduled`（次の試行を確定して ACK）、`dead_lettered`、`skipped_terminal`（terminal の再配送。ACK 喪失・重複）、`skipped_stale`（古い generation）、`skipped_claimed`（他の run が claim 中）、`not_due`（NAK）、`poison`（term）、`failed`（台帳の失敗・failpoint。再配送を待つ）、`lost_claim`（settle の fence に負けた） |
+| `tsls_async_dispatch_queue_operations_total` | counter | `operation`, `result` | `ack` / `nak` / `term` の成否。ACK は必ず台帳の commit の後 |
+| `tsls_async_dispatch_runs_in_flight` | gauge | | この gateway が今処理している配送 |
+| `tsls_async_retries_scheduled_total` | counter | `kind` | 次の generation の event を確定した数: `retry`（`max_attempts` に数える）/ `deferral`（容量・retry budget・停止。数えない） |
+| `tsls_async_dead_letters_total` | counter | `reason` | この gateway が確定した dead letter（`non_retryable` / `attempts_exhausted` / `expired` / `function_deleted` / `revision_unavailable` / `poison`） |
+| `tsls_async_redrives_total` | counter | | dead letter から作った新しい invocation |
+| `tsls_async_reaper_actions_total` | counter | `action` | reaper が確定したもの: `abandoned`（claim 切れの run を次の試行へ）、`republished`（broker が失った event）、`dead_lettered`、`lost`、`failed` |
+
+見方: `skipped_terminal` が増えるのは ACK の喪失か重複配送で、実行はしていない。`retries_scheduled_total{kind="deferral"}` の増加は容量不足か retry budget の頭打ち、`dead_letters_total{reason="attempts_exhausted"}` の急増は依存先の障害を示す。alert は定義していない。
+
 ## 4. boot identity（再利用の証跡）
 
 - guest bridge は Hello で `/proc/sys/kernel/random/boot_id` を報告し、環境の `BootEvidence.guest_boot_id` に残る（PLT-4630）。attempt の API（`attempts[].boot_evidence`）にも出る。

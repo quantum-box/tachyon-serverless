@@ -18,20 +18,20 @@ use super::{
     live_binding, ts, update_invocation_row,
 };
 
-fn parse_ts(raw: &str) -> Result<Timestamp, RepoError> {
+pub(super) fn parse_ts(raw: &str) -> Result<Timestamp, RepoError> {
     chrono::DateTime::parse_from_rfc3339(raw)
         .map(|t| t.with_timezone(&chrono::Utc))
         .map_err(|e| RepoError::Serialization(format!("timestamp `{raw}`: {e}")))
 }
 
-fn ser<E: std::fmt::Display>(e: E) -> RepoError {
+pub(super) fn ser<E: std::fmt::Display>(e: E) -> RepoError {
     RepoError::Serialization(e.to_string())
 }
 
-const EVENT_COLUMNS: &str = "event_id, tenant_id, topic, payload, created_at, sent_at, \
-     publish_attempts, next_attempt_at, claimed_by, claim_expires_at, last_error, queue_sequence";
+pub(super) const EVENT_COLUMNS: &str = "event_id, tenant_id, topic, payload, created_at, sent_at, \
+     publish_attempts, next_attempt_at, claimed_by, claim_expires_at, last_error, queue_sequence, generation";
 
-type RawEvent = (
+pub(super) type RawEvent = (
     String,
     String,
     String,
@@ -44,9 +44,10 @@ type RawEvent = (
     Option<String>,
     Option<String>,
     Option<i64>,
+    i64,
 );
 
-fn raw_event(r: &Row<'_>) -> rusqlite::Result<RawEvent> {
+pub(super) fn raw_event(r: &Row<'_>) -> rusqlite::Result<RawEvent> {
     Ok((
         r.get(0)?,
         r.get(1)?,
@@ -60,12 +61,26 @@ fn raw_event(r: &Row<'_>) -> rusqlite::Result<RawEvent> {
         r.get(9)?,
         r.get(10)?,
         r.get(11)?,
+        r.get(12)?,
     ))
 }
 
-fn event_of(raw: RawEvent) -> Result<OutboxEvent, RepoError> {
-    let (id, tenant, topic, payload, created, sent, attempts, next, claimed, claim_exp, err, seq) =
-        raw;
+pub(super) fn event_of(raw: RawEvent) -> Result<OutboxEvent, RepoError> {
+    let (
+        id,
+        tenant,
+        topic,
+        payload,
+        created,
+        sent,
+        attempts,
+        next,
+        claimed,
+        claim_exp,
+        err,
+        seq,
+        generation,
+    ) = raw;
     Ok(OutboxEvent {
         event_id: InvocationId::parse(&id).map_err(ser)?,
         tenant_id: TenantId::parse(&tenant).map_err(ser)?,
@@ -79,6 +94,7 @@ fn event_of(raw: RawEvent) -> Result<OutboxEvent, RepoError> {
         claim_expires_at: claim_exp.as_deref().map(parse_ts).transpose()?,
         last_error: err,
         queue_sequence: seq.map(|s| s as u64),
+        generation: generation.max(0) as u64,
     })
 }
 
@@ -96,7 +112,7 @@ fn stats_in(c: &Connection) -> Result<OutboxStats, RepoError> {
     })
 }
 
-fn truncate(s: &str, max: usize) -> &str {
+pub(super) fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {
         return s;
     }
@@ -162,10 +178,23 @@ pub(super) fn accept_in(
     // 3. The invocation, its key, its input, its event.
     insert_invocation_checked(tx, invocation, max, retention)?;
     bind_idempotency(tx, invocation, retention)?;
+    insert_input_row(tx, input, now)?;
+    insert_outbox_row(tx, event)?;
+    Ok(AsyncAcceptOutcome::Accepted)
+}
+
+/// The `invocation_inputs` row of `input` (and, for an object, its
+/// `object_refs` attach), inside an open transaction. The invocation row must
+/// already exist. Also used by a redrive (PLT-4640).
+pub(super) fn insert_input_row(
+    tx: &Connection,
+    input: &AsyncInput,
+    now: Timestamp,
+) -> Result<(), RepoError> {
     let (storage, inline, object_id, region) = match &input.body {
         AsyncInputBody::Inline(bytes) => ("inline", Some(bytes.as_slice()), None, None),
         AsyncInputBody::Object(object) => {
-            attach_in(tx, object, &invocation.id, now)?;
+            attach_in(tx, object, &input.invocation_id, now)?;
             (
                 "object",
                 None,
@@ -189,9 +218,15 @@ pub(super) fn accept_in(
         region,
         ts(&now)
     ])?;
+    Ok(())
+}
+
+/// A new, unsent outbox row (with its delivery generation, PLT-4640), inside
+/// an open transaction.
+pub(super) fn insert_outbox_row(tx: &Connection, event: &OutboxEvent) -> Result<(), RepoError> {
     tx.prepare_cached(
         "INSERT INTO outbox (event_id, tenant_id, topic, payload, created_at, sent, \
-         publish_attempts, next_attempt_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6)",
+         publish_attempts, next_attempt_at, generation) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7)",
     )?
     .execute(params![
         event.event_id.as_str(),
@@ -199,9 +234,10 @@ pub(super) fn accept_in(
         event.topic,
         event.payload,
         ts(&event.created_at),
-        ts(&event.next_attempt_at)
+        ts(&event.next_attempt_at),
+        big(event.generation, "outbox generation")?
     ])?;
-    Ok(AsyncAcceptOutcome::Accepted)
+    Ok(())
 }
 
 impl AsyncInvocationRepository for SqliteStore {

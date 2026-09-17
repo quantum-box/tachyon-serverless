@@ -80,6 +80,9 @@ pub struct OutboxEvent {
     pub claim_expires_at: Option<Timestamp>,
     pub last_error: Option<String>,
     pub queue_sequence: Option<u64>,
+    /// Delivery generation (PLT-4640): 0 for the acceptance, n after the nth
+    /// retry was scheduled. Part of the queue message id.
+    pub generation: u64,
 }
 
 impl OutboxEvent {
@@ -103,7 +106,23 @@ impl OutboxEvent {
             claim_expires_at: None,
             last_error: None,
             queue_sequence: None,
+            generation: 0,
         }
+    }
+
+    /// The queue message id: the invocation id, suffixed with `.g<n>` from
+    /// the first retry on (a new message, never deduplicated against the
+    /// previous generation).
+    pub fn message_id(&self) -> String {
+        message_id_for(&self.event_id, self.generation)
+    }
+}
+
+/// See [`OutboxEvent::message_id`].
+pub fn message_id_for(event: &InvocationId, generation: u64) -> String {
+    match generation {
+        0 => event.to_string(),
+        n => format!("{event}.g{n}"),
     }
 }
 

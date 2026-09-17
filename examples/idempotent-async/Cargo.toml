@@ -1,0 +1,22 @@
+[package]
+name = "example-idempotent-async"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+# Example (PLT-4640): an asynchronous handler whose external side effect is keyed by a business
+# idempotency key, so the at-least-once execution of asynchronous invocations is harmless.
+# Payload {"order_id": "...", "fail_first": N, "response_bytes": M} -> {"order_id", "applied",
+# "execution"}. The side effect is a file created exclusively under $IDEMPOTENT_ASYNC_DIR
+# (effects/<order_id>.json); every execution is appended to executions.log. The first N
+# executions of an order fail with Downstream.Unavailable (a retryable handler error);
+# response_bytes > 0 answers with that many bytes (for a response-too-large, non-retryable
+# failure). No network access.
+description = "Tachyon Serverless example: an asynchronous handler with a business idempotency key (at-least-once made harmless)."
+
+[dependencies]
+tachyon-serverless-sdk = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }

@@ -98,11 +98,14 @@ fn settle_invocation(
     now: Timestamp,
     report: &mut ReclaimReport,
 ) -> Result<(), RepoError> {
-    if restart::settle_invocation_with(&mut inv, cause, now) {
+    // An asynchronous invocation keeps going after its dispatcher is gone
+    // (PLT-4640): only its attempts are settled here.
+    if !restart::survives_dispatcher(&inv) && restart::settle_invocation_with(&mut inv, cause, now)
+    {
         update_invocation_row(tx, &inv, retention)?;
         report.invocations += 1;
     }
-    let unknown = restart::is_outcome_unknown(&inv);
+    let unknown = restart::attempts_unknown(&inv);
     let attempts: Vec<InvocationAttempt> = bodies(
         tx,
         "SELECT body FROM attempts WHERE invocation_id = ?1 AND terminal = 0 ORDER BY id",

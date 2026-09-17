@@ -26,6 +26,7 @@ use tachyon_serverless_domain::{
 };
 
 pub mod config;
+pub mod dispatch;
 pub mod guard;
 mod legacy;
 mod logs;
@@ -44,6 +45,11 @@ mod object_contract_tests;
 
 pub use config::{
     ConfigObservation, ConfigPublicationRepository, ConfigRows, StampedConfig, StampedEntry,
+};
+pub use dispatch::{
+    AsyncDispatchRepository, ClaimOutcome, ClaimRequest, DeadLetter, DeadLetterReason,
+    DeadLetterStatus, DispatchCandidate, DispatchFence, DispatchRecord, DispatchSettle,
+    DispatchState, Redrive, RedriveWrite, SettleOutcome,
 };
 pub use memory::InMemoryStore;
 pub use objects::{CollectDecision, CollectReason, ObjectReferenceRepository};

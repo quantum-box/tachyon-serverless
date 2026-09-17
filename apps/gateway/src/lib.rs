@@ -14,6 +14,7 @@
 //!   `/http/` and `/http/{*path}` for any method.
 
 pub mod config_client;
+pub mod dead_letters;
 pub mod durable;
 pub mod error;
 pub mod handlers;
@@ -96,7 +97,21 @@ pub fn router(state: AppState) -> Router {
         )
         // This gateway's usage ledger (PLT-4642), tenant-scoped like
         // invocation reads.
-        .route("/v1/usage", get(handlers::usage_report));
+        .route("/v1/usage", get(handlers::usage_report))
+        // Dead letters and redrive (PLT-4640): this cell's ledger.
+        // `POST /v1/dead-letters/{id}:redrive` lands on the GET route's path.
+        .route(
+            "/v1/functions/{function_id}/dead-letters",
+            get(dead_letters::list_dead_letters),
+        )
+        .route(
+            "/v1/dead-letters/{dead_letter_id}",
+            get(dead_letters::get_dead_letter).post(dead_letters::redrive_colon),
+        )
+        .route(
+            "/v1/dead-letters/{dead_letter_id}/redrive",
+            post(dead_letters::redrive),
+        );
 
     let management = Router::new()
         .route(
@@ -335,6 +350,57 @@ pub async fn serve(
                 }
             })
         });
+    // The asynchronous dispatcher (PLT-4640): `[async_dispatch] workers`
+    // loops, each pulling one event at a time (batch = 1), and the reaper.
+    // They hold only the dispatcher, never the application; a panic in one
+    // delivery is caught and the loop continues (the message is redelivered
+    // and settles on the ledger).
+    let mut async_tasks = Vec::new();
+    if let Some(dispatcher) = app.async_dispatcher.clone() {
+        let workers = dispatcher
+            .config()
+            .workers_for(app.config.capacity.max_concurrency);
+        {
+            let d = dispatcher.clone();
+            async_tasks.push(tokio::spawn(async move {
+                while let Err(e) = d.ensure_consumer().await {
+                    tracing::warn!(error = %e, "async dispatch: creating the consumer failed; retrying");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }));
+        }
+        tracing::info!(
+            workers,
+            owner = dispatcher.owner(),
+            "asynchronous dispatcher started"
+        );
+        for _ in 0..workers {
+            let d = dispatcher.clone();
+            async_tasks.push(tokio::spawn(async move {
+                use futures::FutureExt;
+                while !d.is_stopping() {
+                    let pass = std::panic::AssertUnwindSafe(d.run_once())
+                        .catch_unwind()
+                        .await;
+                    if pass.is_err() {
+                        tracing::error!("async dispatch: a delivery panicked; continuing");
+                    }
+                }
+            }));
+        }
+        let d = dispatcher.clone();
+        async_tasks.push(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(d.config().reaper_interval());
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                if d.is_stopping() {
+                    return;
+                }
+                let _ = d.reap().await;
+            }
+        }));
+    }
     // Inline invocation outputs past their retention become digests
     // (`[store] output_retention_seconds`), and idempotency keys past theirs
     // are purged (`[store] idempotency_retention_seconds`).
@@ -423,7 +489,15 @@ pub async fn serve(
             if let Some(service) = &draining.invoke_async {
                 service.stop_accepting();
             }
+            // No new deliveries; runs in flight end as a retryable shutdown
+            // and settle their next try before the process goes (PLT-4640).
+            if let Some(dispatcher) = &draining.async_dispatcher {
+                dispatcher.stop();
+            }
             draining.invoke.shutdown_all(Duration::from_secs(10)).await;
+            if let Some(dispatcher) = &draining.async_dispatcher {
+                dispatcher.wait_idle(Duration::from_secs(10)).await;
+            }
             // A pooled environment must never outlive this process: its
             // bridge session dies with us and nothing could reclaim it.
             let swept = draining.drain_pool().await;
@@ -461,6 +535,9 @@ pub async fn serve(
     }
     if let Some(triggers) = &app.triggers {
         triggers.release_scheduler();
+    }
+    for task in async_tasks {
+        task.abort();
     }
     // Nothing of this process is in flight any more: another gateway on the
     // same data_dir may take over whatever is left at once.

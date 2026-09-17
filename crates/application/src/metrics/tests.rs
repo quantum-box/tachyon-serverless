@@ -281,6 +281,20 @@ fn input(s: &mut AdmissionState, limits: SeriesLimits, events: &Metrics) -> Metr
             ledger_duplicates_ignored: Some(2),
         }),
         triggers: None,
+        dispatch: Some({
+            let d = crate::metrics::dispatch::AsyncDispatchMetrics::default();
+            d.delivery("completed");
+            d.delivery("completed");
+            d.delivery("poison");
+            d.queue_operation("ack", true);
+            d.queue_operation("ack", false);
+            d.retry_scheduled(true);
+            d.retry_scheduled(false);
+            d.dead_letter("attempts_exhausted");
+            d.redrive();
+            d.reaper("abandoned", 2);
+            d.snapshot()
+        }),
     }
 }
 
@@ -502,6 +516,49 @@ fn the_exposition_is_well_formed_and_carries_admission_attempts_and_host_usage()
     );
     assert_eq!(
         x.get("tsls_usage_ledger_duplicates_ignored_total", &[]),
+        Some(2.0)
+    );
+    assert_eq!(
+        x.get(
+            "tsls_async_dispatch_deliveries_total",
+            &[("outcome", "completed")]
+        ),
+        Some(2.0)
+    );
+    assert_eq!(
+        x.get(
+            "tsls_async_dispatch_deliveries_total",
+            &[("outcome", "lost_claim")]
+        ),
+        Some(0.0)
+    );
+    assert_eq!(
+        x.get(
+            "tsls_async_dispatch_queue_operations_total",
+            &[("operation", "ack"), ("result", "error")]
+        ),
+        Some(1.0)
+    );
+    assert_eq!(
+        x.get(
+            "tsls_async_retries_scheduled_total",
+            &[("kind", "deferral")]
+        ),
+        Some(1.0)
+    );
+    assert_eq!(
+        x.get(
+            "tsls_async_dead_letters_total",
+            &[("reason", "attempts_exhausted")]
+        ),
+        Some(1.0)
+    );
+    assert_eq!(x.get("tsls_async_redrives_total", &[]), Some(1.0));
+    assert_eq!(
+        x.get(
+            "tsls_async_reaper_actions_total",
+            &[("action", "abandoned")]
+        ),
         Some(2.0)
     );
     // Histogram buckets are cumulative and end at the count.

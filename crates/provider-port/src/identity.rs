@@ -14,6 +14,9 @@ pub enum Role {
     /// Platform operator: provider status plus own-tenant function, revision
     /// and alias metadata, read-only (docs/threat-model.md section 7).
     Operator,
+    /// Re-submit dead-lettered asynchronous invocations of the tenant
+    /// (PLT-4640). Only together with `Invoke`: a redrive is a new invocation.
+    Redrive,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

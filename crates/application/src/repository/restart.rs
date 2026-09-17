@@ -132,6 +132,21 @@ pub fn settle_lease(lease: &mut ExecutionLease, now: Timestamp) -> bool {
     lease.released_at.is_none() && lease.release(now).is_ok()
 }
 
+/// An asynchronous invocation outlives the dispatcher that runs it
+/// (PLT-4640): its input and its dispatch state are durable, and the next run
+/// is decided by the dispatch row (`async_dispatch`), whose claim simply
+/// expires. A reclaim or a restart therefore settles only its attempts, never
+/// the invocation itself.
+pub fn survives_dispatcher(inv: &Invocation) -> bool {
+    inv.mode == tachyon_serverless_domain::InvocationMode::Async
+}
+
+/// Whether the non-terminal attempts of `inv` are settled as outcome unknown:
+/// the invocation was, or still is (an asynchronous one), dispatched.
+pub fn attempts_unknown(inv: &Invocation) -> bool {
+    is_outcome_unknown(inv) || matches!(inv.status, InvocationStatus::Running)
+}
+
 pub fn is_outcome_unknown(inv: &Invocation) -> bool {
     matches!(inv.status, InvocationStatus::OutcomeUnknown { .. })
 }

@@ -18,14 +18,15 @@ use crate::error::AppError;
 use crate::local_ports::{
     InMemoryUsageSink, LocalArtifactStore, StaticIdentityProvider, StaticSecretProvider,
 };
-use crate::repository::AsyncInvocationRepository;
 use crate::repository::HeartbeatOutcome;
+use crate::repository::{AsyncDispatchRepository, AsyncInvocationRepository};
 use crate::repository::{InMemoryStore, Repositories, SqliteOptions, SqliteStore, StateStore};
 use crate::services::admission::{AdmissionController, AdmissionSettings, ScaleDefaults};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::invoke_async::{
-    AcceptedEvent, AsyncInvokeService, AsyncInvokeServiceDeps, AsyncRefusal, OutboxPublisher,
-    PublishReport, QueueHealth,
+    AcceptedEvent, AsyncDispatcher, AsyncDispatcherDeps, AsyncInvokeService,
+    AsyncInvokeServiceDeps, AsyncRefusal, DeadLetterService, HandleOutcome, OutboxPublisher,
+    PublishReport, QueueHealth, ReapReport,
 };
 use crate::services::{
     AliasService, ArtifactService, Dispatcher, EnvironmentPool, FunctionService, HistoryService,
@@ -105,6 +106,17 @@ pub struct Application {
     pub triggers: Option<Arc<crate::services::triggers::TriggerService>>,
     /// Test-only failpoints (inert unless built with `failpoints`).
     pub failpoints: Arc<crate::failpoints::Failpoints>,
+    /// The asynchronous dispatcher: consumer, retries, dead letters and the
+    /// reaper (PLT-4640). `None` without asynchronous invoke or with
+    /// `[async_dispatch] enabled = false`.
+    pub async_dispatcher: Option<Arc<AsyncDispatcher>>,
+    /// Dead letters and redrive (PLT-4640). `None` without asynchronous invoke.
+    pub dead_letters: Option<Arc<DeadLetterService>>,
+    /// The durable ledger's dispatch side (PLT-4640). `None` when the ledger
+    /// is volatile.
+    pub dispatch_ledger: Option<Arc<dyn AsyncDispatchRepository>>,
+    /// Dispatcher and redrive counters for `GET /metrics` (PLT-4640).
+    pub dispatch_metrics: Option<Arc<crate::metrics::dispatch::AsyncDispatchMetrics>>,
 }
 
 impl std::fmt::Debug for Application {
@@ -467,6 +479,12 @@ impl Application {
         let async_ledger: Option<Arc<dyn AsyncInvocationRepository>> = durable_ledger
             .clone()
             .map(|l| l as Arc<dyn AsyncInvocationRepository>);
+        let dispatch_ledger: Option<Arc<dyn AsyncDispatchRepository>> = durable_ledger
+            .clone()
+            .map(|l| l as Arc<dyn AsyncDispatchRepository>);
+        let mut async_dispatcher = None;
+        let mut dead_letters = None;
+        let mut dispatch_metrics = None;
         let (invoke_async, outbox) = match (&durable.queue, &async_ledger) {
             (Some(queue), Some(ledger)) => {
                 let health = Arc::new(QueueHealth::default());
@@ -497,9 +515,46 @@ impl Application {
                     clock.clone(),
                     config.invoke_async.clone(),
                     failpoints.clone(),
-                    health,
-                    wake,
+                    health.clone(),
+                    wake.clone(),
                 ));
+                // PLT-4640: the consumer and dead letters on the same ledger.
+                if let Some(dispatch) = &dispatch_ledger {
+                    let counters =
+                        Arc::new(crate::metrics::dispatch::AsyncDispatchMetrics::default());
+                    dispatch_metrics = Some(counters.clone());
+                    dead_letters = Some(Arc::new(DeadLetterService::new(
+                        dispatch.clone(),
+                        ledger.clone(),
+                        store.clone(),
+                        invoke_gate.clone(),
+                        clock.clone(),
+                        ids.clone(),
+                        config.invoke_async.clone(),
+                        health.clone(),
+                        wake.clone(),
+                        counters.clone(),
+                    )));
+                    if config.async_dispatch.enabled {
+                        async_dispatcher = Some(AsyncDispatcher::new(AsyncDispatcherDeps {
+                            ledger: ledger.clone(),
+                            dispatch: dispatch.clone(),
+                            invocations: store.clone(),
+                            objects: durable.objects.clone(),
+                            queue: queue.clone(),
+                            invoke: invoke.clone(),
+                            gate: invoke_gate.clone(),
+                            clock: clock.clone(),
+                            ids: ids.clone(),
+                            owner: dispatcher.id().to_string(),
+                            config: config.async_dispatch.clone(),
+                            failpoints: failpoints.clone(),
+                            publisher_wake: wake.clone(),
+                            jitter: Arc::new(crate::services::invoke_async::retry::system_jitter),
+                            metrics: counters.clone(),
+                        })?);
+                    }
+                }
                 (Some(service), Some(publisher))
             }
             (Some(_), None) => {
@@ -619,6 +674,10 @@ impl Application {
             outbox,
             triggers,
             failpoints,
+            async_dispatcher,
+            dead_letters,
+            dispatch_ledger,
+            dispatch_metrics,
         }))
     }
 
@@ -680,6 +739,18 @@ impl Application {
     ) -> Option<crate::services::triggers::SchedulerReport> {
         let triggers = self.triggers.as_ref()?;
         Some(triggers.run_scheduler_once().await)
+    }
+
+    /// Pull and handle at most one asynchronous event (PLT-4640). `None`
+    /// without a dispatcher or when nothing arrived. The gateway runs this in
+    /// `[async_dispatch] workers` loops; tests call it directly.
+    pub async fn dispatch_async_once(&self) -> Option<HandleOutcome> {
+        self.async_dispatcher.as_ref()?.run_once().await
+    }
+
+    /// One reaper pass of the asynchronous dispatcher (PLT-4640).
+    pub async fn reap_async(&self) -> Option<ReapReport> {
+        Some(self.async_dispatcher.as_ref()?.reap().await)
     }
 
     /// Resolve a delivered asynchronous invoke event against the ledger
@@ -819,6 +890,7 @@ impl Application {
             outbox,
             usage: Some(self.usage_metrics()),
             triggers: self.triggers.as_ref().map(|t| t.metrics().snapshot()),
+            dispatch: self.dispatch_metrics.as_ref().map(|m| m.snapshot()),
         })
     }
 

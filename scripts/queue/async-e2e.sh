@@ -168,6 +168,11 @@ claim_ttl_seconds = 3
 retry_initial_ms = 200
 retry_max_ms = 1000
 publish_interval_ms = 100
+
+# This script checks what reaches JetStream, so nothing may consume it: the asynchronous
+# dispatcher (PLT-4640) is off here and exercised by scripts/queue/async-dispatch-e2e.sh.
+[async_dispatch]
+enabled = false
 EOF
 
 # ---------------------------------------------------------------------------
