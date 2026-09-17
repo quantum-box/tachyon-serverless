@@ -1,0 +1,22 @@
+{"name":"setup.a_handler_running","ok":true,"detail":"claimed_by=dsp_01m2qkhrrs475czkvc5fybf0x7 a=dsp_01m2qkhrrs475czkvc5fybf0x7"}
+{"name":"takeover.b_completed_the_invocation","ok":true,"detail":"status=succeeded attempts=outcome_unknown,succeeded dispatch={\"state\":\"done\",\"attempts\":2,\"generation\":1}"}
+{"name":"fencing.late_settle_does_not_overwrite","ok":true,"detail":"invocation succeeded:1:2026-09-17T11:56:00.340143000Z:1013 -> succeeded:1:2026-09-17T11:56:00.340143000Z:1013; attempts att_01m2qkj2mh86t8f09yqq4b0awd:outcome_unknown:1:681,att_01m2qkj7mdjv31sj57xpem90fd:succeeded:1:507 -> att_01m2qkj2mh86t8f09yqq4b0awd:outcome_unknown:1:681,att_01m2qkj7mdjv31sj57xpem90fd:succeeded:1:507"}
+{"name":"fencing.side_effect_once","ok":true,"detail":"applied=1 skipped=0"}
+{"name":"fencing.one_terminal_no_dead_letter","ok":true,"detail":"dead_letters=0 succeeded_attempts=1"}
+{"name":"fencing.a_is_fenced","ok":true,"detail":"a=dsp_01m2qkhrrs475czkvc5fybf0x7"}
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=1/1"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=3 refused=0"}
+{"name":"cv.accepted_never_lost","ok":true,"detail":"accepted=7 missing_rows=0"}
+{"name":"cv.accepted_all_terminal","ok":true,"detail":"accepted=7 not_terminal=0"}
+{"name":"cv.outcome_per_policy","ok":true,"detail":"unexpected_outcomes=0 expected_failures=0"}
+{"name":"cv.one_outcome_per_invocation","ok":true,"detail":"invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)"}
+{"name":"cv.side_effect_exactly_once","ok":true,"detail":"orders_not_applied_exactly_once=0 executions=5"}
+{"name":"cv.outbox_drained","ok":true,"detail":"unsent_outbox_rows=0"}
+{"name":"cv.ledger_all_terminal","ok":true,"detail":"invocations=10 non_terminal=0 by_status=succeeded:10"}
+{"name":"cv.jetstream_drained","ok":true,"detail":"pending=0 ack_pending=0 stream_messages=0 redelivered=0"}
+{"name":"cv.cron_each_time_once","ok":true,"detail":"fires=1 distinct_times=1"}
+{"name":"cv.usage_counted_once","ok":true,"detail":"journal_pending=0 ledger_events=56 distinct=56 attempts_settled_twice=0 duplicates_ignored=0"}
+{"name":"cv.graceful_stop_exit_0","ok":true,"detail":"exit=0"}
+{"name":"cv.no_orphan_processes","ok":true,"detail":"bridge_or_user_processes=0 env_dirs=0"}
+{"name":"cv.no_open_environments","ok":true,"detail":"non_terminal_environment_rows=0"}
+{"name":"cv.no_secret_value_on_disk","ok":true,"detail":"files_containing_the_secret_value=0 (config excluded)"}

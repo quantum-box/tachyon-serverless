@@ -1,0 +1,5 @@
+{"key":"outage.accepted","value":10}
+{"key":"outage.refused","value":20}
+{"key":"outage.outbox_unsent","value":12}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":19}

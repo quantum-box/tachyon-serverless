@@ -1,0 +1,23 @@
+[chaos worker_bridge_kill_async] begin (SIGKILL the runtime bridge of a running async invocation) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.axYign
+[chaos worker_bridge_kill_async]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos worker_bridge_kill_async]   ok   workload.async_accepted accepted=3 refused=0
+[chaos worker_bridge_kill_async] fault injected
+[chaos worker_bridge_kill_async] fault removed
+[chaos worker_bridge_kill_async] converged
+[chaos worker_bridge_kill_async]   ok   retry.async_run_retried_to_success status=succeeded attempts=outcome_unknown/Host.OutcomeUnknown,succeeded/-
+[chaos worker_bridge_kill_async]   ok   retry.side_effect_once executions=2
+[chaos worker_bridge_kill_async]   ok   cleanup.killed_environment_gone env=env_01m2qhezdfsncbcwpscegg7g5g state=failed
+[chaos worker_bridge_kill_async]   ok   cv.accepted_never_lost accepted=4 missing_rows=0
+[chaos worker_bridge_kill_async]   ok   cv.accepted_all_terminal accepted=4 not_terminal=0
+[chaos worker_bridge_kill_async]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos worker_bridge_kill_async]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos worker_bridge_kill_async]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=4
+[chaos worker_bridge_kill_async]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos worker_bridge_kill_async]   ok   cv.ledger_all_terminal invocations=5 non_terminal=0 by_status=succeeded:5
+[chaos worker_bridge_kill_async]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos worker_bridge_kill_async]   FAIL cv.cron_each_time_once fires=0 distinct_times=0
+[chaos worker_bridge_kill_async]   ok   cv.usage_counted_once journal_pending=0 ledger_events=30 distinct=30 attempts_settled_twice=0 duplicates_ignored=0
+[chaos worker_bridge_kill_async]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos worker_bridge_kill_async]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos worker_bridge_kill_async]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos worker_bridge_kill_async]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded)

@@ -1,0 +1,63 @@
+{
+  "generation": 11,
+  "since": 0,
+  "config_ttl_seconds": 60,
+  "auth_lease_seconds": 60,
+  "entries": [
+    {
+      "kind": "grant",
+      "generation": 1,
+      "tombstone": false
+    },
+    {
+      "kind": "grant",
+      "generation": 2,
+      "tombstone": false
+    },
+    {
+      "kind": "tenant",
+      "generation": 3,
+      "tombstone": false
+    },
+    {
+      "kind": "tenant",
+      "generation": 4,
+      "tombstone": false
+    },
+    {
+      "kind": "policy",
+      "generation": 5,
+      "tombstone": false
+    },
+    {
+      "kind": "function",
+      "generation": 6,
+      "tombstone": false
+    },
+    {
+      "kind": "function",
+      "generation": 7,
+      "tombstone": false
+    },
+    {
+      "kind": "route",
+      "generation": 8,
+      "tombstone": false
+    },
+    {
+      "kind": "revision",
+      "generation": 9,
+      "tombstone": false
+    },
+    {
+      "kind": "route",
+      "generation": 10,
+      "tombstone": false
+    },
+    {
+      "kind": "revision",
+      "generation": 11,
+      "tombstone": false
+    }
+  ]
+}

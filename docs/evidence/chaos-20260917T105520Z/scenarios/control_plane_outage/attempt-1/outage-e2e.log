@@ -1,0 +1,65 @@
+[e2e] run 20260917T110654Z-split-process: management http://127.0.0.1:63517, data plane http://127.0.0.1:63523 (process provider, no isolation)
+[e2e] step 1: build
+[e2e]   PASS (25 ms)
+[e2e] step 2: management gateway up (combined)
+[e2e]   PASS (75 ms)
+[e2e] step 3: deploy hello v1 and cpu-burn via management; internal endpoint auth
+[e2e]   PASS (2687 ms)
+[e2e] step 4: data plane gateway up, first delivery
+[e2e]   PASS (74 ms)
+[e2e] step 5: invoke through the data plane (tenant A 200, tenant B 404)
+[e2e]   PASS (920 ms)
+[e2e] step 6: management API on the data plane -> 503 control_plane_unavailable
+[e2e]   PASS (113 ms)
+[e2e] step 7: deploy v2 via management; data plane converges
+[e2e]   PASS (2755 ms)
+[e2e] step 8: a long invocation is running on the data plane
+[e2e]   PASS (1126 ms)
+[e2e] management stopped (exit 0)
+[e2e] step 9: management stops on SIGTERM with exit 0
+[e2e]   PASS (35 ms)
+[e2e] step 10: control plane down: invokes continue within the TTL
+[e2e]   PASS (1176 ms)
+[e2e] step 11: config TTL passed: new invocations 503 Host.ConfigExpired; existing continue
+[e2e]   PASS (6506 ms)
+[e2e] step 12: the invocation running across the outage completed
+[e2e]   PASS (3184 ms)
+[e2e] step 13: auth lease passed: 503 Host.AuthLeaseExpired
+[e2e]   PASS (3078 ms)
+[e2e] step 14: management restarts without tenant B's token
+[e2e]   PASS (506 ms)
+[e2e] step 15: data plane reconnects, converges, B revoked, A invokes
+[e2e]   PASS (1634 ms)
+[e2e] step 16: data plane stops on SIGTERM with exit 0
+[e2e]   PASS (194 ms)
+[e2e] step 17: restarted management stops on SIGTERM with exit 0
+[e2e]   PASS (113 ms)
+[e2e] step 18: no secret or internal credential in logs and evidence
+[e2e]   PASS (171 ms)
+[e2e] step 19: no orphan bridge processes
+[e2e]   PASS (411 ms)
+[e2e] summary: /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a44851e3ab7a7ee14/docs/evidence/chaos-20260917T105520Z/scenarios/control_plane_outage/attempt-1/20260917T110654Z-split-process/summary.json
+
+#    STATUS MS        STEP
+---- ------ --------- ----------------------------------------
+1    PASS   25        build
+2    PASS   75        management gateway up (combined)
+3    PASS   2687      deploy hello v1 and cpu-burn via management; internal endpoint auth
+4    PASS   74        data plane gateway up, first delivery
+5    PASS   920       invoke through the data plane (tenant A 200, tenant B 404)
+6    PASS   113       management API on the data plane -> 503 control_plane_unavailable
+7    PASS   2755      deploy v2 via management; data plane converges
+8    PASS   1126      a long invocation is running on the data plane
+9    PASS   35        management stops on SIGTERM with exit 0
+10   PASS   1176      control plane down: invokes continue within the TTL
+11   PASS   6506      config TTL passed: new invocations 503 Host.ConfigExpired; existing continue
+12   PASS   3184      the invocation running across the outage completed
+13   PASS   3078      auth lease passed: 503 Host.AuthLeaseExpired
+14   PASS   506       management restarts without tenant B's token
+15   PASS   1634      data plane reconnects, converges, B revoked, A invokes
+16   PASS   194       data plane stops on SIGTERM with exit 0
+17   PASS   113       restarted management stops on SIGTERM with exit 0
+18   PASS   171       no secret or internal credential in logs and evidence
+19   PASS   411       no orphan bridge processes
+
+19 steps, 0 failed

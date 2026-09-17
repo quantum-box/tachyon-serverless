@@ -1,0 +1,3 @@
+[chaos control_plane_outage] begin (control plane (management gateway) stopped past config TTL and auth lease (scripts/control-plane/outage-e2e.sh)) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.SsKKAR
+[chaos control_plane_outage]   ok   e2e.exit_0 exit=0
+[chaos control_plane_outage]   ok   e2e.summary_ok passed=19 failed=0 skipped=0

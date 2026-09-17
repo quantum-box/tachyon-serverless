@@ -1,0 +1,27 @@
+[chaos usage_journal_full_and_replay] begin (usage journal bound reached with the collector stopped; SIGKILL; collector SIGKILL after ledger commit; replay) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.sarWDd
+[chaos usage_journal_full_and_replay] fault injected
+[chaos usage_journal_full_and_replay]   ok   bound.refuses_fail_closed ok=10 refused=3 last=503 Host.UsageJournalFull
+[chaos usage_journal_full_and_replay]   ok   bound.refusal_records_nothing invocations before=10 after=10
+[chaos usage_journal_full_and_replay]   ok   bound.async_accepted_durably code=202 invocation=inv_01m2qhdxvb7ek71d4k03y8wmrq
+[chaos usage_journal_full_and_replay]   ok   bound.async_run_deferred_not_executed status=queued deferrals=1 executions=0
+[chaos usage_journal_full_and_replay]   ok   journal.events_retained_ledger_empty journal_pending=50 ledger_events=0
+[chaos usage_journal_full_and_replay] fault removed
+/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a44851e3ab7a7ee14/scripts/chaos/scenarios.sh: line 705: 32404 Killed: 9               env LOG_FORMAT=json TSLS_USAGE_CRASH_POINT=collector.after_ledger_commit "$GATEWAY_BIN" --config "$WORK/gw-a.toml" >> "$WORK/gateway-a.log" 2>&1
+[chaos usage_journal_full_and_replay]   ok   replay.collector_killed_after_ledger_commit exit=137 ledger_events=25 cursor=0
+[chaos usage_journal_full_and_replay] converged
+[chaos usage_journal_full_and_replay]   ok   replay.ledger_counts_each_event_once journal_had=50 ledger_events=50 distinct=50 duplicates_ignored=25
+[chaos usage_journal_full_and_replay]   ok   replay.usage_matches_known_workload report invocations=10 attempts=10 known successful invokes=10
+[chaos usage_journal_full_and_replay]   ok   replay.accepting_again code=200
+[chaos usage_journal_full_and_replay]   ok   cv.accepted_never_lost accepted=1 missing_rows=0
+[chaos usage_journal_full_and_replay]   ok   cv.accepted_all_terminal accepted=1 not_terminal=0
+[chaos usage_journal_full_and_replay]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos usage_journal_full_and_replay]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos usage_journal_full_and_replay]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=1
+[chaos usage_journal_full_and_replay]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos usage_journal_full_and_replay]   ok   cv.ledger_all_terminal invocations=12 non_terminal=0 by_status=succeeded:12
+[chaos usage_journal_full_and_replay]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos usage_journal_full_and_replay]   ok   cv.usage_counted_once journal_pending=0 ledger_events=60 distinct=60 attempts_settled_twice=0 duplicates_ignored=25
+[chaos usage_journal_full_and_replay]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos usage_journal_full_and_replay]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos usage_journal_full_and_replay]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos usage_journal_full_and_replay]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded)

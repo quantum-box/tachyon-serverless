@@ -1,0 +1,4 @@
+{"key":"workload.metered_invocations","value":10}
+{"key":"journal.pending_before_crash","value":50}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":1}

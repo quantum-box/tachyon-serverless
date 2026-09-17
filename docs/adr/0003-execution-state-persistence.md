@@ -257,7 +257,7 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 |---|---|---|
 | A4（再起動後も Ready / Idle の環境が pool に残る） | 未着手（意図的） | 前の incarnation の pool の環境は fence → terminate → `Lost`（`crates/application/tests/pipeline.rs::a_pooled_environment_is_reclaimed_after_a_restart`）。session を失っているので駆動できない |
 | A7 | 未検証 | PLT-4618 から変化なし |
-| 2 つの gateway **プロセス**を HTTP で並べた E2E | 未検証 | 2 つの `Application` を 1 プロセスに置いた統合テストと、store を直接使う OS プロセスのテストだけ。`scripts/e2e/demo.sh` は gateway 1 つ |
+| 2 つの gateway **プロセス**を HTTP で並べた E2E | 実測あり（PLT-4646、単一 host・process provider） | `scripts/chaos/matrix.sh` の `stale_owner_sync_lease` / `stale_owner_async_claim`: A を SIGSTOP → B が lease 期限 + skew の後に回収 → SIGCONT した A の遅れた完了は拒否され台帳は不変、A は fenced（`docs/failure-matrix.md`）。また `db_locked_past_lease` で、store が lease より長く書けないと（他の gateway がいなくても）gateway が自分を fence し再起動が要ることを記録した（同 §6.2） |
 | Firecracker / KVM 上での fence → terminate | 未検証 | fake provider での統合テストだけ |
 | heartbeat の停止・時刻の飛び | 未検証（設計上の残存） | `max_clock_skew_ms` を超える時刻のずれや `lease_ttl + skew` を超える停止では生きている gateway の仕事が回収され、handler は terminate で止まる（台帳は fencing で守られる）。`docs/threat-model.md` §14-8 |
 | `dispatchers` 表の retention | 未着手 | 起動ごとに 1 行増える |

@@ -1,0 +1,6 @@
+{"key":"before.object_files","value":3}
+{"key":"before.unreferenced_objects","value":1}
+{"key":"outage.held_invocation","value":"queued - dispatch={\"state\":null,\"attempts\":null,\"deferrals\":null}"}
+{"key":"after.held_invocation","value":"succeeded - attempts=1 deferrals=13"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":11}

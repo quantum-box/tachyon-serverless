@@ -1,0 +1,16 @@
+{"key":"before.worker_processes","value":2}
+{"key":"before.open_environments","value":2}
+{"key":"before.unreferenced_objects","value":1}
+{"key":"before.unsent_outbox_rows","value":5}
+{"key":"before.scheduler_owner","value":"dsp_01m2qjk1gr39cawr3g344ph5bf"}
+{"key":"before.object_files","value":7}
+{"key":"before.secret_files","value":0}
+{"key":"after_kill.worker_processes","value":0}
+{"key":"after.old_worker_processes","value":0}
+{"key":"after.old_open_environments","value":0}
+{"key":"after.unsent_outbox_rows","value":0}
+{"key":"after.scheduler_owner","value":"dsp_01m2qjkba8vc7sqpq6fx7kjhm5"}
+{"key":"after.unreferenced_objects","value":0}
+{"key":"after.secret_files","value":0}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":15}

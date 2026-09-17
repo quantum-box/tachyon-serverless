@@ -154,8 +154,15 @@ impl std::fmt::Debug for SqliteStore {
     }
 }
 
+/// How long one call waits for the database write lock (SQLite
+/// `busy_timeout`) and, separately, for this store's connection mutex. A
+/// store that stays locked answers `RepoError::Store` (503
+/// `Host.StoreUnavailable`) after at most twice this, whatever the number of
+/// concurrent callers (PLT-4646).
+const STORE_WAIT: Duration = Duration::from_secs(5);
+
 fn configure(conn: &Connection) -> Result<(), RepoError> {
-    conn.busy_timeout(Duration::from_secs(5))?;
+    conn.busy_timeout(STORE_WAIT)?;
     let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
     conn.pragma_update(None, "synchronous", "FULL")?;
     conn.pragma_update(None, "foreign_keys", "OFF")?;
@@ -251,8 +258,20 @@ impl SqliteStore {
         &self.limits
     }
 
+    /// The connection, waiting at most [`STORE_WAIT`]: while another holder
+    /// sits in SQLite's busy timeout (a database locked by another process),
+    /// callers must not queue behind it one busy timeout after the other.
+    fn connection(&self) -> Result<parking_lot::MutexGuard<'_, Connection>, RepoError> {
+        self.conn.try_lock_for(STORE_WAIT).ok_or_else(|| {
+            RepoError::Store(format!(
+                "the store connection stayed busy for {} s (database locked?)",
+                STORE_WAIT.as_secs()
+            ))
+        })
+    }
+
     fn read<R>(&self, f: impl FnOnce(&Connection) -> Result<R, RepoError>) -> Result<R, RepoError> {
-        let conn = self.conn.lock();
+        let conn = self.connection()?;
         f(&conn)
     }
 
@@ -261,7 +280,7 @@ impl SqliteStore {
         &self,
         f: impl FnOnce(&Connection) -> Result<R, RepoError>,
     ) -> Result<R, RepoError> {
-        let mut conn = self.conn.lock();
+        let mut conn = self.connection()?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let out = f(&tx)?;
         tx.commit()?;

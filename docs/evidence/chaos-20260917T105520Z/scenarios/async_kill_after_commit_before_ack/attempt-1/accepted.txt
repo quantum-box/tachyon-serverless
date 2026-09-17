@@ -1,0 +1,10 @@
+pre-i1 inv_01m2qg8d2gdrn7hxnke1y9sr5p inline
+pre-o1 inv_01m2qg8d7hmfjp3t3zmj3we5vk object
+pre-w1 inv_01m2qg8ddgmrxtcf2s49qsd4e6 webhook
+pre-i2 inv_01m2qg8e8vtqmddyx206jezj0e inline
+pre-o2 inv_01m2qg8er69jmnypmtbhakt6th object
+pre-w2 inv_01m2qg8ewg7h570a5ssnhf8x4y webhook
+fp-async_kill_after_commit_before_ack inv_01m2qg8gs2myya9xh4r0eb9e49 inline
+post-i1 inv_01m2qg8kqswr2d1ec3cp65jjcf inline
+post-o1 inv_01m2qg8kzpe98gzw1fxmkax09s object
+post-w1 inv_01m2qg8m73kz3xjxz5hgpe9g12 webhook

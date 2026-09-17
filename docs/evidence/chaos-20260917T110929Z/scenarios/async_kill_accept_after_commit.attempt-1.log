@@ -1,0 +1,28 @@
+[chaos async_kill_accept_after_commit] begin (SIGKILL at failpoint accept.after_commit (before the 202)) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.SyOj7m
+[chaos async_kill_accept_after_commit]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos async_kill_accept_after_commit]   ok   workload.async_accepted accepted=6 refused=0
+[chaos async_kill_accept_after_commit] fault injected
+/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a44851e3ab7a7ee14/scripts/chaos/lib.sh: line 381:  8583 Killed: 9               env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos async_kill_accept_after_commit]   ok   fault.failpoint_killed_gateway failpoint=accept.after_commit first_answer=000
+[chaos async_kill_accept_after_commit]   ok   fault.gateway_died_of_sigkill exit=137
+[chaos async_kill_accept_after_commit]   ok   fault.no_202_before_crash code=000
+[chaos async_kill_accept_after_commit] fault removed
+[chaos async_kill_accept_after_commit]   ok   client.retry_with_key code=202 replayed=true
+[chaos async_kill_accept_after_commit] converged
+[chaos async_kill_accept_after_commit]   ok   converge.invocation_succeeded status=succeeded attempts=1 dispatch_attempts=1 executions=1
+[chaos async_kill_accept_after_commit]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos async_kill_accept_after_commit]   ok   workload.async_accepted accepted=3 refused=0
+[chaos async_kill_accept_after_commit]   ok   cv.accepted_never_lost accepted=10 missing_rows=0
+[chaos async_kill_accept_after_commit]   ok   cv.accepted_all_terminal accepted=10 not_terminal=0
+[chaos async_kill_accept_after_commit]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos async_kill_accept_after_commit]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos async_kill_accept_after_commit]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=7
+[chaos async_kill_accept_after_commit]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos async_kill_accept_after_commit]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos async_kill_accept_after_commit]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos async_kill_accept_after_commit]   ok   cv.cron_each_time_once fires=2 distinct_times=2
+[chaos async_kill_accept_after_commit]   ok   cv.usage_counted_once journal_pending=0 ledger_events=75 distinct=75 attempts_settled_twice=0 duplicates_ignored=0
+[chaos async_kill_accept_after_commit]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos async_kill_accept_after_commit]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos async_kill_accept_after_commit]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos async_kill_accept_after_commit]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded)

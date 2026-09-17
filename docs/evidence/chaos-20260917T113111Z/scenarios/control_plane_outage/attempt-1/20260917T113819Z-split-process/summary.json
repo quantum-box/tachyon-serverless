@@ -1,0 +1,129 @@
+{
+  "run_id": "20260917T113819Z-split-process",
+  "provider": "process",
+  "host": "Darwin 25.6.0 arm64",
+  "config_ttl_seconds": 8,
+  "auth_lease_seconds": 14,
+  "refresh_interval_ms": 500,
+  "generated_at": "2026-09-17T11:38:38Z",
+  "steps": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "duration_ms": 8,
+      "message": ""
+    },
+    {
+      "name": "management gateway up (combined)",
+      "status": "PASS",
+      "duration_ms": 23,
+      "message": ""
+    },
+    {
+      "name": "deploy hello v1 and cpu-burn via management; internal endpoint auth",
+      "status": "PASS",
+      "duration_ms": 1132,
+      "message": ""
+    },
+    {
+      "name": "data plane gateway up, first delivery",
+      "status": "PASS",
+      "duration_ms": 24,
+      "message": ""
+    },
+    {
+      "name": "invoke through the data plane (tenant A 200, tenant B 404)",
+      "status": "PASS",
+      "duration_ms": 651,
+      "message": ""
+    },
+    {
+      "name": "management API on the data plane -> 503 control_plane_unavailable",
+      "status": "PASS",
+      "duration_ms": 35,
+      "message": ""
+    },
+    {
+      "name": "deploy v2 via management; data plane converges",
+      "status": "PASS",
+      "duration_ms": 1134,
+      "message": ""
+    },
+    {
+      "name": "a long invocation is running on the data plane",
+      "status": "PASS",
+      "duration_ms": 730,
+      "message": ""
+    },
+    {
+      "name": "management stops on SIGTERM with exit 0",
+      "status": "PASS",
+      "duration_ms": 8,
+      "message": ""
+    },
+    {
+      "name": "control plane down: invokes continue within the TTL",
+      "status": "PASS",
+      "duration_ms": 353,
+      "message": ""
+    },
+    {
+      "name": "config TTL passed: new invocations 503 Host.ConfigExpired; existing continue",
+      "status": "PASS",
+      "duration_ms": 7865,
+      "message": ""
+    },
+    {
+      "name": "the invocation running across the outage completed",
+      "status": "PASS",
+      "duration_ms": 2399,
+      "message": ""
+    },
+    {
+      "name": "auth lease passed: 503 Host.AuthLeaseExpired",
+      "status": "PASS",
+      "duration_ms": 3217,
+      "message": ""
+    },
+    {
+      "name": "management restarts without tenant B's token",
+      "status": "PASS",
+      "duration_ms": 40,
+      "message": ""
+    },
+    {
+      "name": "data plane reconnects, converges, B revoked, A invokes",
+      "status": "PASS",
+      "duration_ms": 604,
+      "message": ""
+    },
+    {
+      "name": "data plane stops on SIGTERM with exit 0",
+      "status": "PASS",
+      "duration_ms": 17,
+      "message": ""
+    },
+    {
+      "name": "restarted management stops on SIGTERM with exit 0",
+      "status": "PASS",
+      "duration_ms": 17,
+      "message": ""
+    },
+    {
+      "name": "no secret or internal credential in logs and evidence",
+      "status": "PASS",
+      "duration_ms": 29,
+      "message": ""
+    },
+    {
+      "name": "no orphan bridge processes",
+      "status": "PASS",
+      "duration_ms": 85,
+      "message": ""
+    }
+  ],
+  "passed": 19,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

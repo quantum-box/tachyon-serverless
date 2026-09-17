@@ -1,0 +1,13 @@
+pre-i1 inv_01m2qgcw5xrgkxqsdvgg1gejam inline
+pre-o1 inv_01m2qgcwa2ytc1567ew8xp2xva object
+pre-w1 inv_01m2qgcwexkrm30c92nhg40mw2 webhook
+pre-i2 inv_01m2qgcx5dhhcwanqk4e8hn1gf inline
+pre-o2 inv_01m2qgcxc3k9jyb0rjzy4wk0g3 object
+pre-w2 inv_01m2qgcxga3z4tprayqm1njfph webhook
+outage-1 inv_01m2qgdken9dh4q7sqndn8zz59 inline
+post-i1 inv_01m2qgdp6541hpd58vy9khc3s7 inline
+post-o1 inv_01m2qgdpc50x9hmjp8t21ep9ne object
+post-w1 inv_01m2qgdph106td8efq6c0h8n84 webhook
+post-i2 inv_01m2qgdq60t3b4w92n184at5ff inline
+post-o2 inv_01m2qgdqab9x1nkyf6rtddaakz object
+post-w2 inv_01m2qgdqdrhf1wkm4ayrbyjkad webhook

@@ -1407,3 +1407,45 @@ fn a_lease_left_by_an_exited_process_is_reclaimed_once_and_only_after_expiry() {
         "another instance never presumes a process dead"
     );
 }
+
+// ---------------------------------------------------------------------------
+// store unavailable (PLT-4646)
+// ---------------------------------------------------------------------------
+
+/// Another process holds the database write lock indefinitely. Every caller
+/// must get `RepoError::Store` (503 `Host.StoreUnavailable`) within a bounded
+/// time, not queue behind the other callers' busy timeouts on the connection
+/// mutex: before PLT-4646 the n-th concurrent caller waited n x busy_timeout.
+#[test]
+fn a_held_write_lock_fails_every_concurrent_caller_within_a_bounded_time() {
+    use crate::repository::IdempotencyRepository;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(open(dir.path()));
+    let locker = Connection::open(dir.path().join("state.db")).unwrap();
+    locker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let started = std::time::Instant::now();
+    let callers: Vec<_> = (0..4)
+        .map(|_| {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                let t = std::time::Instant::now();
+                let r = store.purge_expired_idempotency(now());
+                (r, t.elapsed())
+            })
+        })
+        .collect();
+    for caller in callers {
+        let (result, elapsed) = caller.join().unwrap();
+        assert!(
+            matches!(result, Err(RepoError::Store(_))),
+            "a locked store is unavailable: {result:?}"
+        );
+        assert!(
+            elapsed <= STORE_WAIT * 2 + std::time::Duration::from_secs(2),
+            "a caller waited {elapsed:?} (bound: connection wait + busy timeout)"
+        );
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(14));
+    locker.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(store.purge_expired_idempotency(now()).unwrap(), 0);
+}

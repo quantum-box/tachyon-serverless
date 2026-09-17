@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4647、PLT-4651 X1、PLT-4652 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4646、PLT-4647、PLT-4651 X1、PLT-4652 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -787,6 +787,44 @@ CLI 以外から状態と失敗原因を確認する最小画面を `apps/consol
 | 既存 Tachyon Console への統合 | **未着手（設計のみ）** | `docs/console-integration.md`（置き場所 `apps/tachyon/src/app/v1beta/[tenant_id]/serverless/…`、sidebar・辞書・API client・認証 adapter） |
 
 残り・制約: API の history 一覧に `dispatch` が無く、dead-letter 一覧の `redrives` が空なので、一覧の redrive 判定は dead letter の詳細を最大 50 件追加取得して補っている（`invoke` role が無いと一覧では判定できない）。history に cursor が無く最大 500 件。UI は英語のみ。id は query parameter（static export の制約）。Function の作成・deploy・削除・trigger と budget の設定は画面に無い（CLI・設定）。OutcomeUnknown と loading / empty / error / 401 は mock でしか確認していない。Firecracker provider・Linux・Chromium 以外の browser では試していない。
+
+## PLT-4646 controller・DB・queue 障害時の復旧と重複計上防止
+
+`scripts/chaos/matrix.sh` の故障マトリクス 20 シナリオ（gateway の SIGKILL と failpoint、2 gateway process での SIGSTOP / SIGCONT、`state.db` の書込み lock、nats-server の SIGSTOP / SIGKILL、object root の `chmod 000`、usage journal の上限と collector の crash、bridge / user process の SIGKILL、control plane 停止、crash 後の孤児回収）。手順・判定・結果・制約は `docs/failure-matrix.md`。記録日 2026-09-17、branch `verify/plt-4646-failure-matrix`。**すべて macOS arm64 の 1 host・process provider・debug build（`failpoints`）で、HA の保証ではない。** Firecracker では未検証。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | durable 受付済み Invocation が消えず、terminal 前 ACK をしない | 実装済み（単一 host・process provider で実測） | 全シナリオの `cv.accepted_never_lost`・`cv.accepted_all_terminal`・`cv.jetstream_drained`。failpoint 4 地点（`outbox.after_publish`、`dispatch.after_claim`、`dispatch.before_commit`、`dispatch.after_commit`）で crash 時点の台帳と JetStream の未 ACK 数を記録（非 terminal なら未 ACK ≥ 1）。broker の SIGSTOP / SIGKILL（`broker_sigstop`、`broker_sigkill`）、crash 後の未送信 outbox（`orphan_recovery_after_crash`） |
+| 2a | 同期は開始状況に応じ失敗 / OutcomeUnknown | 実装済み（同上） | `sync_gateway_kill`（dispatch 済み → `outcome_unknown` `Host.Restarted`、admission queue で待っていたもの → `failed` `Host.Restarted`、同じ key の再送は再実行しない）、`stale_owner_sync_lease`（`Host.LeaseExpired`）、`worker_bridge_kill_sync`（`outcome_unknown`）、`worker_user_process_kill_sync`（`Runtime.Crash`） |
+| 2b | 非同期は policy どおり retry / DLQ へ収束 | 実装済み（retry への収束を実測。DLQ への収束は PLT-4640 の E2E） | `async_kill_*` 5 シナリオ、`stale_owner_async_claim`、`worker_bridge_kill_async`（retry で成功、副作用 1 回）、`object_store_unavailable` と `usage_journal_full_and_replay`（数えない先送りの後に成功）。`attempts_exhausted` / `non_retryable` / `poison` の dead letter は `scripts/queue/async-dispatch-e2e.sh`（上の PLT-4640） |
+| 3 | 古い owner が新しい状態を上書きしない | 実装済み（2 gateway process・同じ `data_dir` で実測。PLT-4631 の「2 つの gateway プロセスを HTTP で並べた E2E: 未検証」を埋める） | `stale_owner_sync_lease`（回収は `lease_expires_at + skew` の後、SIGCONT 後の A の完了で invocation・attempt 行が不変、A は fenced で 503、B は 200）、`stale_owner_async_claim`（A の attempt は `outcome_unknown`、B が成功、A の遅れた settle は `stale completion refused`、成功 attempt 1・dead letter 0・副作用 1） |
+| 4 | UsageEvent 再送で二重計上しない | 実装済み（実測） | `usage_journal_full_and_replay`（journal 上限で 503 `Host.UsageJournalFull`・拒否は invocation を作らない、collector を ledger commit 後・cursor 前に SIGKILL、replay 後 ledger の event 数 = journal の件数・重複を無視・`GET /v1/usage` = 既知の成功 invoke 数）、全シナリオの `cv.usage_counted_once`（同じ attempt の `attempt_settled` が 2 件無い） |
+| 5 | 復旧後の孤児環境 / Secret / object を安全に回収 | 実装済み（process provider で実測） / 未検証（Firecracker: VMM・jailer・cgroup・tap・nft の回収経路は `docs/failure-matrix.md` §8） | `orphan_recovery_after_crash`（crash 前後の件数: 旧環境 2 → 0、未送信 outbox → 0、scheduler lease の owner が新 dispatcher、参照の無い object → 0、secret 値を含む file 0）、`object_store_unavailable`（GC が孤児を回収し参照中は残す）、全シナリオの `cv.no_orphan_processes`・`cv.no_open_environments`・`cv.no_secret_value_on_disk` |
+| 6 | 制約・残課題を記録 | 記録済み | `docs/failure-matrix.md` §6.2（store 停止が lease を超えると gateway が自分を fence し再起動が要る、store lock 中の要求の総遅延、usage ledger / SQLite queue の connection mutex、数えない先送りの上限、process provider では worker が gateway と一緒に止まる）、§9（対象外） |
+| 7 | 故障マトリクスと機械可読結果、実行 profile、復旧時間を保存 | 実装済み | `docs/evidence/chaos-*/`（`results.jsonl`: fault・`injected_at`・`restored_at`・`recovered_at`・`outage_ms`・`recovery_ms`・`checks[]`、`profile.json`、`summary.md`） |
+
+見つけて直した実装の問題（回帰テスト付き）:
+
+- kill failpoint が macOS で SIGABRT（exit 134）で死んでいた: `crates/application/src/failpoints.rs::tests::a_kill_failpoint_dies_of_sigkill_even_with_busy_threads`。
+- `state.db` が別 process に lock されると、connection mutex の待ち行列で要求が lock の間ずっと待ち、503 にならなかった: `crates/application/src/repository/sqlite/tests.rs::a_held_write_lock_fails_every_concurrent_caller_within_a_bounded_time`（mutex の取得を `STORE_WAIT` で打ち切る）。
+- `examples/idempotent-async` の実行 log で並行 run の行が混ざっていた（1 行 1 write に修正）。
+
+実行記録: `docs/evidence/chaos-20260917T105520Z/`（1 回目）、`chaos-20260917T110929Z/`（2 回目）、`chaos-20260917T113111Z/`（3 回目、20 / 20 が初回試行で pass）、`chaos-20260917T115316Z/`（4 回目、origin/main に rebase した commit、20 / 20 が初回試行で pass）。1・2 回目の失敗と flaky はすべて harness の判定と sample の log の誤りで、原因と対処は `docs/failure-matrix.md` §5.4。
+
+検証項目:
+
+| 検証 | 状態 | 証跡 |
+|---|---|---|
+| dispatcher 再起動 | 実装済み（実測） | `sync_gateway_kill`、`async_kill_*`、`orphan_recovery_after_crash` |
+| 古い callback | 実装済み（実測） | `stale_owner_sync_lease`、`stale_owner_async_claim` |
+| DB の一時停止 | 実装済み（実測、書込み lock のみ） | `db_locked_within_lease`、`db_locked_past_lease`。file の破損・disk full は未検証 |
+| broker の一時停止 | 実装済み（実測） | `broker_sigstop`、`broker_sigkill` |
+| ログ先の一時停止 | 未検証 | gateway の stdout / stderr が詰まる場合は試していない（invocation log は memory） |
+| object store の一時停止 | 実装済み（実測） | `object_store_unavailable` |
+| journal 容量上限 | 実装済み（実測） | `usage_journal_full_and_replay` |
+| worker 切断 | 実装済み（process provider で実測） / 未検証（Firecracker） | `worker_bridge_kill_sync`、`worker_user_process_kill_sync`、`worker_bridge_kill_async` |
+| Firecracker での同じマトリクス | 未検証 | KVM 検証 VM が別の検証（PLT-4653）で使用中。違いは `docs/failure-matrix.md` §8 |
+| 複数 host の HA、電源断、disk 破損、host 間 partition | 未着手（対象外） | `docs/failure-matrix.md` §9 |
 
 ## ADR-0001 残る測定の状況
 
