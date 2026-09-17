@@ -1,0 +1,35 @@
+== before 2026-09-17T07:14:47Z
+ 16:14:47 up  5:01,  1 user,  load average: 2.16, 1.53, 0.81
+               total        used        free      shared  buff/cache   available
+Mem:            7913         556        4119           1        3429        7356
+/dev/vda1        38G   13G   25G  35% /
+ 16:14:53 up  5:01,  1 user,  load average: 2.06, 1.52, 0.81
+ 16:15:05 up  5:01,  1 user,  load average: 4.62, 2.12, 1.02
+ 16:15:25 up  5:02,  1 user,  load average: 6.52, 2.71, 1.24
+ 16:15:56 up  5:02,  1 user,  load average: 7.82, 3.38, 1.51
+ 16:16:17 up  5:03,  1 user,  load average: 9.52, 4.06, 1.77
+ 16:16:32 up  5:03,  1 user,  load average: 10.19, 4.49, 1.95
+ 16:17:05 up  5:04,  1 user,  load average: 10.40, 5.18, 2.27
+ 16:17:39 up  5:04,  1 user,  load average: 11.42, 6.04, 2.67
+ 16:18:11 up  5:05,  1 user,  load average: 11.93, 6.67, 2.99
+ 16:18:11 up  5:05,  1 user,  load average: 11.93, 6.67, 2.99
+ 16:18:12 up  5:05,  1 user,  load average: 11.93, 6.67, 2.99
+ 16:18:12 up  5:05,  1 user,  load average: 11.93, 6.67, 2.99
+ 16:18:12 up  5:05,  1 user,  load average: 11.93, 6.67, 2.99
+== after 2026-09-17T07:18:13Z
+ 16:18:13 up  5:05,  1 user,  load average: 10.97, 6.56, 2.98
+               total        used        free      shared  buff/cache   available
+Mem:            7913         615        4052           1        3438        7298
+/dev/vda1        38G   13G   25G  35% /
+--- leftovers
+-- processes
+none
+-- cgroups
+none
+-- jails
+-- run dir
+/home/takanorifukuyama.guest/tsls/.kvm/run/_archive
+-- taps
+(end taps)
+-- nft
+table ip nat

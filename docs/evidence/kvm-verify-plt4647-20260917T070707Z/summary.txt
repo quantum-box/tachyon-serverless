@@ -1,0 +1,62 @@
+PLT-4647 benchmark follow-up - the two unexplained findings of the benchmark PR
+(branch bench/plt-4647-first-response, docs/benchmark.md section 5 / section 7), 2026-09-17
+
+Host: Apple M4 -> Lima VM tsls-kvm (vz, nested virtualization, 4 vCPU / 8 GiB, Linux 7.0.0-31
+aarch64) -> Firecracker / jailer v1.17.0, gateway as root with config/gateway.firecracker.toml
+(production, jailer, cgroup required). The Mac was shared with other agents' cargo builds:
+macOS 1-min load average 18.7 -> 8.7 (total-ms), 12.0 -> 29.6 (boot before), 20.2 -> 36.1
+(boot after). Each directory's host.txt has the VM's load.
+
+A. total_ms larger than the client time for pooled cold attempts (22-29 ms in the benchmark)
+---------------------------------------------------------------------------------------------
+Reproduced (total-ms/, run-total-ms.sh.txt): one fresh revision per request so every attempt is cold,
+curl on loopback as in bench.sh.
+  pool on : client - total_ms = -23, -26, -25, -45 ms  (client 6901 .. 15607 ms)
+  pool off: client - total_ms = +84, +76, +87, +66 ms
+Root cause: two different clocks, not the gateway.
+  - total_ms is Rust Instant = CLOCK_MONOTONIC (accepted_at.elapsed() at step 10 of the driver,
+    before the ledger settle and before the HTTP response; the only place total_ms is set).
+  - curl 8.x times transfers with CLOCK_MONOTONIC_RAW where available (not traced here; the
+    numbers below are consistent with it to the millisecond).
+  - On this VM CLOCK_MONOTONIC runs 4680 ppm faster than CLOCK_MONOTONIC_RAW (clocks.txt: chrony
+    active, NTPSynchronized=no, clocksource arch_sys_counter; CLOCK_REALTIME is additionally
+    stepped by about -141 ms every ~30 s).
+  4680 ppm of a 6.9 s request is 32 ms: correcting the four pool-on rows gives client - total =
+  +9, +20, +48, +7 ms (the loopback HTTP and curl cost), and the pool-off rows +118, +114, +118,
+  +117 ms, which matches the wall clock between finished_at and curl's exit in rows.jsonl
+  (pool off: 114-118 ms; the destroy-after-invoke terminate runs before the response). With the
+  pool on the response is not delayed by a terminate, so the skew is larger than the true gap
+  and the difference turns negative - only for long (cold) requests; warm requests (~60 ms) skew
+  by < 1 ms.
+Not a bug. For benchmarks on this host compare client and host numbers only after correcting for
+the skew, or measure the client with CLOCK_MONOTONIC. No code change.
+
+B. "firecracker exited before creating the API socket" with empty console / fc.log under load
+--------------------------------------------------------------------------------------------
+Reproduced once (boot-under-load-before/, source b5a7e54, run-boots.sh.txt: 8 busy loops on the 4
+vCPUs, 12 rounds x 3 concurrent cold invokes): request 3-2 failed with
+  "firecracker exited before creating the API socket (vmm pid 119173 is gone)
+   --- console.log (tail) --- <empty> --- fc.log (tail) --- <empty>"
+1.0 s after "firecracker spawned pid=119173 jailed=true"; the environment's cgroup at teardown
+still held 4.4 MiB and 34 ms of system-only CPU (a process that had not run user code yet).
+Root cause (code + cmdline-exec.txt): with the jailer, the provider only has the VMM's pid and
+decides whether it exited with Tracked::exited(): alive (signal 0) AND
+pid_cmdline_contains(pid, instance id) != Some(false). The jailer's child execs Firecracker
+while the provider polls the API socket every 20 ms, and during an execve /proc/<pid>/cmdline
+reads back EMPTY for a live process. An empty cmdline was read as Some(false) ("not ours"), so a
+VMM still exec'ing was reported gone; nothing had written console or fc.log yet. A tight poller
+caught the empty window in 686 / 1000 execs on an idle VM (cmdline-exec.txt); the provider's
+20 ms poll hits it rarely, more often when the VM's vCPUs are starved and the exec takes longer.
+Fix (crates/providers/firecracker/src/vmm.rs, provider.rs): an empty cmdline is None (no
+verdict); Tracked::exited() treats a zombie (/proc/<pid>/stat state Z/X) as gone so an exiting
+VMM is still detected. Tests: vmm::tests::{an_empty_cmdline_is_unknown_not_foreign,
+zombie_state_is_read_after_the_last_parenthesis, a_live_process_is_not_a_zombie_and_matches_its_cmdline}
+(the last one Linux-only; run in the VM: 9 passed).
+After the fix (boot-under-load-after/, same load and rounds): 33 microVMs spawned, 0 API-socket
+exits, 27/36 served; the other failures are 6 "timeout waiting for guest bridge after 30s" (the
+guest kernel was still booting on starved vCPUs) and 3 circuit_open after them. Before: 24
+spawned, 1 API-socket exit, 3 InitTimeout, 5 bridge timeouts, then the breaker stayed open (12
+circuit_open). One failure in 24 starts versus none in 33 is NOT statistically significant; the
+fix rests on the mechanism above, not on this count.
+Every run left no VMM / jailer / gateway process, cgroup, jail, tap or tachyon nft table
+(host.txt).

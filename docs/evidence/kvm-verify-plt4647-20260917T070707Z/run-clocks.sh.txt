@@ -1,0 +1,20 @@
+#!/bin/bash
+# How far do CLOCK_MONOTONIC (Rust Instant, the gateway's total_ms), CLOCK_MONOTONIC_RAW
+# (curl's timer when available) and CLOCK_REALTIME drift apart on this VM?
+curl --version | head -1
+uname -r
+timedatectl show 2>/dev/null | grep -E "NTP|Synchronized"
+systemctl is-active systemd-timesyncd chrony chronyd 2>/dev/null
+cat /sys/devices/system/clocksource/clocksource0/current_clocksource
+python3 - <<'PY'
+import time
+M, R, W = time.CLOCK_MONOTONIC, time.CLOCK_MONOTONIC_RAW, time.CLOCK_REALTIME
+g = time.clock_gettime
+m0, r0, w0 = g(M), g(R), g(W)
+print("   t(s)  mono-raw drift(ms)  realtime-mono drift(ms)  ppm(mono vs raw)")
+for i in range(1, 13):
+    time.sleep(5)
+    m, r, w = g(M), g(R), g(W)
+    dm, dr, dw = m - m0, r - r0, w - w0
+    print(f"{dm:7.1f}  {1000*(dm-dr):18.2f}  {1000*(dw-dm):22.2f}  {1e6*(dm-dr)/dr:12.0f}")
+PY

@@ -1,0 +1,133 @@
+#!/bin/bash
+# PLT-4631 on Firecracker: two root gateways on one data_dir and one provider workdir.
+# A pools a paused microVM, A is SIGSTOPped (heartbeat stops), B starts on the same data_dir,
+# reclaims A's expired lease, must terminate A's VMM before settling the environment, and
+# serves the next invocation on a new cold environment. A is then SIGCONTed and must be fenced.
+. "$(dirname "$0")/common.sh"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+W=$VERIFY/fence; sudo rm -rf "$W"; mkdir -p "$W"
+E="$REPO/docs/evidence/kvm-verify-plt4631-fencing-$STAMP"; mkdir -p "$E"
+cat > "$W/extra.toml" <<'EOF'
+
+# Added for the PLT-4631 Firecracker fencing run (.vmrun/fence.sh, recorded in summary.txt).
+[pool]
+enabled = true
+max_idle_per_revision = 1
+idle_ttl_seconds = 300
+
+[dispatcher]
+lease_ttl_seconds = 6
+heartbeat_interval_seconds = 2
+max_clock_skew_ms = 500
+EOF
+PA=18485; PB=18486
+mkcfg "$W/a.toml" $PA "$W/data" "$W/extra.toml"
+mkcfg "$W/b.toml" $PB "$W/data" "$W/extra.toml"
+cp "$W/a.toml" "$E/gateway-a.toml"; cp "$W/b.toml" "$E/gateway-b.toml"
+hostinfo "$E/host.txt" before
+T=target/debug/tsls
+S="$E/summary.txt"; : > "$S"
+FAILED=0
+check() { local line; if [ "$2" -eq 0 ]; then line="PASS  $1  $3"; else line="FAIL  $1  $3"; FAILED=1; fi; echo "$line" | tee -a "$S"; }
+now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
+ts() { date -u +%FT%T.%3NZ; }
+ready() { curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1/readyz"; }
+wait_ready() { for _ in $(seq 1 120); do [ "$(ready "$1")" = 200 ] && return 0; sleep 0.5; done; return 1; }
+
+sudo -n "$REPO/target/debug/tachyon-serverless-gateway" --config "$W/a.toml" > "$E/gateway-a.log" 2>&1 &
+GA_SUDO=$!
+wait_ready $PA; check "a-ready" $? "gateway A on :$PA"
+GA="$(pgrep -f "tachyon-serverless-gateway --config $W/a.toml" | while read -r p; do [ "$(ps -o comm= -p "$p")" = tachyon-serverl ] && echo "$p"; done | head -n1)"
+echo "gateway A pid=$GA (sudo $GA_SUDO)" | tee -a "$S"
+
+export TSLS_TOKEN=dev-token-tenant-a
+FN="$(TSLS_API_URL=http://127.0.0.1:$PA $T functions create --name fence --description plt-4631 --json | jq -r .id)"
+TSLS_API_URL=http://127.0.0.1:$PA $T functions deploy --function fence --binary target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --json > "$E/revision.json"
+TSLS_API_URL=http://127.0.0.1:$PA $T functions invoke fence --payload '{"name":"a"}' --json > "$E/invoke-a.json" 2> "$E/invoke-a.stderr"
+check "a-invoke" $? "$(head -c 160 "$E/invoke-a.json")"
+INV_A="$(sed -n 's/.*invocation[ =]\(inv_[0-9a-z]*\).*/\1/p' "$E/invoke-a.stderr" | head -n1)"
+curl -s -H "authorization: Bearer $TSLS_TOKEN" "http://127.0.0.1:$PA/v1/invocations/$INV_A" > "$E/invocation-a.json"
+ENV_A="$(jq -r '.attempts[0].environment_id' "$E/invocation-a.json")"
+# wait until the environment is parked (idle) in A's pool
+for _ in $(seq 1 60); do
+  idle="$(curl -s -H "authorization: Bearer $TSLS_TOKEN" "http://127.0.0.1:$PA/v1/capacity" | jq '.environments.idle')"
+  [ "$idle" = 1 ] && break; sleep 0.25
+done
+check "a-env-pooled" "$([ "$idle" = 1 ]; echo $?)" "environment $ENV_A idle=$idle"
+CG="/sys/fs/cgroup/tachyon/$ENV_A"
+VMM="$(cat "$CG/cgroup.procs" 2>/dev/null | tr '\n' ' ')"
+VMM_STATE="$(for p in $VMM; do ps -o pid=,stat=,comm= -p "$p"; done | tr '\n' ';')"
+echo "A's VMM pids in $CG: $VMM ($VMM_STATE)" | tee -a "$S"
+check "a-vmm-alive" "$([ -n "$VMM" ]; echo $?)" "cgroup $CG procs=[$VMM]"
+
+# --- stop A's heartbeat
+echo "$(ts) SIGSTOP gateway A ($GA)" | tee -a "$S"
+sudo kill -STOP "$GA"
+STOPPED_AT=$(now_ms)
+
+# timeline poller: VMM alive? cgroup present? run dir present?
+( while :; do
+    alive=0; for p in $VMM; do kill -0 "$p" 2>/dev/null && alive=1; done
+    sudo kill -0 $VMM 2>/dev/null && alive=1
+    printf '%s vmm_alive=%s cgroup=%s env_dir=%s\n' "$(ts)" "$alive" "$([ -d "$CG" ] && echo 1 || echo 0)" \
+      "$([ -d "$REPO/.kvm/run/$ENV_A" ] && echo 1 || echo 0)"
+    sleep 0.2
+  done ) > "$E/timeline.txt" 2>&1 &
+POLL=$!
+
+sudo -n "$REPO/target/debug/tachyon-serverless-gateway" --config "$W/b.toml" > "$E/gateway-b.log" 2>&1 &
+GB_SUDO=$!
+wait_ready $PB; check "b-ready" $? "gateway B on :$PB ($(( $(now_ms) - STOPPED_AT )) ms after SIGSTOP)"
+GB="$(pgrep -f "tachyon-serverless-gateway --config $W/b.toml" | while read -r p; do [ "$(ps -o comm= -p "$p")" = tachyon-serverl ] && echo "$p"; done | head -n1)"
+echo "gateway B pid=$GB" | tee -a "$S"
+grep -m1 "startup reconcile finished" "$E/gateway-b.log" | sed 's/\x1b\[[0-9;]*m//g' | tee -a "$S"
+
+# B must reclaim A (lease 6 s + skew 0.5 s, heartbeat 2 s) and terminate A's VMM
+for _ in $(seq 1 150); do
+  grep -q "fenced environment terminated and settled" "$E/gateway-b.log" && break; sleep 0.2
+done
+SETTLE_LINE="$(grep -m1 "fenced environment terminated and settled" "$E/gateway-b.log" | sed 's/\x1b\[[0-9;]*m//g')"
+check "b-settled-a-env" "$([ -n "$SETTLE_LINE" ]; echo $?)" "$SETTLE_LINE"
+sleep 1
+alive=0; for p in $VMM; do sudo kill -0 "$p" 2>/dev/null && alive=1; done
+check "a-vmm-gone" "$([ "$alive" = 0 ] && [ ! -d "$CG" ]; echo $?)" "vmm_alive=$alive cgroup_present=$([ -d "$CG" ] && echo 1 || echo 0)"
+FIRST_DEAD="$(grep -m1 'vmm_alive=0' "$E/timeline.txt" | cut -d' ' -f1)"
+SETTLE_TS="$(echo "$SETTLE_LINE" | awk '{print $1}')"
+echo "VMM first seen dead: $FIRST_DEAD ; settle logged: $SETTLE_TS" | tee -a "$S"
+TERM_LINE="$(sed 's/\x1b\[[0-9;]*m//g' "$E/gateway-b.log" | grep -n "environment terminated env_id=$ENV_A reason=Reconcile was_running=true" | head -n1)"
+SETTLE_N="$(sed 's/\x1b\[[0-9;]*m//g' "$E/gateway-b.log" | grep -n "fenced environment terminated and settled environment_id=$ENV_A" | head -n1 | cut -d: -f1)"
+check "terminated-before-settled" "$([ -n "$TERM_LINE" ] && [ -n "$SETTLE_N" ] && [ "${TERM_LINE%%:*}" -lt "$SETTLE_N" ]; echo $?)" \
+  "B's log: provider terminate (was_running=true) at line ${TERM_LINE%%:*}, ledger settle at line $SETTLE_N; 0.2 s poller first saw the VMM dead at $FIRST_DEAD"
+
+# next invocation through B: a new cold environment, never A's
+TSLS_API_URL=http://127.0.0.1:$PB $T functions invoke fence --payload '{"name":"b"}' --json > "$E/invoke-b.json" 2> "$E/invoke-b.stderr"
+rc=$?
+INV_B="$(sed -n 's/.*invocation[ =]\(inv_[0-9a-z]*\).*/\1/p' "$E/invoke-b.stderr" | head -n1)"
+curl -s -H "authorization: Bearer $TSLS_TOKEN" "http://127.0.0.1:$PB/v1/invocations/$INV_B" > "$E/invocation-b.json"
+ENV_B="$(jq -r '.attempts[0].environment_id' "$E/invocation-b.json")"
+KIND_B="$(jq -r '.attempts[0].start_kind' "$E/invocation-b.json")"
+check "b-invoke-new-cold-env" "$([ $rc = 0 ] && [ "$KIND_B" = cold ] && [ "$ENV_B" != "$ENV_A" ]; echo $?)" "rc=$rc start_kind=$KIND_B env=$ENV_B (A's was $ENV_A)"
+
+kill $POLL 2>/dev/null
+# --- resume A: its heartbeat is refused, it must fence itself
+echo "$(ts) SIGCONT gateway A" | tee -a "$S"
+sudo kill -CONT "$GA"
+# sudo suspends itself when its child stops; resume it too or `wait` never returns.
+sudo kill -CONT "$GA_SUDO"
+for _ in $(seq 1 40); do [ "$(ready $PA)" = 503 ] && break; sleep 0.25; done
+RA="$(ready $PA)"
+code="$(curl -s -o "$E/invoke-a-after.json" -w '%{http_code}' -X POST -H "authorization: Bearer $TSLS_TOKEN" -H 'content-type: application/json' --data '{"name":"late"}' "http://127.0.0.1:$PA/v1/functions/$FN/invoke")"
+check "a-fenced-after-resume" "$([ "$RA" = 503 ] && [ "$code" = 503 ]; echo $?)" "readyz=$RA invoke=$code $(head -c 200 "$E/invoke-a-after.json")"
+curl -s "http://127.0.0.1:$PA/readyz" > "$E/readyz-a-after.json"
+
+sudo kill -TERM "$GB"; wait $GB_SUDO; echo "gateway B exit=$?" | tee -a "$S"
+sudo kill -TERM "$GA"; wait $GA_SUDO; echo "gateway A exit=$?" | tee -a "$S"
+hostinfo "$E/host.txt" after
+sudo chown -R "$(id -u):$(id -g)" "$E" "$W" "$REPO/.kvm/run" 2>/dev/null
+{ echo "--- leftovers after both gateways stopped"; leftovers; } >> "$E/host.txt" 2>&1
+L="$(leftovers 2>&1)"
+check "no-leftovers" "$(echo "$L" | sed -n '/-- processes/,/-- cgroups/p' | grep -q '^none$' && ! echo "$L" | sed -n '/-- cgroups/,/-- jails/p' | grep -q tachyon/; echo $?)" "see host.txt"
+echo "exit=$FAILED" | tee -a "$S"
+sed 's/\x1b\[[0-9;]*m//g' "$E/gateway-b.log" | grep -E "reconcile|reclaim|fenced|terminated|dispatcher" | cut -c1-400
+sed 's/\x1b\[[0-9;]*m//g' "$E/gateway-a.log" | grep -E "fenced|heartbeat|lease|dispatcher" | cut -c1-300
+echo "$E"

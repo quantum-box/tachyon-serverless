@@ -1,0 +1,90 @@
+{
+  "node": {
+    "name": "burst-local",
+    "region": "us",
+    "hosts": 1,
+    "host_scale_out": "not_supported",
+    "capacity": {
+      "memory_mib": 1020
+    },
+    "per_environment_overhead": {
+      "cpu_millis": 0,
+      "memory_mib": 64,
+      "ephemeral_storage_mib": 0
+    },
+    "max_concurrency": 8
+  },
+  "reserved": {
+    "cpu_millis": 0,
+    "memory_mib": 0,
+    "ephemeral_storage_mib": 0
+  },
+  "environments": {
+    "starting": 0,
+    "busy": 0,
+    "promised": 0,
+    "parking": 0,
+    "idle": 0,
+    "draining": 0
+  },
+  "in_flight": 0,
+  "queue": {
+    "length": 0,
+    "bytes": 0,
+    "max_length": 4,
+    "max_bytes": 33554432,
+    "timeout_seconds": 90
+  },
+  "start_rate": {
+    "per_second": 20,
+    "burst": 20,
+    "tokens": 20
+  },
+  "rejections": {
+    "placement": 1,
+    "queue_full": 7
+  },
+  "tenant": {
+    "tenant_id": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+    "in_flight": 0,
+    "queued": 0,
+    "queued_bytes": 0,
+    "weight": 1
+  },
+  "revisions": [
+    {
+      "revision_id": "rev_01m2q1ythwaw95sh2srctd3m0d",
+      "desired": 1,
+      "max_environments": 8,
+      "environments": {
+        "starting": 0,
+        "busy": 0,
+        "promised": 0,
+        "parking": 0,
+        "idle": 0,
+        "draining": 0
+      },
+      "queued": 0,
+      "arrival_rate_per_second": 0.201,
+      "avg_duration_ms": 535,
+      "circuit_breaker": "closed",
+      "min_ready": 0,
+      "idle_ttl_seconds": 60,
+      "scale_down_cooldown_seconds": 30,
+      "route_state": "routed",
+      "last_scale_event": {
+        "kind": "scale_up",
+        "reason": "backlog",
+        "at": "2026-09-17T06:48:45.994961962Z"
+      }
+    }
+  ],
+  "scaling": {
+    "reconcile_interval_ms": 1000,
+    "default_idle_ttl_seconds": 60,
+    "default_scale_down_cooldown_seconds": 30,
+    "drain_timeout_seconds": 961,
+    "warm_pool": false,
+    "at_zero": "zero environments is not zero host cost: the gateway, its store and the node keep running"
+  }
+}

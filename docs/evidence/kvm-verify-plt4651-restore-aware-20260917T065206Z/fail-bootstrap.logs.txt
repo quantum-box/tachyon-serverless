@@ -1,0 +1,6 @@
+2026-09-17T06:52:24.407Z [platform/boot] creating environment env_01m2q26kcrffew609pm7m3x53q with provider firecracker
+2026-09-17T06:52:29.535Z [platform/boot] bridge connected after 5125 ms (host_pid=Some(112577))
+2026-09-17T06:52:29.802Z [platform/init] user process started (pid 104)
+2026-09-17T06:52:29.931Z [stderr/init] tachyon lifecycle: Runtime.PreCheckpointFailed: Demo.BootstrapFailure: RESTORE_AWARE_FAIL=bootstrap
+2026-09-17T06:52:30.011Z [stderr/init] Error: Lifecycle { error_type: "Runtime.PreCheckpointFailed", message: "Demo.BootstrapFailure: RESTORE_AWARE_FAIL=bootstrap" }
+2026-09-17T06:52:30.012Z [platform/init] init failed: Demo.BootstrapFailure: RESTORE_AWARE_FAIL=bootstrap

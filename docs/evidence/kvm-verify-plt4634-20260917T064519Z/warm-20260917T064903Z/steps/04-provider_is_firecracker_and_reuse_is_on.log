@@ -1,0 +1,4 @@
+[e2e] reuse: enabled=true verified=true (the provider reports both idle capabilities as supported and [pool] enabled is true)
+  idle_quiesce=supported
+  idle_resume=supported
+[e2e] note: this provider already reports both idle capabilities as supported

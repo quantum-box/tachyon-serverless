@@ -1,0 +1,7 @@
+2026-09-17T06:52:18.227Z [platform/boot] creating environment env_01m2q26dbkmtpkb49fhj1z05v7 with provider firecracker
+2026-09-17T06:52:23.440Z [platform/boot] bridge connected after 5210 ms (host_pid=Some(112552))
+2026-09-17T06:52:23.657Z [platform/init] user process started (pid 104)
+2026-09-17T06:52:23.918Z [stderr/init] restore-aware: bootstrap: building the lookup table (no runtime, no secrets)
+2026-09-17T06:52:23.958Z [platform/init] lifecycle continue answered (cold)
+2026-09-17T06:52:24.022Z [stderr/init] restore-aware: after_restore: restored=false generation=0 instance=env_01m2q26dbkmtpkb49fhj1z05v7-75e8ba55d45047c5
+2026-09-17T06:52:24.321Z [platform/shutdown] environment terminated (Completed); cleaned: process-group:112552, cgroup:/sys/fs/cgroup/tachyon/env_01m2q26dbkmtpkb49fhj1z05v7, jail:/srv/jailer/firecracker/env-01m2q26dbkmtpkb49fhj1z05v7, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2q26dbkmtpkb49fhj1z05v7/console.log, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2q26dbkmtpkb49fhj1z05v7/fc.log, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q26dbkmtpkb49fhj1z05v7/function.ext4, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q26dbkmtpkb49fhj1z05v7/scratch.ext4, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q26dbkmtpkb49fhj1z05v7/fc.pid, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q26dbkmtpkb49fhj1z05v7

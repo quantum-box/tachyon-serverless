@@ -1,0 +1,14 @@
+#!/bin/bash
+. "$(dirname "$0")/common.sh"
+W=$VERIFY/demo; sudo rm -rf "$W"; mkdir -p "$W"
+mkcfg "$W/gateway.toml" 18481 "$W/data"
+hostinfo "$W/host.txt" before
+sudo -n env PATH="$PATH" HOME="$HOME" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 \
+  TSLS_GATEWAY_CONFIG="$W/gateway.toml" TSLS_API_URL=http://127.0.0.1:18481 \
+  bash scripts/e2e/demo.sh > "$W/stdout.txt" 2>&1
+echo "demo exit=$?" | tee -a "$W/host.txt"
+hostinfo "$W/host.txt" after
+sudo chown -R "$(id -u):$(id -g)" "$REPO/docs/evidence" "$W" "$REPO/.kvm/run" 2>/dev/null
+leftovers >> "$W/host.txt" 2>&1
+tail -45 "$W/stdout.txt"
+ls -d "$REPO"/docs/evidence/*-firecracker | tail -1

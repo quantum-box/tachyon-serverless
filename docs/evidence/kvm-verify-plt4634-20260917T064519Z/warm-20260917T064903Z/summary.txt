@@ -1,0 +1,37 @@
+tachyon-serverless warm reuse measurement 20260917T064903Z
+host              Linux 7.0.0-31-generic aarch64 (aarch64)
+gateway config    /home/takanorifukuyama.guest/tsls/docs/evidence/warm-20260917T064903Z/gateway.toml (derived from /home/takanorifukuyama.guest/verify/warm/gateway.toml)
+provider          firecracker / micro_vm / dev_only=false
+idle capability   quiesce=supported resume=supported
+reuse             enabled=true verified=true
+reuse reason      the provider reports both idle capabilities as supported and [pool] enabled is true
+function          warm-probe (fn_01m2q20jkjg8367tn7xe61s9bb)
+revision          rev_01m2q20jqx8fazfqbrfm956per (256 MiB, 500 m)
+invocations       6
+orphans           clean
+
+== per invocation ==
+  #1	cold	env=env_01m2q20k1cs244hyg8y5pw2j3d	epoch=1	boot=5251	resume=-	readiness=-	handler=116	total=6028	client=6050
+  #2	warm	env=env_01m2q20k1cs244hyg8y5pw2j3d	epoch=2	boot=0	resume=1	readiness=11	handler=35	total=50	client=69
+  #3	warm	env=env_01m2q20k1cs244hyg8y5pw2j3d	epoch=3	boot=0	resume=1	readiness=2	handler=58	total=63	client=79
+  #4	warm	env=env_01m2q20k1cs244hyg8y5pw2j3d	epoch=4	boot=0	resume=1	readiness=3	handler=29	total=34	client=50
+  #5	warm	env=env_01m2q20k1cs244hyg8y5pw2j3d	epoch=5	boot=0	resume=1	readiness=2	handler=28	total=33	client=49
+  #6	warm	env=env_01m2q20k1cs244hyg8y5pw2j3d	epoch=6	boot=0	resume=1	readiness=2	handler=40	total=45	client=60
+
+== cold vs warm (median ms) ==
+  cold  n=1	boot=5251	init=591	handler=116	total=6028	client=6050
+  warm  n=5	resume=1	readiness=2	handler=35	total=45	client=60
+  environments used: 1	total_ms difference (cold - warm): 5983
+
+== paused VMM on the host ==
+  pid 108125 of environment env_01m2q20k1cs244hyg8y5pw2j3d
+  rss=39572 kiB  vsz=269996 kiB  threads=3  state=Sl
+  cpu ticks used over 3s while paused: 0
+
+== findings ==
+  none
+
+== how to read this ==
+  The numbers are host-observed (AttemptTimings). A warm attempt reports
+  resume and readiness instead of boot and init, so cold total vs warm total
+  is the comparison; boot is what warm avoids.

@@ -1,0 +1,24 @@
+== final VM state 2026-09-17T07:36:54Z
+ 16:36:54 up  5:23,  1 user,  load average: 0.29, 0.84, 2.05
+/dev/vda1        38G   14G   24G  37% /
+-- processes
+none
+-- cgroups
+none
+-- jails
+-- run dir
+/home/takanorifukuyama.guest/tsls/.kvm/run/_archive
+-- taps
+(end taps)
+-- nft
+table ip nat
+-- cgroup parent
+ls: cannot access '/sys/fs/cgroup/tachyon': No such file or directory
+-- jailer base
+total 8
+drwxr-xr-x 2 root root 4096 Sep 17 16:36 .
+drwxr-xr-x 3 root root 4096 Sep 17 13:55 ..
+-- ip_forward
+0
+-- nft ruleset tables mentioning tachyon
+none

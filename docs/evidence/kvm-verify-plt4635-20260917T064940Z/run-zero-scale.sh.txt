@@ -1,0 +1,29 @@
+#!/bin/bash
+. "$(dirname "$0")/common.sh"
+W=$VERIFY/zero; sudo rm -rf "$W"; mkdir -p "$W"
+cat > "$W/extra.toml" <<'EOF'
+
+# Added for the PLT-4635 Firecracker verification (scripts/e2e/zero-scale.sh header).
+[pool]
+enabled = true
+
+[scaling]
+reconcile_interval_ms = 500
+drain_timeout_seconds = 5
+allow_short_drain = true
+EOF
+mkcfg "$W/gateway.toml" 18483 "$W/data" "$W/extra.toml"
+# microVM cold starts take ~6 s on this nested host: the 7-request burst's waiters need more than 10 s.
+sed -i 's/^queue_timeout_seconds = .*/queue_timeout_seconds = 60/' "$W/gateway.toml"
+hostinfo "$W/host.txt" before
+sudo -n env PATH="$PATH" HOME="$HOME" TMPDIR=/tmp TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 \
+  TSLS_GATEWAY_CONFIG="$W/gateway.toml" TSLS_API_URL=http://127.0.0.1:18483 \
+  TSLS_TOKEN_A=dev-token-tenant-a TSLS_GUEST_DIR="$REPO/target/aarch64-unknown-linux-musl/release" \
+  TSLS_ARCH=aarch64 bash scripts/e2e/zero-scale.sh > "$W/stdout.txt" 2>&1
+echo "zero-scale exit=$?" | tee -a "$W/host.txt"
+hostinfo "$W/host.txt" after
+sudo chown -R "$(id -u):$(id -g)" "$REPO/docs/evidence" "$W" "$REPO/.kvm/run" 2>/dev/null
+leftovers >> "$W/host.txt" 2>&1
+grep -E "^(PASS|FAIL|NOTE|SKIP|provider=|evidence)" "$W/stdout.txt"
+tail -5 "$W/stdout.txt"
+sed -n '/-- processes/,$p' "$W/host.txt"

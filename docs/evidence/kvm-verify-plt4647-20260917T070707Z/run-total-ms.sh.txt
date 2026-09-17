@@ -1,0 +1,47 @@
+#!/bin/bash
+# PLT-4647 follow-up: compare curl time_total with the ledger's total_ms for cold attempts
+# with the pool on and off (same production firecracker config, root gateway).
+. "$(dirname "$0")/common.sh"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+E="$REPO/docs/evidence/kvm-verify-plt4647-total-ms-$STAMP"; mkdir -p "$E"
+N="${N:-4}"
+T=target/debug/tsls
+export TSLS_TOKEN=dev-token-tenant-a
+hostinfo "$E/host.txt" before
+for mode in on off; do
+  W=$VERIFY/total-$mode; sudo rm -rf "$W"; mkdir -p "$W"
+  PORT=18487
+  if [ "$mode" = on ]; then printf '\n[pool]\nenabled = true\nidle_ttl_seconds = 300\n' > "$W/extra.toml"; else : > "$W/extra.toml"; fi
+  mkcfg "$W/gateway.toml" $PORT "$W/data" "$W/extra.toml"
+  cp "$W/gateway.toml" "$E/gateway-pool-$mode.toml"
+  sudo -n env LOG_FORMAT=json "$REPO/target/debug/tachyon-serverless-gateway" --config "$W/gateway.toml" > "$E/gateway-pool-$mode.log" 2>&1 &
+  GW=$!
+  export TSLS_API_URL=http://127.0.0.1:$PORT
+  for _ in $(seq 1 120); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$TSLS_API_URL/readyz")" = 200 ] && break; sleep 0.5; done
+  FN="$($T functions create --name total --description plt-4647 --json | jq -r .id)"
+  for i in $(seq 1 "$N"); do
+    # a fresh revision per request: always a cold start, also with the pool on
+    REV="$($T functions deploy --function "$FN" --binary target/aarch64-unknown-linux-musl/release/example-hello --arch aarch64 --env "RUN=$i" --json 2>/dev/null | jq -r .id)"
+    sleep 1
+    start_wall="$(date -u +%FT%T.%6NZ)"
+    m="$(curl -sS -o "$W/body" -D "$W/hdr" -w '%{http_code} %{time_total} %{time_starttransfer} %{time_pretransfer}' \
+      -H "authorization: Bearer $TSLS_TOKEN" -H 'content-type: application/json' --data '{"name":"bench"}' \
+      "$TSLS_API_URL/v1/functions/$FN/invoke?revision_id=$REV")"
+    end_wall="$(date -u +%FT%T.%6NZ)"
+    inv="$(tr -d '\r' < "$W/hdr" | awk 'tolower($1) == "x-tachyon-invocation-id:" { print $2 }')"
+    d="$(curl -s -H "authorization: Bearer $TSLS_TOKEN" "$TSLS_API_URL/v1/invocations/$inv")"
+    echo "$d" >> "$E/invocations-pool-$mode.jsonl"
+    jq -nc --arg mode "$mode" --arg m "$m" --arg s "$start_wall" --arg e "$end_wall" --argjson d "$d" '
+      ($m | split(" ")) as $x |
+      {pool: $mode, http: ($x[0]|tonumber), client_ms: (($x[1]|tonumber)*1000|round), ttfb_ms: (($x[2]|tonumber)*1000|round),
+       curl_start: $s, curl_end: $e, invocation_id: $d.id, accepted_at: $d.accepted_at, finished_at: $d.finished_at,
+       start_kind: $d.attempts[-1].start_kind, timings: $d.attempts[-1].timings,
+       client_minus_total: ((($x[1]|tonumber)*1000|round) - $d.attempts[-1].timings.total_ms)}' | tee -a "$E/rows.jsonl"
+  done
+  sudo kill -TERM $GW; wait $GW
+done
+hostinfo "$E/host.txt" after
+sudo chown -R "$(id -u):$(id -g)" "$E" "$REPO/.kvm/run" "$VERIFY" 2>/dev/null
+{ echo "--- leftovers"; leftovers; } >> "$E/host.txt" 2>&1
+jq -c '{pool, client_ms, ttfb_ms, total: .timings.total_ms, boot: .timings.environment_boot_ms, init: .timings.runtime_init_ms, handler: .timings.handler_ms, client_minus_total}' "$E/rows.jsonl"
+echo "$E"

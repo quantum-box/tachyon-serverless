@@ -1,0 +1,182 @@
+{
+  "run_id": "20260917T072756Z-firecracker",
+  "provider": "firecracker",
+  "architecture": "aarch64",
+  "host": "Linux 7.0.0-31-generic aarch64",
+  "gateway_config": "/home/takanorifukuyama.guest/verify/demo/gateway.toml",
+  "generated_at": "2026-09-17T07:32:39Z",
+  "steps": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "duration_ms": 174,
+      "message": ""
+    },
+    {
+      "name": "gateway healthz/readyz",
+      "status": "PASS",
+      "duration_ms": 28637,
+      "message": ""
+    },
+    {
+      "name": "tokens for tenant A and B",
+      "status": "PASS",
+      "duration_ms": 202,
+      "message": ""
+    },
+    {
+      "name": "provider capability table",
+      "status": "PASS",
+      "duration_ms": 286,
+      "message": ""
+    },
+    {
+      "name": "create functions (idempotent)",
+      "status": "PASS",
+      "duration_ms": 906,
+      "message": ""
+    },
+    {
+      "name": "deploy hello (GREETING=v1, DEMO_SECRET)",
+      "status": "PASS",
+      "duration_ms": 1580,
+      "message": ""
+    },
+    {
+      "name": "deploy http-axum",
+      "status": "PASS",
+      "duration_ms": 1194,
+      "message": ""
+    },
+    {
+      "name": "deploy cpu-burn",
+      "status": "PASS",
+      "duration_ms": 1662,
+      "message": ""
+    },
+    {
+      "name": "invoke hello ok (message, secret_present, greeting)",
+      "status": "FAIL",
+      "duration_ms": 31404,
+      "message": "exit 1; see /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T072756Z-firecracker/steps/09-invoke_hello_ok__message__secret_present__greeting_.log"
+    },
+    {
+      "name": "invoke hello fail -> exit 3 user_error",
+      "status": "FAIL",
+      "duration_ms": 34877,
+      "message": "exit 1; see /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T072756Z-firecracker/steps/10-invoke_hello_fail_-__exit_3_user_error.log"
+    },
+    {
+      "name": "invoke hello panic -> exit 3 crash",
+      "status": "FAIL",
+      "duration_ms": 33478,
+      "message": "exit 1; see /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T072756Z-firecracker/steps/11-invoke_hello_panic_-__exit_3_crash.log"
+    },
+    {
+      "name": "init failure revision -> exit 3 init_error",
+      "status": "PASS",
+      "duration_ms": 34334,
+      "message": ""
+    },
+    {
+      "name": "http GET / -> 200 ok",
+      "status": "PASS",
+      "duration_ms": 12351,
+      "message": ""
+    },
+    {
+      "name": "http POST /echo -> body echoed",
+      "status": "PASS",
+      "duration_ms": 11897,
+      "message": ""
+    },
+    {
+      "name": "http GET /status/404 -> 404 passthrough",
+      "status": "PASS",
+      "duration_ms": 12398,
+      "message": ""
+    },
+    {
+      "name": "http GET /headers -> custom header visible",
+      "status": "PASS",
+      "duration_ms": 13443,
+      "message": ""
+    },
+    {
+      "name": "invoke cpu-burn 1s ok",
+      "status": "PASS",
+      "duration_ms": 12880,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn timeout 2s -> exit 4 timeout, wall < 10s",
+      "status": "PASS",
+      "duration_ms": 20314,
+      "message": ""
+    },
+    {
+      "name": "no orphan bridge / VMM processes",
+      "status": "PASS",
+      "duration_ms": 2211,
+      "message": ""
+    },
+    {
+      "name": "logs contain handler lines",
+      "status": "FAIL",
+      "duration_ms": 33,
+      "message": "exit 1; see /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T072756Z-firecracker/steps/20-logs_contain_handler_lines.log"
+    },
+    {
+      "name": "history shows attempts with boot evidence",
+      "status": "FAIL",
+      "duration_ms": 62,
+      "message": "exit 1; see /home/takanorifukuyama.guest/tsls/docs/evidence/20260917T072756Z-firecracker/steps/21-history_shows_attempts_with_boot_evidence.log"
+    },
+    {
+      "name": "rollback: v2 -> rollback -> v1",
+      "status": "PASS",
+      "duration_ms": 26627,
+      "message": ""
+    },
+    {
+      "name": "cross-tenant get/invoke -> 404",
+      "status": "PASS",
+      "duration_ms": 33,
+      "message": ""
+    },
+    {
+      "name": "cancel running invocation",
+      "status": "PASS",
+      "duration_ms": 122,
+      "message": ""
+    },
+    {
+      "name": "collect evidence",
+      "status": "PASS",
+      "duration_ms": 101,
+      "message": ""
+    },
+    {
+      "name": "gateway stops on SIGTERM with exit 0",
+      "status": "PASS",
+      "duration_ms": 7,
+      "message": ""
+    },
+    {
+      "name": "secret values absent from gateway log, evidence and state",
+      "status": "PASS",
+      "duration_ms": 15,
+      "message": ""
+    },
+    {
+      "name": "no orphans after gateway shutdown",
+      "status": "PASS",
+      "duration_ms": 28,
+      "message": ""
+    }
+  ],
+  "passed": 23,
+  "failed": 5,
+  "skipped": 0,
+  "ok": false
+}

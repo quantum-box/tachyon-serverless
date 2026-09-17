@@ -1,0 +1,863 @@
+[
+  {
+    "id": "inv_01m2q4fxcpkc8ep3vaw4ck3ne5",
+    "function_id": "fn_01m2q48k0pkfsgzp3h132nh81c",
+    "revision_id": "rev_01m2q48mnjjy1be1jkxynpq1nv",
+    "alias": "prod",
+    "alias_generation": 3,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v1",
+      "message": "hello, v1-again",
+      "secret_present": true,
+      "unisolated": false
+    },
+    "trace_id": "inv_01m2q4fxcpkc8ep3vaw4ck3ne5",
+    "input_digest": "sha256:6afd324d6bd5d45deb8b8e52437a69be5a0265a5f628b8c5bf4d37ff767af1ad",
+    "input_size_bytes": 19,
+    "accepted_at": "2026-09-17T07:32:26.646213206Z",
+    "started_at": "2026-09-17T07:32:38.020874540Z",
+    "finished_at": "2026-09-17T07:32:38.150909101Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:32:36.646213206Z",
+      "init_deadline": "2026-09-17T07:32:56.647724130Z",
+      "execution_deadline": "2026-09-17T07:33:08.020874540Z",
+      "client_deadline": "2026-09-17T07:33:36.646213206Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4g8g4e9fsydez5h0ak24g",
+        "number": 1,
+        "environment_id": "env_01m2q4fxcq1w4yaa67jmywddm8",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 10700,
+          "runtime_init_ms": 695,
+          "handler_ms": 128,
+          "response_ms": 0,
+          "total_ms": 11643
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 10700,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4fxcq1w4yaa67jmywddm8",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4fxcq1w4yaa67jmywddm8/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4fxcq1w4yaa67jmywddm8",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 74,
+            "guest_init_ms": 406,
+            "host_disk_budget_bytes": 292194816,
+            "instance_id": "env-01m2q4fxcq1w4yaa67jmywddm8",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4fxcq1w4yaa67jmywddm8/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 6,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "02f9e674-37ca-4444-8d8d-c80a3bbf4fdc",
+          "host_pid": 124453
+        },
+        "dispatched_at": "2026-09-17T07:32:38.020874540Z",
+        "finished_at": "2026-09-17T07:32:38.150909101Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2q4ffweez7jpr1r44jshebp",
+    "function_id": "fn_01m2q48k0pkfsgzp3h132nh81c",
+    "revision_id": "rev_01m2q4ffj53m06ps6qe1fm2961",
+    "alias": "prod",
+    "alias_generation": 2,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "greeting": "v2",
+      "message": "hello, v2",
+      "secret_present": true,
+      "unisolated": false
+    },
+    "trace_id": "inv_01m2q4ffweez7jpr1r44jshebp",
+    "input_digest": "sha256:cac80308dfca66ed7ea92110517c31c44e6234a7eb4ca260872b87135ba400ad",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T07:32:12.814773966Z",
+    "started_at": "2026-09-17T07:32:26.106389668Z",
+    "finished_at": "2026-09-17T07:32:26.374130831Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:32:22.814773966Z",
+      "init_deadline": "2026-09-17T07:32:42.817326290Z",
+      "execution_deadline": "2026-09-17T07:32:56.106389668Z",
+      "client_deadline": "2026-09-17T07:33:22.814773966Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4fwvt7dt8n86kg2q1z02j",
+        "number": 1,
+        "environment_id": "env_01m2q4ffwh2rrspwvhdqgbzzrj",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 12267,
+          "runtime_init_ms": 836,
+          "handler_ms": 265,
+          "response_ms": 0,
+          "total_ms": 13557
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 12267,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4ffwh2rrspwvhdqgbzzrj",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4ffwh2rrspwvhdqgbzzrj/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4ffwh2rrspwvhdqgbzzrj",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 30,
+            "guest_init_ms": 525,
+            "host_disk_budget_bytes": 292194816,
+            "instance_id": "env-01m2q4ffwh2rrspwvhdqgbzzrj",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4ffwh2rrspwvhdqgbzzrj/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 9,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "3661d0d4-5973-4b41-a4f9-dab48db60b5c",
+          "host_pid": 124413
+        },
+        "dispatched_at": "2026-09-17T07:32:26.106389668Z",
+        "finished_at": "2026-09-17T07:32:26.374130831Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2q4bw5v5a0qthbvqbwq2571",
+    "function_id": "fn_01m2q48k0pkfsgzp3h132nh81c",
+    "revision_id": "rev_01m2q4bv661wn5hrtdkhmn3bns",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "init_error",
+      "error_type": "Host.EnvironmentBootFailed",
+      "message": "boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q4bw5xdkhrqyn2bmk97399/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...blk virtio0: 1/0/0 default/read/poll queues\r\n[   15.667417] virtio_blk virtio0: 1/0/0 default/read/poll queues\r\n[   15.933492] virtio_blk virtio0: [vda] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)\r\n[   15.933492] virtio_blk virtio0: [vda] 131072 512-byte logical blocks (67.1 MB/64.0 MiB)\r\n[   16.522279] virtio_blk virtio1: 1/0/0 default/read/poll queues\r\n[   16.522279] virtio_blk virtio1: 1/0/0 default/read/poll queues\r\n[   16.673622] virtio_blk virtio1: [vdb] 20480 512-byte logical blocks (10.5 MB/10.0 MiB)\r\n[   16.673622] virtio_blk virtio1: [vdb] 20480 512-byte logical blocks (10.5 MB/10.0 MiB)\r\n[   17.273393] virtio_blk virtio2: 1/0/0 default/read/poll queues\r\n[   17.273393] virtio_blk virtio2: 1/0/0 default/read/poll queues\r\n[   17.650664] virtio_blk virtio2: [vdc] 524288 512-byte logical blocks (268 MB/256 MiB)\r\n[   17.650664] virtio_blk virtio2: [vdc] 524288 512-byte logical blocks (268 MB/256 MiB)\r\n[   18.220103] Loading iSCSI transport class v2.0-870.\r\n[   18.220103] Loading iSCSI transport class v2.0-870.\r\n[   18.334563] iscsi: registered transport (tcp)\r\n[   18.334563] iscsi: registered transport (tcp)\r\n[   18.827232] rtc-pl031 40001000.rtc: registered as rtc0\r\n[   18.827232] rtc-pl031 40001000.rtc: registered as rtc0\r\n[   19.101502] rtc-pl031 40001000.rtc: setting system clock to 2026-09-17T07:30:40 UTC (1789630240)\r\n[   19.101502] rtc-pl031 40001000.rtc: setting system clock to 2026-09-17T07:30:40 UTC (1789630240)\r\n[   19.501996] vmclock 801fe000.ptp: vmclock0: registered miscdev\r\n[   19.501996] vmclock 801fe000.ptp: vmclock0: registered miscdev\r\n[   19.731212] hid: raw HID events driver (C) Jiri Kosina\r\n[   19.731212] hid: raw HID events driver (C) Jiri Kosina\r\n[   20.128774] Initializing XFRM netlink socket\r\n[   20.128774] Initializing XFRM netlink socket\r\n[   20.167337] NET: Registered PF_INET6 protocol family\r\n[   20.167337] NET: Registered PF_INET6 protocol family\r\n[   20.703970] Segment Routing with IPv6\r\n[   20.703970] Segment Routing with IPv6\r\n[   20.730756] In-situ OAM (IOAM) with IPv6\r\n[   20.730756] In-situ OAM (IOAM) with IPv6\r\n[   21.194950] bpfilter: Loaded bpfilter_umh pid 46\r\n[   21.194950] bpfilter: Loaded bpfilter_umh pid 46\r\n[   21.607907] NET: Registered PF_PACKET protocol family\r\n[   21.607907] NET: Registered PF_PACKET protocol family\r\n[   21.821234] Bridge firewalling registered\r\n[   21.821234] Bridge firewalling registered\r\n[   21.920908] Key type dns_resolver registered\r\n[   21.920908] Key type dns_resolver registered\r\n[   22.090889] NET: Registered PF_VSOCK protocol family\r\n[   22.090889] NET: Registered PF_VSOCK protocol family\r\n[   22.430708] registered taskstats version 1\r\n[   22.430708] registered taskstats version 1\r\n[   22.522093] Loading compiled-in X.509 certificates\r\n[   22.522093] Loading compiled-in X.509 certificates\r\n[   22.687609] zswap: loaded using pool lzo/zbud\r\n[   22.687609] zswap: loaded using pool lzo/zbud\r\n[   22.718808] Key type .fscrypt registered\r\n[   22.718808] Key type .fscrypt registered\r\n[   22.811264] Key type fscrypt-provisioning registered\r\n[   22.811264] Key type fscrypt-provisioning registered\r\n[   22.910539] Key type encrypted registered\r\n[   22.910539] Key type encrypted registered\r\n[   23.001340] clk: Disabling unused clocks\r\n[   23.001340] clk: Disabling unused clocks\r\n[   23.292214] EXT4-fs (vda): write access unavailable, skipping orphan cleanup\r\n[   23.292214] EXT4-fs (vda): write access unavailable, skipping orphan cleanup\r\n[   23.384598] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.\r\n[   23.384598] EXT4-fs (vda): mounted filesystem with ordered data mode. Quota mode: none.\r\n[   23.425502] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.\r\n[   23.425502] VFS: Mounted root (ext4 filesystem) readonly on device 254:0.\r\n[   23.517399] devtmpfs: mounted\r\n[   23.517399] devtmpfs: mounted\r\n[   23.597255] Freeing unused kernel memory: 2240K\r\n[   23.597255] Freeing unused kernel memory: 2240K\r\n[   23.619408] Run /sbin/tachyon-init as init process\r\n[   23.619408] Run /sbin/tachyon-init as init process\r\n\n--- fc.log (tail) ---\n2026-09-17T07:30:15.624640425 [env-01m2q4bw5xdkhrqyn2bmk97399:main] If the VM was restored from snapshot, boot-source, machine-config.smt, and machine-config.cpu_template will all be empty.\n2026-09-17T07:30:16.073906155 [env-01m2q4bw5xdkhrqyn2bmk97399:main] Could not read the coherency line size, size, number of sets for cache level 1.\n2026-09-17T07:30:16.074351943 [env-01m2q4bw5xdkhrqyn2bmk97399:main] Could not read the coherency line size, size, number of sets for cache level 1.\n2026-09-17T07:30:16.075142673 [env-01m2q4bw5xdkhrqyn2bmk97399:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding\n"
+    },
+    "trace_id": "inv_01m2q4bw5v5a0qthbvqbwq2571",
+    "input_digest": "sha256:90215511fc4037d9290c56da6ef2052bcea2f8d4b0b8e1911520ad0499ec6a46",
+    "input_size_bytes": 15,
+    "accepted_at": "2026-09-17T07:30:14.331149086Z",
+    "finished_at": "2026-09-17T07:30:46.022633525Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:30:24.331149086Z",
+      "client_deadline": "2026-09-17T07:31:24.331149086Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2q4as5zc5hsaf7ct3dnbwt1",
+    "function_id": "fn_01m2q48k0pkfsgzp3h132nh81c",
+    "revision_id": "rev_01m2q48mnjjy1be1jkxynpq1nv",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "init_error",
+      "error_type": "Host.EnvironmentBootFailed",
+      "message": "boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q4as7zgbggytrwcy3xjfc9/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...'user_space'\r\n[    9.549511] audit: type=2000 audit(0.700:1): state=initialized audit_enabled=0 res=1\r\n[    9.858124] cpuidle: using governor menu\r\n[    9.904270] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.\r\n[   10.039634] ASID allocator initialised with 65536 entries\r\n[   10.435209] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages\r\n[   10.545715] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page\r\n[   10.567295] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages\r\n[   10.942052] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page\r\n[   11.063593] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages\r\n[   11.271194] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page\r\n[   11.373794] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages\r\n[   11.439795] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page\r\n[   11.828732] ACPI: Interpreter disabled.\r\n[   11.955199] iommu: Default domain type: Translated \r\n[   12.067750] iommu: DMA domain TLB invalidation policy: strict mode \r\n[   12.240867] SCSI subsystem initialized\r\n[   12.250604] pps_core: LinuxPPS API ver. 1 registered\r\n[   12.327128] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>\r\n[   12.575014] PTP clock support registered\r\n[   12.782284] NetLabel: Initializing\r\n[   12.790531] NetLabel:  domain hash size = 128\r\n[   12.960169] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO\r\n[   13.345934] NetLabel:  unlabeled traffic allowed by default\r\n[   13.465121] vgaarb: loaded\r\n[   13.599747] clocksource: Switched to clocksource arch_sys_counter\r\n[   13.843572] VFS: Disk quotas dquot_6.6.0\r\n[   13.873101] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)\r\n[   14.316834] pnp: PnP ACPI: disabled\r\n[   14.505970] NET: Registered PF_INET protocol family\r\n[   14.711778] IP idents hash table entries: 4096 (order: 3, 32768 bytes, linear)\r\n[   15.134382] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)\r\n[   15.250434] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)\r\n[   15.528226] TCP established hash table entries: 2048 (order: 2, 16384 bytes, linear)\r\n[   15.857185] TCP bind hash table entries: 2048 (order: 4, 65536 bytes, linear)\r\n[   16.062987] TCP: Hash tables configured (established 2048 bind 2048)\r\n[   16.411548] MPTCP token hash table entries: 256 (order: 0, 6144 bytes, linear)\r\n[   16.594282] UDP hash table entries: 256 (order: 1, 8192 bytes, linear)\r\n[   16.708393] UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)\r\n[   16.942375] NET: Registered PF_UNIX/PF_LOCAL protocol family\r\n[   17.263447] RPC: Registered named UNIX socket transport module.\r\n[   17.496258] RPC: Registered udp transport module.\r\n[   17.799507] RPC: Registered tcp transport module.\r\n[   17.819700] RPC: Registered tcp NFSv4.1 backchannel transport module.\r\n[   17.907262] NET: Registered PF_XDP protocol family\r\n[   18.098283] PCI: CLS 0 bytes, default 64\r\n[   18.290935] Initialise system trusted keyrings\r\n[   18.411125] workingset: timestamp_bits=36 max_order=16 bucket_order=0\r\n[   18.916835] zbud: loaded\r\n[   19.428726] squashfs: version 4.0 (2009/01/31) Phillip Lougher\r\n[   19.586095] NFS: Registering the id_resolver key type\r\n[   19.824192] Key type id_resolver registered\r\n[   19.878036] Key type id_legacy registered\r\n[   20.081544] nfs4filelayout_init: NFSv4 File Layout Driver Registering...\r\n[   20.282031] SGI XFS with ACLs, security attributes, quota, no debug enabled\r\n[   20.887852] Key type asymmetric registered\r\n[   21.226187] Asymmetric key parser 'x509' registered\r\n[   21.286070] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 247)\r\n[   21.715705] io scheduler mq-deadline registered\r\n[   21.785112] io scheduler kyber registered\r\n[   22.032435] io scheduler bfq registered\r\n[   22.215030] Serial: 8250/16550 driver, 1 ports, IRQ sharing disabled\r\n[   22.287327] printk: console [ttyS0] disabled\r\n[   22.488319] 40002000.uart: ttyS0 at MMIO 0x40002000 (irq = 13, base_baud = 1500000) is a 16550A\r\n\n--- fc.log (tail) ---\n2026-09-17T07:29:40.279872674 [env-01m2q4as7zgbggytrwcy3xjfc9:main] If the VM was restored from snapshot, boot-source, machine-config.smt, and machine-config.cpu_template will all be empty.\n2026-09-17T07:29:40.738021386 [env-01m2q4as7zgbggytrwcy3xjfc9:main] Could not read the coherency line size, size, number of sets for cache level 1.\n2026-09-17T07:29:40.738429582 [env-01m2q4as7zgbggytrwcy3xjfc9:main] Could not read the coherency line size, size, number of sets for cache level 1.\n2026-09-17T07:29:40.953572277 [env-01m2q4as7zgbggytrwcy3xjfc9:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding\n"
+    },
+    "trace_id": "inv_01m2q4as5zc5hsaf7ct3dnbwt1",
+    "input_digest": "sha256:8df974e80ac3f41bf7a597c6e708e10516faaee21d6e9001b1d3f276bef1237a",
+    "input_size_bytes": 14,
+    "accepted_at": "2026-09-17T07:29:38.495529596Z",
+    "finished_at": "2026-09-17T07:30:11.228556626Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:29:48.495529596Z",
+      "client_deadline": "2026-09-17T07:30:48.495529596Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2q49q3jc0sdytv9hxv1dm3t",
+    "function_id": "fn_01m2q48k0pkfsgzp3h132nh81c",
+    "revision_id": "rev_01m2q48mnjjy1be1jkxynpq1nv",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "init_error",
+      "error_type": "Host.EnvironmentBootFailed",
+      "message": "boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q49q4bfnrw4yke41fkz02z/root/v.sock_5000 after 30s\n--- console.log (tail) ---\n...ELinuxProject/selinux-kernel/wiki/DEPRECATE-checkreqprot\r\n[    2.245706] Mount-cache hash table entries: 512 (order: 0, 4096 bytes, linear)\r\n[    2.283731] Mountpoint-cache hash table entries: 512 (order: 0, 4096 bytes, linear)\r\n[    2.883794] cblist_init_generic: Setting adjustable number of callback queues.\r\n[    2.975356] cblist_init_generic: Setting shift to 0 and lim to 1.\r\n[    3.082225] rcu: Hierarchical SRCU implementation.\r\n[    3.521007] rcu: \tMax phase no-delay instances is 1000.\r\n[    3.645404] Platform MSI: msic domain created\r\n[    3.737601] PCI/MSI: /intc/msic domain created\r\n[    3.748339] EFI services will not be available.\r\n[    4.442623] smp: Bringing up secondary CPUs ...\r\n[    4.529765] smp: Brought up 1 node, 1 CPU\r\n[    4.736339] SMP: Total of 1 processors activated.\r\n[    4.860722] CPU features: detected: Branch Target Identification\r\n[    5.246651] CPU features: detected: ARMv8.4 Translation Table Level\r\n[    5.289923] CPU features: detected: Data cache clean to the PoU not required for I/D coherence\r\n[    5.574056] CPU features: detected: Common not Private translations\r\n[    6.387409] CPU features: detected: CRC32 instructions\r\n[    6.629045] CPU features: detected: Data cache clean to Point of Deep Persistence\r\n[    6.819701] CPU features: detected: Data cache clean to Point of Persistence\r\n[    7.272932] CPU features: detected: E0PD\r\n[    7.281755] CPU features: detected: Enhanced Privileged Access Never\r\n[    7.476865] CPU features: detected: RCpc load-acquire (LDAPR)\r\n[    7.997634] CPU features: detected: LSE atomic instructions\r\n[    8.231909] CPU features: detected: Privileged Access Never\r\n[    8.614721] CPU features: detected: RAS Extension Support\r\n[    8.720425] CPU features: detected: Speculation barrier (SB)\r\n[    8.917702] CPU features: detected: TLB range maintenance instructions\r\n[    9.209155] CPU: All CPU(s) started at EL1\r\n[    9.228332] alternatives: applying system-wide alternatives\r\n[   11.843481] devtmpfs: initialized\r\n[   12.273384] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns\r\n[   12.580277] futex hash table entries: 256 (order: 2, 16384 bytes, linear)\r\n[   13.008207] DMI not present or invalid.\r\n[   13.508992] NET: Registered PF_NETLINK/PF_ROUTE protocol family\r\n[   14.091153] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations\r\n[   14.475518] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations\r\n[   14.504681] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations\r\n[   15.140797] audit: initializing netlink subsys (disabled)\r\n[   15.471905] thermal_sys: Registered thermal governor 'fair_share'\r\n[   15.472013] thermal_sys: Registered thermal governor 'step_wise'\r\n[   15.491534] thermal_sys: Registered thermal governor 'user_space'\r\n[   15.677470] audit: type=2000 audit(0.840:1): state=initialized audit_enabled=0 res=1\r\n[   16.077933] cpuidle: using governor menu\r\n[   16.477009] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.\r\n[   16.765703] ASID allocator initialised with 65536 entries\r\n[   17.277520] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages\r\n[   17.496956] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page\r\n[   17.658453] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages\r\n[   18.002251] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page\r\n[   18.059798] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages\r\n[   18.267757] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page\r\n[   18.390029] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages\r\n[   18.576704] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page\r\n[   18.950424] ACPI: Interpreter disabled.\r\n[   18.966143] iommu: Default domain type: Translated \r\n[   19.063132] iommu: DMA domain TLB invalidation policy: strict mode \r\n[   19.289233] SCSI subsystem initialized\r\n[   19.388860] pps_core: LinuxPPS API ver. 1 registered\r\n[   19.459896] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>\r\n[   19.\n--- fc.log (tail) ---\n2026-09-17T07:29:05.218703946 [env-01m2q49q4bfnrw4yke41fkz02z:main] If the VM was restored from snapshot, boot-source, machine-config.smt, and machine-config.cpu_template will all be empty.\n2026-09-17T07:29:05.856998250 [env-01m2q49q4bfnrw4yke41fkz02z:main] Could not read the coherency line size, size, number of sets for cache level 1.\n2026-09-17T07:29:05.857223551 [env-01m2q49q4bfnrw4yke41fkz02z:main] Could not read the coherency line size, size, number of sets for cache level 1.\n2026-09-17T07:29:05.946444079 [env-01m2q49q4bfnrw4yke41fkz02z:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding\n"
+    },
+    "trace_id": "inv_01m2q49q3jc0sdytv9hxv1dm3t",
+    "input_digest": "sha256:8f368cf8ea5ee799673942b99a77375e53d42df26dd48415385612db04fc3097",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T07:29:03.602886081Z",
+    "finished_at": "2026-09-17T07:29:37.018941188Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:29:13.602886081Z",
+      "client_deadline": "2026-09-17T07:30:13.602886081Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2q48ragtgpgvtvhrj55sv98",
+    "function_id": "fn_01m2q48k0pkfsgzp3h132nh81c",
+    "revision_id": "rev_01m2q48mnjjy1be1jkxynpq1nv",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "init_error",
+      "error_type": "Host.InitTimeout",
+      "message": "guest did not become ready within 30 s"
+    },
+    "trace_id": "inv_01m2q48ragtgpgvtvhrj55sv98",
+    "input_digest": "sha256:d7d234f759ec34fd6298b7e32318614760070aaef9f4e92ced928324b49a0602",
+    "input_size_bytes": 15,
+    "accepted_at": "2026-09-17T07:28:32.080401632Z",
+    "finished_at": "2026-09-17T07:29:02.738201023Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:28:42.080401632Z",
+      "client_deadline": "2026-09-17T07:29:42.080401632Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2q4dz1w6fjj80vnr3fvv2qq",
+    "function_id": "fn_01m2q48k614n9e7ytc2mcs07fw",
+    "revision_id": "rev_01m2q48nwvp81vavmd1b8e92fb",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "eyJhY2NlcHQiOiIqLyoiLCJob3N0IjoiMTI3LjAuMC4xOjE4NDgxIiwieC1kZW1vLWhlYWRlciI6ImRlbW8tdmFsdWUifQ==",
+      "headers": [
+        [
+          "content-type",
+          "application/json"
+        ],
+        [
+          "content-length",
+          "70"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2q4dz1w6fjj80vnr3fvv2qq",
+    "input_digest": "sha256:2aef7616c1d533e6c5ee2f31a91447c0263964e168956163f47d73b4b4f575e1",
+    "input_size_bytes": 173,
+    "accepted_at": "2026-09-17T07:31:22.812151014Z",
+    "started_at": "2026-09-17T07:31:35.727507881Z",
+    "finished_at": "2026-09-17T07:31:36.000739074Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:31:32.812151014Z",
+      "init_deadline": "2026-09-17T07:31:52.814549160Z",
+      "execution_deadline": "2026-09-17T07:32:05.727507881Z",
+      "client_deadline": "2026-09-17T07:32:32.812151014Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4ebnfmynmknaht4zv89f3",
+        "number": 1,
+        "environment_id": "env_01m2q4dz1ytfedd6m8s21xr556",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 11464,
+          "runtime_init_ms": 1388,
+          "handler_ms": 270,
+          "response_ms": 0,
+          "total_ms": 13326
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 11464,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4dz1ytfedd6m8s21xr556",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4dz1ytfedd6m8s21xr556/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4dz1ytfedd6m8s21xr556",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 98,
+            "guest_init_ms": 931,
+            "host_disk_budget_bytes": 292698392,
+            "instance_id": "env-01m2q4dz1ytfedd6m8s21xr556",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4dz1ytfedd6m8s21xr556/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 8,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "3a5c12e7-2c35-44e2-9669-b40b1f6d5bf3",
+          "host_pid": 124212
+        },
+        "dispatched_at": "2026-09-17T07:31:35.727507881Z",
+        "finished_at": "2026-09-17T07:31:36.000739074Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2q4djy0k9nj6abman4rvbk6",
+    "function_id": "fn_01m2q48k614n9e7ytc2mcs07fw",
+    "revision_id": "rev_01m2q48nwvp81vavmd1b8e92fb",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "c3RhdHVzIDQwNA==",
+      "headers": [
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ],
+        [
+          "content-length",
+          "10"
+        ]
+      ],
+      "status": 404
+    },
+    "http_status": 404,
+    "trace_id": "inv_01m2q4djy0k9nj6abman4rvbk6",
+    "input_digest": "sha256:50072164a479e7ed4afec19993d3693bb5b1bd02308e5cbac9bf5d5de3e2f7a6",
+    "input_size_bytes": 145,
+    "accepted_at": "2026-09-17T07:31:10.400336725Z",
+    "started_at": "2026-09-17T07:31:22.042379879Z",
+    "finished_at": "2026-09-17T07:31:22.428148378Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:31:20.400336725Z",
+      "init_deadline": "2026-09-17T07:31:40.402084169Z",
+      "execution_deadline": "2026-09-17T07:31:52.042379879Z",
+      "client_deadline": "2026-09-17T07:32:20.400336725Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4dy9tqm0e9yamxmqfp39p",
+        "number": 1,
+        "environment_id": "env_01m2q4djy2c71yp6c5jz9z3d1b",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 9866,
+          "runtime_init_ms": 1629,
+          "handler_ms": 382,
+          "response_ms": 0,
+          "total_ms": 12026
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 9866,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4djy2c71yp6c5jz9z3d1b",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4djy2c71yp6c5jz9z3d1b/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4djy2c71yp6c5jz9z3d1b",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 105,
+            "guest_init_ms": 1102,
+            "host_disk_budget_bytes": 292698392,
+            "instance_id": "env-01m2q4djy2c71yp6c5jz9z3d1b",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4djy2c71yp6c5jz9z3d1b/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 6,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "e0dbe8f3-a3b4-4ad6-95bd-a11f0c991ed7",
+          "host_pid": 124187
+        },
+        "dispatched_at": "2026-09-17T07:31:22.042379879Z",
+        "finished_at": "2026-09-17T07:31:22.428148378Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2q4d7a25tefk9c6vg0g4hst",
+    "function_id": "fn_01m2q48k614n9e7ytc2mcs07fw",
+    "revision_id": "rev_01m2q48nwvp81vavmd1b8e92fb",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "aGVsbG8tZWNoby1ib2R5",
+      "headers": [
+        [
+          "content-type",
+          "text/plain"
+        ],
+        [
+          "content-length",
+          "15"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2q4d7a25tefk9c6vg0g4hst",
+    "input_digest": "sha256:717ba09756c31f10b3befadbcbf0b62914f84ac433122b128132b8c168f79473",
+    "input_size_bytes": 214,
+    "accepted_at": "2026-09-17T07:30:58.498466645Z",
+    "started_at": "2026-09-17T07:31:09.918141872Z",
+    "finished_at": "2026-09-17T07:31:10.141191497Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:31:08.498466645Z",
+      "init_deadline": "2026-09-17T07:31:28.500713126Z",
+      "execution_deadline": "2026-09-17T07:31:39.918141872Z",
+      "client_deadline": "2026-09-17T07:32:08.498466645Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4djey9b66qz22q7yebg2n",
+        "number": 1,
+        "environment_id": "env_01m2q4d7a4mqygzxfxcf3g497w",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 10623,
+          "runtime_init_ms": 783,
+          "handler_ms": 220,
+          "response_ms": 0,
+          "total_ms": 11780
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 10623,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4d7a4mqygzxfxcf3g497w",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4d7a4mqygzxfxcf3g497w/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4d7a4mqygzxfxcf3g497w",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 35,
+            "guest_init_ms": 561,
+            "host_disk_budget_bytes": 292698392,
+            "instance_id": "env-01m2q4d7a4mqygzxfxcf3g497w",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4d7a4mqygzxfxcf3g497w/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 5,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "98886ab9-c73a-4168-847d-7f74a43ceada",
+          "host_pid": 124151
+        },
+        "dispatched_at": "2026-09-17T07:31:09.918141872Z",
+        "finished_at": "2026-09-17T07:31:10.141191497Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2q4cv8e8ycmg3zkdtwvjprn",
+    "function_id": "fn_01m2q48k614n9e7ytc2mcs07fw",
+    "revision_id": "rev_01m2q48nwvp81vavmd1b8e92fb",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "body_base64": "b2s=",
+      "headers": [
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ],
+        [
+          "content-length",
+          "2"
+        ]
+      ],
+      "status": 200
+    },
+    "http_status": 200,
+    "trace_id": "inv_01m2q4cv8e8ycmg3zkdtwvjprn",
+    "input_digest": "sha256:edd2fe88a1c2dcd49c19f785c450557a3ab8373d7f2eec59122e96a4a0b51f71",
+    "input_size_bytes": 135,
+    "accepted_at": "2026-09-17T07:30:46.158104909Z",
+    "started_at": "2026-09-17T07:30:57.934299999Z",
+    "finished_at": "2026-09-17T07:30:58.227826792Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:30:56.158104909Z",
+      "init_deadline": "2026-09-17T07:31:16.177009646Z",
+      "execution_deadline": "2026-09-17T07:31:27.934299999Z",
+      "client_deadline": "2026-09-17T07:31:56.158104909Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4d6renzhqnqt08xg47hgn",
+        "number": 1,
+        "environment_id": "env_01m2q4cv90epm24t0ye5pp99db",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 10447,
+          "runtime_init_ms": 1104,
+          "handler_ms": 289,
+          "response_ms": 0,
+          "total_ms": 12051
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 10447,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4cv90epm24t0ye5pp99db",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4cv90epm24t0ye5pp99db/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4cv90epm24t0ye5pp99db",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 34,
+            "guest_init_ms": 720,
+            "host_disk_budget_bytes": 292698392,
+            "instance_id": "env-01m2q4cv90epm24t0ye5pp99db",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4cv90epm24t0ye5pp99db/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 17,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "99680576-f6ce-475f-aee7-2a5f8f49b6a2",
+          "host_pid": 124121
+        },
+        "dispatched_at": "2026-09-17T07:30:57.934299999Z",
+        "finished_at": "2026-09-17T07:30:58.227826792Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2q4g906bzr7ea1pm2psy16p",
+    "function_id": "fn_01m2q48kcqb4djy5bbeq43qdeh",
+    "revision_id": "rev_01m2q48qdma4edbds799927yzb",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "cancelled",
+    "trace_id": "inv_01m2q4g906bzr7ea1pm2psy16p",
+    "input_digest": "sha256:d8b6baac143209b32a8a5f85b5fba77b4e052d6cdfd2978929fb11fc0255eafa",
+    "input_size_bytes": 14,
+    "accepted_at": "2026-09-17T07:32:38.534552687Z",
+    "finished_at": "2026-09-17T07:32:38.631499677Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:32:48.534552687Z",
+      "client_deadline": "2026-09-17T07:33:48.534552687Z"
+    },
+    "attempts": []
+  },
+  {
+    "id": "inv_01m2q4es50v00k6q1f6nenkc83",
+    "function_id": "fn_01m2q48kcqb4djy5bbeq43qdeh",
+    "revision_id": "rev_01m2q4erwkjq4fv68fge1m9z1y",
+    "mode": "sync",
+    "status": "failed",
+    "error": {
+      "class": "timeout",
+      "error_type": "Host.Timeout",
+      "message": "handler did not finish within 2 s"
+    },
+    "trace_id": "inv_01m2q4es50v00k6q1f6nenkc83",
+    "input_digest": "sha256:b2037123731fd3579b1c4953c496a601e1e8570ee626a566861bf5f3068b040a",
+    "input_size_bytes": 36,
+    "accepted_at": "2026-09-17T07:31:49.536181581Z",
+    "started_at": "2026-09-17T07:32:05.687536814Z",
+    "finished_at": "2026-09-17T07:32:08.895488845Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:31:59.536181581Z",
+      "init_deadline": "2026-09-17T07:32:19.537283765Z",
+      "execution_deadline": "2026-09-17T07:32:07.687536814Z",
+      "client_deadline": "2026-09-17T07:32:31.536181581Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4f8xqx7zee58vdpymv003",
+        "number": 1,
+        "environment_id": "env_01m2q4es515a8g75rnsz0t6vrg",
+        "epoch": 1,
+        "status": "failed",
+        "error": {
+          "class": "timeout",
+          "error_type": "Host.Timeout",
+          "message": "handler did not finish within 2 s"
+        },
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 14310,
+          "runtime_init_ms": 1893,
+          "handler_ms": 2000,
+          "response_ms": 1202,
+          "total_ms": 19499
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 14310,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4es515a8g75rnsz0t6vrg",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4es515a8g75rnsz0t6vrg/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4es515a8g75rnsz0t6vrg",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_init_ms": 1014,
+            "host_disk_budget_bytes": 292124960,
+            "instance_id": "env-01m2q4es515a8g75rnsz0t6vrg",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4es515a8g75rnsz0t6vrg/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 2,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "bbe826f5-dafe-4d77-8883-11922f3b3e63",
+          "host_pid": 124289
+        },
+        "dispatched_at": "2026-09-17T07:32:05.687536814Z",
+        "finished_at": "2026-09-17T07:32:08.895488845Z"
+      }
+    ]
+  },
+  {
+    "id": "inv_01m2q4ec789stsdtwk86rnsfv3",
+    "function_id": "fn_01m2q48kcqb4djy5bbeq43qdeh",
+    "revision_id": "rev_01m2q48qdma4edbds799927yzb",
+    "alias": "prod",
+    "alias_generation": 1,
+    "mode": "sync",
+    "status": "succeeded",
+    "output": {
+      "burned_seconds": 1.000224542,
+      "cancelled": false,
+      "iterations": 271800000
+    },
+    "trace_id": "inv_01m2q4ec789stsdtwk86rnsfv3",
+    "input_digest": "sha256:fd839bdef3efc7f83657dc6dfd87ac89eda36d5756deb4cbfb8db4596c2de7a6",
+    "input_size_bytes": 13,
+    "accepted_at": "2026-09-17T07:31:36.296965168Z",
+    "started_at": "2026-09-17T07:31:47.777383552Z",
+    "finished_at": "2026-09-17T07:31:48.896268391Z",
+    "deadlines": {
+      "queue_deadline": "2026-09-17T07:31:46.296965168Z",
+      "init_deadline": "2026-09-17T07:32:06.299882822Z",
+      "execution_deadline": "2026-09-17T07:32:17.777383552Z",
+      "client_deadline": "2026-09-17T07:32:46.296965168Z"
+    },
+    "attempts": [
+      {
+        "id": "att_01m2q4eqe1wqkr5zwdsxkg0f3q",
+        "number": 1,
+        "environment_id": "env_01m2q4ec7bqhcx7172a4ckwwe7",
+        "epoch": 1,
+        "status": "succeeded",
+        "start_kind": "cold",
+        "timings": {
+          "queue_wait_ms": 0,
+          "environment_boot_ms": 10614,
+          "runtime_init_ms": 699,
+          "handler_ms": 1116,
+          "response_ms": 0,
+          "total_ms": 12596
+        },
+        "boot_evidence": {
+          "details": {
+            "boot_ms": 10614,
+            "bridge_version": "0.1.0",
+            "cgroup": "/sys/fs/cgroup/tachyon/env_01m2q4ec7bqhcx7172a4ckwwe7",
+            "cgroup_cpu_max": "50000 100000",
+            "cgroup_memory_max_bytes": 335544320,
+            "cgroup_mode": "required",
+            "cgroup_pids_max": 64,
+            "console_log": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4ec7bqhcx7172a4ckwwe7/console.log",
+            "console_log_max_bytes": 4194304,
+            "egress_profile": "none",
+            "env_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2q4ec7bqhcx7172a4ckwwe7",
+            "fc_log_max_bytes": 4194304,
+            "firecracker_version": "v1.17.0",
+            "function_drive_bytes": 10485760,
+            "guest_architecture": "aarch64",
+            "guest_handler_ms": 1020,
+            "guest_init_ms": 423,
+            "host_disk_budget_bytes": 292124960,
+            "instance_id": "env-01m2q4ec7bqhcx7172a4ckwwe7",
+            "jail_root": "/srv/jailer/firecracker/env-01m2q4ec7bqhcx7172a4ckwwe7/root",
+            "jailed": true,
+            "kernel_path": "/home/takanorifukuyama.guest/tsls/.kvm/vmlinux",
+            "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+            "mem_mib": 256,
+            "network_interfaces": 0,
+            "provider": "firecracker",
+            "rootfs_path": "/home/takanorifukuyama.guest/tsls/.kvm/rootfs.ext4",
+            "rootfs_sha256": "6d22e0a8d5a86f7e1e9cacbc12241ed8623605db3faaceb56f34a8429f8297e2",
+            "scratch_drive_bytes": 268435456,
+            "scratch_drive_ms": 6,
+            "scratch_drive_reserved": true,
+            "vcpus": 1,
+            "vmm_gid": 64000,
+            "vmm_new_pid_ns": true,
+            "vmm_uid": 64000,
+            "vsock_port": 5000
+          },
+          "guest_boot_id": "1732b4f7-8de0-4750-b561-611ab279960a",
+          "host_pid": 124245
+        },
+        "dispatched_at": "2026-09-17T07:31:47.777383552Z",
+        "finished_at": "2026-09-17T07:31:48.896268391Z"
+      }
+    ]
+  }
+]

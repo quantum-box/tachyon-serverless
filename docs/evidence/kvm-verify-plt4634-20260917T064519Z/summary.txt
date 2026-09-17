@@ -1,0 +1,53 @@
+PLT-4634 (admission / autoscaler, PR #16) on Firecracker - KVM verification 2026-09-17
+
+Source: origin/main b5a7e54 (the only change in the VM copy at that time: scripts/e2e/burst.sh
+provider support, committed with this evidence). Guest bridge and rootfs rebuilt from that tree
+(rootfs sha256 6d22e0a8...; the previous image carried an older bridge).
+Host: Apple M4 -> Lima VM tsls-kvm (vz, nested virtualization, 4 vCPU / 8 GiB, Linux 7.0.0-31
+aarch64) -> KVM -> Firecracker / jailer v1.17.0, guest kernel 6.1.155. Gateway as root
+(config/gateway.firecracker.toml: profile production, jailer enabled, cgroup required).
+The physical Mac was shared with other agents' cargo builds: 1-min load average on macOS was
+9.2 -> 6.6 (demo), 9.2 -> 7.1 (burst), 6.9 -> 5.9 (warm). VM load and disk in each host.txt.
+
+1. scripts/e2e/demo.sh, TSLS_PROVIDER=firecracker            -> demo-20260917T064519Z-firecracker/
+   Ran as: run-demo.sh.txt (sudo -n env ... TSLS_SKIP_BUILD=1 TSLS_GATEWAY_CONFIG=<copy of
+   config/gateway.firecracker.toml with listen 127.0.0.1:18481 and a fresh data_dir>).
+   Result: 28/28 PASS (summary.json). 12 microVMs spawned, all "jailed":true with a cgroup;
+   orphan check clean before and after gateway shutdown.
+
+2. scripts/e2e/burst.sh, TSLS_PROVIDER=firecracker (new flag) -> burst-20260917T064804Z-firecracker/
+   Generated config: provider sections copied from config/gateway.firecracker.toml (production,
+   jailer, cgroup required), [capacity] max_concurrency 8 / max_queue 4 / queue_timeout 90 s,
+   [capacity.node] memory 1020 MiB with vmm overhead 64 MiB + bridge 0 (= 3 x (256 + 64) + 60),
+   region us, tenant B required_region jp.
+   Result: 11/11 PASS (summary.txt).
+   - 7 concurrent: 7/7 served, GET /v1/capacity (50 ms poll, capacity-burst1.jsonl) never above
+     in_flight 3 nor 960 MiB reserved of 1020 (no overshoot), queue reached 4.
+   - 14 concurrent: 7 x 200, 7 x 429 reason queue_full (explicit refusal, nothing else).
+   - tenant B (jp-only) on the us node: 503 reason placement.
+   - capacity report: hosts 1, host_scale_out not_supported, overhead 64 MiB, tenant-scoped.
+   - gateway exit 0, orphan-check clean (firecracker). 14 microVMs spawned.
+
+3. scripts/kvm/measure-warm.sh (admission Grant path on main) -> warm-20260917T064903Z/
+   Ran as: run-warm.sh.txt (root, TSLS_GATEWAY_CONFIG = config copy on :18482).
+   Result: exit 0, 5 of 6 invocations warm on one environment (epochs 2..6): warm median
+   resume 1 ms, readiness 2 ms, handler 35 ms, total 45 ms, client 60 ms; cold total 6028 ms.
+   Paused VMM: rss 39572 KiB, 0 CPU ticks over 3 s. Orphans clean.
+
+VM after every run (host.txt): no gateway / firecracker / jailer process, no
+/sys/fs/cgroup/tachyon/* cgroup, no jail under /srv/jailer, no tap, no tachyon nft table
+("table ip nat" existed before the first run and is not created by tachyon; .kvm/run/_archive
+holds the terminated environments' logs by design).
+
+4. After rebasing onto origin/main daa8743 (PLT-4647 bench and PLT-4639 async invoke merged; the
+   guest bridge is unchanged, sha256 edb5f38b...), scripts/e2e/demo.sh was run again with the
+   same config:
+   - demo-rebased-underload-20260917T072756Z-firecracker/: 23/28. Steps 9-11 (the first three
+     cold starts) failed with Host.InitTimeout (guest not ready within 30 s) and steps 20-21
+     failed only because they need step 9's invocation. It ran while `cargo test --workspace`
+     and clippy ran on the Mac (macOS 1-min load average 28.8 -> 33.4); later cold starts in the
+     same run passed. Kept because it was run, not counted as a pass.
+   - demo-rebased-20260917T073458Z-firecracker/: 28/28 PASS right after the local gates finished
+     (macOS load average 15.0 -> 8.0). The VM check afterwards is in host.txt there.
+   The InitTimeout under host load is the same class as the benchmark's excluded first run; it
+   did not reproduce without the concurrent local build.

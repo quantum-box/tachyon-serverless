@@ -450,6 +450,20 @@ TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
 - VM 内のパスは短くする。`/Users/...` の mount 先で動かすと Unix socket の 107 バイト制限を超えやすい。
 - macOS 側のディスクの空きが無くなると VM 内のファイルが壊れる（§7.1）。bootstrap と `target/` で数 GiB を使う。
 
+### 5.7 P2 の KVM 検証（2026-09-17、origin/main `b5a7e54`）
+
+fake / process provider でだけ確認していた PLT-4634 / 4635 / 4631 / 4651 を、この VM の Firecracker（jailer・cgroup required、gateway は root）で 1 回ずつ実行した。gateway の設定はどれも `config/gateway.firecracker.toml` の listen と data_dir を変えたコピーで、足した設定は各証跡の `gateway*.toml` にある。実行したスクリプト（`run-*.sh.txt`。shellcheck の対象外にするため拡張子を変えた記録）と VM の負荷・実行後の残留検査（`host.txt`）も各ディレクトリに置いた。macOS 側は他の build と共用で、1 分 load average は 5〜37 だった。
+
+| 対象 | 実行したもの | 結果 | 証跡 |
+|---|---|---|---|
+| PLT-4634 admission | `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh`、`TSLS_PROVIDER=firecracker scripts/e2e/burst.sh`（node 1020 MiB = 3 ×（256 + 64）+ 60）、`scripts/kvm/measure-warm.sh` | demo 28/28、burst 11/11（in_flight 最大 3・予約最大 960 MiB、429 `queue_full` × 7、503 `placement`）、warm 6 回中 5 回 | `docs/evidence/kvm-verify-plt4634-20260917T064519Z/` |
+| PLT-4635 scale to zero / drain | `scripts/e2e/zero-scale.sh`（`[pool] enabled = true`、`[scaling] reconcile_interval_ms = 500`・`drain_timeout_seconds = 5`・`allow_short_drain = true`、`queue_timeout_seconds = 60`） | 18/18（paused microVM を sweeper が `scale_to_zero`、alias 切替の drain、drain timeout 504、削除の 409 と確定） | `docs/evidence/kvm-verify-plt4635-20260917T064940Z/` |
+| PLT-4631 lease / fencing | 同じ `data_dir` と workdir の 2 gateway。A の pool に paused microVM → A を SIGSTOP → B が lease（6 s + skew 0.5 s）失効後に回収 → A を SIGCONT | 11/11（B は VMM を終了させてから台帳を確定、次の invoke は新しい環境に cold、復帰した A は `/readyz` 503・invoke 503） | `docs/evidence/kvm-verify-plt4631-fencing-20260917T070522Z/` |
+| PLT-4651 restore-aware | `examples/restore-aware` を deploy / invoke（成功 2、`RESTORE_AWARE_FAIL=bootstrap` / `after_restore`） | cold 経路で成功、`Runtime.PreCheckpointFailed` / `Runtime.AfterRestoreFailed` | `docs/evidence/kvm-verify-plt4651-restore-aware-20260917T065206Z/` |
+| PLT-4647 benchmark の未解決 2 件 | pool on / off の cold で curl と `total_ms` を比較、clock の比較、負荷下の cold start 36 回 × 2 | 下の §7.1 の 2 行 | `docs/evidence/kvm-verify-plt4647-20260917T070707Z/` |
+
+`scripts/e2e/burst.sh` と `zero-scale.sh` は gateway を自分で起動するので、jailer と cgroup required の設定では **スクリプト全体を root で**動かす（`sudo -n env PATH="$PATH" HOME="$HOME" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 ... scripts/e2e/<script>.sh`、build は事前に通常ユーザーで行う）。gateway を `sudo` 経由で起動して SIGSTOP する場合、`sudo` 自身も停止するので SIGCONT は gateway と `sudo` の両方に送る。
+
 ## 6. 既知の制約
 
 - host と同じアーキテクチャの guest のみ。`validate_artifact` は ELF の `e_machine` を revision の宣言と host の両方に照合し、`PT_INTERP` があるバイナリ（動的リンク）は `artifact rejected`（rootfs に libc が無い）。
@@ -494,5 +508,7 @@ smoke の場合は `docs/evidence/kvm-*/hello.stderr.txt` に出る。ログの�
 |---|---|---|
 | VM 内で ext4 の I/O error が出る。`target/` に 0 バイトのバイナリが残る。gateway が `.../data/state.json is not a valid state file ... Move it aside to start with an empty ledger.` で起動しない（`state.json` がゼロ埋め） | macOS 側のディスクが一杯になり、VM の disk への書き込みが失敗した | macOS 側の空きを作る → `limactl stop tsls-kvm && limactl start tsls-kvm` → `sudo chmod 666 /dev/kvm` → VM 内で `find target -type f -size 0 -delete` → `mv data/state.json data/state.json.broken` → bootstrap からやり直す。壊れた `state.json` を黙って捨てない仕様は `crates/application/src/repository.rs::corrupt_state_file_is_refused_with_a_hint` |
 | preflight の `kvm` が FAIL、または firecracker が `/dev/kvm` を開けない | VM を起動し直すと `/dev/kvm` の権限が戻る | `sudo chmod 666 /dev/kvm`（§5.3） |
+| host が混んでいるときだけ、jailer 経由の起動が `firecracker exited before creating the API socket (vmm pid N is gone)` で失敗し、console.log と fc.log が空 | jailer の子が Firecracker に `execve` している間、`/proc/<pid>/cmdline` は生きているプロセスでも空を返す。provider はそれを「別のプロセス」と読み、起動中の VMM を終了扱いにしていた（`docs/evidence/kvm-verify-plt4647-20260917T070707Z/`） | 修正済み（空の cmdline は判定なし、zombie は終了扱い。`crates/providers/firecracker/src/vmm.rs`） |
+| pool 有効の cold attempt で `total_ms` が curl の `time_total` より数十 ms 大きい | この VM では `CLOCK_MONOTONIC`（gateway の `Instant`）が `CLOCK_MONOTONIC_RAW`（curl 8.x の計時）より 4680 ppm 速い（chrony の補正）。数秒の cold request では 30〜70 ms の差になり、pool 無効では terminate が応答より前にある分だけ正に見える | gateway の不具合ではない。client と host の値を比べるときは時計の差を補正する（同上） |
 | guest の console に bridge の `--environment-id` 不足のエラーが出て、Hello が来ない | kernel は `init=/sbin/tachyon-init` を引数なしで起動する | 修正済み（commit `8e2fbc7`: PID 1 なら自動で `--init`）。古い rootfs を使っている場合は bootstrap を再実行して bridge と `.kvm/rootfs.ext4` を作り直す |
 | Hello は来るが、user process が Ready の前に終了する（Runtime API への接続が `ENETUNREACH`） | 起動直後の guest では loopback（`lo`）が down のまま | 修正済み（commit `c0f0ebe`: init モードで `lo` を up にする）。対処は上と同じく rootfs の作り直し |

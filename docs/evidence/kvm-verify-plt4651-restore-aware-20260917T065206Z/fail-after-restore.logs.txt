@@ -1,0 +1,8 @@
+2026-09-17T06:52:30.168Z [platform/boot] creating environment env_01m2q26s0rxz7cqpybeybmjbsb with provider firecracker
+2026-09-17T06:52:35.128Z [platform/boot] bridge connected after 5091 ms (host_pid=Some(112601))
+2026-09-17T06:52:35.327Z [platform/init] user process started (pid 104)
+2026-09-17T06:52:35.511Z [stderr/init] restore-aware: bootstrap: building the lookup table (no runtime, no secrets)
+2026-09-17T06:52:35.606Z [platform/init] lifecycle continue answered (cold)
+2026-09-17T06:52:35.619Z [stderr/init] tachyon lifecycle: Runtime.AfterRestoreFailed: Demo.AfterRestoreFailure: RESTORE_AWARE_FAIL=after_restore
+2026-09-17T06:52:35.698Z [stderr/init] Error: Lifecycle { error_type: "Runtime.AfterRestoreFailed", message: "Demo.AfterRestoreFailure: RESTORE_AWARE_FAIL=after_restore" }
+2026-09-17T06:52:35.703Z [platform/init] init failed: Demo.AfterRestoreFailure: RESTORE_AWARE_FAIL=after_restore

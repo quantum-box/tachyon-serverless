@@ -1,0 +1,42 @@
+PLT-4635 (scale to zero / drain, PR #18) on Firecracker - KVM verification 2026-09-17
+
+Source: origin/main b5a7e54. Host as in kvm-verify-plt4634-20260917T064519Z/summary.txt
+(Lima VM, nested virtualization, Firecracker / jailer v1.17.0, gateway as root). macOS 1-min
+load average 5.0 -> 5.2 during the run.
+
+Ran as: run-zero-scale.sh.txt ->
+  sudo -n env ... TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1
+    TSLS_GATEWAY_CONFIG=<config/gateway.firecracker.toml copy: listen 127.0.0.1:18483, fresh
+      data_dir, queue_timeout_seconds 60 (the 7-request burst waits for ~6 s cold starts), plus
+      [pool] enabled = true and [scaling] reconcile_interval_ms = 500, drain_timeout_seconds = 5,
+      allow_short_drain = true>
+    TSLS_API_URL=http://127.0.0.1:18483 TSLS_TOKEN_A=dev-token-tenant-a
+    TSLS_GUEST_DIR=target/aarch64-unknown-linux-musl/release TSLS_ARCH=aarch64
+    scripts/e2e/zero-scale.sh
+The gateway runs profile production with jailer + cgroup required; the pool is verified
+(idle_quiesce / idle_resume supported), so idle environments are paused microVMs.
+
+Result: exit 0, 18/18 PASS (zero-scale-20260917T064940Z-firecracker/summary.txt).
+  provider=firecracker warm_pool=true drain_timeout=5s reconcile=500ms
+  1 zero before traffic.
+  2 burst 7 (revision max_concurrency 3): 7/7 200, max provisioned 3 (coalesced activation).
+  3 idle -> 0 by the sweeper: last_scale_event scale_to_zero / idle_ttl. capacity-timeline.txt:
+    busy 3 -> (busy 1, idle 1, draining 1) -> idle 1 (a paused microVM in the pool) at 8.96 s ->
+    0 at 10.94 s with scale_to_zero/idle_ttl (revision idle TTL 2 s, cooldown 1 s; the
+    environment went idle 2.0 s earlier).
+  4 re-access cold: 200, start_kind cold (event activation).
+  5 alias switch during a 4 s handler: new invocation on rev2 (alias_generation 2), running one
+    finished 200 on rev1 (generation 1); rev1 superseded -> unrouted, drained to 0 (event drain /
+    alias_switch; "not pooling an environment of a draining revision" in gateway.log).
+  6 drain timeout: a 40 s handler on a drained revision ended 504 Host.DrainTimeout after 5 s.
+  7 delete during a 3 s handler: deleting; new invocation and Idempotency-Key retry 409
+    Host.FunctionDeleted; the in-flight one 200; deletion_state deleted (drained_at set); 0
+    environments (events drain / function_deleted).
+  8 GET /v1/capacity scaling.at_zero says zero environments is not zero host cost.
+gateway.log: 7 microVMs spawned (jailed, cgroup), 7 "environment terminated", 2 "idle
+environment reaped".
+
+What this does not show: the cooldown blocking a scale-down (cooldown 1 s had already passed when
+the TTL expired); min_ready > 0 pre-start on Firecracker; the orphan checks in the script are
+process-provider only - the VM check after the run (host.txt) found no gateway / firecracker /
+jailer process, no tachyon cgroup, no jail, no tap, no tachyon nft table.

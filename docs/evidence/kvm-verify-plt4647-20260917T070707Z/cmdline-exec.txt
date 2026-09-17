@@ -1,0 +1,16 @@
+$ bash cmdline.sh.txt      (Lima VM tsls-kvm, 2026-09-17T07:13Z)
+cmdline.py forks a child that execs /usr/bin/sleep 0.02 and reads /proc/<pid>/cmdline and
+/proc/<pid>/stat in a tight loop until the child is a zombie. It counts reads that came back EMPTY
+while the process was not a zombie and before the new image's argv ("sleep") had been seen,
+i.e. while the execve was in progress.
+
+== idle host
+ 16:13:05 up  4:59,  1 user,  load average: 2.39, 0.99, 0.56
+execs=1000 reads=2764297 empty_reads_during_exec=1007 execs_with_an_empty_read_during_exec=686
+== 8 busy loops on 4 vCPUs
+ 16:13:28 up  5:00,  1 user,  load average: 1.99, 0.99, 0.57
+execs=1000 reads=775838 empty_reads_during_exec=398 execs_with_an_empty_read_during_exec=324
+done
+
+(A first version without the "before the new image's argv" condition also counted the empty
+cmdline of a process that is exiting but not yet a zombie: 946 / 1000 and 555 / 1000 execs.)

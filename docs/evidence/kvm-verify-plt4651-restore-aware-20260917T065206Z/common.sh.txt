@@ -1,0 +1,30 @@
+# sourced by the run scripts inside the VM
+set -uo pipefail
+source ~/.cargo/env 2>/dev/null || true
+export PATH="$HOME/.cargo/bin:$PATH"
+REPO=~/tsls
+VERIFY=~/verify
+mkdir -p "$VERIFY"
+cd "$REPO"
+
+# mkcfg OUT PORT DATA_DIR [EXTRA_TOML_FILE] -> copy of config/gateway.firecracker.toml with listen/data_dir changed
+mkcfg() {
+  local out="$1" port="$2" data="$3" extra="${4:-}"
+  sed -e "s#^listen = .*#listen = \"127.0.0.1:$port\"#" \
+      -e "s#^data_dir = .*#data_dir = \"$data\"#" \
+      config/gateway.firecracker.toml > "$out"
+  if [ -n "$extra" ]; then cat "$extra" >> "$out"; fi
+}
+
+hostinfo() { # hostinfo FILE LABEL
+  { echo "== $2 $(date -u +%FT%TZ)"; uptime; free -m | head -2; df -h / | tail -1; } >> "$1"
+}
+
+leftovers() {
+  echo "-- processes"; pgrep -a -f '(^|/)(firecracker|jailer|tachyon-serverless-gateway)( |$)' | grep -v pgrep || echo none
+  echo "-- cgroups"; find /sys/fs/cgroup/tachyon -mindepth 1 -maxdepth 1 -type d 2>/dev/null || echo none
+  echo "-- jails"; sudo find /srv/jailer -mindepth 1 -maxdepth 2 2>/dev/null || echo none
+  echo "-- run dir"; find "$REPO/.kvm/run" -mindepth 1 -maxdepth 1 2>/dev/null || echo none
+  echo "-- taps"; ip -br link | awk '$1 ~ /^tsls/' ; echo "(end taps)"
+  echo "-- nft"; sudo nft list tables
+}

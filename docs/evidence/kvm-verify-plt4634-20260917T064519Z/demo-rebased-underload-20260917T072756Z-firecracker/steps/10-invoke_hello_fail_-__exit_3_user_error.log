@@ -1,0 +1,70 @@
+error: init_error (HTTP 502): invocation inv_01m2q49q3jc0sdytv9hxv1dm3t failed: Host.EnvironmentBootFailed: boot failed: timeout waiting for guest bridge on /srv/jailer/firecracker/env-01m2q49q4bfnrw4yke41fkz02z/root/v.sock_5000 after 30s
+--- console.log (tail) ---
+...ELinuxProject/selinux-kernel/wiki/DEPRECATE-checkreqprot
+[    2.245706] Mount-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    2.283731] Mountpoint-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    2.883794] cblist_init_generic: Setting adjustable number of callback queues.
+[    2.975356] cblist_init_generic: Setting shift to 0 and lim to 1.
+[    3.082225] rcu: Hierarchical SRCU implementation.
+[    3.521007] rcu: 	Max phase no-delay instances is 1000.
+[    3.645404] Platform MSI: msic domain created
+[    3.737601] PCI/MSI: /intc/msic domain created
+[    3.748339] EFI services will not be available.
+[    4.442623] smp: Bringing up secondary CPUs ...
+[    4.529765] smp: Brought up 1 node, 1 CPU
+[    4.736339] SMP: Total of 1 processors activated.
+[    4.860722] CPU features: detected: Branch Target Identification
+[    5.246651] CPU features: detected: ARMv8.4 Translation Table Level
+[    5.289923] CPU features: detected: Data cache clean to the PoU not required for I/D coherence
+[    5.574056] CPU features: detected: Common not Private translations
+[    6.387409] CPU features: detected: CRC32 instructions
+[    6.629045] CPU features: detected: Data cache clean to Point of Deep Persistence
+[    6.819701] CPU features: detected: Data cache clean to Point of Persistence
+[    7.272932] CPU features: detected: E0PD
+[    7.281755] CPU features: detected: Enhanced Privileged Access Never
+[    7.476865] CPU features: detected: RCpc load-acquire (LDAPR)
+[    7.997634] CPU features: detected: LSE atomic instructions
+[    8.231909] CPU features: detected: Privileged Access Never
+[    8.614721] CPU features: detected: RAS Extension Support
+[    8.720425] CPU features: detected: Speculation barrier (SB)
+[    8.917702] CPU features: detected: TLB range maintenance instructions
+[    9.209155] CPU: All CPU(s) started at EL1
+[    9.228332] alternatives: applying system-wide alternatives
+[   11.843481] devtmpfs: initialized
+[   12.273384] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+[   12.580277] futex hash table entries: 256 (order: 2, 16384 bytes, linear)
+[   13.008207] DMI not present or invalid.
+[   13.508992] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[   14.091153] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[   14.475518] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[   14.504681] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[   15.140797] audit: initializing netlink subsys (disabled)
+[   15.471905] thermal_sys: Registered thermal governor 'fair_share'
+[   15.472013] thermal_sys: Registered thermal governor 'step_wise'
+[   15.491534] thermal_sys: Registered thermal governor 'user_space'
+[   15.677470] audit: type=2000 audit(0.840:1): state=initialized audit_enabled=0 res=1
+[   16.077933] cpuidle: using governor menu
+[   16.477009] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[   16.765703] ASID allocator initialised with 65536 entries
+[   17.277520] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[   17.496956] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[   17.658453] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[   18.002251] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[   18.059798] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[   18.267757] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[   18.390029] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[   18.576704] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[   18.950424] ACPI: Interpreter disabled.
+[   18.966143] iommu: Default domain type: Translated 
+[   19.063132] iommu: DMA domain TLB invalidation policy: strict mode 
+[   19.289233] SCSI subsystem initialized
+[   19.388860] pps_core: LinuxPPS API ver. 1 registered
+[   19.459896] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[   19.
+--- fc.log (tail) ---
+2026-09-17T07:29:05.218703946 [env-01m2q49q4bfnrw4yke41fkz02z:main] If the VM was restored from snapshot, boot-source, machine-config.smt, and machine-config.cpu_template will all be empty.
+2026-09-17T07:29:05.856998250 [env-01m2q49q4bfnrw4yke41fkz02z:main] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T07:29:05.857223551 [env-01m2q49q4bfnrw4yke41fkz02z:main] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T07:29:05.946444079 [env-01m2q49q4bfnrw4yke41fkz02z:fc_vcpu 0] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+ [type=Host.EnvironmentBootFailed] [invocation=inv_01m2q49q3jc0sdytv9hxv1dm3t] [request=01m2q49q3g4gx611zb0xcbz9af]
+ASSERT_EQ failed (jq .error.code): expected [user_error] got [init_error]

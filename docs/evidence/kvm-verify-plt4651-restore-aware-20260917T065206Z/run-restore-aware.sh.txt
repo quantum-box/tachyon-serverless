@@ -1,0 +1,46 @@
+#!/bin/bash
+# PLT-4651: examples/restore-aware once on Firecracker (cold path), through a root gateway
+# (config/gateway.firecracker.toml with listen / data_dir changed).
+. "$(dirname "$0")/common.sh"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+W=$VERIFY/restore; sudo rm -rf "$W"; mkdir -p "$W"
+E="$REPO/docs/evidence/kvm-verify-plt4651-restore-aware-$STAMP"; mkdir -p "$E"
+PORT=18484
+mkcfg "$W/gateway.toml" $PORT "$W/data"
+cp "$W/gateway.toml" "$E/gateway.toml"
+hostinfo "$E/host.txt" before
+sudo -n env LOG_FORMAT=json "$REPO/target/debug/tachyon-serverless-gateway" --config "$W/gateway.toml" > "$E/gateway.log" 2>&1 &
+GW=$!
+export TSLS_API_URL=http://127.0.0.1:$PORT TSLS_TOKEN=dev-token-tenant-a
+for i in $(seq 1 120); do [ "$(curl -s -o /dev/null -w '%{http_code}' "$TSLS_API_URL/readyz")" = 200 ] && break; sleep 0.5; done
+T=target/debug/tsls
+BIN=target/aarch64-unknown-linux-musl/release/example-restore-aware
+$T provider --json > "$E/provider.json"
+$T functions create --name restore-aware --description plt-4651 --json > /dev/null
+REV_OK="$($T functions deploy --function restore-aware --binary $BIN --arch aarch64 --secret DEMO_SECRET=demo-secret --json | jq -r .id)"
+REV_FB="$($T functions deploy --function restore-aware --binary $BIN --arch aarch64 --env RESTORE_AWARE_FAIL=bootstrap --no-publish --json | jq -r .id)"
+REV_FA="$($T functions deploy --function restore-aware --binary $BIN --arch aarch64 --env RESTORE_AWARE_FAIL=after_restore --no-publish --json | jq -r .id)"
+{ echo "revision ok: $REV_OK"; echo "revision fail-bootstrap: $REV_FB"; echo "revision fail-after-restore: $REV_FA"; } > "$E/summary.txt"
+run() { # run NAME PAYLOAD [ARGS...]
+  local name="$1" payload="$2"; shift 2
+  local s e
+  s=$(date +%s%3N)
+  $T functions invoke restore-aware --payload "$payload" --json "$@" > "$E/$name.json" 2> "$E/$name.stderr"
+  echo "$name exit=$? " >> "$E/summary.txt"
+  inv="$(sed -n 's/.*invocation[ =]\(inv_[0-9a-z]*\).*/\1/p' "$E/$name.stderr" | head -n1)"
+  [ -n "$inv" ] || inv="$(jq -r '.error.invocation_id // empty' "$E/$name.json")"
+  [ -n "$inv" ] && curl -s -H "authorization: Bearer $TSLS_TOKEN" "$TSLS_API_URL/v1/invocations/$inv" > "$E/$name.invocation.json"
+  [ -n "$inv" ] && $T functions logs --invocation "$inv" > "$E/$name.logs.txt" 2>&1
+}
+run invoke-prime '{"n":97}'
+run invoke-composite '{"n":91}'
+run fail-bootstrap '{"n":7}' --revision-id "$REV_FB"
+run fail-after-restore '{"n":7}' --revision-id "$REV_FA"
+sudo kill -TERM $GW; wait $GW; echo "gateway exit=$?" >> "$E/summary.txt"
+hostinfo "$E/host.txt" after
+sudo chown -R "$(id -u):$(id -g)" "$E" "$W" "$REPO/.kvm/run" 2>/dev/null
+{ echo "--- leftovers after gateway stop"; leftovers; } >> "$E/host.txt" 2>&1
+cat "$E/summary.txt"
+for f in invoke-prime invoke-composite fail-bootstrap fail-after-restore; do echo "--- $f"; cat "$E/$f.json"; echo; jq -c '{status, attempts: [.attempts[] | {start_kind, status, boot: .boot_evidence.details.jailed, timings}]}' "$E/$f.invocation.json" 2>/dev/null; grep -h "lifecycle\|restore-aware" "$E/$f.logs.txt" | head -8; done
+sed -n '/leftovers/,$p' "$E/host.txt"
+echo "$E"

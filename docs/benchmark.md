@@ -80,7 +80,7 @@ git checkout でない tree（Lima VM に rsync したコピーなど）では `
   - handler = `handler_ms`、response = `response_ms`、total = `total_ms`（受付 → 結果確定）
   - **host platform = total − handler**（queue・boot・init・resume・readiness・response と記帳。「基盤が足した時間」の host 側の値）
   - client platform = client − handler（上に loopback HTTP と curl を足したもの）
-  - client − total = HTTP と curl の分。負になる attempt がある（smoke 実行では pool 有効の cold attempt で −35〜−40 ms。`total_ms` の確定が client への応答の送出より後になっていると読めるが、原因は調べていない）。
+  - client − total = HTTP と curl の分。負になる attempt がある（smoke 実行では pool 有効の cold attempt で −35〜−40 ms。原因は時計の違い（`docs/evidence/kvm-verify-plt4647-20260917T070707Z/`）: `total_ms` は gateway の `Instant`（`CLOCK_MONOTONIC`）で、応答の送出より前に確定する。curl 8.x の計時は `CLOCK_MONOTONIC_RAW` で、この VM では前者が 4680 ppm 速い（chrony の補正）。数秒の cold request では 30〜70 ms になり、pool 無効では terminate（約 115 ms）が応答より前にあるので正に、pool 有効では負に見える。warm（数十 ms）では 1 ms 未満。client と host の値を比べるときはこの差を補正する）。
 - 資源:
   - 固定 memory は host から見た値だけを使う: VMM プロセスの `VmRSS`（guest memory のうち触られた分と VMM 自身）と、環境 cgroup の `memory.current`（VMM + drive の page cache）/ `memory.peak`。要求値（`mem_size_mib`）は上限であって消費ではない。guest の中の内訳（kernel / bridge / 関数）は host から見えないので未測定。
   - bridge の host 側の費用は gateway の RSS を pool 内の環境数と並べて見る（gateway 起動直後の環境 0 と比べる）。guest 側の bridge は rootfs に入った static バイナリの大きさ（`metadata.json` の `runtime_bridge.bytes`）だけを記録する。
@@ -159,7 +159,7 @@ P0（PLT-4613 / PLT-4616）では Kata・Cloud Hypervisor・Knative のどれも
 
 - **nested virtualization**: Apple M4 → macOS の Virtualization.framework → Lima VM（Linux aarch64、4 vCPU / 8 GiB）→ KVM → Firecracker。guest の MMIO（とくに serial console）と timer の exit が二重になるので、bare metal より桁で遅くなりうる。x86_64 と bare metal の値は未測定。
 - **serial console**: provider は証跡のため `console=ttyS0` で kernel ログを出す（`docs/kvm.md` §6）。この host では cold の起動中ずっと 500 m の cgroup quota に当たって throttle されている（summary の §3.2 の throttled period 比 0.99）。そのうち console 出力がどれだけを占めるかは測っていない。`quiet` や quota の変更は provider の挙動を変えるので本計測ではしていない。
-- **物理 host の共用**: 計測に使った Mac は他の build と共用で、負荷が高い間（load average 40〜140）に始めた 1 回目の実行（`bench-20260917T050042Z`、hello だけで中止）では、hello の fresh host 5 回中 4 回、cold 20 回中 5 回が失敗した（30 秒の bridge 待ち timeout の `Host.EnvironmentBootFailed` / `Host.InitTimeout`、および `firecracker exited before creating the API socket`（console / fc.log とも空）の起動失敗 2 件）。成功した cold の boot も 15〜27 秒だった。この実行は物理 host の混雑を測ってしまうため途中で止め、生データは残していない（**除外した実行があることをここに記録する**）。API socket 前の終了の原因は調べていない。
+- **物理 host の共用**: 計測に使った Mac は他の build と共用で、負荷が高い間（load average 40〜140）に始めた 1 回目の実行（`bench-20260917T050042Z`、hello だけで中止）では、hello の fresh host 5 回中 4 回、cold 20 回中 5 回が失敗した（30 秒の bridge 待ち timeout の `Host.EnvironmentBootFailed` / `Host.InitTimeout`、および `firecracker exited before creating the API socket`（console / fc.log とも空）の起動失敗 2 件）。成功した cold の boot も 15〜27 秒だった。この実行は物理 host の混雑を測ってしまうため途中で止め、生データは残していない（**除外した実行があることをここに記録する**）。API socket 前の終了は provider の不具合だった: jailer の子が Firecracker に `execve` している間は生きているプロセスでも `/proc/<pid>/cmdline` が空で、provider がそれを「別のプロセス」と読んで起動中の VMM を終了扱いにしていた。負荷をかけた Lima VM で再現し、修正した（`docs/evidence/kvm-verify-plt4647-20260917T070707Z/`、`crates/providers/firecracker/src/vmm.rs`）。
 - **1 host・同居**: client（curl）、gateway、全 VMM が同じ 4 vCPU を使う。並列度 8 では client と gateway も CPU を取り合う。
 - **固定負荷**: sweep の総 request 数は固定で、到着率を制御した負荷（open loop）ではない。スループットは「この総数を並列 n で流したときの成功数 / 壁時計」。
 - **cache miss の範囲**: `drop_caches` は host の page cache を落とすが、macOS 側（Lima の disk image の下）の cache は落とせない。本当の「新品の専用 host」ではない。
