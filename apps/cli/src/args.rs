@@ -181,6 +181,15 @@ pub struct DeployArgs {
     pub secret: Vec<String>,
     #[arg(long, default_value = "")]
     pub description: String,
+    /// Egress profile: `none` (default, no network device), `restricted` (only the
+    /// `--egress-allow` destinations) or `public-web` (public IPv4 unicast, DNS through
+    /// the provider's resolver).
+    #[arg(long, value_name = "PROFILE")]
+    pub egress: Option<String>,
+    /// Destination a `restricted` revision may open (repeatable):
+    /// `[tcp|udp:]CIDR:PORT[,PORT...]`, e.g. `1.1.1.1/32:443` or `udp:1.1.1.1/32:53`.
+    #[arg(long = "egress-allow", value_name = "[PROTO:]CIDR:PORTS")]
+    pub egress_allow: Vec<String>,
     /// Do not move the `prod` alias to the new revision.
     #[arg(long)]
     pub no_publish: bool,
@@ -296,6 +305,30 @@ pub fn parse_key_value(raw: &str, what: &str) -> Result<(String, String), CliErr
             "invalid {what} `{raw}`: expected KEY=VALUE"
         ))),
     }
+}
+
+/// Parse `--egress-allow [tcp|udp:]CIDR:PORT[,PORT...]` into `(protocol, cidr, ports)`.
+/// The CIDR itself is validated by the server.
+pub fn parse_egress_allow(raw: &str) -> Result<(Option<String>, String, Vec<u16>), CliError> {
+    let usage = || {
+        CliError::usage(format!(
+            "invalid --egress-allow `{raw}`: expected [tcp|udp:]CIDR:PORT[,PORT...]"
+        ))
+    };
+    let parts: Vec<&str> = raw.split(':').collect();
+    let (protocol, cidr, ports) = match parts.as_slice() {
+        [cidr, ports] => (None, *cidr, *ports),
+        [proto @ ("tcp" | "udp"), cidr, ports] => (Some((*proto).to_string()), *cidr, *ports),
+        _ => return Err(usage()),
+    };
+    if cidr.is_empty() {
+        return Err(usage());
+    }
+    let ports = ports
+        .split(',')
+        .map(|p| p.trim().parse::<u16>().map_err(|_| usage()))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((protocol, cidr.to_string(), ports))
 }
 
 /// Parse `Name: value` (the space after the colon is optional).

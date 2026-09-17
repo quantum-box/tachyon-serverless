@@ -368,7 +368,14 @@ pub fn reuse_key_for(
         .hex()
         .to_string(),
         runtime_profile: spec.runtime.protocol.clone(),
-        network_policy_version: digest_u64(&serde_json::to_vec(&spec.egress).unwrap_or_default()),
+        // The allowlist is part of the policy: a `restricted` guest never
+        // shares an environment with a revision allowed somewhere else. An
+        // empty list hashes as before, so `none` / `public-web` keys are stable.
+        network_policy_version: if spec.egress_allow.is_empty() {
+            digest_u64(&serde_json::to_vec(&spec.egress).unwrap_or_default())
+        } else {
+            digest_u64(&serde_json::to_vec(&(&spec.egress, &spec.egress_allow)).unwrap_or_default())
+        },
         secret_binding_generation,
     }
 }

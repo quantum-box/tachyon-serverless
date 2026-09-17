@@ -4,6 +4,7 @@
 # Layout (docs/protocol.md section C):
 #   /sbin/tachyon-init   runtime bridge, static musl binary, 0755 (PID 1 in the guest)
 #   /proc /sys /dev /tmp /function   empty mount points
+#   /etc/resolv.conf     symlink to /proc/net/pnp (resolver set by the kernel `ip=` argument)
 #
 # Usage:
 #   scripts/kvm/build-rootfs.sh
@@ -39,6 +40,11 @@ trap cleanup EXIT
 
 mkdir -p "$STAGING/sbin" "$STAGING/proc" "$STAGING/sys" "$STAGING/dev" "$STAGING/tmp" "$STAGING/function"
 install -m 0755 "$BRIDGE_BIN" "$STAGING/sbin/tachyon-init"
+# PLT-4622: a guest with a network device (egress restricted / public-web) is configured by
+# the kernel `ip=` argument, which publishes the resolver (public-web only) in /proc/net/pnp.
+# Without a device the target is empty or missing and musl falls back to 127.0.0.1, as before.
+mkdir -p "$STAGING/etc"
+ln -s /proc/net/pnp "$STAGING/etc/resolv.conf"
 
 rm -f "$ROOTFS"
 # Pre-size the image (sparse) and pass the size explicitly: works with every mke2fs >= 1.43.

@@ -160,6 +160,11 @@ pub fn probe_firecracker_version(binary: &Path) -> Option<String> {
     parse_firecracker_version(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// Preflight check for the egress network (see [`OPTIONAL_CHECKS`]).
+pub const EGRESS_NETWORK_CHECK: &str = "egress_network";
+/// Checks reported but not required for the provider to be ready.
+pub const OPTIONAL_CHECKS: [&str; 1] = [EGRESS_NETWORK_CHECK];
+
 fn check(name: &str, ok: bool, detail: impl Into<String>) -> PreflightCheck {
     PreflightCheck {
         name: name.to_owned(),
@@ -292,7 +297,22 @@ pub async fn run_preflight(
         ),
     ));
 
-    let ok = checks.iter().all(|c| c.ok);
+    // 10. Host network for egress restricted / public-web (PLT-4622). Optional:
+    //     a host without it still runs `none` environments, so it does not
+    //     make the provider unready; the capabilities say what is missing.
+    checks.push(match crate::network::host_support(&cfg.network) {
+        Ok(detail) => check(EGRESS_NETWORK_CHECK, true, detail),
+        Err(reason) => check(
+            EGRESS_NETWORK_CHECK,
+            false,
+            format!("optional: egress restricted / public-web unavailable: {reason}"),
+        ),
+    });
+
+    let ok = checks
+        .iter()
+        .filter(|c| !OPTIONAL_CHECKS.contains(&c.name.as_str()))
+        .all(|c| c.ok);
     PreflightReport {
         provider: "firecracker".to_owned(),
         ok,
@@ -388,6 +408,7 @@ mod tests {
             "mkfs_ext4",
             "workdir",
             "socket_path_length",
+            "egress_network",
         ] {
             assert!(names.contains(&expected), "missing check {expected}");
         }
@@ -398,7 +419,15 @@ mod tests {
             assert!(!c.detail.is_empty());
         }
         assert!(!report.ok);
-        assert_eq!(report.ok, report.checks.iter().all(|c| c.ok));
+        assert_eq!(
+            report.ok,
+            report
+                .checks
+                .iter()
+                .filter(|c| c.name != EGRESS_NETWORK_CHECK)
+                .all(|c| c.ok),
+            "the egress network check is reported but optional"
+        );
         // The workdir probe creates the directory and cleans its probe file.
         let workdir = report.checks.iter().find(|c| c.name == "workdir").unwrap();
         assert!(workdir.ok, "{}", workdir.detail);

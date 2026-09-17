@@ -6,10 +6,10 @@ use bytes::Bytes;
 use reqwest::Method;
 use tachyon_serverless_api_types::{
     AliasResponse, ArtifactRequest, ArtifactUploadResponse, CreateRevisionRequest,
-    ExecutionRequest, ResourcesRequest, RevisionResponse, SecretBindingRequest,
+    EgressAllowRequest, ExecutionRequest, ResourcesRequest, RevisionResponse, SecretBindingRequest,
 };
 
-use crate::args::{DeployArgs, parse_key_value};
+use crate::args::{DeployArgs, parse_egress_allow, parse_key_value};
 use crate::client::ApiClient;
 use crate::commands::functions::{print_alias, print_revision, revision_status};
 use crate::error::{CliError, ExitCode};
@@ -66,6 +66,17 @@ pub fn build_revision_request(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let egress_allow = args
+        .egress_allow
+        .iter()
+        .map(|raw| {
+            parse_egress_allow(raw).map(|(protocol, cidr, ports)| EgressAllowRequest {
+                cidr,
+                protocol,
+                ports,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(CreateRevisionRequest {
         artifact: ArtifactRequest::Binary {
             digest: digest.to_string(),
@@ -73,7 +84,8 @@ pub fn build_revision_request(
         architecture: args.arch.resolve()?.to_string(),
         resources,
         execution,
-        egress: None,
+        egress: args.egress.clone(),
+        egress_allow,
         env_vars,
         secrets,
         description: args.description.clone(),
@@ -275,6 +287,8 @@ mod tests {
             env: vec!["GREETING=v1".into()],
             secret: vec!["DEMO_SECRET=demo-secret".into()],
             description: "d".into(),
+            egress: None,
+            egress_allow: Vec::new(),
             no_publish: true,
             wait: true,
             no_wait: false,
@@ -303,6 +317,47 @@ mod tests {
         assert_eq!(r.secrets[0].binding_ref, "demo-secret");
         assert!(!r.publish_to_prod);
         assert_eq!(r.egress, None);
+    }
+
+    #[test]
+    fn egress_flags_become_the_profile_and_allowlist() {
+        let mut a = args();
+        a.egress = Some("restricted".into());
+        a.egress_allow = vec!["1.1.1.1/32:443,80".into(), "udp:1.1.1.1:53".into()];
+        let r = build_revision_request(&a, "sha256:ab").unwrap();
+        assert_eq!(r.egress.as_deref(), Some("restricted"));
+        assert_eq!(
+            r.egress_allow,
+            vec![
+                EgressAllowRequest {
+                    cidr: "1.1.1.1/32".into(),
+                    protocol: None,
+                    ports: vec![443, 80],
+                },
+                EgressAllowRequest {
+                    cidr: "1.1.1.1".into(),
+                    protocol: Some("udp".into()),
+                    ports: vec![53],
+                },
+            ]
+        );
+        for bad in [
+            "1.1.1.1/32",
+            "icmp:1.1.1.1:1",
+            "1.1.1.1:http",
+            ":443",
+            "1.1.1.1:",
+        ] {
+            let mut a = args();
+            a.egress_allow = vec![bad.into()];
+            assert!(
+                matches!(
+                    build_revision_request(&a, "sha256:ab"),
+                    Err(CliError::Usage(_))
+                ),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

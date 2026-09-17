@@ -129,14 +129,14 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 
 `egress_none`（M8）と `enforce_resource_limits`（M9・DISK）を実際に測るのが §3.6、`idle_quiesce` / `idle_resume`（warm 再利用）を測るのが §3.7。
 
-### 3.6 隔離の計測（ADR-0001 M8 / M9、PLT-4622 DISK）
+### 3.6 隔離の計測（ADR-0001 M8 / M9、PLT-4622 DISK / NET）
 
 ```sh
 scripts/kvm/measure-isolation.sh
 ```
 
 `examples/isolation-probe`（guest 用の musl バイナリ。`bootstrap.sh` がビルドする）を gateway 経由で deploy し、
-guest の中から egress（M8）、資源上限（M9）、ephemeral storage の上限（DISK）を測る。gateway は `config/gateway.firecracker.toml` でこのスクリプトが起動し、最後に停止する（§3.5 と同じ設定なので、別の gateway を同じ port で動かしたまま実行しない）。
+guest の中から egress（M8）、資源上限（M9）、ephemeral storage の上限（DISK）、egress profile `restricted` / `public-web`（NET）を測る。NET（既定 `NET_MEASURE=1`）は gateway を `sudo -n` で root として起動し（tap と nftables に `CAP_NET_ADMIN` が要る）、`net.ipv4.ip_forward` を実行中だけ 1 にして戻す。root が作ったファイルは gateway 停止後に実行ユーザーへ chown する。`NET_MEASURE=0` なら従来どおり非特権で M8 / M9 / DISK だけを測る。gateway は `config/gateway.firecracker.toml` でこのスクリプトが起動し、最後に停止する（§3.5 と同じ設定なので、別の gateway を同じ port で動かしたまま実行しない）。
 
 | ステップ | 内容 | 期待 |
 |---|---|---|
@@ -144,9 +144,13 @@ guest の中から egress（M8）、資源上限（M9）、ephemeral storage の
 | M8 interface | 同じ応答に含まれる `/proc/net/dev` と `/proc/net/route` | `lo` だけ、default route 0 件 |
 | M9 resources | `{"probe":"resources"}`。`/proc/cpuinfo` の processor 数、`available_parallelism`、`/proc/meminfo` の MemTotal、見えていれば cgroup の `memory.max` / `cpu.max` | vCPU は revision の `cpu_millis` から決まる値と一致。MemTotal は要求値以下で、要求値の 70%（`MEM_TOLERANCE_PCT`）以上 |
 | M9 alloc | `--memory-mib 128` の revision（`--no-publish`）に `{"probe":"resources","alloc_mib":512}`。16 MiB ずつ確保し 4 KiB ごとに 1 byte 書く | 上限を超えたところで kernel に kill され、host からは crash に見える。`tsls functions invocation --json` の `status` / `error.class` / `error.error_type` を記録する |
+| NET public-web | `--egress public-web` の revision に `{"probe":"net"}`。TCP connect（許可: 1.1.1.1:443、1.0.0.1:443 / 拒否: 169.254.169.254:80、10.0.2.2、100.64.0.1、192.168.0.1、host の default gateway と host 自身の :22 / :53 / :8080、node の tap 172.30.0.1 / .5、IPv6 と IPv4-mapped IPv6）、生の UDP DNS（許可: 1.1.1.1:53 / 拒否: 8.8.8.8:53、gateway:53）、名前解決して接続（許可: example.com / 拒否: `169.254.169.254.nip.io`）、HTTP redirect（`NET_REDIRECT_URL` の 302 → metadata を追従して拒否） | 許可はすべて成功、拒否はすべて失敗。期待は `net-expect-publicweb.json` |
+| NET restricted | `--egress restricted --egress-allow 1.1.1.1/32:443` の revision に同じ probe | 1.1.1.1:443 だけ成功。1.0.0.1:443、1.1.1.1:80、metadata、管理網、node、IPv6、UDP DNS、名前解決は失敗 |
+| NET cross-tenant | tenant B（`NET_TOKEN_B`）の public-web revision で `{"probe":"listen","port":8080}` を `NET_LISTEN_MS` 起動したまま、tenant A の public-web 環境から B の guest :8080 / :22 と B の tap :22 / :8080 へ connect。2 環境が同時に存在する間の lease・tap・nft table を記録 | A の接続はすべて失敗、B の受付 0、A の 1.1.1.1:443 は成功 |
+| NET race / cleanup | gateway.log で環境ごとに `egress policy installed and verified` と `InstanceStart accepted` の時刻を比較。gateway 停止後に `tsls*` tap・`table inet tachyon_egress`・`net.json` が残っていないか | 起動したすべての policed 環境で policy が先。残留 0 |
 | DISK fill | `--ephemeral-storage-mib 64` の revision（`--no-publish`）に `{"probe":"disk","fill_mib":256}`。`/tmp` に 1 MiB ずつ書き、失敗したところで止める。並行して host の空き容量（`df`）と provider の workdir（`du`）を 200 ms ごとに記録する | `stopped_by=enospc`、書けた量は cap（64 MiB）以下かつ 80%（`DISK_TOLERANCE_PCT`）以上。`/tmp` は `/dev/vdc` の ext4。`/` と `/function` への書き込みは `EROFS`。host の空きの減少は cap + 64 MiB（`DISK_HOST_SLACK_MIB`）以下 |
 
-主な環境変数: `PROBE_MEMORY_MIB`（既定 256）、`PROBE_CPU_MILLIS`（500）、`ALLOC_MEMORY_MIB`（128）、`ALLOC_MIB`（既定は `ALLOC_MEMORY_MIB` の 4 倍）、`MEM_TOLERANCE_PCT`（70）、`DISK_STORAGE_MIB`（64）、`DISK_FILL_MIB`（既定は `DISK_STORAGE_MIB` の 4 倍）、`DISK_TOLERANCE_PCT`（80）、`DISK_HOST_SLACK_MIB`（64）、`CONNECT_TIMEOUT_MS`（2000）、`DNS_TIMEOUT_MS`（5000）、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
+主な環境変数: `PROBE_MEMORY_MIB`（既定 256）、`PROBE_CPU_MILLIS`（500）、`ALLOC_MEMORY_MIB`（128）、`ALLOC_MIB`（既定は `ALLOC_MEMORY_MIB` の 4 倍）、`MEM_TOLERANCE_PCT`（70）、`DISK_STORAGE_MIB`（64）、`DISK_FILL_MIB`（既定は `DISK_STORAGE_MIB` の 4 倍）、`DISK_TOLERANCE_PCT`（80）、`DISK_HOST_SLACK_MIB`（64）、`CONNECT_TIMEOUT_MS`（2000）、`DNS_TIMEOUT_MS`（5000）、`NET_MEASURE`（1）、`NET_TOKEN_B`（`dev-token-tenant-b`）、`NET_LISTEN_MS`（25000）、`NET_REDIRECT_URL`（httpbin.org の redirect-to）、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
 
 結果の読み方:
 
@@ -167,6 +171,7 @@ guest の中から egress（M8）、資源上限（M9）、ephemeral storage の
 | 1 | guest から network に到達した（M8 FAIL） |
 | 2 | 計測自体ができなかった（build / gateway / deploy / probe の失敗） |
 | 3 | ephemeral storage の上限が効かなかった（cap を超えて書けた、read-only のはずの場所に書けた、host の空きが budget 以上に減った。DISK FAIL） |
+| 4 | egress profile が効かなかった（拒否すべき宛先・他 tenant・node・管理網に届いた、policy の検証前に `InstanceStart` した、tap / table / lease が残った。NET FAIL）。許可すべき宛先に届かない・probe が動かないのは exit 2 |
 
 証跡は `docs/evidence/isolation-<UTC>/`:
 
@@ -180,9 +185,16 @@ guest の中から egress（M8）、資源上限（M9）、ephemeral storage の
 | `disk.json` / `disk-invocation.json` / `disk-logs.txt` | disk probe の応答（書けた byte 数、止まった理由、`/proc/mounts`、`statvfs` の前後、read-only 検査）、invocation（`evidence.details` に `scratch_drive_bytes` / `scratch_drive_reserved` / `network_interfaces` など）、guest の進捗ログ |
 | `disk-host.json` / `disk-host-samples.txt` | fill 中の host の空き容量と workdir の使用量（200 ms ごと）とその最小・最大 |
 | `revision-baseline.json` / `revision-alloc.json` / `revision-disk.json` | 使った revision の spec（要求した vCPU / memory / ephemeral storage の正本） |
+| `net-host.txt` | host のアドレス・default gateway・host から :22 が open かの対照・`ip_forward`・実行前の tap と table |
+| `net-expect-{publicweb,restricted,cross}.json` / `net-{publicweb,restricted}.json` / `net-cross-{a,b}.json` / `net-checks-*.json` | 期待（許可 / 拒否）、probe の応答（`net.connect` / `udp_dns` / `resolve` / `http_redirect`、`resolv_conf`）、宛先ごとの判定 |
+| `net-{publicweb,restricted}-invocation.json` | invocation（`evidence.details` に `egress_profile` / `egress_tap` / `guest_ip` / `egress_policy_rules` / `egress_policy_verified_ms`） |
+| `net-cross-during.txt` / `net-race.json` / `net-counters.txt` / `net-cleanup.txt` | 2 環境同時の lease・tap・nft table、policy と `InstanceStart` の時刻、teardown 時の chain の counter、実行後の残留検査 |
+| `revision-{publicweb,restricted,tenant-b}.json` | NET で使った revision の spec（`egress` / `egress_allow` の正本） |
 | `provider.json` / `gateway.log` / `steps/` / `orphan-check.txt` | capability 表、gateway のログ、step ごとのログ、終了後の孤児監査 |
 
-このスクリプトは provider の `Capabilities` を変更しない。`egress_none`（M8）と `enforce_resource_limits`（M9・DISK、PLT-4622）を `Unverified` から `Supported` にしたのは、この計測結果を確認した上での別の変更（ADR-0001 §「決定」5）。したがって証跡の `provider.json` は計測時点の値（`enforce_resource_limits` = unverified）を示す。
+NET の記録は `docs/evidence/isolation-20260917T031126Z/`（exit 0。public-web 16/16 拒否・4/4 許可、restricted 11/11・1/1、cross 4/4・1/1 で B の受付 0、race 4/4、残留 0）。
+
+このスクリプトは provider の `Capabilities` を変更しない。`egress_restricted` / `egress_public_web` を `Supported` にしたのは NET の実装と同じ変更（PLT-4622、ADR-0005）で、上の記録の `provider.json` は既に `supported` を示す。`egress_none`（M8）と `enforce_resource_limits`（M9・DISK、PLT-4622）を `Unverified` から `Supported` にしたのは、この計測結果を確認した上での別の変更（ADR-0001 §「決定」5）。したがって証跡の `provider.json` は計測時点の値（`enforce_resource_limits` = unverified）を示す。
 
 #### 環境ごとの host 側の上限（PLT-4622）
 
@@ -200,9 +212,23 @@ guest が host のディスクを使い切れないよう、provider は `<workd
 
 Firecracker の drive `rate_limiter`（帯域・IOPS）は **使っていない**。容量は drive の大きさで決まるので上限の強制には不要で、隣の環境の IO を守る目的の値は実機の負荷計測なしに決められないため後続に回した。
 
+#### egress profile restricted / public-web（PLT-4622）
+
+設計は `docs/adr/0005-egress-profiles.md`。provider は環境ごとに tap `tsls<11 hex>`（IPv6 無効）と `guest_cidr`（既定 172.30.0.0/16）の /30 を作り、provider 所有の `table inet tachyon_egress` に環境 chain `g_<tap>` を入れる。chain は送信元偽装・`BLOCKED_IPV4`（private / link-local / metadata / CGNAT / loopback ほか）・IPv4 以外を先に drop し、public-web は resolver（既定 1.1.1.1）以外の DNS を drop して残りを accept、restricted は allowlist 以外を drop する。node への `input`、tap への `output`、tap 宛ての新規 `forward` は drop。guest は kernel 引数 `ip=... ipv6.disable=1` で設定する（rootfs の `/etc/resolv.conf` → `/proc/net/pnp`。rootfs は `build-rootfs.sh` で作り直す）。
+
+要件: gateway が root または `CAP_NET_ADMIN`、`nft` と `ip`、`/dev/net/tun`、`net.ipv4.ip_forward=1`。preflight の `egress_network`（optional。`ok` に数えない）と `tsls provider` の capability に理由が出る。
+
+調べ方:
+
+```sh
+ip -br link show | grep '^tsls'           # 動いている policed 環境の tap
+sudo nft list table inet tachyon_egress    # 規則と counter（環境が無ければ table ごと無い）
+cat .kvm/run/<env_id>/net.json             # lease（tap、guest / host の IP）
+```
+
 #### egress の起動ゲート（PLT-4622）
 
-P1 の egress policy は「NIC を付けない」ことで構造的に強制している。user code が policy より先に動く余地を無くすため、provider は `InstanceStart` の前に 2 段の fail-closed 検査をする（`crates/providers/firecracker/src/egress_gate.rs`）。
+egress none の policy は「NIC を付けない」ことで構造的に強制している。restricted / public-web は、tap と chain を作って読み戻し、一致したときだけ `PUT /network-interfaces/eth0` を計画に入れ、下の 2 段の検査で「検証済み tap を指す eth0 1 本だけ」を許し、`InstanceStart` の直前にもう一度 chain を読み戻す。user code が policy より先に動く余地を無くすため、provider は `InstanceStart` の前に 2 段の fail-closed 検査をする（`crates/providers/firecracker/src/egress_gate.rs`）。
 
 1. 送る予定の API 呼び出しに `/network-interfaces*` と `/mmds*` が無いこと。
 2. 全 device を設定した後、`GET /vm/config` の `network-interfaces` が空配列で `mmds-config` が null であること。key が無い・形が違う応答も失敗にする。
@@ -401,7 +427,7 @@ TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
 ## 6. 既知の制約
 
 - host と同じアーキテクチャの guest のみ。`validate_artifact` は ELF の `e_machine` を revision の宣言と host の両方に照合し、`PT_INTERP` があるバイナリ（動的リンク）は `artifact rejected`（rootfs に libc が無い）。
-- ネットワークなし。`EgressProfile::None` 以外の spec は `InvalidSpec`。
+- egress `none` はネットワークなし（NIC を付けない）。`restricted` / `public-web` は tap と nftables で強制し（§3.6 NET、`docs/adr/0005-egress-profiles.md`）、gateway が root（または `CAP_NET_ADMIN`）で動き、`nft` / `ip` があり、`net.ipv4.ip_forward=1` の host でだけ使える。満たさない host では 2 つの capability が理由付きの `unsupported` になり、その revision の環境作成は何も作らずに `Unavailable`（invoke は `platform_error`）。IPv6 は guest に与えない。帯域の `rate_limiter` は未設定。1 host に Firecracker provider は 1 つ（tap 名 prefix `tsls` と table を共有するため）。
 - 1 環境 1 実行。snapshot は `Unsupported`。warm 再利用（idle 休止・再開）は §3.7 の実機計測を経て `Supported` だが、`[pool]` の既定が off なので既定では働かず、destroy-after-invoke のままである。gate は `docs/architecture.md` §4。
 - `ephemeral_storage_mib` は環境ごとの scratch drive（`/tmp`、ext4、作成時に確保）の大きさで強制する（§3.6）。環境作成が drive の `mkfs.ext4` 分だけ遅くなる（64 MiB で 37 ms、nested virtualization）。warm 再利用（§3.7）では同じ環境の `/tmp` が invocation をまたいで残る（同一 tenant・同一 revision の範囲）。drive の `rate_limiter` は未設定。
 - 課金・メータリング用の host 側計測は timings のみ（`host_metering = Unverified`）。

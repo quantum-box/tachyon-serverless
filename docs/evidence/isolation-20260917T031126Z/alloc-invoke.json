@@ -1,0 +1,1 @@
+{"error":{"code":"crash","message":"invocation inv_01m2pnn20y47a0xmeb38teney1 failed: Runtime.Crash: user process exited while the attempt was in flight (exit_code=None, signal=Some(9))","request_id":"01m2pnn20x6622hrsmm34n4g4m","invocation_id":"inv_01m2pnn20y47a0xmeb38teney1","error_type":"Runtime.Crash"}}

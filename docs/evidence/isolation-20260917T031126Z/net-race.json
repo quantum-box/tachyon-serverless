@@ -1,0 +1,46 @@
+[
+  {
+    "env_id": "env_01m2pnp946kk7005mz2emjhvh8",
+    "egress": "public-web",
+    "tap": "tsls9d56e1026bf",
+    "policy_verified_at": "2026-09-17T03:13:47.155653Z",
+    "policy_verify_ms": 118,
+    "instance_start_at": "2026-09-17T03:13:47.395791Z",
+    "torn_down": true,
+    "started": true,
+    "policy_before_start": true
+  },
+  {
+    "env_id": "env_01m2pnptd2gsr74dbm99f69rt6",
+    "egress": "restricted",
+    "tap": "tslsbbc3a47bf84",
+    "policy_verified_at": "2026-09-17T03:14:04.789854Z",
+    "policy_verify_ms": 74,
+    "instance_start_at": "2026-09-17T03:14:05.040009Z",
+    "torn_down": true,
+    "started": true,
+    "policy_before_start": true
+  },
+  {
+    "env_id": "env_01m2pnqa00jkhy7542n2qft32g",
+    "egress": "public-web",
+    "tap": "tslsedb6df2f6cf",
+    "policy_verified_at": "2026-09-17T03:14:20.746574Z",
+    "policy_verify_ms": 61,
+    "instance_start_at": "2026-09-17T03:14:20.999210Z",
+    "torn_down": true,
+    "started": true,
+    "policy_before_start": true
+  },
+  {
+    "env_id": "env_01m2pnqdvy7n6jxt8hrcek7e1r",
+    "egress": "public-web",
+    "tap": "tsls47f99a18e85",
+    "policy_verified_at": "2026-09-17T03:14:24.848993Z",
+    "policy_verify_ms": 150,
+    "instance_start_at": "2026-09-17T03:14:25.171245Z",
+    "torn_down": true,
+    "started": true,
+    "policy_before_start": true
+  }
+]

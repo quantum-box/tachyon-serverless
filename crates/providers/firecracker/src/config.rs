@@ -3,6 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::network::NetworkConfig;
+
 /// Default [`FirecrackerConfig::console_log_max_bytes`]: 4 MiB.
 pub const DEFAULT_CONSOLE_LOG_MAX_BYTES: u64 = 4 * 1024 * 1024;
 /// Default [`FirecrackerConfig::fc_log_max_bytes`]: 4 MiB.
@@ -51,6 +53,10 @@ pub struct FirecrackerConfig {
     /// scratch drive, log caps) is set aside. Below it `create_environment`
     /// fails closed with `Unavailable` before anything is written.
     pub min_host_free_bytes: u64,
+    /// Host network used by the `restricted` / `public-web` egress profiles
+    /// (PLT-4622, docs/adr/0005-egress-profiles.md). Only touched for
+    /// environments that ask for egress; `none` never creates a device.
+    pub network: NetworkConfig,
 }
 
 impl Default for FirecrackerConfig {
@@ -67,6 +73,7 @@ impl Default for FirecrackerConfig {
             console_log_max_bytes: DEFAULT_CONSOLE_LOG_MAX_BYTES,
             fc_log_max_bytes: DEFAULT_FC_LOG_MAX_BYTES,
             min_host_free_bytes: DEFAULT_MIN_HOST_FREE_BYTES,
+            network: NetworkConfig::default(),
         }
     }
 }
@@ -91,6 +98,12 @@ impl FirecrackerConfig {
         }
         if !is_bare(&self.mkfs_ext4) {
             self.mkfs_ext4 = abs(&self.mkfs_ext4);
+        }
+        if !is_bare(&self.network.nft_binary) {
+            self.network.nft_binary = abs(&self.network.nft_binary);
+        }
+        if !is_bare(&self.network.ip_binary) {
+            self.network.ip_binary = abs(&self.network.ip_binary);
         }
         self.kernel = abs(&self.kernel);
         self.rootfs = abs(&self.rootfs);

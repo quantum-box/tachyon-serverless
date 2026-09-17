@@ -1,0 +1,12 @@
+2026-09-17T03:13:07.306Z [platform/boot] creating environment env_01m2pnn24bcjh6j9hp4wtf05xt with provider firecracker
+2026-09-17T03:13:21.472Z [platform/boot] bridge connected after 14225 ms (host_pid=Some(9464))
+2026-09-17T03:13:21.817Z [platform/init] user process started (pid 104)
+2026-09-17T03:13:22.354Z [stderr/init] isolation-probe: starting (arch=aarch64 unisolated=false)
+2026-09-17T03:13:23.374Z [stdout/handler] isolation-probe: probe=resources invocation=inv_01m2pnn20y47a0xmeb38teney1 attempt=att_01m2pnnj4ra945rqjxzkvyaxm4 alloc_mib=512
+2026-09-17T03:13:23.452Z [stdout/handler] isolation-probe: alloc start requested=512 MiB chunk=16 MiB chunks=32
+2026-09-17T03:13:24.397Z [stdout/handler] isolation-probe: alloc touched 16 MiB of 512 MiB
+2026-09-17T03:13:25.264Z [stdout/handler] isolation-probe: alloc touched 32 MiB of 512 MiB
+2026-09-17T03:13:26.233Z [stdout/handler] isolation-probe: alloc touched 48 MiB of 512 MiB
+2026-09-17T03:13:26.949Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+2026-09-17T03:13:27.730Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+2026-09-17T03:13:31.030Z [platform/shutdown] environment terminated (Crashed); cleaned: process-group:9464, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2pnn24bcjh6j9hp4wtf05xt/console.log, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2pnn24bcjh6j9hp4wtf05xt/fc.log, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pnn24bcjh6j9hp4wtf05xt/fc.sock, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pnn24bcjh6j9hp4wtf05xt/v.sock, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pnn24bcjh6j9hp4wtf05xt/v.sock_5000, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pnn24bcjh6j9hp4wtf05xt/function.ext4, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pnn24bcjh6j9hp4wtf05xt/scratch.ext4, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pnn24bcjh6j9hp4wtf05xt/fc.pid, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pnn24bcjh6j9hp4wtf05xt

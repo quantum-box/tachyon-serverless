@@ -13,7 +13,12 @@
 //!   fc.log           Firecracker log (--log-path)
 //!   console.log      guest serial console (Firecracker stdout/stderr, capped)
 //!   fc.pid           pid of the Firecracker process (process-group leader)
+//!   net.json         network lease (egress restricted / public-web only)
 //! ```
+//!
+//! Egress `restricted` / `public-web` (PLT-4622) additionally get a host tap
+//! and an nftables chain, installed and read back before the network device
+//! is configured and before `InstanceStart` (crate::network, egress_gate).
 //!
 //! Guest-initiated vsock connections (guest -> host CID 2, port N) are
 //! forwarded by Firecracker to `<uds_path>_<N>` with no `CONNECT` handshake,
@@ -44,11 +49,12 @@ use crate::drive::{
     create_reserved_image, create_sparse_image, function_drive_size_bytes, mkfs_args,
     scratch_drive_size_bytes, scratch_mkfs_args,
 };
-use crate::egress_gate::{check_planned_calls, check_vm_config};
+use crate::egress_gate::{ExpectedNic, check_planned_calls, check_vm_config};
 use crate::elf::{ElfInfo, inspect_elf_file};
 use crate::host_guard::{
     ConsoleCapture, HostBudget, available_bytes, check_host_budget, spawn_log_watchdog,
 };
+use crate::network::{HostNetwork, VerifiedPolicy, host_support};
 use crate::preflight::{DigestCache, probe_firecracker_version, run_preflight};
 use crate::vmm::{
     EnvPaths, MAX_UNIX_SOCKET_PATH, instance_id_for, kill_process_group, pid_alive,
@@ -85,6 +91,10 @@ pub struct FirecrackerProvider {
     version: Option<String>,
     running: tokio::sync::Mutex<HashMap<EnvironmentId, Tracked>>,
     digests: DigestCache,
+    net: HostNetwork,
+    /// [`host_support`] at construction: whether this process can enforce
+    /// `restricted` / `public-web` on this host, or why not.
+    net_support: Result<String, String>,
 }
 
 impl std::fmt::Debug for FirecrackerProvider {
@@ -103,11 +113,20 @@ impl FirecrackerProvider {
         let cfg = cfg.absolutized();
         let version = crate::preflight::resolve_command(&cfg.firecracker_binary)
             .and_then(|p| probe_firecracker_version(&p));
+        let net_support = host_support(&cfg.network);
+        if let Err(reason) = &net_support {
+            tracing::info!(
+                reason,
+                "egress restricted / public-web are unavailable on this host (egress none is unaffected)"
+            );
+        }
         Self {
+            net: HostNetwork::new(cfg.network.clone()),
             cfg,
             version,
             running: tokio::sync::Mutex::new(HashMap::new()),
             digests: DigestCache::default(),
+            net_support,
         }
     }
 
@@ -120,7 +139,10 @@ impl FirecrackerProvider {
         self.version.as_deref()
     }
 
-    /// Capability table advertised by this provider (RFC §6.3).
+    /// Capability table of this provider on a host that can enforce every
+    /// profile (RFC §6.3). [`ExecutionProvider::capabilities`] downgrades the
+    /// network profiles to `Unsupported` with the reason when this host
+    /// cannot (no `CAP_NET_ADMIN`, no nftables, not Linux, ...).
     pub fn capability_table() -> Capabilities {
         Capabilities {
             isolation: IsolationLevel::MicroVm,
@@ -144,8 +166,8 @@ impl FirecrackerProvider {
             // no network device is configured, the guest lists loopback only and
             // every connect attempt failed with NetworkUnreachable.
             egress_none: Support::Supported,
-            egress_restricted: Support::unsupported("no network device is configured in P1"),
-            egress_public_web: Support::unsupported("no network device is configured in P1"),
+            egress_restricted: EGRESS_NETWORK_SUPPORT,
+            egress_public_web: EGRESS_NETWORK_SUPPORT,
             host_metering: Support::unverified("host-side timings only; no cgroup/KVM stats"),
             // PLT-4633, measured on real KVM and promoted from `Unverified`
             // (docs/evidence/warm-20260916T162532Z, taken with
@@ -299,6 +321,40 @@ impl FirecrackerProvider {
             );
         }
 
+        // 2c. Egress policy (PLT-4622): tap + nftables chain, read back. Nothing
+        //     that could carry a packet exists in the VM before this passed.
+        let policy: Option<VerifiedPolicy> = if spec.egress == EgressProfile::None {
+            None
+        } else {
+            let policy = self
+                .net
+                .setup(
+                    &self.cfg.workdir,
+                    &paths.dir,
+                    env_id,
+                    spec.egress,
+                    &spec.egress_allow,
+                )
+                .await
+                .map_err(|e| {
+                    ProviderError::Boot(format!(
+                        "egress gate: the {} policy could not be installed and verified: {e}",
+                        spec.egress.as_str()
+                    ))
+                })?;
+            tracing::info!(
+                env_id,
+                egress = spec.egress.as_str(),
+                tap = %policy.lease().tap,
+                guest_ip = %policy.lease().guest_ip,
+                rules = policy.rule_count(),
+                ms = policy.verified_ms(),
+                "egress policy installed and verified"
+            );
+            Some(policy)
+        };
+        let expected_nic: Option<ExpectedNic> = policy.as_ref().map(|p| p.lease().expected_nic());
+
         // 3. Listen for the guest-initiated vsock connection BEFORE the VM starts.
         let listener = UnixListener::bind(&paths.vsock_listener).map_err(|e| {
             ProviderError::Boot(format!("bind {}: {e}", paths.vsock_listener.display()))
@@ -337,7 +393,14 @@ impl FirecrackerProvider {
         // 5. Wait for the API socket.
         let start = Instant::now();
         loop {
-            if paths.api_sock.exists() {
+            // The socket file exists as soon as Firecracker binds it, a moment
+            // before it listens; a connect in that window is refused (seen on
+            // KVM with two environments booting at once). Wait for a connect.
+            if paths.api_sock.exists()
+                && tokio::net::UnixStream::connect(&paths.api_sock)
+                    .await
+                    .is_ok()
+            {
                 break;
             }
             if let Ok(Some(status)) = child.try_wait() {
@@ -364,13 +427,15 @@ impl FirecrackerProvider {
         let api = ApiClient::new(&paths.api_sock, API_TIMEOUT);
         let vcpus = spec.resources.vcpus();
         let mem_mib = spec.resources.memory_mib;
+        let ip_arg = policy.as_ref().map(|p| p.lease().kernel_net_args());
         let boot_args = compose_boot_args(
             spec.architecture,
             env_id,
             self.cfg.vsock_port,
+            ip_arg.as_deref(),
             self.cfg.boot_args_extra.as_deref(),
         );
-        let calls: [(&str, serde_json::Value); 6] = [
+        let mut calls: Vec<(String, serde_json::Value)> = [
             (
                 "/machine-config",
                 serde_json::json!({"vcpu_count": vcpus, "mem_size_mib": mem_mib, "smt": false}),
@@ -410,10 +475,20 @@ impl FirecrackerProvider {
                 "/vsock",
                 serde_json::json!({"guest_cid": GUEST_CID, "uds_path": paths.vsock_uds}),
             ),
-        ];
-        // Egress gate, part 1: the plan itself configures no network path.
-        check_planned_calls(calls.iter().map(|(path, _)| *path))
-            .map_err(|e| Self::boot_error(paths, e))?;
+        ]
+        .into_iter()
+        .map(|(path, body)| (path.to_owned(), body))
+        .collect();
+        if let (Some(policy), Some(nic)) = (&policy, &expected_nic) {
+            calls.push((nic.api_path(), policy.lease().firecracker_body()));
+        }
+        // Egress gate, part 1: the plan configures no network path, or
+        // exactly the one interface whose policy was verified.
+        check_planned_calls(
+            calls.iter().map(|(path, _)| path.as_str()),
+            expected_nic.as_ref(),
+        )
+        .map_err(|e| Self::boot_error(paths, e))?;
         for (path, body) in &calls {
             if let Err(e) = api.put(path, body).await {
                 return Err(match child.try_wait() {
@@ -440,7 +515,18 @@ impl FirecrackerProvider {
                 format!("egress gate: cannot read the VM configuration before InstanceStart: {e}"),
             )
         })?;
-        check_vm_config(&vm_config).map_err(|e| Self::boot_error(paths, e))?;
+        check_vm_config(&vm_config, expected_nic.as_ref())
+            .map_err(|e| Self::boot_error(paths, e))?;
+        // Egress gate, part 3: the policy is still in force at the moment the
+        // guest is started (nobody flushed the chain since it was installed).
+        if let Some(policy) = &policy {
+            self.net.verify(policy).await.map_err(|e| {
+                Self::boot_error(
+                    paths,
+                    format!("egress gate: the policy no longer verifies before InstanceStart: {e}"),
+                )
+            })?;
+        }
         if let Err(e) = api
             .put(
                 "/actions",
@@ -534,7 +620,32 @@ impl FirecrackerProvider {
         );
         details.insert("fc_log_max_bytes".into(), self.cfg.fc_log_max_bytes.into());
         details.insert("host_disk_budget_bytes".into(), budget.total().into());
-        details.insert("network_interfaces".into(), 0.into());
+        details.insert("egress_profile".into(), spec.egress.as_str().into());
+        match &policy {
+            None => {
+                details.insert("network_interfaces".into(), 0.into());
+            }
+            Some(policy) => {
+                let lease = policy.lease();
+                details.insert("network_interfaces".into(), 1.into());
+                details.insert("egress_tap".into(), lease.tap.clone().into());
+                details.insert("egress_chain".into(), lease.chain().into());
+                details.insert("guest_ip".into(), lease.guest_ip.to_string().into());
+                details.insert("host_tap_ip".into(), lease.host_ip.to_string().into());
+                details.insert(
+                    "dns_resolver".into(),
+                    lease
+                        .dns_resolver
+                        .map(|d| d.to_string().into())
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                details.insert("egress_policy_rules".into(), policy.rule_count().into());
+                details.insert(
+                    "egress_policy_verified_ms".into(),
+                    policy.verified_ms().into(),
+                );
+            }
+        }
         details.insert("env_dir".into(), paths.dir.display().to_string().into());
         details.insert(
             "console_log".into(),
@@ -617,6 +728,7 @@ impl FirecrackerProvider {
             &paths.scratch_drive,
             &paths.pid_file,
             &paths.stage_app,
+            &paths.dir.join(crate::network::LEASE_FILE),
         ] {
             if tokio::fs::remove_file(p).await.is_ok() {
                 cleaned.push(p.display().to_string());
@@ -723,7 +835,50 @@ impl FirecrackerProvider {
         let _ = t.child.wait().await;
         was_running
     }
+
+    /// Remove the tap and nftables state of an environment (PLT-4622). Called
+    /// after the VMM is dead and before the directory (and its lease) is
+    /// removed. A failure is logged and reported; startup reconcile sweeps
+    /// whatever is left.
+    async fn teardown_network(&self, environment_id: &EnvironmentId, cleaned: &mut Vec<String>) {
+        match self
+            .net
+            .teardown(&self.cfg.workdir, environment_id.as_str())
+            .await
+        {
+            Ok(report) => {
+                if let Some(counters) = &report.counters {
+                    tracing::info!(
+                        env_id = %environment_id,
+                        counters = %counters,
+                        "egress policy counters at teardown"
+                    );
+                }
+                cleaned.extend(report.cleaned);
+            }
+            Err(e) => {
+                tracing::error!(env_id = %environment_id, error = %e, "egress network teardown failed");
+                cleaned.push(format!("network-teardown-failed:{e}"));
+            }
+        }
+    }
 }
+
+/// `egress_restricted` / `egress_public_web` on a host that can enforce them.
+///
+/// PLT-4622, measured on real KVM (docs/evidence/isolation-20260917T031126Z,
+/// scripts/kvm/measure-isolation.sh NET): with a per-environment tap and the
+/// provider's nftables table, public-web reached 1.1.1.1 / 1.0.0.1 and DNS
+/// through the configured resolver only, while metadata, the management
+/// network, the node, private / CGNAT ranges, IPv6, other resolvers, a DNS
+/// name and an HTTP redirect pointing at 169.254.169.254 all failed (16/16);
+/// restricted reached only its allowlisted 1.1.1.1:443 (11/11 denied); two
+/// tenants booted at once could not reach each other (0 accepted); the policy
+/// was read back before InstanceStart on all 4 policed boots; no tap, table
+/// or lease survived. aarch64 under nested virtualization only. Hosts without
+/// CAP_NET_ADMIN / nftables / ip_forward get `Unsupported` with the reason
+/// (`ExecutionProvider::capabilities`).
+const EGRESS_NETWORK_SUPPORT: Support = Support::Supported;
 
 /// Whether a `PATCH /vm` fault means "the microVM is already in **the state
 /// that was requested**".
@@ -814,7 +969,13 @@ impl ExecutionProvider for FirecrackerProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Self::capability_table()
+        let mut caps = Self::capability_table();
+        if let Err(reason) = &self.net_support {
+            let note = format!("unavailable on this host: {reason}");
+            caps.egress_restricted = Support::unsupported(note.clone());
+            caps.egress_public_web = Support::unsupported(note);
+        }
+        caps
     }
 
     async fn preflight(&self) -> Result<PreflightReport, ProviderError> {
@@ -863,10 +1024,27 @@ impl ExecutionProvider for FirecrackerProvider {
             ));
         }
         if spec.egress != EgressProfile::None {
-            return Err(ProviderError::InvalidSpec(format!(
-                "egress profile {:?} is not supported (P1 configures no network device)",
-                spec.egress
-            )));
+            // Checked again now, not only at construction: ip_forward or the
+            // binaries may have changed. Fail closed before anything exists.
+            if let Err(reason) = host_support(&self.cfg.network) {
+                return Err(ProviderError::Unavailable(format!(
+                    "egress {} cannot be enforced on this host: {reason}",
+                    spec.egress.as_str()
+                )));
+            }
+            if spec.egress == EgressProfile::Restricted && spec.egress_allow.is_empty() {
+                return Err(ProviderError::InvalidSpec(
+                    "egress restricted without allow rules".into(),
+                ));
+            }
+            for rule in &spec.egress_allow {
+                rule.validate()
+                    .map_err(|e| ProviderError::InvalidSpec(format!("egress_allow: {e}")))?;
+            }
+        } else if !spec.egress_allow.is_empty() {
+            return Err(ProviderError::InvalidSpec(
+                "egress none carries no allow rules".into(),
+            ));
         }
         let longest = paths.longest_socket_path_len();
         if longest > MAX_UNIX_SOCKET_PATH {
@@ -904,6 +1082,10 @@ impl ExecutionProvider for FirecrackerProvider {
                     let _ = child.wait().await;
                 }
                 let mut cleaned = Vec::new();
+                if spec.egress != EgressProfile::None {
+                    self.teardown_network(&spec.environment_id, &mut cleaned)
+                        .await;
+                }
                 let _ = self.archive_logs(&spec.environment_id, &paths).await;
                 Self::remove_env_files(&paths, &mut cleaned).await;
                 Err(err)
@@ -919,7 +1101,18 @@ impl ExecutionProvider for FirecrackerProvider {
         let paths = self.paths_for(environment_id);
         let tracked = self.running.lock().await.remove(environment_id);
         if tracked.is_none() && !paths.dir.exists() {
-            return Ok(TerminateReport::default());
+            // A tap may outlive a directory removed by hand; never leave it.
+            let mut cleaned = Vec::new();
+            if std::path::Path::new("/sys/class/net")
+                .join(crate::network::tap_name(environment_id.as_str()))
+                .exists()
+            {
+                self.teardown_network(environment_id, &mut cleaned).await;
+            }
+            return Ok(TerminateReport {
+                was_running: false,
+                cleaned,
+            });
         }
         // Only a guest that can still act on the `Shutdown` frame is waited
         // for. A quiesced microVM cannot: its vCPUs are stopped, so waiting
@@ -953,6 +1146,13 @@ impl ExecutionProvider for FirecrackerProvider {
             }
         }
 
+        if paths.dir.join(crate::network::LEASE_FILE).exists()
+            || std::path::Path::new("/sys/class/net")
+                .join(crate::network::tap_name(environment_id.as_str()))
+                .exists()
+        {
+            self.teardown_network(environment_id, &mut cleaned).await;
+        }
         let archived = self.archive_logs(environment_id, &paths).await;
         cleaned.extend(archived.into_iter().map(|p| format!("archived:{p}")));
         Self::remove_env_files(&paths, &mut cleaned).await;
@@ -1048,6 +1248,16 @@ impl ExecutionProvider for FirecrackerProvider {
             }
         }
         ids.sort();
+        // Startup reconcile lists environments first: sweep network state
+        // (taps, chains, map entries) that belongs to no environment directory.
+        let live: Vec<String> = ids.iter().map(|id| id.as_str().to_owned()).collect();
+        match self.net.sweep(&self.cfg.workdir, &live).await {
+            Ok(removed) if !removed.is_empty() => {
+                tracing::warn!(?removed, "removed orphaned egress network state");
+            }
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "egress network sweep failed"),
+        }
         Ok(ids)
     }
 }
@@ -1091,8 +1301,9 @@ mod tests {
         // PLT-4622: vCPU / memory / ephemeral storage measured on real KVM
         // (docs/evidence/isolation-20260917T011555Z).
         assert!(c.enforce_resource_limits.is_supported());
-        assert!(matches!(c.egress_restricted, Support::Unsupported { .. }));
-        assert!(matches!(c.egress_public_web, Support::Unsupported { .. }));
+        // PLT-4622: measured on real KVM (see capability_table()).
+        assert_eq!(c.egress_restricted, EGRESS_NETWORK_SUPPORT);
+        assert_eq!(c.egress_public_web, EGRESS_NETWORK_SUPPORT);
         assert!(matches!(c.host_metering, Support::Unverified { .. }));
         for s in [&c.snapshot_create, &c.snapshot_clone] {
             assert!(matches!(s, Support::Unsupported { .. }));
@@ -1373,6 +1584,7 @@ mod tests {
             architecture: Architecture::host().unwrap(),
             resources: Default::default(),
             egress: EgressProfile::None,
+            egress_allow: Vec::new(),
             connect_timeout: Duration::from_secs(1),
         };
         assert!(matches!(
@@ -1381,8 +1593,32 @@ mod tests {
         ));
     }
 
+    /// A host that cannot enforce the network profiles says so in its
+    /// capabilities, with the reason, and leaves `none` alone.
+    #[test]
+    fn network_capabilities_follow_the_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = provider(dir.path());
+        let c = p.capabilities();
+        assert!(c.egress_none.is_supported());
+        match &p.net_support {
+            Ok(_) => {
+                assert!(c.egress_restricted.is_supported());
+                assert!(c.egress_public_web.is_supported());
+            }
+            Err(reason) => {
+                for s in [&c.egress_restricted, &c.egress_public_web] {
+                    assert!(
+                        matches!(s, Support::Unsupported { reason: r } if r.contains(reason.as_str())),
+                        "{s:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[tokio::test]
-    async fn create_rejects_non_none_egress() {
+    async fn create_rejects_non_none_egress_where_it_cannot_be_enforced() {
         let dir = tempfile::tempdir().unwrap();
         let p = provider(dir.path());
         let spec = EnvironmentSpec {
@@ -1397,11 +1633,27 @@ mod tests {
             architecture: Architecture::host().unwrap(),
             resources: Default::default(),
             egress: EgressProfile::PublicWeb,
+            egress_allow: Vec::new(),
             connect_timeout: Duration::from_secs(1),
         };
+        if p.net_support.is_ok() {
+            // A privileged Linux host can enforce it; covered on real KVM.
+            return;
+        }
+        let mut none_with_rules = spec.clone();
+        none_with_rules.egress = EgressProfile::None;
+        none_with_rules.egress_allow = vec![tachyon_serverless_domain::EgressAllowRule {
+            cidr: "1.1.1.1/32".into(),
+            protocol: Default::default(),
+            ports: vec![443],
+        }];
         assert!(matches!(
             p.create_environment(spec).await,
-            Err(ProviderError::InvalidSpec(m)) if m.contains("egress")
+            Err(ProviderError::Unavailable(m)) if m.contains("egress public-web cannot be enforced")
+        ));
+        assert!(matches!(
+            p.create_environment(none_with_rules).await,
+            Err(ProviderError::InvalidSpec(m)) if m.contains("allow rules")
         ));
         assert!(p.list_environments().await.unwrap().is_empty());
     }
@@ -1425,6 +1677,7 @@ mod tests {
             architecture: Architecture::host().unwrap(),
             resources: Default::default(),
             egress: EgressProfile::None,
+            egress_allow: Vec::new(),
             connect_timeout: Duration::from_secs(1),
         };
         let err = p.create_environment(spec).await.unwrap_err();

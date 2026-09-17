@@ -17,11 +17,14 @@ pub const GUEST_ENTRYPOINT: &str = "/function/app";
 /// `console=ttyS0 reboot=k panic=1 pci=off init=/sbin/tachyon-init
 /// tachyon.env_id=<id> tachyon.vsock_port=<port> tachyon.function_dev=/dev/vdb
 /// tachyon.scratch_dev=/dev/vdc`
-/// plus ` keep_bootcon` on aarch64, plus `boot_args_extra` (trimmed) if any.
+/// plus ` keep_bootcon` on aarch64, plus the guest network argument (`ip=...`,
+/// only for an environment with a policed network interface, PLT-4622), plus
+/// `boot_args_extra` (trimmed) if any.
 pub fn compose_boot_args(
     arch: Architecture,
     env_id: &str,
     vsock_port: u32,
+    network: Option<&str>,
     extra: Option<&str>,
 ) -> String {
     let mut s = format!(
@@ -31,6 +34,10 @@ pub fn compose_boot_args(
     );
     if arch == Architecture::Aarch64 {
         s.push_str(" keep_bootcon");
+    }
+    if let Some(net) = network {
+        s.push(' ');
+        s.push_str(net);
     }
     if let Some(extra) = extra.map(str::trim).filter(|e| !e.is_empty()) {
         s.push(' ');
@@ -45,7 +52,7 @@ mod tests {
 
     #[test]
     fn x86_64_matches_protocol_doc() {
-        let s = compose_boot_args(Architecture::X86_64, "env_01abc", 5000, None);
+        let s = compose_boot_args(Architecture::X86_64, "env_01abc", 5000, None, None);
         assert_eq!(
             s,
             "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/tachyon-init \
@@ -56,16 +63,36 @@ mod tests {
 
     #[test]
     fn aarch64_adds_keep_bootcon_and_extra_is_appended() {
-        let s = compose_boot_args(Architecture::Aarch64, "env_x", 5001, Some("  loglevel=8 "));
+        let s = compose_boot_args(
+            Architecture::Aarch64,
+            "env_x",
+            5001,
+            None,
+            Some("  loglevel=8 "),
+        );
         assert!(s.ends_with(" keep_bootcon loglevel=8"));
         assert!(s.contains("tachyon.vsock_port=5001"));
         assert!(s.starts_with("console=ttyS0 reboot=k panic=1 pci=off"));
     }
 
     #[test]
+    fn network_argument_precedes_extra() {
+        let s = compose_boot_args(
+            Architecture::X86_64,
+            "e",
+            5000,
+            Some("ip=172.30.0.2::172.30.0.1:255.255.255.252::eth0:off"),
+            Some("loglevel=8"),
+        );
+        assert!(s.ends_with(
+            "tachyon.scratch_dev=/dev/vdc ip=172.30.0.2::172.30.0.1:255.255.255.252::eth0:off loglevel=8"
+        ));
+    }
+
+    #[test]
     fn blank_extra_is_ignored() {
-        let a = compose_boot_args(Architecture::X86_64, "e", 5000, Some("   "));
-        let b = compose_boot_args(Architecture::X86_64, "e", 5000, None);
+        let a = compose_boot_args(Architecture::X86_64, "e", 5000, None, Some("   "));
+        let b = compose_boot_args(Architecture::X86_64, "e", 5000, None, None);
         assert_eq!(a, b);
     }
 }

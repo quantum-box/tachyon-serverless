@@ -63,6 +63,7 @@ impl utoipa::Modify for SecurityAddon {
         api::ResourcesRequest,
         api::ExecutionRequest,
         api::SecretBindingRequest,
+        api::EgressAllowRequest,
         api::CreateRevisionRequest,
         api::RevisionResponse,
         api::UpdateAliasRequest,

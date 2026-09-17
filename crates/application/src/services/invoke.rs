@@ -2034,6 +2034,7 @@ impl Driver {
             artifact: artifact.clone(),
             architecture: self.revision.spec.runtime.architecture,
             egress: self.revision.spec.egress,
+            egress_allow: self.revision.spec.egress_allow.clone(),
             resources: self.revision.spec.resources,
             connect_timeout: init_wait,
         };

@@ -283,6 +283,8 @@ async fn run_inner(
         env: Vec::new(),
         secret: Vec::new(),
         description: "tsls dev".into(),
+        egress: None,
+        egress_allow: Vec::new(),
         no_publish: false,
         wait: true,
         no_wait: false,

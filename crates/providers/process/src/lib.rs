@@ -1069,6 +1069,7 @@ mod tests {
             architecture: host_arch(),
             resources: Default::default(),
             egress: Default::default(),
+            egress_allow: Vec::new(),
             connect_timeout: Duration::from_secs(2),
         };
         let err = p.create_environment(spec).await.unwrap_err();

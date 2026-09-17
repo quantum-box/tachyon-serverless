@@ -191,6 +191,10 @@ mod fake {
         for conn in listener.incoming() {
             let mut conn = conn.unwrap();
             let (method, path, body) = read_request(&mut conn);
+            if method.is_empty() {
+                // A readiness probe: the provider connects and closes without a request.
+                continue;
+            }
             let mut entry = serde_json::json!({"method": method, "path": path, "body": body});
             if path == "/actions" {
                 let port = cmdline_value(&boot_args, "tachyon.vsock_port").unwrap_or_default();
@@ -391,6 +395,7 @@ fn spec(f: &Fixture, connect_timeout: Duration) -> EnvironmentSpec {
             ephemeral_storage_mib: 128,
         },
         egress: EgressProfile::None,
+        egress_allow: Vec::new(),
         connect_timeout,
     }
 }

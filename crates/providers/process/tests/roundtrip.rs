@@ -77,6 +77,7 @@ fn spec(id: EnvironmentId, bridge: &std::path::Path, connect_timeout: Duration) 
         architecture: Architecture::host().expect("supported host"),
         resources: Default::default(),
         egress: Default::default(),
+        egress_allow: Vec::new(),
         connect_timeout,
     }
 }

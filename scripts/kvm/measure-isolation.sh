@@ -37,6 +37,15 @@
 #                         ext4 metadata takes a few percent of a small file system)
 #   DISK_HOST_SLACK_MIB   host free space the run may lose beyond the environment's scratch drive
 #                         (default 64: function drive, capped logs, gateway data)
+#   NET_MEASURE           1 (default) also measures the egress profiles `restricted` and
+#                         `public-web` (PLT-4622, NET): needs passwordless sudo (or root), nftables
+#                         and iproute2. The gateway then runs as root, net.ipv4.ip_forward is set
+#                         to 1 for the run and restored afterwards. 0 keeps the old unprivileged run.
+#   NET_TOKEN_B           token of the second tenant for the cross-tenant check
+#                         (default dev-token-tenant-b)
+#   NET_LISTEN_MS         how long tenant B's guest listens for tenant A (default 25000)
+#   NET_REDIRECT_URL      an http:// URL that answers 3xx towards the metadata address (default
+#                         httpbin.org redirect-to; unreachable = inconclusive, not a failure)
 #
 # Output: docs/evidence/isolation-<UTC>/{egress.json,resources.json,alloc-invoke.json,
 #   alloc-invocation.json,alloc-logs.txt,revision-baseline.json,revision-alloc.json,
@@ -50,6 +59,9 @@
 #   2  the measurement could not be taken (build, gateway, deploy or probe failure)
 #   3  the guest wrote past its ephemeral storage cap, wrote to a read-only drive, or the host
 #      lost more free space than the environment's budget (DISK FAIL)
+#   4  a guest with egress restricted / public-web reached a destination its profile denies,
+#      another tenant's guest, the node or the management network, user code could start
+#      before the policy was verified, or taps / nftables state outlived the run (NET FAIL)
 #
 # Idempotent: the function is reused when it already exists, every run writes a new evidence
 # directory, and the gateway started here is always stopped again. This script never changes
@@ -86,6 +98,16 @@ DISK_STORAGE_MIB="${DISK_STORAGE_MIB:-64}"
 DISK_FILL_MIB="${DISK_FILL_MIB:-$(( DISK_STORAGE_MIB * 4 ))}"
 DISK_TOLERANCE_PCT="${DISK_TOLERANCE_PCT:-80}"
 DISK_HOST_SLACK_MIB="${DISK_HOST_SLACK_MIB:-64}"
+NET_MEASURE="${NET_MEASURE:-1}"
+NET_TOKEN_B="${NET_TOKEN_B:-dev-token-tenant-b}"
+NET_LISTEN_MS="${NET_LISTEN_MS:-25000}"
+NET_REDIRECT_URL="${NET_REDIRECT_URL:-http://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F}"
+NET_TABLE="tachyon_egress"
+# The gateway (and so the provider's nft / ip calls) runs as root only for the NET measurement.
+SUDO=""
+if [ "$NET_MEASURE" = "1" ] && [ "$(id -u)" -ne 0 ]; then
+  SUDO="sudo -n"
+fi
 
 [ -f "$CONFIG_PATH" ] || e2e_die "gateway config not found: $CONFIG_PATH"
 
@@ -114,6 +136,9 @@ PROBE_BIN="$GUEST_DIR/example-isolation-probe"
 FC_RUN_DIR="$(sed -n 's/^workdir *= *"\(.*\)"$/\1/p' "$CONFIG_PATH" | head -n1)"
 FC_RUN_DIR="${FC_RUN_DIR:-.kvm/run}"
 case "$FC_RUN_DIR" in /*) ;; *) FC_RUN_DIR="$REPO_ROOT/${FC_RUN_DIR#./}" ;; esac
+DATA_DIR="$(sed -n 's/^data_dir *= *"\(.*\)"$/\1/p' "$CONFIG_PATH" | head -n1)"
+DATA_DIR="${DATA_DIR:-./data}"
+case "$DATA_DIR" in /*) ;; *) DATA_DIR="$REPO_ROOT/${DATA_DIR#./}" ;; esac
 
 tsls() { "$TSLS_BIN" "$@"; }
 export TSLS_BIN
@@ -125,15 +150,50 @@ M9_STATUS="UNKNOWN"
 M9_DETAIL="the resource probe did not produce a report"
 DISK_STATUS="UNKNOWN"
 DISK_DETAIL="the disk probe did not produce a report"
+NET_STATUS="SKIPPED"
+NET_DETAIL="NET_MEASURE=0"
 ORPHAN_NOTE="not checked"
 FINDINGS=""
+ORIG_IP_FORWARD=""
+
+gateway_alive() { [ -n "$GATEWAY_PID" ] && $SUDO kill -0 "$GATEWAY_PID" 2>/dev/null; }
+
+# stop_gateway GRACE_SECS: SIGTERM (relayed by sudo), then SIGKILL; reap the child.
+stop_gateway() {
+  local grace="$1" waited=0
+  [ -n "$GATEWAY_PID" ] || return 0
+  if gateway_alive; then
+    $SUDO kill -TERM "$GATEWAY_PID" 2>/dev/null || true
+    while gateway_alive && [ "$waited" -lt $(( grace * 4 )) ]; do
+      sleep 0.25
+      waited=$(( waited + 1 ))
+    done
+    if gateway_alive; then
+      e2e_warn "gateway $GATEWAY_PID did not exit after SIGTERM within ${grace}s; sending SIGKILL"
+      $SUDO pkill -KILL -P "$GATEWAY_PID" 2>/dev/null || true
+      $SUDO kill -KILL "$GATEWAY_PID" 2>/dev/null || true
+    fi
+  fi
+  set +e
+  wait "$GATEWAY_PID" 2>/dev/null
+  STOP_RC=$?
+  set -e
+  GATEWAY_PID=""
+  if [ -n "$SUDO" ]; then
+    # Files the root gateway created stay usable for the next unprivileged run.
+    $SUDO chown -R "$(id -u):$(id -g)" "$FC_RUN_DIR" "$DATA_DIR" 2>/dev/null || true
+  fi
+}
 
 cleanup() {
   local rc=$?
   set +e
-  if [ -n "$GATEWAY_PID" ] && kill -0 "$GATEWAY_PID" 2>/dev/null; then
+  if gateway_alive; then
     e2e_log "cleanup: stopping gateway $GATEWAY_PID"
-    stop_process "$GATEWAY_PID" 10
+    stop_gateway 10
+  fi
+  if [ -n "$ORIG_IP_FORWARD" ]; then
+    $SUDO sysctl -q -w "net.ipv4.ip_forward=$ORIG_IP_FORWARD" >/dev/null 2>&1
   fi
   rm -rf "$WORK_DIR"
   exit "$rc"
@@ -164,7 +224,12 @@ build_all() {
 }
 
 start_gateway() {
-  LOG_FORMAT=json TACHYON_GATEWAY_CONFIG="$CONFIG_PATH" \
+  if [ "$NET_MEASURE" = "1" ]; then
+    $SUDO true || e2e_die "NET_MEASURE=1 needs passwordless sudo (or run with NET_MEASURE=0)"
+    ORIG_IP_FORWARD="$(sysctl -n net.ipv4.ip_forward)"
+    $SUDO sysctl -q -w net.ipv4.ip_forward=1
+  fi
+  $SUDO env LOG_FORMAT=json TACHYON_GATEWAY_CONFIG="$CONFIG_PATH" \
     "$GATEWAY_BIN" "$GATEWAY_CONFIG_FLAG" "$CONFIG_PATH" >"$GATEWAY_LOG" 2>&1 &
   GATEWAY_PID=$!
   e2e_log "gateway pid $GATEWAY_PID, config $CONFIG_PATH, log $GATEWAY_LOG"
@@ -175,7 +240,7 @@ start_gateway() {
 wait_gateway() {
   local i
   for i in $(seq 1 60); do
-    if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+    if ! gateway_alive; then
       echo "gateway process $GATEWAY_PID exited during startup (port in use or invalid config)" >&2
       tail -n 30 "$GATEWAY_LOG" >&2
       return 1
@@ -365,6 +430,267 @@ run_disk_probe() {
 }
 
 # ---------------------------------------------------------------------------
+# 3b. NET: egress restricted / public-web (PLT-4622)
+# ---------------------------------------------------------------------------
+
+# Host addresses a guest must never reach, and a control that they are really listening.
+net_host_facts() {
+  local route
+  route="$(ip -4 route show default | head -n 1)"
+  HOST_GW="$(printf '%s' "$route" | awk '{print $3}')"
+  HOST_IF="$(printf '%s' "$route" | awk '{print $5}')"
+  HOST_IP="$(ip -4 -o addr show dev "$HOST_IF" | awk '{print $4}' | cut -d/ -f1 | head -n 1)"
+  if [ -z "$HOST_GW" ] || [ -z "$HOST_IP" ]; then
+    echo "cannot find the host address / default gateway" >&2
+    return 1
+  fi
+  state_set net.host_gw "$HOST_GW"
+  state_set net.host_ip "$HOST_IP"
+  local ssh_control="closed"
+  timeout 2 bash -c "</dev/tcp/$HOST_IP/22" 2>/dev/null && ssh_control="open"
+  {
+    echo "host_if=$HOST_IF host_ip=$HOST_IP default_gw=$HOST_GW"
+    echo "control: $HOST_IP:22 from the host itself is $ssh_control (a guest must not reach it)"
+    echo "net.ipv4.ip_forward=$(sysctl -n net.ipv4.ip_forward) (was $ORIG_IP_FORWARD)"
+    echo "nft $($SUDO nft --version 2>/dev/null)"
+    echo "--- taps before ---"
+    ip -br link show | grep '^tsls' || echo "(none)"
+    echo "--- table inet $NET_TABLE before ---"
+    $SUDO nft list table inet "$NET_TABLE" 2>&1 || true
+  } > "$EVIDENCE_DIR/net-host.txt"
+  cat "$EVIDENCE_DIR/net-host.txt"
+  jq -r '.capabilities | "capabilities: restricted=\(.egress_restricted.status) public_web=\(.egress_public_web.status)"' \
+    "$EVIDENCE_DIR/provider.json"
+}
+
+ensure_function_b() {
+  local id
+  run_capture env TSLS_TOKEN="$NET_TOKEN_B" "$TSLS_BIN" functions get "$FUNCTION_NAME" --json
+  if [ "$RUN_RC" -eq 0 ]; then
+    id="$(printf '%s' "$RUN_OUT" | jq -r .id)"
+  else
+    id="$(TSLS_TOKEN="$NET_TOKEN_B" tsls functions create --name "$FUNCTION_NAME" \
+      --description "PLT-4622 cross-tenant listener" --json | jq -r .id)"
+  fi
+  state_set "fn.b" "$id"
+  e2e_log "tenant B function $FUNCTION_NAME: $id"
+}
+
+deploy_net_revisions() {
+  deploy_revision publicweb "$PROBE_MEMORY_MIB" "isolation probe egress public-web" \
+    --egress public-web --no-publish
+  deploy_revision restricted "$PROBE_MEMORY_MIB" "isolation probe egress restricted to 1.1.1.1:443" \
+    --egress restricted --egress-allow 1.1.1.1/32:443 --no-publish
+  local rev
+  rev="$(TSLS_TOKEN="$NET_TOKEN_B" tsls functions deploy --function "$FUNCTION_NAME" --binary "$PROBE_BIN" \
+    --arch "$ARCH" --memory-mib "$PROBE_MEMORY_MIB" --cpu-millis "$PROBE_CPU_MILLIS" \
+    --timeout-seconds "$PROBE_TIMEOUT_SECONDS" --egress public-web --no-publish \
+    --description "tenant B listener (egress public-web)" --json | jq -r .id)"
+  if [ -z "$rev" ] || [ "$rev" = "null" ]; then
+    echo "tenant B deploy returned no revision" >&2
+    return 1
+  fi
+  state_set rev.b "$rev"
+  TSLS_TOKEN="$NET_TOKEN_B" tsls functions revision "$FUNCTION_NAME" "$rev" --json > "$EVIDENCE_DIR/revision-tenant-b.json"
+  jq -c '.spec | {egress, egress_allow}' "$EVIDENCE_DIR/revision-publicweb.json" \
+    "$EVIDENCE_DIR/revision-restricted.json" "$EVIDENCE_DIR/revision-tenant-b.json"
+}
+
+# The node's own tap addresses of the first two leases (172.30.0.1 and .5 with the default pool).
+NODE_TAP_TARGETS='"172.30.0.1:22", "172.30.0.5:22"'
+
+write_net_expectations() {
+  local gw ip
+  gw="$(state_get net.host_gw)"
+  ip="$(state_get net.host_ip)"
+  cat > "$EVIDENCE_DIR/net-expect-publicweb.json" <<EOF
+{
+  "connect": {
+    "allow": ["1.1.1.1:443", "1.0.0.1:443"],
+    "deny": ["169.254.169.254:80", "10.0.2.2:80", "100.64.0.1:80", "192.168.0.1:80",
+             "$gw:22", "$gw:53", "$ip:22", "$ip:8080", $NODE_TAP_TARGETS,
+             "[2606:4700:4700::1111]:443", "[::ffff:169.254.169.254]:80"]
+  },
+  "udp_dns": { "allow": ["1.1.1.1:53"], "deny": ["8.8.8.8:53", "$gw:53"] },
+  "resolve": { "allow": ["example.com"], "deny_connect": ["169.254.169.254.nip.io"], "deny_resolve": [] },
+  "http_redirect": { "deny_follow": true }
+}
+EOF
+  cat > "$EVIDENCE_DIR/net-expect-restricted.json" <<EOF
+{
+  "connect": {
+    "allow": ["1.1.1.1:443"],
+    "deny": ["1.0.0.1:443", "1.1.1.1:80", "169.254.169.254:80", "$gw:22", "$ip:22",
+             $NODE_TAP_TARGETS, "[2606:4700:4700::1111]:443"]
+  },
+  "udp_dns": { "allow": [], "deny": ["1.1.1.1:53", "8.8.8.8:53"] },
+  "resolve": { "allow": [], "deny_connect": [], "deny_resolve": ["example.com"] },
+  "http_redirect": { "deny_follow": false }
+}
+EOF
+}
+
+# net_payload EXPECT_FILE -> the probe payload that exercises every target of the expectation.
+net_payload() {
+  jq -c --argjson connect "$CONNECT_TIMEOUT_MS" --argjson dns "$DNS_TIMEOUT_MS" --arg url "$NET_REDIRECT_URL" \
+    '{probe: "net", connect_timeout_ms: $connect, dns_timeout_ms: $dns, dns_name: "example.com",
+      connect: (.connect.allow + .connect.deny),
+      udp_dns: (.udp_dns.allow + .udp_dns.deny),
+      resolve: (.resolve.allow + .resolve.deny_connect + .resolve.deny_resolve),
+      resolve_port: 80}
+     + (if .http_redirect.deny_follow then {http_redirect: $url} else {} end)' "$1"
+}
+
+# net_checks REPORT EXPECT -> one JSON array of {kind, target, expect, ok, detail}.
+net_checks() {
+  jq -n --slurpfile r "$1" --slurpfile e "$2" '
+    ($r[0].net // {}) as $n | $e[0] as $e |
+    def find(arr; key; t): [(arr // [])[] | select(.[key] == t)] | first;
+    [
+      ($e.connect.allow[] as $t | find($n.connect; "target"; $t) as $c
+        | {kind: "connect", target: $t, expect: "allow", inconclusive: ($c == null), ok: ($c.connected == true),
+           detail: ($c.error_kind // $c.peer // "missing")}),
+      ($e.connect.deny[] as $t | find($n.connect; "target"; $t) as $c
+        | {kind: "connect", target: $t, expect: "deny", inconclusive: ($c == null), ok: ($c != null and $c.connected == false),
+           detail: ($c.error_kind // $c.peer // "missing")}),
+      ($e.udp_dns.allow[] as $t | find($n.udp_dns; "server"; $t) as $c
+        | {kind: "udp_dns", target: $t, expect: "allow", inconclusive: ($c == null), ok: ($c.answered == true),
+           detail: (($c.addresses // []) | join(",")) }),
+      ($e.udp_dns.deny[] as $t | find($n.udp_dns; "server"; $t) as $c
+        | {kind: "udp_dns", target: $t, expect: "deny", inconclusive: ($c == null), ok: ($c != null and $c.answered == false),
+           detail: ($c.error_kind // "answered")}),
+      ($e.resolve.allow[] as $t | find($n.resolve; "name"; $t) as $c
+        | {kind: "resolve+connect", target: $t, expect: "allow", inconclusive: ($c == null), ok: ($c.connected == true),
+           detail: (($c.addresses // []) | join(","))}),
+      ($e.resolve.deny_connect[] as $t | find($n.resolve; "name"; $t) as $c
+        | {kind: "resolve+connect", target: $t, expect: "deny_connect", inconclusive: ($c == null),
+           ok: ($c != null and $c.connected == false),
+           detail: "resolved=\($c.resolved) to \(($c.addresses // []) | join(","))"}),
+      ($e.resolve.deny_resolve[] as $t | find($n.resolve; "name"; $t) as $c
+        | {kind: "resolve", target: $t, expect: "deny_resolve", inconclusive: ($c == null),
+           ok: ($c != null and $c.resolved == false), detail: ($c.error_kind // "resolved")}),
+      (if $e.http_redirect.deny_follow then
+         ($n.http_redirect // {}) as $h
+         | {kind: "http_redirect", target: ($h.url // "missing"), expect: "deny_follow",
+            ok: ($h.follow_connected != true), inconclusive: ($h.fetched != true),
+            detail: "fetched=\($h.fetched) status=\($h.status) location=\($h.location)"}
+       else empty end)
+    ]'
+}
+
+# run_net_probe KEY REVISION_KEY: invoke, record, evaluate against net-expect-KEY.json.
+run_net_probe() {
+  local key="$1" rev_key="$2" expect="$EVIDENCE_DIR/net-expect-$1.json" payload
+  payload="$(net_payload "$expect")"
+  invoke_capture "$FUNCTION_NAME" "$payload" --revision-id "$(state_get "rev.$rev_key")"
+  printf '%s\n' "$INVOKE_ERR" >&2
+  printf '%s\n' "$INVOKE_OUT" > "$EVIDENCE_DIR/net-$key.json"
+  if [ -n "$INVOKE_ID" ]; then
+    tsls functions invocation "$INVOKE_ID" --json > "$EVIDENCE_DIR/net-$key-invocation.json" || true
+  fi
+  assert_eq 0 "$INVOKE_RC" "net probe ($key) exit code" || return 1
+  net_checks "$EVIDENCE_DIR/net-$key.json" "$expect" > "$EVIDENCE_DIR/net-checks-$key.json"
+  jq -r '.[] | "  \(if .ok then "ok  " else "BAD " end) \(.kind) \(.target) expect=\(.expect) (\(.detail))"' \
+    "$EVIDENCE_DIR/net-checks-$key.json"
+  jq -r '.attempts[-1].evidence.details // .evidence.details // {} | "tap=\(.egress_tap) guest_ip=\(.guest_ip) rules=\(.egress_policy_rules) verified_ms=\(.egress_policy_verified_ms)"' \
+    "$EVIDENCE_DIR/net-$key-invocation.json" 2>/dev/null || true
+}
+
+run_net_publicweb() { run_net_probe publicweb publicweb; }
+run_net_restricted() { run_net_probe restricted restricted; }
+
+# Leases (net.json) currently present under the provider workdir, one JSON object per line.
+current_leases() {
+  $SUDO find "$FC_RUN_DIR" -mindepth 2 -maxdepth 2 -name net.json -exec cat {} + 2>/dev/null |
+    jq -c '.' 2>/dev/null || true
+}
+
+# Two tenants at once: B listens, A (public-web) tries B's guest and B's host tap.
+run_net_cross_tenant() {
+  local _ b_lease b_env a_pid b_pid payload during="$EVIDENCE_DIR/net-cross-during.txt"
+  # The environments of the previous probes are torn down after their response; start clean so
+  # the first lease that appears is tenant B's.
+  for _ in $(seq 1 120); do
+    [ -z "$(current_leases)" ] && break
+    sleep 0.25
+  done
+  [ -z "$(current_leases)" ] || { echo "leases of earlier environments are still present" >&2; return 1; }
+  (
+    run_capture env TSLS_TOKEN="$NET_TOKEN_B" "$TSLS_BIN" functions invoke "$FUNCTION_NAME" \
+      --payload "{\"probe\":\"listen\",\"port\":8080,\"duration_ms\":$NET_LISTEN_MS}" --json \
+      --revision-id "$(state_get rev.b)"
+    printf '%s\n' "$RUN_OUT" > "$EVIDENCE_DIR/net-cross-b.json"
+    printf '%s\n' "$RUN_ERR" > "$EVIDENCE_DIR/net-cross-b.stderr.txt"
+  ) &
+  b_pid=$!
+  b_lease=""
+  for _ in $(seq 1 120); do
+    b_lease="$(current_leases | head -n 1)"
+    [ -n "$b_lease" ] && break
+    sleep 0.25
+  done
+  [ -n "$b_lease" ] || { echo "tenant B's environment never got a lease" >&2; wait "$b_pid"; return 1; }
+  b_env="$(printf '%s' "$b_lease" | jq -r .env_id)"
+  state_set net.b_guest_ip "$(printf '%s' "$b_lease" | jq -r .guest_ip)"
+  state_set net.b_host_ip "$(printf '%s' "$b_lease" | jq -r .host_ip)"
+  e2e_log "tenant B env $b_env: guest $(state_get net.b_guest_ip), tap host $(state_get net.b_host_ip)"
+  sleep 3 # boot + handler start: B must be listening before A connects
+  payload="$(jq -nc --arg g "$(state_get net.b_guest_ip)" --arg h "$(state_get net.b_host_ip)" \
+    --argjson connect "$CONNECT_TIMEOUT_MS" \
+    '{probe: "net", connect_timeout_ms: $connect,
+      connect: ["\($g):8080", "\($g):22", "\($h):22", "\($h):8080", "1.1.1.1:443"]}')"
+  jq -n --arg g "$(state_get net.b_guest_ip)" --arg h "$(state_get net.b_host_ip)" \
+    '{connect: {allow: ["1.1.1.1:443"], deny: ["\($g):8080", "\($g):22", "\($h):22", "\($h):8080"]},
+      udp_dns: {allow: [], deny: []}, resolve: {allow: [], deny_connect: [], deny_resolve: []},
+      http_redirect: {deny_follow: false}}' > "$EVIDENCE_DIR/net-expect-cross.json"
+  (
+    invoke_capture "$FUNCTION_NAME" "$payload" --revision-id "$(state_get rev.publicweb)"
+    printf '%s\n' "$INVOKE_OUT" > "$EVIDENCE_DIR/net-cross-a.json"
+    printf '%s\n' "$INVOKE_ERR" > "$EVIDENCE_DIR/net-cross-a.stderr.txt"
+  ) &
+  a_pid=$!
+  for _ in $(seq 1 120); do
+    [ "$(current_leases | wc -l | tr -d ' ')" -ge 2 ] && break
+    sleep 0.25
+  done
+  {
+    echo "== leases while both environments run =="
+    current_leases
+    echo "== taps =="
+    ip -br link show | grep '^tsls' || echo "(none)"
+    echo "== table inet $NET_TABLE =="
+    $SUDO nft list table inet "$NET_TABLE" 2>&1 || true
+  } > "$during"
+  wait "$a_pid" || true
+  wait "$b_pid" || true
+  net_checks "$EVIDENCE_DIR/net-cross-a.json" "$EVIDENCE_DIR/net-expect-cross.json" \
+    > "$EVIDENCE_DIR/net-checks-cross.json"
+  jq -r '.[] | "  \(if .ok then "ok  " else "BAD " end) A -> \(.target) expect=\(.expect) (\(.detail))"' \
+    "$EVIDENCE_DIR/net-checks-cross.json"
+  jq -r '"  B listening=\(.listen.listening) accepted=\(.listen.accepted) peers=\(.listen.peers)"' \
+    "$EVIDENCE_DIR/net-cross-b.json"
+  [ "$(grep -c '^table inet' "$during")" -ge 1 ] || { echo "no nft table while two environments ran" >&2; return 1; }
+  jq -e '.listen.listening == true' "$EVIDENCE_DIR/net-cross-b.json" >/dev/null
+}
+
+# After the gateway stopped: no tap, no table, no lease may be left.
+net_cleanup_check() {
+  local taps table leases
+  taps="$(ip -br link show | grep '^tsls' || true)"
+  if $SUDO nft list table inet "$NET_TABLE" >/dev/null 2>&1; then table="present"; else table="absent"; fi
+  leases="$(current_leases | wc -l | tr -d ' ')"
+  {
+    echo "taps after the run: ${taps:-(none)}"
+    echo "table inet $NET_TABLE after the run: $table"
+    echo "net.json leases left under $FC_RUN_DIR: $leases"
+    echo "--- nft list tables ---"
+    $SUDO nft list tables 2>&1
+  } > "$EVIDENCE_DIR/net-cleanup.txt"
+  cat "$EVIDENCE_DIR/net-cleanup.txt"
+  [ -z "$taps" ] && [ "$table" = "absent" ] && [ "$leases" = "0" ]
+}
+
+# ---------------------------------------------------------------------------
 # 4. verdicts
 # ---------------------------------------------------------------------------
 
@@ -512,6 +838,97 @@ evaluate_disk() {
   DISK_DETAIL="$detail"
 }
 
+# Initial egress race: for every environment with a policed NIC, the policy was installed and read
+# back before InstanceStart (gateway.log is JSON lines; RFC 3339 timestamps compare as strings).
+net_race_record() {
+  jq -R 'fromjson? // empty' "$GATEWAY_LOG" | jq -s '
+    [ .[] | select(.message == "egress policy installed and verified" or .message == "InstanceStart accepted"
+                   or .message == "egress policy counters at teardown") ]
+    | group_by(.env_id)
+    | map({env_id: .[0].env_id,
+           egress: (map(select(.egress)) | first | .egress),
+           tap: (map(select(.tap)) | first | .tap),
+           policy_verified_at: (map(select(.message == "egress policy installed and verified")) | first | .timestamp),
+           policy_verify_ms: (map(select(.message == "egress policy installed and verified")) | first | .ms),
+           instance_start_at: (map(select(.message == "InstanceStart accepted")) | first | .timestamp),
+           torn_down: (map(select(.message == "egress policy counters at teardown")) | length > 0)})
+    | map(select(.policy_verified_at != null))
+    | map(. + {started: (.instance_start_at != null),
+               policy_before_start: (.instance_start_at == null or .policy_verified_at < .instance_start_at)})' \
+    > "$EVIDENCE_DIR/net-race.json"
+  jq -R 'fromjson? // empty' "$GATEWAY_LOG" |
+    jq -r 'select(.message == "egress policy counters at teardown") | "== \(.env_id) ==\n\(.counters)"' \
+    > "$EVIDENCE_DIR/net-counters.txt"
+}
+
+evaluate_net() {
+  [ "$NET_MEASURE" = "1" ] || return 0
+  local f deny_bad allow_bad inconclusive missing accepted envs race_bad detail="" ok=1 unknown=0
+  for f in publicweb restricted cross; do
+    if ! json_file_ok "$EVIDENCE_DIR/net-checks-$f.json" || [ "$(jq length "$EVIDENCE_DIR/net-checks-$f.json")" = "0" ]; then
+      unknown=1
+      note_finding "NET: no checks for $f (see steps/)"
+      continue
+    fi
+    deny_bad="$(jq -r '[.[] | select(.expect != "allow" and (.ok | not) and (.inconclusive | not)) | "\(.kind) \(.target)"] | join("; ")' "$EVIDENCE_DIR/net-checks-$f.json")"
+    allow_bad="$(jq -r '[.[] | select(.expect == "allow" and (.ok | not) and (.inconclusive | not)) | "\(.kind) \(.target)"] | join("; ")' "$EVIDENCE_DIR/net-checks-$f.json")"
+    inconclusive="$(jq -r '[.[] | select(.inconclusive == true and .kind == "http_redirect") | .target] | join("; ")' "$EVIDENCE_DIR/net-checks-$f.json")"
+    missing="$(jq -r '[.[] | select(.inconclusive == true and .kind != "http_redirect") | "\(.kind) \(.target)"] | join("; ")' "$EVIDENCE_DIR/net-checks-$f.json")"
+    if [ -n "$missing" ]; then
+      unknown=1
+      note_finding "NET: $f has no result for: $missing (the probe did not run; see steps/)"
+    fi
+    detail="$detail$f: $(jq -r '[.[] | select(.expect != "allow")] | "\([.[] | select(.ok)] | length)/\(length) denied"' "$EVIDENCE_DIR/net-checks-$f.json"), $(jq -r '[.[] | select(.expect == "allow")] | "\([.[] | select(.ok)] | length)/\(length) allowed"' "$EVIDENCE_DIR/net-checks-$f.json"); "
+    if [ -n "$deny_bad" ]; then
+      ok=0
+      note_finding "NET: $f reached what its profile denies: $deny_bad"
+    fi
+    if [ -n "$allow_bad" ]; then
+      unknown=1
+      note_finding "NET: $f could not reach what its profile allows (policy or host connectivity): $allow_bad"
+    fi
+    [ -z "$inconclusive" ] || note_finding "NET: $f redirect check inconclusive (the redirector was not reachable): $inconclusive"
+  done
+  if json_file_ok "$EVIDENCE_DIR/net-cross-b.json"; then
+    accepted="$(jq -r '.listen.accepted // "null"' "$EVIDENCE_DIR/net-cross-b.json")"
+    detail="${detail}tenant B accepted $accepted connection(s); "
+    if [ "$accepted" != "0" ]; then
+      ok=0
+      note_finding "NET: tenant B's guest accepted $accepted connection(s) during tenant A's probe: $(jq -c '.listen.peers' "$EVIDENCE_DIR/net-cross-b.json")"
+    fi
+  else
+    unknown=1
+    note_finding "NET: no tenant B listener report"
+  fi
+  net_race_record
+  envs="$(jq '[.[] | select(.started)] | length' "$EVIDENCE_DIR/net-race.json")"
+  race_bad="$(jq -r '[.[] | select(.policy_before_start | not) | .env_id] | join(", ")' "$EVIDENCE_DIR/net-race.json")"
+  detail="${detail}policy verified before InstanceStart in $(jq '[.[] | select(.started and .policy_before_start)] | length' "$EVIDENCE_DIR/net-race.json")/$envs policed boots; "
+  if [ "$envs" -lt 4 ]; then
+    unknown=1
+    note_finding "NET: only $envs policed boots started (expected 4: public-web, restricted, cross A and B)"
+  fi
+  if [ -n "$race_bad" ]; then
+    ok=0
+    note_finding "NET: InstanceStart was not preceded by a verified policy for $race_bad"
+  fi
+  if [ "$(state_get net.cleanup)" = "clean" ]; then
+    detail="${detail}taps / table / leases gone after the run"
+  else
+    ok=0
+    detail="${detail}leftovers after the run (net-cleanup.txt)"
+    note_finding "NET: taps, nftables state or leases outlived the run (net-cleanup.txt)"
+  fi
+  if [ "$ok" -eq 0 ]; then
+    NET_STATUS="FAIL"
+  elif [ "$unknown" -eq 1 ]; then
+    NET_STATUS="UNKNOWN"
+  else
+    NET_STATUS="PASS"
+  fi
+  NET_DETAIL="$detail"
+}
+
 orphan_note() {
   local out
   if [ ! -x "$REPO_ROOT/scripts/e2e/orphan-check.sh" ] || ! command -v pgrep >/dev/null 2>&1; then
@@ -597,6 +1014,24 @@ write_summary_txt() {
         "$EVIDENCE_DIR/disk-host.json"
     fi
     echo
+    echo "== NET egress restricted / public-web (PLT-4622) =="
+    local f
+    for f in publicweb restricted cross; do
+      if json_file_ok "$EVIDENCE_DIR/net-checks-$f.json"; then
+        echo "  [$f]"
+        jq -r '.[] | "    \(if .ok then "ok " else "BAD" end) \(.kind) \(.target) expect=\(.expect) (\(.detail))"' \
+          "$EVIDENCE_DIR/net-checks-$f.json"
+      fi
+    done
+    if json_file_ok "$EVIDENCE_DIR/net-cross-b.json"; then
+      jq -r '"  [cross] tenant B listening=\(.listen.listening) accepted=\(.listen.accepted)"' "$EVIDENCE_DIR/net-cross-b.json"
+    fi
+    if json_file_ok "$EVIDENCE_DIR/net-race.json"; then
+      jq -r '.[] | "  [race] \(.env_id) \(.egress) policy \(.policy_verified_at) < start \(.instance_start_at): \(.policy_before_start)"' \
+        "$EVIDENCE_DIR/net-race.json"
+    fi
+    [ ! -s "$EVIDENCE_DIR/net-cleanup.txt" ] || sed -n '1,3s/^/  [cleanup] /p' "$EVIDENCE_DIR/net-cleanup.txt"
+    echo
     echo "== findings =="
     if [ -n "$FINDINGS" ]; then printf '%s' "$FINDINGS" | sed 's/^/  - /'; else echo "  none"; fi
     echo
@@ -604,6 +1039,7 @@ write_summary_txt() {
     printf '  %-4s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
     printf '  %-4s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
     printf '  %-4s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
+    printf '  %-4s %-8s %s\n' "NET" "$NET_STATUS" "$NET_DETAIL"
   } > "$SUMMARY_TXT"
 }
 
@@ -614,6 +1050,7 @@ print_table() {
   printf '%-4s %-8s %s\n' "M8" "$M8_STATUS" "$M8_DETAIL"
   printf '%-4s %-8s %s\n' "M9" "$M9_STATUS" "$M9_DETAIL"
   printf '%-4s %-8s %s\n' "DISK" "$DISK_STATUS" "$DISK_DETAIL"
+  printf '%-4s %-8s %s\n' "NET" "$NET_STATUS" "$NET_DETAIL"
   echo
   echo "evidence: $EVIDENCE_DIR"
   echo "summary:  $SUMMARY_TXT"
@@ -638,19 +1075,31 @@ main() {
   step "M9: allocate ${ALLOC_MIB} MiB past the limit" run_alloc_probe
   step "deploy disk revision (${DISK_STORAGE_MIB} MiB ephemeral storage)" deploy_disk_revision
   step "DISK: fill /tmp with ${DISK_FILL_MIB} MiB" run_disk_probe
+  if [ "$NET_MEASURE" = "1" ]; then
+    step "NET: host addresses and capabilities" net_host_facts
+    step "NET: tenant B function $FUNCTION_NAME" ensure_function_b
+    step "NET: deploy public-web, restricted and tenant B revisions" deploy_net_revisions
+    step "NET: expectations" write_net_expectations
+    step "NET: public-web probe" run_net_publicweb
+    step "NET: restricted probe" run_net_restricted
+    step "NET: two tenants at once (A -> B)" run_net_cross_tenant
+  fi
 
   local gw_rc=0
   if [ -n "$GATEWAY_PID" ]; then
-    stop_process "$GATEWAY_PID" 15
+    stop_gateway 15
     gw_rc=$STOP_RC
-    GATEWAY_PID=""
     e2e_log "gateway exit status $gw_rc"
+  fi
+  if [ "$NET_MEASURE" = "1" ]; then
+    if net_cleanup_check; then state_set net.cleanup clean; else state_set net.cleanup dirty; fi
   fi
   orphan_note
 
   evaluate_m8
   evaluate_m9
   evaluate_disk
+  evaluate_net
   write_summary_txt
 
   steps_write_summary "$EVIDENCE_DIR/summary.json" \
@@ -661,6 +1110,9 @@ main() {
         --arg m9 "$M9_STATUS" --arg m9_detail "$M9_DETAIL" \
         --arg disk "$DISK_STATUS" --arg disk_detail "$DISK_DETAIL" \
         --arg disk_rev "$(state_get rev.disk)" \
+        --arg net "$NET_STATUS" --arg net_detail "$NET_DETAIL" \
+        --arg net_publicweb_rev "$(state_get rev.publicweb)" --arg net_restricted_rev "$(state_get rev.restricted)" \
+        --arg net_tenant_b_rev "$(state_get rev.b)" \
         --argjson disk_storage_mib "$DISK_STORAGE_MIB" --argjson disk_fill_mib "$DISK_FILL_MIB" \
         --arg orphans "$ORPHAN_NOTE" --arg findings "$FINDINGS" \
         --argjson memory_mib "$PROBE_MEMORY_MIB" --argjson cpu_millis "$PROBE_CPU_MILLIS" \
@@ -668,12 +1120,15 @@ main() {
         '{run_id: $run, architecture: $arch, host: $host, gateway_config: $config,
           function: $function, baseline_revision: $baseline, alloc_revision: $alloc_rev,
           disk_revision: $disk_rev,
+          net_revisions: {public_web: $net_publicweb_rev, restricted: $net_restricted_rev,
+                          tenant_b_public_web: $net_tenant_b_rev},
           requested: {memory_mib: $memory_mib, cpu_millis: $cpu_millis,
                       alloc_memory_mib: $alloc_memory_mib, alloc_mib: $alloc_mib,
                       disk_storage_mib: $disk_storage_mib, disk_fill_mib: $disk_fill_mib},
           measurements: {M8: {status: $m8, detail: $m8_detail},
                          M9: {status: $m9, detail: $m9_detail},
-                         DISK: {status: $disk, detail: $disk_detail}},
+                         DISK: {status: $disk, detail: $disk_detail},
+                         NET: {status: $net, detail: $net_detail}},
           orphans: $orphans,
           findings: ($findings | split("\n") | map(select(length > 0)))}')"
 
@@ -690,11 +1145,16 @@ main() {
     echo "FAIL: the ephemeral storage limit did not hold (see findings)" >&2
     exit 3
   fi
-  if [ "$failed" -ne 0 ] || [ "$M8_STATUS" = "UNKNOWN" ] || [ "$DISK_STATUS" = "UNKNOWN" ]; then
+  if [ "$NET_STATUS" = "FAIL" ]; then
+    echo "FAIL: an egress profile did not hold (see findings)" >&2
+    exit 4
+  fi
+  if [ "$failed" -ne 0 ] || [ "$M8_STATUS" = "UNKNOWN" ] || [ "$DISK_STATUS" = "UNKNOWN" ] \
+    || [ "$NET_STATUS" = "UNKNOWN" ]; then
     echo "INCOMPLETE: the measurement could not be taken ($failed step(s) failed)" >&2
     exit 2
   fi
-  echo "M8 PASS, DISK PASS (M9 $M9_STATUS; M9 findings are reported, not fatal)"
+  echo "M8 PASS, DISK PASS, NET $NET_STATUS (M9 $M9_STATUS; M9 findings are reported, not fatal)"
   exit 0
 }
 

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::clock::Timestamp;
+use crate::egress::{EgressAllowRule, MAX_EGRESS_ALLOW_RULES};
 use crate::error::DomainError;
 use crate::ids::{FunctionId, RevisionId, Sha256Digest, TenantId};
 use crate::limits::Limits;
@@ -124,7 +125,14 @@ impl Default for ExecutionPolicy {
     }
 }
 
-/// Egress profile. The prototype providers only implement `None`.
+/// Egress profile (PLT-4622, docs/adr/0005-egress-profiles.md). Every profile
+/// is default-deny towards the management network, the node, metadata,
+/// link-local, private and other special-purpose ranges, and IPv6.
+///
+/// - `None`: no network device at all;
+/// - `Restricted`: only the destinations in [`RevisionSpec::egress_allow`];
+/// - `PublicWeb`: any globally reachable IPv4 unicast destination, with DNS
+///   only through the provider's configured resolver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum EgressProfile {
@@ -132,6 +140,17 @@ pub enum EgressProfile {
     None,
     Restricted,
     PublicWeb,
+}
+
+impl EgressProfile {
+    /// Wire name (`none`, `restricted`, `public-web`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Restricted => "restricted",
+            Self::PublicWeb => "public-web",
+        }
+    }
 }
 
 /// Reference to a secret binding. Values never appear in the revision.
@@ -178,6 +197,11 @@ pub struct RevisionSpec {
     pub resources: ResourceProfile,
     pub execution: ExecutionPolicy,
     pub egress: EgressProfile,
+    /// Destinations a `restricted` revision may open. Must be empty for the
+    /// other profiles. Omitted from the serialized form when empty, so the
+    /// digest of revisions created before the field existed is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub egress_allow: Vec<EgressAllowRule>,
     /// Non-secret environment variables.
     pub env_vars: Vec<(String, String)>,
     pub secrets: Vec<SecretBinding>,
@@ -258,6 +282,34 @@ impl RevisionSpec {
                 "execution.min_ready",
                 "must be 0 in the prototype (destroy-after-invoke)",
             ));
+        }
+        match self.egress {
+            EgressProfile::Restricted => {
+                if self.egress_allow.is_empty() || self.egress_allow.len() > MAX_EGRESS_ALLOW_RULES
+                {
+                    return Err(DomainError::validation(
+                        "egress_allow",
+                        format!(
+                            "egress `restricted` needs 1..={MAX_EGRESS_ALLOW_RULES} allow rules \
+                             (everything else is denied)"
+                        ),
+                    ));
+                }
+                for rule in &self.egress_allow {
+                    rule.validate()?;
+                }
+            }
+            EgressProfile::None | EgressProfile::PublicWeb => {
+                if !self.egress_allow.is_empty() {
+                    return Err(DomainError::validation(
+                        "egress_allow",
+                        format!(
+                            "allow rules only apply to egress `restricted`, not `{}`",
+                            self.egress.as_str()
+                        ),
+                    ));
+                }
+            }
         }
         for (name, _) in &self.env_vars {
             validate_env_name(name)?;
@@ -440,6 +492,7 @@ mod tests {
             resources: ResourceProfile::default(),
             execution: ExecutionPolicy::default(),
             egress: EgressProfile::None,
+            egress_allow: Vec::new(),
             env_vars: vec![("GREETING".into(), "hi".into())],
             secrets: vec![SecretBinding {
                 env_name: "DATABASE_URL".into(),
@@ -508,6 +561,40 @@ mod tests {
             s.validate(&limits).is_err(),
             "duplicate with secret env name"
         );
+    }
+
+    /// PLT-4622: `restricted` is an allowlist, the other profiles carry none,
+    /// and an empty allowlist does not change the digest of older revisions.
+    #[test]
+    fn egress_allowlists_are_validated_per_profile() {
+        use crate::egress::{EgressAllowRule, EgressProtocol};
+        let limits = Limits::default();
+        let allow = || EgressAllowRule {
+            cidr: "1.1.1.1/32".into(),
+            protocol: EgressProtocol::Tcp,
+            ports: vec![443],
+        };
+
+        let mut s = spec();
+        s.egress = EgressProfile::Restricted;
+        assert!(s.validate(&limits).is_err(), "restricted without rules");
+        s.egress_allow.push(allow());
+        s.validate(&limits).unwrap();
+        s.egress_allow[0].cidr = "169.254.169.254/32".into();
+        assert!(s.validate(&limits).is_err(), "metadata is never allowed");
+
+        for profile in [EgressProfile::None, EgressProfile::PublicWeb] {
+            let mut s = spec();
+            s.egress = profile;
+            s.validate(&limits).unwrap();
+            s.egress_allow.push(allow());
+            assert!(s.validate(&limits).is_err(), "{profile:?} with rules");
+        }
+
+        let json = serde_json::to_value(spec()).unwrap();
+        assert!(json.get("egress_allow").is_none());
+        let back: RevisionSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(back.digest(), spec().digest());
     }
 
     #[test]

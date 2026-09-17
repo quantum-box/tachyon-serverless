@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use tachyon_serverless_domain::{
-    Architecture, BootEvidence, EgressProfile, EnvironmentId, ProviderKind, ResourceProfile,
-    RevisionId, Sha256Digest, TenantId,
+    Architecture, BootEvidence, EgressAllowRule, EgressProfile, EnvironmentId, ProviderKind,
+    ResourceProfile, RevisionId, Sha256Digest, TenantId,
 };
 
 /// Whether a capability is available. `Unverified` means the provider has
@@ -104,6 +104,9 @@ pub struct EnvironmentSpec {
     pub architecture: Architecture,
     pub resources: ResourceProfile,
     pub egress: EgressProfile,
+    /// Allowlist of a `restricted` revision (empty for the other profiles).
+    /// Providers that enforce `restricted` must deny everything not listed.
+    pub egress_allow: Vec<EgressAllowRule>,
     /// Time allowed for the guest bridge to connect after creation starts.
     pub connect_timeout: Duration,
 }

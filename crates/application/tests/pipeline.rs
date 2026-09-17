@@ -166,6 +166,7 @@ fn revision_request(
             max_concurrency,
         },
         egress: None,
+        egress_allow: Vec::new(),
         env_vars: vec![("GREETING".into(), "hello".into())],
         secrets: vec![SecretBindingRequest {
             env_name: "DEMO_SECRET".into(),
@@ -1858,6 +1859,7 @@ fn orphan_spec(id: &EnvironmentId) -> EnvironmentSpec {
         architecture: Architecture::Aarch64,
         resources: ResourceProfile::default(),
         egress: EgressProfile::None,
+        egress_allow: Vec::new(),
         connect_timeout: Duration::from_secs(1),
     }
 }
