@@ -245,12 +245,28 @@ async fn deploy(router: &Router, name: &str) -> (String, String) {
             _ => tokio::time::sleep(Duration::from_millis(20)).await,
         }
     }
-    let alias = get(
-        router,
-        &format!("/v1/functions/{function_id}/aliases/prod"),
-        TOKEN_A,
-    )
-    .await;
+    // Validation writes `ready` and then publishes `prod` in a second store
+    // write, so an HTTP client can see the revision ready a moment before the
+    // alias exists (docs/api.md). Poll for the alias instead of reading it once;
+    // a single read was flaky on loaded CI runners (404).
+    let alias = loop {
+        let alias = get(
+            router,
+            &format!("/v1/functions/{function_id}/aliases/prod"),
+            TOKEN_A,
+        )
+        .await;
+        if alias.status == StatusCode::OK && alias.json()["revision_id"] == revision_id {
+            break alias;
+        }
+        assert!(
+            tokio::time::Instant::now() <= deadline + Duration::from_secs(5),
+            "alias prod never pointed at {revision_id}: {} {}",
+            alias.status,
+            String::from_utf8_lossy(&alias.body)
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     assert_eq!(alias.status, StatusCode::OK);
     assert_eq!(alias.json()["revision_id"], revision_id);
     assert_eq!(alias.json()["generation"], 1);
