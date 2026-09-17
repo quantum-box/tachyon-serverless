@@ -1,0 +1,16 @@
+auth.anonymous_refused                   ok authorization violation: nats: authorization violation
+auth.wrong_password_refused              ok unauthorized: authorization violation: nats: authorization violation
+restart.published                        ok published=100
+restart.stored_before_kill               ok stream_messages=90 ack_pending=10
+restart.killed                           ok SIGKILL pid 45440
+restart.restarted                        ok pid 45567
+restart.stored_after_restart             ok stream_messages=90
+restart.all_unacked_delivered            ok received=90 unique=90 redelivered=10
+restart.drained                          ok stream_messages=0
+restart.dedup_after_restart              ok duplicates=90 accepted_again=10 (the 10 acked before the kill)
+capacity.discard_new_refuses             ok published=5 queue_full=3 first_error=queue_full: queue_full: publish: publish failed: maximum messages exceeded (code 503, error code 10077)
+capacity.existing_kept                   ok unique=5
+capacity.message_too_large               ok first_error=message_too_large: message too large: 4096 bytes (max 1024)
+retention.max_age_expires                ok before=3 after=0
+contract.nats                            ok test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.38s
+objects_and_sqlite_queue                 ok test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 154 filtered out; finished in 6.87s

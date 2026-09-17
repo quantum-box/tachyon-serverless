@@ -1,0 +1,66 @@
+[45440] 2026/09/17 14:40:32.035125 [INF] Starting nats-server
+[45440] 2026/09/17 14:40:32.035235 [INF]   Version:  2.14.7
+[45440] 2026/09/17 14:40:32.035245 [INF]   Git:      [8d8b69a]
+[45440] 2026/09/17 14:40:32.035250 [INF]   Name:     tachyon-queue-local
+[45440] 2026/09/17 14:40:32.035255 [INF]   Node:     OBUMwGpe
+[45440] 2026/09/17 14:40:32.035258 [INF]   ID:       NAHG6XHYJFOLMI63LMFRWY3GF5XAY44TOQMO7XPAUSLFDCV6INJKD53F
+[45440] 2026/09/17 14:40:32.035517 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+[45440] 2026/09/17 14:40:32.035706 [INF] Using configuration file: /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a70b564def9552d31/target/queue/verify-state-20260917T054026Z/nats-server.conf (sha256:67c87136e0fc5a8fc7f18498a37033f6747c9bf66df4d46b5028b38f9d973cd7)
+[45440] 2026/09/17 14:40:32.037647 [INF] Starting http monitor on 127.0.0.1:28222
+[45440] 2026/09/17 14:40:32.038043 [INF] Starting JetStream
+[45440] 2026/09/17 14:40:32.038195 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+[45440] 2026/09/17 14:40:32.038201 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+[45440] 2026/09/17 14:40:32.038204 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+[45440] 2026/09/17 14:40:32.038208 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+[45440] 2026/09/17 14:40:32.038211 [INF] 
+[45440] 2026/09/17 14:40:32.038215 [INF]          https://docs.nats.io/jetstream
+[45440] 2026/09/17 14:40:32.038218 [INF] 
+[45440] 2026/09/17 14:40:32.038221 [INF] ---------------- JETSTREAM ----------------
+[45440] 2026/09/17 14:40:32.038224 [INF]   Strict:          true
+[45440] 2026/09/17 14:40:32.038244 [INF]   Max Memory:      64.00 MB
+[45440] 2026/09/17 14:40:32.038248 [INF]   Max Storage:     2.00 GB
+[45440] 2026/09/17 14:40:32.038252 [INF]   Store Directory: "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a70b564def9552d31/target/queue/verify-state-20260917T054026Z/jetstream/jetstream"
+[45440] 2026/09/17 14:40:32.038255 [INF]   API Level:       4
+[45440] 2026/09/17 14:40:32.038258 [INF] -------------------------------------------
+[45440] 2026/09/17 14:40:32.038971 [INF] Took 914.042µs to start JetStream
+[45440] 2026/09/17 14:40:32.039044 [INF] Listening for client connections on 127.0.0.1:24222
+[45440] 2026/09/17 14:40:32.039087 [INF] Server is ready
+[45440] 2026/09/17 14:40:32.957410 [ERR] 127.0.0.1:65395 - cid:6 - authentication error
+[45440] 2026/09/17 14:40:32.972390 [ERR] 127.0.0.1:65396 - cid:7 - authentication error - User "gateway"
+[45567] 2026/09/17 14:40:34.106768 [INF] Starting nats-server
+[45567] 2026/09/17 14:40:34.106836 [INF]   Version:  2.14.7
+[45567] 2026/09/17 14:40:34.106841 [INF]   Git:      [8d8b69a]
+[45567] 2026/09/17 14:40:34.106846 [INF]   Name:     tachyon-queue-local
+[45567] 2026/09/17 14:40:34.106851 [INF]   Node:     OBUMwGpe
+[45567] 2026/09/17 14:40:34.106855 [INF]   ID:       NBQUVEIHCBGJQHHGMG222R3QKGEQ43JPCVKAZJLDKBGACVEBTCOJFPR4
+[45567] 2026/09/17 14:40:34.106860 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+[45567] 2026/09/17 14:40:34.106872 [INF] Using configuration file: /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a70b564def9552d31/target/queue/verify-state-20260917T054026Z/nats-server.conf (sha256:67c87136e0fc5a8fc7f18498a37033f6747c9bf66df4d46b5028b38f9d973cd7)
+[45567] 2026/09/17 14:40:34.107085 [INF] Starting http monitor on 127.0.0.1:28222
+[45567] 2026/09/17 14:40:34.107138 [INF] Starting JetStream
+[45567] 2026/09/17 14:40:34.107368 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+[45567] 2026/09/17 14:40:34.107374 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+[45567] 2026/09/17 14:40:34.107378 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+[45567] 2026/09/17 14:40:34.107380 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+[45567] 2026/09/17 14:40:34.107383 [INF] 
+[45567] 2026/09/17 14:40:34.107386 [INF]          https://docs.nats.io/jetstream
+[45567] 2026/09/17 14:40:34.107388 [INF] 
+[45567] 2026/09/17 14:40:34.107400 [INF] ---------------- JETSTREAM ----------------
+[45567] 2026/09/17 14:40:34.107409 [INF]   Strict:          true
+[45567] 2026/09/17 14:40:34.107414 [INF]   Max Memory:      64.00 MB
+[45567] 2026/09/17 14:40:34.107417 [INF]   Max Storage:     2.00 GB
+[45567] 2026/09/17 14:40:34.107419 [INF]   Store Directory: "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a70b564def9552d31/target/queue/verify-state-20260917T054026Z/jetstream/jetstream"
+[45567] 2026/09/17 14:40:34.107421 [INF]   API Level:       4
+[45567] 2026/09/17 14:40:34.107423 [INF] -------------------------------------------
+[45567] 2026/09/17 14:40:34.107995 [INF]   Starting restore for stream 'TACHYON > TACHYON_VERIFY_RESTART'
+[45567] 2026/09/17 14:40:34.108451 [INF]   Restored 90 messages for stream 'TACHYON > TACHYON_VERIFY_RESTART' in 0s
+[45567] 2026/09/17 14:40:34.108493 [INF]   Recovering 1 consumers for stream - 'TACHYON > TACHYON_VERIFY_RESTART'
+[45567] 2026/09/17 14:40:34.108818 [INF] Took 1.6625ms to start JetStream
+[45567] 2026/09/17 14:40:34.108846 [INF] Listening for client connections on 127.0.0.1:24222
+[45567] 2026/09/17 14:40:34.108853 [INF] Server is ready
+[45567] 2026/09/17 14:40:54.380725 [ERR] 127.0.0.1:65433 - cid:90 - authentication error
+[45567] 2026/09/17 14:40:54.382551 [ERR] 127.0.0.1:65434 - cid:91 - authentication error - User "gateway"
+[45567] 2026/09/17 14:41:01.490266 [INF] Trapped "terminated" signal
+[45567] 2026/09/17 14:41:01.492000 [INF] Initiating Shutdown...
+[45567] 2026/09/17 14:41:01.492024 [INF] Initiating JetStream Shutdown...
+[45567] 2026/09/17 14:41:01.494512 [INF] JetStream Shutdown
+[45567] 2026/09/17 14:41:01.494810 [INF] Server Exiting..

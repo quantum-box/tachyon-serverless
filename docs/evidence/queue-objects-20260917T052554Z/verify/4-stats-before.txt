@@ -1,0 +1,5 @@
+stream_messages=3
+stream_bytes=459
+pending=3
+ack_pending=0
+redelivered=0

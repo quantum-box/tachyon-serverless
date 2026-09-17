@@ -1,0 +1,32 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (target/debug/deps/tachyon_serverless_application-cba1989bd8bcab2e)
+
+running 25 tests
+test durable::crypto::tests::seal_open_round_trip_and_tamper_detection ... ok
+test durable::crypto::tests::key_loading_is_strict_and_redacted ... ok
+test durable::tests::nats_config_refuses_anonymous_connections ... ok
+test durable::tests::object_config_requires_a_key_and_bounded_limits ... ok
+test durable::tests::objects_round_trip_encrypted_and_survive_a_reopen ... ok
+test durable::tests::queue_and_objects_are_off_by_default ... ok
+test durable::tests::objects_are_invisible_across_tenants ... ok
+test durable::tests::tampered_objects_fail_verification ... ok
+test repository::object_contract_tests::memory::a_non_terminal_reference_protects_an_expired_object ... ok
+test durable::tests::sqlite_queue_and_objects_are_built_from_config ... ok
+test repository::object_contract_tests::memory::an_attach_after_a_collection_claim_is_refused ... ok
+test repository::object_contract_tests::memory::an_object_reference_never_crosses_a_tenant ... ok
+test repository::object_contract_tests::memory::orphans_are_only_collected_when_nothing_ever_referenced_them ... ok
+test repository::object_contract_tests::sqlite::a_non_terminal_reference_protects_an_expired_object ... ok
+test repository::object_contract_tests::sqlite::an_attach_after_a_collection_claim_is_refused ... ok
+test repository::object_contract_tests::sqlite::an_object_reference_never_crosses_a_tenant ... ok
+test repository::object_contract_tests::sqlite::orphans_are_only_collected_when_nothing_ever_referenced_them ... ok
+test durable::tests::object_size_and_tenant_quota_are_enforced ... ok
+test durable::sqlite_queue::tests::committed_messages_survive_a_reopen_of_the_file ... ok
+test durable::tests::gc_removes_incomplete_writes_after_the_grace_period ... ok
+test durable::sqlite_queue::tests::a_full_queue_refuses_publish_with_queue_full ... ok
+test durable::tests::gc_collects_orphans_only_after_the_grace_period ... ok
+test durable::tests::gc_never_collects_objects_of_unfinished_invocations ... ok
+test durable::tests::gc_and_attach_race_never_leave_a_dangling_reference ... ok
+test durable::sqlite_queue::tests::sqlite_queue_passes_the_queue_contract ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 154 filtered out; finished in 6.87s
+

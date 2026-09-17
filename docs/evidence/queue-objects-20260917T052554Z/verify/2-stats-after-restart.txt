@@ -1,0 +1,5 @@
+stream_messages=90
+stream_bytes=14220
+pending=80
+ack_pending=10
+redelivered=0

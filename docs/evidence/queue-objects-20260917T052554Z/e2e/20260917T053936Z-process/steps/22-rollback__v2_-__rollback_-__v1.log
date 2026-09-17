@@ -1,0 +1,12 @@
+uploading /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a70b564def9552d31/target/debug/example-hello (3520880 bytes, arch aarch64)
+artifact sha256:a026d127380a8ff750d4e5179bc514e964b57d91e420660641ab71a8c09df5c0
+revision rev_01m2py2dz14h33eaw2pg2zwzgz (#3) created: pending
+revision rev_01m2py2dz14h33eaw2pg2zwzgz is preparing
+revision rev_01m2py2dz14h33eaw2pg2zwzgz is ready
+alias       prod
+function    fn_01m2py1mmdbr82r0bnhdx46ea4
+from        rev_01m2py2dz14h33eaw2pg2zwzgz
+to          rev_01m2py1np6brspyzpdkpvjvcz2
+generation  2 -> 3
+ALIAS  REVISION                        GENERATION  PREVIOUS                        UPDATED
+prod   rev_01m2py1np6brspyzpdkpvjvcz2  3           rev_01m2py2dz14h33eaw2pg2zwzgz  2026-09-17T05:40:14.529Z

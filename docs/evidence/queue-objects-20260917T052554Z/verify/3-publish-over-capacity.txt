@@ -1,0 +1,5 @@
+published=5
+duplicates=0
+queue_full=3
+other_errors=0
+first_error=queue_full: queue_full: publish: publish failed: maximum messages exceeded (code 503, error code 10077)
