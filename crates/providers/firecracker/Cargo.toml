@@ -7,6 +7,13 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Firecracker (Linux/KVM) execution provider: microVM lifecycle over the Firecracker API socket, guest bridge over vsock, per-environment function drive and cleanup."
 
+[features]
+default = []
+# PLT-4653 (X1, experimental): snapshot at the SDK checkpoint and clone into a new jail /
+# cgroup / scratch copy. Off by default; with it the snapshot capabilities are `Unverified`
+# (jailer required) instead of `Unsupported`.
+experimental-restore = []
+
 [dependencies]
 tachyon-serverless-domain = { workspace = true }
 tachyon-serverless-protocol = { workspace = true }

@@ -29,7 +29,8 @@ use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use tachyon_serverless_domain::{
-    Architecture, BootEvidence, EnvironmentId, ProviderKind, RUNTIME_PROTOCOL_V1,
+    Architecture, BootEvidence, DeviceModel, EnvironmentId, HostCpuIdentity, ProviderKind,
+    RUNTIME_PROTOCOL_V1, RuntimeProfile, Sha256Digest, SnapshotId,
 };
 use tachyon_serverless_protocol::runtime_api::{HttpRequestEvent, HttpResponsePayload};
 use tachyon_serverless_protocol::{
@@ -37,9 +38,10 @@ use tachyon_serverless_protocol::{
     decode_message, encode_message,
 };
 use tachyon_serverless_provider_port::{
-    ArtifactLocation, Capabilities, EnvironmentHandle, EnvironmentObservation, EnvironmentSpec,
-    EnvironmentStats, ExecutionProvider, IsolationLevel, PreflightCheck, PreflightReport,
-    ProviderError, Support, TerminateReason, TerminateReport,
+    ArtifactLocation, Capabilities, CloneSpec, CloneTimings, EnvironmentHandle,
+    EnvironmentObservation, EnvironmentSpec, EnvironmentStats, ExecutionProvider, IsolationLevel,
+    PreflightCheck, PreflightReport, ProviderError, RestoreHostProfile, SnapshotCapture,
+    SnapshotTimings, Support, TerminateReason, TerminateReport,
 };
 
 /// Boxed future returned by a custom script closure.
@@ -185,6 +187,15 @@ pub struct FakeProviderOptions {
     /// hypervisor's API with its own timeout, and the caller's response must
     /// not wait for it (PLT-4633 review F4).
     pub quiesce_delay: Duration,
+    /// X1 (PLT-4653): directory for fake snapshots. When set, the provider
+    /// reports `snapshot_create` / `snapshot_clone` as `Unverified` and
+    /// implements `restore_profile`, `snapshot_environment` (writes small
+    /// placeholder files) and `clone_environment` (plays the next script).
+    pub snapshot_root: Option<std::path::PathBuf>,
+    /// When set, `snapshot_environment` fails with this reason.
+    pub fail_snapshot: Option<String>,
+    /// When set, `clone_environment` fails with this reason.
+    pub fail_clone: Option<String>,
 }
 
 #[derive(Debug)]
@@ -217,6 +228,10 @@ struct Inner {
     resumed: Vec<EnvironmentId>,
     /// Scripted host usage per environment (PLT-4637 metrics tests).
     stats: HashMap<EnvironmentId, EnvironmentStats>,
+    /// X1: `(source environment, snapshot)` per `snapshot_environment` call.
+    snapshotted: Vec<(EnvironmentId, SnapshotId)>,
+    /// X1: `(clone environment, snapshot)` per successful clone.
+    cloned: Vec<(EnvironmentId, SnapshotId)>,
 }
 
 /// Test-only [`ExecutionProvider`].
@@ -356,6 +371,104 @@ impl FakeExecutionProvider {
             .and_then(|e| e.hello_ack.lock().clone())
     }
 
+    /// X1: every snapshot taken, in order.
+    pub fn snapshotted(&self) -> Vec<(EnvironmentId, SnapshotId)> {
+        self.inner.lock().snapshotted.clone()
+    }
+
+    /// X1: every clone created, in order.
+    pub fn cloned(&self) -> Vec<(EnvironmentId, SnapshotId)> {
+        self.inner.lock().cloned.clone()
+    }
+
+    /// The host profile the fake reports.
+    pub fn fake_restore_profile() -> RestoreHostProfile {
+        let d = |s: &str| Sha256Digest::of_bytes(s.as_bytes());
+        RestoreHostProfile {
+            runtime: RuntimeProfile {
+                provider_kind: "fake".into(),
+                provider_version: "fake-1".into(),
+                vmm_sha256: d("fake-vmm"),
+                kernel_sha256: d("fake-kernel"),
+                rootfs_sha256: d("fake-rootfs"),
+                bridge_protocol_version: tachyon_serverless_protocol::RESTORE_PROTOCOL_VERSION,
+                jailer_mode: "off".into(),
+                cgroup_mode: "off".into(),
+                host_kernel: "fake".into(),
+            },
+            host_cpu: HostCpuIdentity {
+                arch: std::env::consts::ARCH.into(),
+                cpu_model_hash: d("fake-cpu"),
+                kvm_capabilities_hash: d("fake-kvm"),
+            },
+            devices: DeviceModel {
+                drives: vec![],
+                vsock_guest_cid: 3,
+                vsock_port: tachyon_serverless_protocol::DEFAULT_VSOCK_PORT,
+                doorbell_port: tachyon_serverless_protocol::DOORBELL_VSOCK_PORT,
+                network_interfaces: 0,
+            },
+        }
+    }
+
+    /// Start the scripted guest of a new environment and hand back the host
+    /// end.
+    fn start_guest(
+        &self,
+        spec: &EnvironmentSpec,
+        script: FakeGuestScript,
+        created_at: Instant,
+    ) -> EnvironmentHandle {
+        let (host_end, guest_end) = tokio::io::duplex(256 * 1024);
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let hello_ack = Arc::new(Mutex::new(None));
+        let guest_boot_id = format!("fake-boot-{}", spec.environment_id.as_str());
+        let script_name = script.name();
+        let guest = tokio::spawn(run_guest(
+            script,
+            GuestContext {
+                environment_id: spec.environment_id.clone(),
+                guest_boot_id: guest_boot_id.clone(),
+                architecture: spec.architecture,
+                received: received.clone(),
+                hello_ack: hello_ack.clone(),
+            },
+            guest_end,
+        ));
+        let host_pid = std::process::id();
+        {
+            let mut inner = self.inner.lock();
+            inner.created.push(spec.environment_id.clone());
+            inner.environments.insert(
+                spec.environment_id.clone(),
+                FakeEnvironment {
+                    script: script_name,
+                    guest,
+                    host_pid,
+                    running: true,
+                    paused: false,
+                    received,
+                    hello_ack,
+                },
+            );
+        }
+        let mut details = serde_json::Map::new();
+        details.insert("provider".into(), "fake".into());
+        details.insert("script".into(), script_name.into());
+        details.insert("protocol".into(), RUNTIME_PROTOCOL_V1.into());
+        EnvironmentHandle {
+            environment_id: spec.environment_id.clone(),
+            evidence: BootEvidence {
+                guest_boot_id: Some(guest_boot_id),
+                host_pid: Some(host_pid),
+                details,
+            },
+            stream: Box::new(host_end),
+            created_at,
+            connected_at: Instant::now(),
+        }
+    }
+
     fn next_script(&self) -> Option<FakeGuestScript> {
         let mut inner = self.inner.lock();
         inner
@@ -389,8 +502,14 @@ impl ExecutionProvider for FakeExecutionProvider {
             host_metering: unsupported("no metering"),
             idle_quiesce: idle("destroy-after-invoke"),
             idle_resume: idle("destroy-after-invoke"),
-            snapshot_create: unsupported("no snapshots"),
-            snapshot_clone: unsupported("no snapshots"),
+            snapshot_create: match self.options.snapshot_root {
+                Some(_) => Support::unverified("fake provider: placeholder snapshot files"),
+                None => unsupported("no snapshots"),
+            },
+            snapshot_clone: match self.options.snapshot_root {
+                Some(_) => Support::unverified("fake provider: clone plays the next script"),
+                None => unsupported("no snapshots"),
+            },
             dev_only: true,
         }
     }
@@ -454,54 +573,7 @@ impl ExecutionProvider for FakeExecutionProvider {
             tokio::time::sleep(self.options.boot_delay).await;
         }
 
-        let (host_end, guest_end) = tokio::io::duplex(256 * 1024);
-        let received = Arc::new(Mutex::new(Vec::new()));
-        let hello_ack = Arc::new(Mutex::new(None));
-        let guest_boot_id = format!("fake-boot-{}", spec.environment_id.as_str());
-        let script_name = script.name();
-        let guest = tokio::spawn(run_guest(
-            script,
-            GuestContext {
-                environment_id: spec.environment_id.clone(),
-                guest_boot_id: guest_boot_id.clone(),
-                architecture: spec.architecture,
-                received: received.clone(),
-                hello_ack: hello_ack.clone(),
-            },
-            guest_end,
-        ));
-        let host_pid = std::process::id();
-        {
-            let mut inner = self.inner.lock();
-            inner.created.push(spec.environment_id.clone());
-            inner.environments.insert(
-                spec.environment_id.clone(),
-                FakeEnvironment {
-                    script: script_name,
-                    guest,
-                    host_pid,
-                    running: true,
-                    paused: false,
-                    received,
-                    hello_ack,
-                },
-            );
-        }
-        let mut details = serde_json::Map::new();
-        details.insert("provider".into(), "fake".into());
-        details.insert("script".into(), script_name.into());
-        details.insert("protocol".into(), RUNTIME_PROTOCOL_V1.into());
-        Ok(EnvironmentHandle {
-            environment_id: spec.environment_id,
-            evidence: BootEvidence {
-                guest_boot_id: Some(guest_boot_id),
-                host_pid: Some(host_pid),
-                details,
-            },
-            stream: Box::new(host_end),
-            created_at,
-            connected_at: Instant::now(),
-        })
+        Ok(self.start_guest(&spec, script, created_at))
     }
 
     async fn terminate_environment(
@@ -606,6 +678,113 @@ impl ExecutionProvider for FakeExecutionProvider {
             .filter(|(_, e)| e.running)
             .map(|(id, _)| id.clone())
             .collect())
+    }
+
+    async fn restore_profile(&self) -> Result<RestoreHostProfile, ProviderError> {
+        match self.options.snapshot_root {
+            Some(_) => Ok(Self::fake_restore_profile()),
+            None => Err(ProviderError::Unavailable(
+                "fake provider: no snapshots".into(),
+            )),
+        }
+    }
+
+    fn snapshot_dir(&self, snapshot_id: &SnapshotId) -> Option<std::path::PathBuf> {
+        self.options
+            .snapshot_root
+            .as_ref()
+            .map(|root| root.join(snapshot_id.as_str()))
+    }
+
+    async fn snapshot_environment(
+        &self,
+        environment_id: &EnvironmentId,
+        snapshot_id: &SnapshotId,
+    ) -> Result<SnapshotCapture, ProviderError> {
+        let Some(dir) = self.snapshot_dir(snapshot_id) else {
+            return Err(ProviderError::Unavailable(
+                "fake provider: no snapshots".into(),
+            ));
+        };
+        if let Some(reason) = &self.options.fail_snapshot {
+            return Err(ProviderError::Internal(reason.clone()));
+        }
+        {
+            let mut inner = self.inner.lock();
+            match inner.environments.get_mut(environment_id) {
+                Some(env) if env.running => env.paused = true,
+                _ => return Err(ProviderError::NotFound(environment_id.clone())),
+            }
+            inner
+                .snapshotted
+                .push((environment_id.clone(), snapshot_id.clone()));
+        }
+        std::fs::create_dir_all(&dir)?;
+        for name in tachyon_serverless_provider_port::restore::files::ALL {
+            std::fs::write(
+                dir.join(name),
+                format!("fake {name} of {environment_id} for {snapshot_id}\n"),
+            )?;
+        }
+        Ok(SnapshotCapture {
+            dir,
+            timings: SnapshotTimings::default(),
+        })
+    }
+
+    async fn clone_environment(
+        &self,
+        spec: CloneSpec,
+    ) -> Result<(EnvironmentHandle, CloneTimings), ProviderError> {
+        let started_at = Instant::now();
+        if self.options.snapshot_root.is_none() {
+            return Err(ProviderError::Unavailable(
+                "fake provider: no snapshots".into(),
+            ));
+        }
+        if let Some(reason) = &self.options.fail_clone {
+            return Err(ProviderError::Boot(reason.clone()));
+        }
+        for name in tachyon_serverless_provider_port::restore::files::ALL {
+            if !spec.snapshot_dir.join(name).is_file() {
+                return Err(ProviderError::Boot(format!(
+                    "snapshot file {name} is missing in {}",
+                    spec.snapshot_dir.display()
+                )));
+            }
+        }
+        if self
+            .inner
+            .lock()
+            .environments
+            .contains_key(&spec.spec.environment_id)
+        {
+            return Err(ProviderError::InvalidSpec(format!(
+                "environment {} already exists",
+                spec.spec.environment_id
+            )));
+        }
+        let script = self.next_script().ok_or_else(|| {
+            ProviderError::Internal("fake provider has no script for this clone".into())
+        })?;
+        let mut handle = self.start_guest(&spec.spec, script, started_at);
+        handle
+            .evidence
+            .details
+            .insert("snapshot_id".into(), spec.snapshot_id.to_string().into());
+        self.inner
+            .lock()
+            .cloned
+            .push((spec.spec.environment_id.clone(), spec.snapshot_id.clone()));
+        let loaded_at = Instant::now();
+        Ok((
+            handle,
+            CloneTimings {
+                started_at,
+                loaded_at,
+                doorbell_at: Some(loaded_at),
+            },
+        ))
     }
 }
 
@@ -737,6 +916,7 @@ impl Guest {
                 // `recv` answers a `Ping` itself, so one never gets here.
                 HostMessage::Cancel { .. }
                 | HostMessage::HelloAck { .. }
+                | HostMessage::Restore { .. }
                 | HostMessage::Ping { .. } => continue,
                 HostMessage::HelloReject { .. } => return None,
             }
@@ -1152,6 +1332,7 @@ mod tests {
             init_timeout_ms: 1000,
             max_response_bytes: 1024,
             max_log_line_bytes: 1024,
+            snapshot_hold: false,
         }
     }
 

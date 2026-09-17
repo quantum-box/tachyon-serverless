@@ -301,6 +301,7 @@ impl Host {
             init_timeout_ms: 600_000,
             max_response_bytes: 1 << 20,
             max_log_line_bytes: 8192,
+            snapshot_hold: false,
         };
         self.send_host(c, &ack).await?;
         self.ev.emit("hello_ack_sent", json!({"env_vars": match &ack { HostMessage::HelloAck { env, .. } => env.len(), _ => 0 }}));

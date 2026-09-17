@@ -122,6 +122,7 @@ async fn deploy(
         description: String::new(),
         publish_to_prod: true,
         required_region: required_region.map(str::to_string),
+        restore: None,
     };
     let rev = h.app.revisions.create(p, &function.id, &req).await.unwrap();
     let rev = h

@@ -32,12 +32,16 @@ use tachyon_serverless_domain::{
     AttemptId, Clock, EnvironmentId, InvocationId, LogPhase, LogRecord, LogStream, TenantId,
 };
 use tachyon_serverless_protocol::{
-    FrameCodec, GuestErrorKind, GuestMessage, HostMessage, PROTOCOL_VERSION, ProtocolError,
-    decode_message, encode_message,
+    FrameCodec, GuestErrorKind, GuestMessage, HostMessage, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION,
+    ProtocolError, decode_message, encode_message, host_accepts,
 };
 use tachyon_serverless_provider_port::BridgeStream;
 
 use crate::repository::{AppendOutcome, LogRepository};
+
+/// Experimental restore handshakes (X1, PLT-4653).
+mod restore;
+pub use restore::{CheckpointReport, RestoreHandshakeError, RestoreIdentity};
 
 /// Everything the host puts into `HelloAck`. `env` may contain resolved
 /// secrets: `Debug` redacts it and it must never be logged.
@@ -260,9 +264,28 @@ impl BridgeSession {
         logs: LogForwarder,
         timeout: Duration,
     ) -> Result<(Self, HelloInfo), SessionError> {
-        let mut session = Self {
+        Self::handshake_inner(
+            stream,
+            expected_environment_id,
+            epoch,
+            params,
+            logs,
+            timeout,
+            false,
+        )
+        .await
+    }
+
+    /// A session around an already connected stream, before any frame.
+    fn new_unconnected(
+        stream: Box<dyn BridgeStream>,
+        environment_id: &EnvironmentId,
+        epoch: u64,
+        logs: LogForwarder,
+    ) -> Self {
+        Self {
             framed: Framed::new(stream, FrameCodec),
-            environment_id: expected_environment_id.clone(),
+            environment_id: environment_id.clone(),
             epoch,
             logs,
             lease: None,
@@ -270,7 +293,21 @@ impl BridgeSession {
             disconnected: false,
             write_closed: false,
             guest_exited: false,
-        };
+        }
+    }
+
+    /// The handshake; `snapshot_hold` asks a version-3 guest to hold at the
+    /// lifecycle checkpoint (refused for older guests).
+    async fn handshake_inner(
+        stream: Box<dyn BridgeStream>,
+        expected_environment_id: &EnvironmentId,
+        epoch: u64,
+        params: HelloAckParams,
+        logs: LogForwarder,
+        timeout: Duration,
+        snapshot_hold: bool,
+    ) -> Result<(Self, HelloInfo), SessionError> {
+        let mut session = Self::new_unconnected(stream, expected_environment_id, epoch, logs);
         let deadline = Instant::now() + timeout;
         let hello = loop {
             match session.next_message(deadline, "hello").await? {
@@ -305,9 +342,22 @@ impl BridgeSession {
             }
         };
         let (protocol_version, bridge_version, environment_id, guest_boot_id, architecture) = hello;
-        if protocol_version != PROTOCOL_VERSION {
+        // Versions 2 and 3 differ only by the experimental restore frames,
+        // which are never sent to a version-2 guest (docs/protocol.md §A).
+        if !host_accepts(protocol_version) {
             let reason = format!(
-                "unsupported protocol version {protocol_version} (host speaks {PROTOCOL_VERSION})"
+                "unsupported protocol version {protocol_version} (host speaks \
+                 {MIN_PROTOCOL_VERSION}..={PROTOCOL_VERSION})"
+            );
+            session.reject(&reason).await;
+            return Err(SessionError::HandshakeRejected(reason));
+        }
+        if snapshot_hold && !tachyon_serverless_protocol::supports_restore(protocol_version) {
+            let reason = format!(
+                "a snapshot hold needs protocol version \
+                 {} (the guest speaks {protocol_version}; build the bridge with \
+                 experimental-restore)",
+                tachyon_serverless_protocol::RESTORE_PROTOCOL_VERSION
             );
             session.reject(&reason).await;
             return Err(SessionError::HandshakeRejected(reason));
@@ -329,6 +379,7 @@ impl BridgeSession {
             init_timeout_ms: params.init_timeout.as_millis() as u64,
             max_response_bytes: params.max_response_bytes,
             max_log_line_bytes: params.max_log_line_bytes,
+            snapshot_hold,
         };
         session.send(&ack).await?;
         Ok((
@@ -809,6 +860,8 @@ fn message_name(m: &GuestMessage) -> &'static str {
         GuestMessage::Exited { .. } => "exited",
         GuestMessage::Heartbeat { .. } => "heartbeat",
         GuestMessage::Pong { .. } => "pong",
+        GuestMessage::CheckpointWaiting { .. } => "checkpoint_waiting",
+        GuestMessage::Reconnect { .. } => "reconnect",
     }
 }
 

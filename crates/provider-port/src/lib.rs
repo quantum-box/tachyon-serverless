@@ -8,11 +8,13 @@
 pub mod artifact;
 pub mod execution;
 pub mod identity;
+pub mod restore;
 pub mod secret;
 pub mod usage;
 
 pub use artifact::*;
 pub use execution::*;
 pub use identity::*;
+pub use restore::{CloneSpec, CloneTimings, RestoreHostProfile, SnapshotCapture, SnapshotTimings};
 pub use secret::*;
 pub use usage::*;

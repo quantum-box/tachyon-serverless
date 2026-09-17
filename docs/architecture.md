@@ -431,6 +431,14 @@ invoke 後の環境を破棄せず `Idle` で残し、次の invoke に渡す仕
 
 どちらかが閉じていれば `EnvironmentPool` は「再利用しない」としか答えず、invoke pipeline は P1 と同じ destroy-after-invoke になる。理由は起動ログと `PoolPolicy::disabled_reason()` / `PoolPolicy::reason()` に出る。
 
+### snapshot / clone（X1 実験、PLT-4653）
+
+設計は `docs/adr/0017-snapshot-manifest-and-clone.md`、protocol は `docs/protocol.md` §A-X1。既定では無効（revision の `restore.policy = disabled`、`[snapshots]` 無効、bridge / Firecracker provider の feature `experimental-restore` が off）で、invoke の経路は変わらない。
+
+- **層の分担**: domain（`snapshot.rs`）が manifest・署名・互換検査を純関数で持つ。application の `snapshot::SnapshotService` が作成（source を hold して provider に capture させ、封印して署名）と restore 計画（候補の状態・署名・互換・平文 digest の検査と restore 回数の予約）を行い、`services/invoke/restore.rs` が計画を clone・restore handshake・ready に繋ぐ。provider は bytes を動かすだけで、load してよいかは判断しない。
+- **invoke への入り方**: `Driver::prepare_cold` の先頭で policy が `disabled` でないときだけ `try_restore` を呼ぶ。結果は restored の `Prepared`（以降は cold と同じ dispatch 経路）、`prefer` の cold（理由を evidence に付けて通常の cold へ）、`require` の失敗（`Host.RestoreRequiredUnavailable`）のいずれか。clone は admission の grant・台帳の環境行・usage の `EnvironmentStarted` を cold と同じように持つ。
+- **環境**: clone は自分の環境 id・jail・cgroup・vsock listener・scratch copy を持ち、terminate / reconcile は通常の環境と同じ。平文 snapshot は `<workdir>/_snapshots/`（`list_environments` は環境 id でない directory を無視する）、封印した保管は `<data_dir>/snapshots/`。
+
 ### idle 休止・再開と計測 gate（PLT-4633）
 
 gate が開いているとき、pool は環境の**休止と再開そのもの**も持つ。

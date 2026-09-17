@@ -20,6 +20,7 @@ pub mod invocation;
 pub mod limits;
 pub mod log;
 pub mod revision;
+pub mod snapshot;
 pub mod usage;
 
 pub use alias::*;
@@ -33,6 +34,7 @@ pub use invocation::*;
 pub use limits::*;
 pub use log::*;
 pub use revision::*;
+pub use snapshot::*;
 pub use usage::*;
 
 #[cfg(test)]

@@ -57,6 +57,9 @@ struct Instance {
     rng: Mutex<XorShift64>,
     secret_present: bool,
     connection: FakeConnection,
+    /// What the instance's scratch marker held before this copy wrote its
+    /// own id (empty for any copy of a snapshot: the source never wrote one).
+    scratch_before: String,
 }
 
 /// Stand-in for a database or TLS connection: opened in after_restore only.
@@ -144,6 +147,12 @@ async fn after_restore(fixed: Fixed, ctx: RestoreContext) -> Result<Instance, Ha
     let now_ms = ms(SystemTime::now());
     let instance_id = format!("{}-{nonce:016x}", ctx.instance_id);
     let secret_present = std::env::var_os("DEMO_SECRET").is_some();
+    // Per-instance write area (PLT-4653): each copy records its own id on the
+    // writable scratch drive. Two copies of one snapshot must never see each
+    // other's marker.
+    let marker = scratch_marker_path();
+    let scratch_before = std::fs::read_to_string(&marker).unwrap_or_default();
+    let _ = std::fs::write(&marker, format!("{instance_id}\n"));
     let connection = FakeConnection {
         id: format!("conn-{:016x}", os_random_u64()?),
         opened_at_ms: now_ms,
@@ -162,6 +171,7 @@ async fn after_restore(fixed: Fixed, ctx: RestoreContext) -> Result<Instance, Ha
         rng: Mutex::new(XorShift64(seed)),
         secret_present,
         connection,
+        scratch_before,
     })
 }
 
@@ -195,7 +205,16 @@ fn answer(state: &Instance, payload: &Value) -> Result<Value, HandlerError> {
         "connection_opened_at_ms": state.connection.opened_at_ms,
         "connection_queries": queries,
         "secret_present": state.secret_present,
+        "scratch_marker": std::fs::read_to_string(scratch_marker_path()).unwrap_or_default().trim(),
+        "scratch_marker_before": state.scratch_before.trim(),
     }))
+}
+
+/// Marker file on the writable scratch drive (`/tmp` in a Firecracker guest).
+fn scratch_marker_path() -> std::path::PathBuf {
+    std::env::var_os("RESTORE_AWARE_SCRATCH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("restore-aware-instance"))
 }
 
 fn main() -> Result<(), SdkError> {

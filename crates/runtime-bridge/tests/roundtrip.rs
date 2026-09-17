@@ -10,7 +10,7 @@ use std::time::Duration;
 use futures::{SinkExt, StreamExt};
 use tachyon_serverless_protocol::{
     FrameCodec, GuestErrorKind, GuestMessage, HostMessage, LogPhase, LogStream, MAX_FRAME_BYTES,
-    MAX_RESPONSE_PAYLOAD_BYTES, PROTOCOL_VERSION, decode_message, encode_message,
+    MAX_RESPONSE_PAYLOAD_BYTES, decode_message, encode_message,
 };
 use tokio::io::AsyncReadExt;
 use tokio::net::{UnixListener, UnixStream};
@@ -117,7 +117,10 @@ impl Session {
                 architecture,
                 ..
             } => {
-                assert_eq!(protocol_version, PROTOCOL_VERSION);
+                assert_eq!(
+                    protocol_version,
+                    tachyon_serverless_runtime_bridge::session::HELLO_PROTOCOL_VERSION
+                );
                 assert_eq!(bridge_version, env!("CARGO_PKG_VERSION"));
                 assert_eq!(environment_id, ENV_ID);
                 assert_eq!(architecture, std::env::consts::ARCH);
@@ -136,6 +139,7 @@ impl Session {
                 init_timeout_ms: 15_000,
                 max_response_bytes: launch.max_response_bytes,
                 max_log_line_bytes: 4096,
+                snapshot_hold: false,
             })
             .await;
         session
@@ -411,6 +415,7 @@ async fn user_exit_before_ready_is_init_error() {
             init_timeout_ms: 15_000,
             max_response_bytes: 1 << 20,
             max_log_line_bytes: 4096,
+            snapshot_hold: false,
         })
         .unwrap(),
     )

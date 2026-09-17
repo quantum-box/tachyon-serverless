@@ -836,6 +836,9 @@ pub struct GatewayConfig {
     /// alerts and hard limits (PLT-4643). Off by default.
     #[serde(default)]
     pub budget: crate::budget::BudgetConfig,
+    /// `[snapshots]` (X1, PLT-4653, experimental). Off by default.
+    #[serde(default)]
+    pub snapshots: crate::snapshot::SnapshotsConfig,
 }
 
 /// `[metrics]` (PLT-4637, docs/metrics.md). `GET /metrics` exposes every

@@ -124,6 +124,36 @@ pub enum GuestMessage {
     Pong {
         nonce: u64,
     },
+    /// Protocol version 3 (X1, PLT-4653). Sent once, and only when the host
+    /// asked for a snapshot hold in `HelloAck`: the user process opened the
+    /// experimental lifecycle, reported `checkpoint` and is now blocked in
+    /// `continue`. `after_restore` has not run, so nothing it creates
+    /// (identity, credentials, connections) is in guest memory. The host may
+    /// snapshot the guest only after this frame.
+    CheckpointWaiting {
+        /// [`crate::CHECKPOINT_PHASE`] as observed by the bridge.
+        lifecycle_phase: String,
+        /// `tachyon-lifecycle-version` of the Runtime API.
+        lifecycle_version: u32,
+        /// Always `false` here; recorded in the manifest as evidence.
+        after_restore_ran: bool,
+    },
+    /// Protocol version 3 (X1, PLT-4653). The first frame of a connection
+    /// that a held guest re-established after its vsock transport was reset
+    /// (a restored copy, or a resumed source). Never sent by a cold boot,
+    /// which says `Hello`: a host expecting a restore that receives `Hello`
+    /// is looking at a cold boot and must not count it as restored.
+    Reconnect {
+        protocol_version: u32,
+        /// Environment id the guest was booted for (the snapshot source).
+        environment_id: String,
+        /// Unchanged by a restore: equal to the source's `Hello`.
+        guest_boot_id: Option<String>,
+        /// 1 for the first reconnect of this guest.
+        reconnects: u64,
+        /// Why the previous connection ended, as the guest saw it.
+        lost: String,
+    },
 }
 
 /// Messages sent by the host to the guest bridge.
@@ -147,6 +177,13 @@ pub enum HostMessage {
         init_timeout_ms: u64,
         max_response_bytes: u64,
         max_log_line_bytes: u64,
+        /// Protocol version 3 (X1, PLT-4653): hold the process at the
+        /// lifecycle checkpoint and report [`GuestMessage::CheckpointWaiting`]
+        /// instead of answering `continue` with `cold`. Omitted when false,
+        /// and only ever set for a version-3 guest (a version-2 bridge would
+        /// ignore it and start cold, which the host detects).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        snapshot_hold: bool,
     },
     /// Handshake rejected (version mismatch, unknown environment...). The
     /// bridge exits after receiving this.
@@ -195,6 +232,23 @@ pub enum HostMessage {
     Shutdown {
         reason: String,
     },
+    /// Protocol version 3 (X1, PLT-4653). Answer to [`GuestMessage::Reconnect`]
+    /// on a restored copy: the identity of this copy, delivered after the
+    /// restore and never captured in the snapshot. The bridge sets the guest
+    /// wall clock to `host_now_ms` and then answers the lifecycle `continue`
+    /// with `restored`.
+    Restore {
+        /// Environment id the host tracks this copy as (not the source's).
+        environment_id: String,
+        /// Identity of this copy; distinct for every clone.
+        instance_id: String,
+        /// Restore count of the snapshot (1 = first copy).
+        generation: u64,
+        /// Epoch of the copy's first assignment.
+        epoch: u64,
+        /// Host wall clock, ms since the Unix epoch.
+        host_now_ms: u64,
+    },
 }
 
 /// Stand-in for a secret-bearing environment list in `Debug` output.
@@ -219,6 +273,7 @@ impl fmt::Debug for HostMessage {
                 init_timeout_ms,
                 max_response_bytes,
                 max_log_line_bytes,
+                snapshot_hold,
             } => f
                 .debug_struct("HelloAck")
                 .field("environment_id", environment_id)
@@ -230,6 +285,7 @@ impl fmt::Debug for HostMessage {
                 .field("init_timeout_ms", init_timeout_ms)
                 .field("max_response_bytes", max_response_bytes)
                 .field("max_log_line_bytes", max_log_line_bytes)
+                .field("snapshot_hold", snapshot_hold)
                 .finish(),
             HostMessage::HelloReject { reason } => f
                 .debug_struct("HelloReject")
@@ -267,6 +323,20 @@ impl fmt::Debug for HostMessage {
             HostMessage::Shutdown { reason } => {
                 f.debug_struct("Shutdown").field("reason", reason).finish()
             }
+            HostMessage::Restore {
+                environment_id,
+                instance_id,
+                generation,
+                epoch,
+                host_now_ms,
+            } => f
+                .debug_struct("Restore")
+                .field("environment_id", environment_id)
+                .field("instance_id", instance_id)
+                .field("generation", generation)
+                .field("epoch", epoch)
+                .field("host_now_ms", host_now_ms)
+                .finish(),
         }
     }
 }
@@ -394,6 +464,70 @@ mod tests {
         assert!(format!("{invoke:?}").contains("remaining_ms: 25000"));
     }
 
+    /// PLT-4653: version 3 adds the restore frames; a version-2 `HelloAck`
+    /// (no `snapshot_hold`) encodes exactly as before, and the negotiation
+    /// accepts versions 2 and 3 only.
+    #[test]
+    fn version_3_restore_frames_and_negotiation() {
+        use crate::{MIN_PROTOCOL_VERSION, PROTOCOL_VERSION, host_accepts, supports_restore};
+        assert_eq!((MIN_PROTOCOL_VERSION, PROTOCOL_VERSION), (2, 3));
+        assert!(!host_accepts(1) && host_accepts(2) && host_accepts(3) && !host_accepts(4));
+        assert!(!supports_restore(2) && supports_restore(3));
+
+        let ack = |hold| HostMessage::HelloAck {
+            environment_id: "env_1".into(),
+            epoch: 1,
+            entrypoint: "/function/app".into(),
+            args: vec![],
+            env: vec![],
+            working_dir: "/function".into(),
+            init_timeout_ms: 1000,
+            max_response_bytes: 1,
+            max_log_line_bytes: 1,
+            snapshot_hold: hold,
+        };
+        let plain = String::from_utf8(encode_message(&ack(false)).unwrap().to_vec()).unwrap();
+        assert!(!plain.contains("snapshot_hold"), "{plain}");
+        let held = encode_message(&ack(true)).unwrap();
+        assert!(
+            String::from_utf8(held.to_vec())
+                .unwrap()
+                .contains(r#""snapshot_hold":true"#)
+        );
+        assert_eq!(decode_message::<HostMessage>(&held).unwrap(), ack(true));
+
+        for m in [
+            GuestMessage::CheckpointWaiting {
+                lifecycle_phase: "checkpoint".into(),
+                lifecycle_version: 1,
+                after_restore_ran: false,
+            },
+            GuestMessage::Reconnect {
+                protocol_version: 3,
+                environment_id: "env_1".into(),
+                guest_boot_id: Some("b".into()),
+                reconnects: 1,
+                lost: "doorbell".into(),
+            },
+        ] {
+            assert_eq!(
+                decode_message::<GuestMessage>(&encode_message(&m).unwrap()).unwrap(),
+                m
+            );
+        }
+        let restore = HostMessage::Restore {
+            environment_id: "env_2".into(),
+            instance_id: "i".into(),
+            generation: 1,
+            epoch: 1,
+            host_now_ms: 5,
+        };
+        assert_eq!(
+            decode_message::<HostMessage>(&encode_message(&restore).unwrap()).unwrap(),
+            restore
+        );
+    }
+
     #[test]
     fn oversized_frame_rejected() {
         let mut codec = FrameCodec;
@@ -420,6 +554,7 @@ mod tests {
             init_timeout_ms: 1000,
             max_response_bytes: 2048,
             max_log_line_bytes: 512,
+            snapshot_hold: false,
         };
         for rendered in [format!("{msg:?}"), format!("{msg:#?}")] {
             assert!(!rendered.contains("s3cr3t-value"), "{rendered}");

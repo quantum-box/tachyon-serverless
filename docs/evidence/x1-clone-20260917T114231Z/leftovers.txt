@@ -1,0 +1,6 @@
+# leftovers after the run (gateway stopped, snapshots removed)
+firecracker: none
+jails: 
+cgroups: 
+env dirs: 
+snapshot dirs: 

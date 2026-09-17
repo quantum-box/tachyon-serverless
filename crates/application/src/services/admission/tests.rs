@@ -858,6 +858,7 @@ fn revision(max_concurrency: u32) -> tachyon_serverless_domain::FunctionRevision
             secrets: Vec::new(),
             description: String::new(),
             placement: Placement::default(),
+            restore: Default::default(),
         },
         &Limits::default(),
         t(0),

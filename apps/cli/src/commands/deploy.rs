@@ -96,6 +96,15 @@ pub fn build_revision_request(
         description: args.description.clone(),
         publish_to_prod: !args.no_publish,
         required_region: args.region.clone(),
+        restore: (args.restore_policy.is_some() || args.synthetic_init_sample).then(|| {
+            tachyon_serverless_api_types::RestoreRequest {
+                policy: args
+                    .restore_policy
+                    .clone()
+                    .unwrap_or_else(|| "disabled".into()),
+                synthetic_init_sample: args.synthetic_init_sample,
+            }
+        }),
     })
 }
 
@@ -299,6 +308,8 @@ mod tests {
             egress: None,
             egress_allow: Vec::new(),
             region: None,
+            restore_policy: None,
+            synthetic_init_sample: false,
             no_publish: true,
             wait: true,
             no_wait: false,

@@ -58,6 +58,18 @@ pub async fn connect_vsock(cid: u32, port: u32) -> std::io::Result<BoxedHostStre
     Err(last_err.expect("at least one attempt"))
 }
 
+/// One vsock connection attempt (the restore link retries itself).
+#[cfg(target_os = "linux")]
+pub async fn connect_vsock_once(cid: u32, port: u32) -> std::io::Result<BoxedHostStream> {
+    let s = tokio_vsock::VsockStream::connect(tokio_vsock::VsockAddr::new(cid, port)).await?;
+    Ok(Box::new(s))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn connect_vsock_once(cid: u32, port: u32) -> std::io::Result<BoxedHostStream> {
+    connect_vsock(cid, port).await
+}
+
 #[cfg(not(target_os = "linux"))]
 pub async fn connect_vsock(_cid: u32, _port: u32) -> std::io::Result<BoxedHostStream> {
     Err(std::io::Error::new(

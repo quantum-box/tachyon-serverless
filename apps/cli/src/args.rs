@@ -248,6 +248,14 @@ pub struct DeployArgs {
     /// or no region label rejects its invocations; the constraint is never relaxed.
     #[arg(long = "region", value_name = "REGION")]
     pub region: Option<String>,
+    /// Experimental (X1): restore policy `disabled` | `prefer` | `require`. Anything
+    /// but `disabled` needs `--synthetic-init-sample`, no `--secret` and egress `none`.
+    #[arg(long = "restore-policy", value_name = "POLICY")]
+    pub restore_policy: Option<String>,
+    /// Experimental (X1): state that initialization builds only synthetic sample data,
+    /// which is what allows snapshots of the revision.
+    #[arg(long = "synthetic-init-sample")]
+    pub synthetic_init_sample: bool,
     /// Do not move the `prod` alias to the new revision.
     #[arg(long)]
     pub no_publish: bool,

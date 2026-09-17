@@ -119,6 +119,9 @@ pub struct Application {
     pub dispatch_ledger: Option<Arc<dyn AsyncDispatchRepository>>,
     /// Dispatcher and redrive counters for `GET /metrics` (PLT-4640).
     pub dispatch_metrics: Option<Arc<crate::metrics::dispatch::AsyncDispatchMetrics>>,
+    /// Experimental snapshot service (X1, PLT-4653). `None` unless
+    /// `[snapshots] enabled`.
+    pub snapshots: Option<Arc<crate::snapshot::SnapshotService>>,
 }
 
 impl std::fmt::Debug for Application {
@@ -487,7 +490,7 @@ impl Application {
             limits: limits.clone(),
             capacity: config.capacity.clone(),
             invoke: config.invoke.clone(),
-            entrypoints,
+            entrypoints: entrypoints.clone(),
             pool: pool.clone(),
             dispatcher: dispatcher.clone(),
             gate: invoke_gate.clone(),
@@ -672,6 +675,47 @@ impl Application {
                  Its results must not be reported as a verified warm setup"
             );
         }
+        // X1 (PLT-4653): off unless `[snapshots] enabled`.
+        let snapshots = if config.snapshots.enabled {
+            let s = &config.snapshots;
+            let root = s
+                .root
+                .clone()
+                .unwrap_or_else(|| config.data_dir.join("snapshots"));
+            let store = crate::snapshot::SnapshotStore::open(&root).map_err(|e| {
+                AppError::platform(format!(
+                    "cannot open snapshot store {}: {e}",
+                    root.display()
+                ))
+            })?;
+            let service =
+                crate::snapshot::SnapshotService::new(crate::snapshot::SnapshotServiceDeps {
+                    store,
+                    key: s.load_key()?,
+                    signing: s.load_signing_key()?,
+                    provider: provider.clone(),
+                    repos: repos.clone(),
+                    artifacts: artifacts.clone(),
+                    entrypoints: entrypoints.clone(),
+                    limits: limits.clone(),
+                    clock: clock.clone(),
+                    ids: ids.clone(),
+                    settings: s.settings()?,
+                });
+            invoke.set_snapshots(service.clone());
+            let caps = provider.capabilities();
+            tracing::warn!(
+                root = %root.display(),
+                snapshot_create = caps.snapshot_create.status_str(),
+                snapshot_clone = caps.snapshot_clone.status_str(),
+                allow_unverified = s.allow_unverified,
+                "EXPERIMENTAL snapshots are enabled (X1): only synthetic initialization samples \
+                 without secret bindings may be snapshotted and restored"
+            );
+            Some(service)
+        } else {
+            None
+        };
         Ok(Arc::new(Self {
             config: Arc::new(config),
             limits,
@@ -712,6 +756,7 @@ impl Application {
             dead_letters,
             dispatch_ledger,
             dispatch_metrics,
+            snapshots,
         }))
     }
 

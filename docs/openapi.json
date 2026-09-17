@@ -683,6 +683,17 @@
           "resources": {
             "$ref": "#/components/schemas/ResourcesRequest"
           },
+          "restore": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RestoreRequest",
+                "description": "Experimental restore settings (X1, PLT-4653). Omitted means\n`{\"policy\": \"disabled\"}`: the revision never restores a snapshot."
+              }
+            ]
+          },
           "secrets": {
             "items": {
               "$ref": "#/components/schemas/SecretBindingRequest"
@@ -694,6 +705,19 @@
           "artifact",
           "architecture"
         ],
+        "type": "object"
+      },
+      "CreateSnapshotRequest": {
+        "description": "`POST /v1/functions/{function_id}/snapshots` (X1, experimental).",
+        "properties": {
+          "revision_id": {
+            "description": "Revision to snapshot. Defaults to the revision alias `prod` points at.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "CreateTriggerRequest": {
@@ -2018,6 +2042,107 @@
         ],
         "type": "object"
       },
+      "ListResponse_SnapshotResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "description": "A snapshot as the API shows it: identity, state and the manifest digest.\nThe manifest's host facts are summarized, never the artifact bytes.",
+              "properties": {
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "expires_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "function_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "manifest_digest": {
+                  "description": "`sha256:<hex>` of the canonical manifest.",
+                  "type": "string"
+                },
+                "manifest_version": {
+                  "format": "int32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "memory_mib": {
+                  "format": "int32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "restores": {
+                  "description": "How many clones were created from it.",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "revision_id": {
+                  "type": "string"
+                },
+                "source_environment_id": {
+                  "type": "string"
+                },
+                "state": {
+                  "description": "`active` | `revoked` | `quarantined` | `expired`",
+                  "type": "string"
+                },
+                "state_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timings": {
+                  "description": "Snapshot timings of the source, milliseconds: `pause_ms`,\n`create_ms`, `copy_ms`, `seal_ms`.",
+                  "type": "object"
+                },
+                "vcpus": {
+                  "format": "int32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "function_id",
+                "revision_id",
+                "state",
+                "manifest_digest",
+                "manifest_version",
+                "provider",
+                "memory_mib",
+                "vcpus",
+                "source_environment_id",
+                "restores",
+                "created_at",
+                "expires_at",
+                "timings"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ListResponse_TriggerFireResponse": {
         "properties": {
           "items": {
@@ -2689,6 +2814,20 @@
         },
         "type": "object"
       },
+      "RestoreRequest": {
+        "description": "Experimental restore settings of a revision (X1, PLT-4653;\ndocs/adr/0017-snapshot-manifest-and-clone.md).",
+        "properties": {
+          "policy": {
+            "description": "`disabled` (default) | `prefer` (restore when a compatible, verified\nsnapshot exists, otherwise start cold and record why) | `require`\n(restore or fail with `Host.RestoreRequiredUnavailable`).",
+            "type": "string"
+          },
+          "synthetic_init_sample": {
+            "description": "The operator states that initialization builds only synthetic sample\ndata. Required for `prefer` / `require` and for creating a snapshot;\nsuch a revision may not have secret bindings and must use egress\n`none`.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ReuseInfo": {
         "description": "Whether this gateway reuses (warms) execution environments, and why.\n\nThe two flags answer two different questions and neither implies the other\n(PLT-4633 review F7):\n\n- `enabled` is what this gateway *does*: both gates are open, so\n  environments really are pooled and reused.\n- `verified` is a fact about the **provider**: it reports both\n  `idle_quiesce` and `idle_resume` as `supported`, which it may only do\n  once the pause/resume cycle has been measured on real hardware. It says\n  nothing about the `[pool]` configuration, so a gateway with reuse\n  switched off can still report `verified: true`.\n\nThey are separate on purpose: an operator may switch reuse on for an\n`unverified` provider in order to take the measurement\n(`[pool] allow_unverified_idle`), and such a run must never be presented as\na warm success. `enabled: true, verified: false` therefore means \"reuse is\nrunning so it can be measured\", not \"warm works here\" (PLT-4633 acceptance\n4, docs/architecture.md §4).",
         "properties": {
@@ -2855,6 +2994,18 @@
         ],
         "type": "object"
       },
+      "RevokeSnapshotRequest": {
+        "description": "`POST /v1/functions/{function_id}/snapshots/{snapshot_id}/revoke`.",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "ScaleEventInfo": {
         "description": "One scale decision (PLT-4635).",
         "properties": {
@@ -2979,6 +3130,90 @@
           "handler_ms",
           "teardown_ms",
           "idle_pooled_ms"
+        ],
+        "type": "object"
+      },
+      "SnapshotResponse": {
+        "description": "A snapshot as the API shows it: identity, state and the manifest digest.\nThe manifest's host facts are summarized, never the artifact bytes.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "function_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "manifest_digest": {
+            "description": "`sha256:<hex>` of the canonical manifest.",
+            "type": "string"
+          },
+          "manifest_version": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memory_mib": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "restores": {
+            "description": "How many clones were created from it.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "source_environment_id": {
+            "type": "string"
+          },
+          "state": {
+            "description": "`active` | `revoked` | `quarantined` | `expired`",
+            "type": "string"
+          },
+          "state_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timings": {
+            "description": "Snapshot timings of the source, milliseconds: `pause_ms`,\n`create_ms`, `copy_ms`, `seal_ms`.",
+            "type": "object"
+          },
+          "vcpus": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "function_id",
+          "revision_id",
+          "state",
+          "manifest_digest",
+          "manifest_version",
+          "provider",
+          "memory_mib",
+          "vcpus",
+          "source_environment_id",
+          "restores",
+          "created_at",
+          "expires_at",
+          "timings"
         ],
         "type": "object"
       },
@@ -5329,6 +5564,211 @@
         ]
       }
     },
+    "/v1/functions/{function_id}/snapshots": {
+      "get": {
+        "operationId": "list_snapshots",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_SnapshotResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "snapshots"
+        ]
+      },
+      "post": {
+        "operationId": "create_snapshot",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "snapshots"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/snapshots/{snapshot_id}/revoke": {
+      "post": {
+        "operationId": "revoke_snapshot",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "snapshot id",
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "snapshots"
+        ]
+      }
+    },
     "/v1/functions/{function_id}/triggers": {
       "get": {
         "operationId": "list_triggers",
@@ -6312,6 +6752,9 @@
     },
     {
       "name": "triggers"
+    },
+    {
+      "name": "snapshots"
     },
     {
       "name": "dead-letters"

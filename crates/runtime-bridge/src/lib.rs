@@ -13,6 +13,8 @@
 pub mod cli;
 pub mod init;
 pub mod process;
+#[cfg(feature = "experimental-restore")]
+pub mod restore_link;
 pub mod runtime_api;
 pub mod selftest;
 pub mod session;
@@ -91,14 +93,93 @@ async fn run_bridge(cli: Cli) -> i32 {
     let unisolated = std::env::var(tachyon_serverless_protocol::env::UNISOLATED)
         .map(|v| !v.is_empty() && v != "0")
         .unwrap_or(false);
-    session::run_session(
-        stream,
-        SessionConfig {
-            environment_id,
-            runtime_api_addr: cli.runtime_api_addr,
-            guest_boot_id: init::read_boot_id(),
-            unisolated,
-        },
-    )
-    .await
+    let session_cfg = SessionConfig {
+        environment_id,
+        runtime_api_addr: cli.runtime_api_addr,
+        guest_boot_id: init::read_boot_id(),
+        unisolated,
+    };
+    #[cfg(feature = "experimental-restore")]
+    {
+        linked::run(&cli, vsock_port, stream, session_cfg).await
+    }
+    #[cfg(not(feature = "experimental-restore"))]
+    {
+        session::run_session(stream, session_cfg).await
+    }
+}
+
+/// The session behind the restore link (X1, PLT-4653).
+#[cfg(feature = "experimental-restore")]
+mod linked {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tracing::{error, warn};
+
+    use crate::cli::{Cli, TransportKind};
+    use crate::restore_link::{self, Connect, LinkConfig, LinkOutcome};
+    use crate::session::{self, SessionConfig};
+    use crate::transport::BoxedHostStream;
+
+    pub async fn run(
+        cli: &Cli,
+        vsock_port: u32,
+        stream: BoxedHostStream,
+        cfg: SessionConfig,
+    ) -> i32 {
+        let connect: Connect = match cli.transport {
+            TransportKind::Unix => {
+                let path = cli.unix_path.clone().unwrap_or_default();
+                Box::new(move || {
+                    let p = path.clone();
+                    Box::pin(async move {
+                        let s = tokio::net::UnixStream::connect(p).await?;
+                        Ok(Box::new(s) as BoxedHostStream)
+                    })
+                })
+            }
+            TransportKind::Vsock => {
+                let cid = cli.vsock_cid;
+                Box::new(move || Box::pin(crate::transport::connect_vsock_once(cid, vsock_port)))
+            }
+        };
+        #[cfg(target_os = "linux")]
+        let (arm_doorbell, set_clock): (
+            Option<restore_link::ArmDoorbell>,
+            Option<restore_link::SetClock>,
+        ) = if cli.init && cli.transport == TransportKind::Vsock {
+            (
+                Some(restore_link::vsock_doorbell(
+                    tachyon_serverless_protocol::DOORBELL_VSOCK_PORT,
+                )),
+                Some(Box::new(restore_link::set_realtime_clock)),
+            )
+        } else {
+            (None, None)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let (arm_doorbell, set_clock) = (None, None);
+        let link_cfg = LinkConfig {
+            environment_id: cfg.environment_id.clone(),
+            guest_boot_id: cfg.guest_boot_id.clone(),
+            reconnect_budget: Duration::from_secs(120),
+            reconnect_interval: Duration::from_millis(20),
+            arm_doorbell,
+            set_clock,
+        };
+        let (source, link) = restore_link::link();
+        let (session_side, link_side) =
+            tokio::io::duplex(2 * tachyon_serverless_protocol::MAX_FRAME_BYTES);
+        let pump = tokio::spawn(link.run(link_side, stream, connect, link_cfg));
+        let code = session::run_session_with(Box::new(session_side), cfg, Arc::new(source)).await;
+        match tokio::time::timeout(Duration::from_secs(2), pump).await {
+            Ok(Ok(LinkOutcome::GaveUp(e))) => error!("restore link gave up: {e}"),
+            Ok(Ok(LinkOutcome::HostLost(e))) => warn!("restore link: host connection ended: {e}"),
+            Ok(Ok(LinkOutcome::SessionClosed)) => {}
+            Ok(Err(e)) => error!("restore link task failed: {e}"),
+            Err(_) => warn!("restore link did not stop"),
+        }
+        code
+    }
 }

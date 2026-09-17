@@ -1,0 +1,110 @@
+[
+  {
+    "check": "provider",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "snapshot_create=unverified snapshot_clone=unverified (allow_unverified measurement run)"
+  },
+  {
+    "check": "cold-1",
+    "result": "PASS",
+    "metric_ms": 2794,
+    "detail": "boot+init to Ready (client 2868 ms), start_kind=cold"
+  },
+  {
+    "check": "cold-2",
+    "result": "PASS",
+    "metric_ms": 2782,
+    "detail": "boot+init to Ready (client 2979 ms), start_kind=cold"
+  },
+  {
+    "check": "cold-3",
+    "result": "PASS",
+    "metric_ms": 3122,
+    "detail": "boot+init to Ready (client 3351 ms), start_kind=cold"
+  },
+  {
+    "check": "require-no-snapshot",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "HTTP 502 Host.RestoreRequiredUnavailable (no_snapshot); nothing booted cold"
+  },
+  {
+    "check": "snapshot",
+    "result": "PASS",
+    "metric_ms": 6587,
+    "detail": "snap_01m2qjwjbcn0x0bxxdfrfph3tj: {\"copy_ms\":13,\"create_ms\":354,\"pause_ms\":0,\"seal_ms\":3092} manifest sha256:95da94e430445f05d13f82c6e1a77422271a141ad35ad9c1c9c3406f9d533d4e"
+  },
+  {
+    "check": "snapshot-source-gone",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "source VMM terminated (never resumed)"
+  },
+  {
+    "check": "clones-concurrent",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": " clone-a: HTTP 200 kind=restored env=env_01m2qjwv9fcrnxyq9bz323ks0k instance=rst_01m2qjwvf2fc4sxr8c5v790s2p-7e843e282cb82a99 ready=543ms client=1836ms marker=rst_01m2qjwvf2fc4sxr8c5v790s2p-7e843e282cb82a99 before='' clock_skew=125ms; clone-b: HTTP 200 kind=restored env=env_01m2qjwv9kva93pgxsvj67869y instance=rst_01m2qjwvf5dtarx1gh5vkfhkdt-24a80c6048d7c69c ready=511ms client=1827ms marker=rst_01m2qjwvf5dtarx1gh5vkfhkdt-24a80c6048d7c69c before='' clock_skew=133ms; distinct instance and environment ids"
+  },
+  {
+    "check": "clones-shared-memory",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "2 VMMs mapped the one snapshot memory file (see clones-maps.txt for the mapping flags and smaps)"
+  },
+  {
+    "check": "restore-1",
+    "result": "PASS",
+    "metric_ms": 338,
+    "detail": "clone start to Ready (client 1541 ms; load 25 ms, reconnect 152 ms, verify 942 ms)"
+  },
+  {
+    "check": "restore-2",
+    "result": "PASS",
+    "metric_ms": 295,
+    "detail": "clone start to Ready (client 1215 ms; load 22 ms, reconnect 137 ms, verify 734 ms)"
+  },
+  {
+    "check": "restore-3",
+    "result": "PASS",
+    "metric_ms": 339,
+    "detail": "clone start to Ready (client 1306 ms; load 23 ms, reconnect 143 ms, verify 708 ms)"
+  },
+  {
+    "check": "revision-stale",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "HTTP 502: invocation inv_01m2qjx0m5qgds94zbjnymcpjf failed: Host.RestoreRequiredUnavailable: restore required but unavailable: revision_mismatch: no usable snapshot: snap_01m2qjwjbcn0x0bxxdfrfph3tj: incompatibl"
+  },
+  {
+    "check": "corrupt-require",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "HTTP 502 Host.RestoreRequiredUnavailable artifact_corrupted; snap_01m2qjx0mq98kcp78s13t36hj1 quarantined"
+  },
+  {
+    "check": "prefer-restored",
+    "result": "PASS",
+    "metric_ms": 625,
+    "detail": "prefer with an intact snapshot restores"
+  },
+  {
+    "check": "corrupt-prefer",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "HTTP 200 start_kind=cold restore_fallback=artifact_corrupted (never counted as restored)"
+  },
+  {
+    "check": "latency",
+    "result": "INFO",
+    "metric_ms": null,
+    "detail": "median cold boot+init 2794 ms vs restored clone-start-to-Ready 338 ms (nested virtualization, reference only)"
+  },
+  {
+    "check": "cleanup",
+    "result": "PASS",
+    "metric_ms": null,
+    "detail": "no firecracker, jail, cgroup, env dir or snapshot left"
+  }
+]

@@ -61,6 +61,9 @@
 | PATCH | `/v1/functions/{function_id}/triggers/{trigger_id}` | 更新・有効 / 無効・secret の rotate（`expected_generation` で CAS） | 200 `TriggerResponse` | 400, 404, 409 `conflict` |
 | DELETE | `/v1/functions/{function_id}/triggers/{trigger_id}` | 削除。以後の fire は commit しない。受付済みの fire は通常の非同期 invocation として続く | 200 `TriggerResponse`（`status = deleted`） | 404, 409 |
 | GET | `/v1/functions/{function_id}/triggers/{trigger_id}/fires` | fire の記録（予定時刻・event id・invocation id・refused の理由。query: `limit`） | 200 `ListResponse<TriggerFireResponse>` | 404 |
+| POST | `/v1/functions/{function_id}/snapshots` | **実験（X1、PLT-4653、§5.12）**: revision（body `{"revision_id"?}`、省略時は `prod`）の snapshot を作る（`deploy` role）。source を checkpoint で保持して保存し、暗号化・署名する | 201 `SnapshotResponse` | 400（synthetic でない・secret binding あり・egress が none でない・lifecycle を使わない）, 404, 409 `revision_not_ready`, 503（`[snapshots]` 無効・capability が使えない） |
+| GET | `/v1/functions/{function_id}/snapshots` | 実験: snapshot 一覧（状態 `active` / `revoked` / `quarantined` / `expired`、manifest digest、restore 回数） | 200 `ListResponse<SnapshotResponse>` | 404, 503 |
+| POST | `/v1/functions/{function_id}/snapshots/{snapshot_id}/revoke` | 実験: 失効（body `{"reason"}`、`deploy` role）。以後その snapshot は load されない | 200 `SnapshotResponse` | 404, 503 |
 | POST | `/v1/hooks/{trigger_id}` | 署名付き webhook の配信（bearer token なし、HMAC 署名で認証、§5.11.2） | 202 `WebhookAcceptedResponse` | 400（event id）, 401（署名・timestamp）, 404, 410（無効）, 413, 429, 503 |
 | GET | `/v1/functions/{function_id}/dead-letters` | 非同期 invocation の dead letter 一覧（PLT-4640、§5.6.2。新しい順、query: `limit`） | 200 `ListResponse<DeadLetterResponse>`（他 tenant の function は空） | 403, 503 `async_unavailable`（`not_configured`） |
 | GET | `/v1/dead-letters/{dead_letter_id}` | dead letter と redrive の記録（§5.6.2） | 200 `DeadLetterResponse` | 403, 404（他 tenant を含む） |
@@ -312,6 +315,7 @@ node（物理 host）と、その上の環境を分けて返す。`tenant` と `
 - `required_region`（任意）: この revision を動かしてよい region（例 `jp`）。node の `[capacity.node] region` が一致しなければ invoke は 503 `placement`。spec には `placement.region` として入り、未指定なら省略される（既存 revision の digest は変わらない）。
 - `egress`: `none`（既定。NIC なし）/ `restricted` / `public-web`。`egress_allow` は `restricted` のときだけ必須（1..=16 件）で、各要素は `{"cidr": "1.1.1.1/32", "protocol": "tcp", "ports": [443]}`（`protocol` は `tcp` 既定 / `udp`、`ports` は 1..=16 件）。IPv4 CIDR のみで、0/8・10/8・100.64/10・127/8・169.254/16・172.16/12・192.168/16 などの special-purpose 範囲と重なるものは 400。どの profile でも管理網・node・metadata・private 範囲・IPv6 には届かない（`docs/adr/0005-egress-profiles.md`）。spec の `egress_allow` は空なら省略される。
 - `publish_to_prod`（既定 true）: `ready` になった時点で alias `prod` を向ける。
+- `restore`（任意、**実験 X1、PLT-4653**）: `{"policy": "disabled" | "prefer" | "require", "synthetic_init_sample": bool}`。省略時は `disabled`（何も変わらず、spec にも出ないので既存 revision の digest は変わらない）。`prefer` / `require` は `synthetic_init_sample = true`・secret binding なし・egress `none` の revision だけ作れる（違えば 400）。`prefer`: 互換で検証済みの snapshot があれば clone で起動し、無ければ cold（attempt は `start_kind = cold`、`boot_evidence.details.restore_fallback` に理由）。`require`: clone できなければ invocation は `init_error` / `Host.RestoreRequiredUnavailable`（message に理由の code）で、cold にはならない。restore された attempt は `start_kind = restored` で、`boot_evidence.details` に `snapshot_id`、`snapshot_manifest_digest`、`restore_instance_id`、`restore_generation`、`restore_{verify,load,doorbell,reconnect,ready}_ms`。gateway の `[snapshots] enabled` が無ければ、`require` は常に失敗し `prefer` は常に cold（`restore_fallback = not_configured`）。詳細は §5.12 と `docs/adr/0017-snapshot-manifest-and-clone.md`。
 - scale policy（PLT-4635、§8）: `execution.min_ready`（既定 0 = 無負荷なら環境 0。`0..=16` かつ `max_concurrency` 以下。環境再利用が有効な gateway でだけ満たされる）、`execution.idle_ttl_seconds`（省略時 gateway の `[pool] idle_ttl_seconds`、`1..=86400`）、`execution.scale_down_cooldown_seconds`（省略時 `[scaling] scale_down_cooldown_seconds`、`0..=3600`）。環境数の上限は `max_concurrency`。後の 2 つは未指定なら spec に出ない（既存 revision の digest は変わらない）。
 
 Response 202 → `RevisionResponse`（`status` は `pending` → `preparing` → `validating` → `ready` | `failed`）:
@@ -690,6 +694,25 @@ scheduler は gateway の中で `[triggers] scheduler_interval_ms`（既定 1000
 `max_catchup_seconds`（既定 24 時間）より古い時刻は実行しない。受付が一時的に拒否された時刻（`backlog`、queue、設定 cache、store）は次の pass で再試行し、恒久的に拒否された時刻（function 削除、alias / revision 無し、revision 未 ready、policy）は `refused` として記録して進む。function が削除されていれば trigger を無効化する（`status_reason = function_deleted`）。
 
 同じ予定時刻の fire 行は 1 つだけ（再起動・2 つの scheduler・fire と cursor 更新の間の crash のどれでも）。
+
+### 5.12 snapshot（実験 X1、PLT-4653）
+
+`SnapshotResponse`:
+
+```json
+{
+  "id": "snap_01j...", "function_id": "fn_01j...", "revision_id": "rev_01j...",
+  "state": "active", "manifest_digest": "sha256:...", "manifest_version": 1,
+  "provider": "firecracker", "memory_mib": 256, "vcpus": 1,
+  "source_environment_id": "env_01j...", "restores": 2,
+  "created_at": "2026-09-17T12:00:00Z", "expires_at": "2026-09-17T13:00:00Z",
+  "timings": {"pause_ms": 3, "create_ms": 250, "copy_ms": 40, "seal_ms": 900}
+}
+```
+
+- `state_reason`: `revoked` / `quarantined` の理由（例 `artifact memory digest mismatch`、`stale: key_generation_changed`）。
+- restore の拒否理由の code（`Host.RestoreRequiredUnavailable` の message と `restore_fallback`）: `not_configured`、`capability_unverified` / `capability_unsupported`、`revision_not_eligible`、`secret_bindings`、`no_snapshot`、`tenant_mismatch`、`revision_mismatch`、`spec_digest_mismatch`、`runtime_mismatch`、`host_cpu_mismatch`、`device_model_mismatch`、`memory_mismatch`、`vcpu_mismatch`、`storage_mismatch`、`network_mismatch`、`egress_unsupported`、`key_generation_changed`、`secret_generation_changed`、`lifecycle_version_mismatch`、`expired`、`revoked`、`quarantined`、`manifest_invalid`、`artifact_corrupted`、`clone_failed`、`cold_boot_detected`、`not_the_source`、`reconnect_timeout`、`reconnect_failed`、`init_failed`。
+- snapshot の中身（memory・vmstate・scratch・function drive）は API から取得できない。
 
 ### 5.7 HTTP アダプタ
 

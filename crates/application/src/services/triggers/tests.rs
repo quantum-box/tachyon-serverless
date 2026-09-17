@@ -169,6 +169,7 @@ async fn deploy(app: &Application, tenant: &str, name: &str) -> (Function, Funct
                 description: String::new(),
                 publish_to_prod: true,
                 required_region: None,
+                restore: None,
             },
         )
         .await
