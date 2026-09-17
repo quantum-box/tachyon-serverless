@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4646、PLT-4647、PLT-4648、PLT-4651 X1、PLT-4652 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4646、PLT-4647、PLT-4648、PLT-4650、PLT-4651 X1、PLT-4652 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -904,6 +904,31 @@ clean clone からの追試（macOS arm64、process provider、**自動化 agent
 gate: `shellcheck 0.10.0 -x -P scripts/e2e`（全 tracked `.sh`）、`scripts/ci/selftest.sh`（`scripts/lab/**`・`deploy/lab/**` は KVM 必要にしないことを固定。理由は `docs/ci.md` §3）、`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`。Rust の変更は無いので `cargo test --workspace` は対象外。
 
 未検証・未着手: lab.sh の firecracker 経路（KVM host で通していない。Lima VM は別の計測に使われているため実行しなかった）、x86_64、bare metal、KVM CI runner（未登録）、既存 Tachyon Console への統合（未着手）、別の人間による追試。
+
+## PLT-4650 既知制約・国内有償 β との差分・次の設計判断
+
+文書 `docs/known-constraints-and-beta-gap.md`。記録日 2026-09-17、branch `docs/plt-4650-constraints`（origin/main `382d047` から）。本 repository のコード・script は変えていない。PLT-4649（最終受入）は未実行なので、その結果に依存する値は文書中で「PLT-4649 実行後に更新」と印を付け、数値を埋めていない（文書 §9 に一覧）。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 実測済み機能 / 未対応 / 残リスクの一覧（KVM 実測・process 実測・fake のみを区別） | 実装済み（文書） | 文書 §1（1.2 Firecracker、1.3 process provider、1.4 fake / 単体のみ、1.5 未対応。各行に evidence directory と acceptance の節） |
+| 2 | RFC の仮定と実測の差分表 | 実装済み（文書） / 一部は PLT-4649 実行後に更新 | 文書 §2.1（cold p95 ≤ 3 s は未達 6037 ms、warm p95 ≤ 20 ms は一部未達 17 / 17 / 31 ms、Fast Restore・可用性・backup 復旧は未測定、受付消失 0 はプロセス障害の範囲で一部達成、二重課金 0 は単一 host で達成）、§2.2（Kata+CH → Firecracker、TiDB → SQLite、S3 → local FS、OTel → メモリ、保持期限、相互認証などの構成差分）。数値は `docs/benchmark.md`・`docs/evidence/bench-20260917T055450Z/`・`docs/evidence/x1-clone-20260917T114231Z/`・`docs/failure-matrix.md` から転記 |
+| 3 | warm 対応 profile の一覧 | 実装済み（文書） | 文書 §3.1（Firecracker `idle_quiesce` / `idle_resume` = Supported・既定 off、process = Unsupported、snapshot / clone = Unverified（X1、既定無効）、Kata / CH は未対応 / 未成立） |
+| 4 | queue の耐久条件の一覧 | 実装済み（文書） | 文書 §3.2（JetStream 単一 node・`sync_interval: always`・crash 後の配送回数リセット・dedup window と kill -9 後の dedup 表・outbox の保証・disk 喪失で失うもの） |
+| 5 | 実行・DB・queue・log・backup・Secret の所在地と、単一 host の故障範囲 | 実装済み（文書） | 文書 §4（全データが 1 host、複製なし、backup なし、invocation log はメモリ、鍵は 0600 の file で KMS なし）、§5（component ごとの停止・復旧・失うデータ） |
+| 6 | 海外検証 pool や location hint を国内完結の証拠にしない | 実装済み（文書） | 文書 §4.1（region は scheduling label、唯一の public 公開は第三者 edge を通った quick tunnel、location hint・製品名で国内完結と判断しない） |
+| 7 | HA、国内 DC、鍵管理、実請求、サポート / abuse、SLA、性能原価を後続判断として整理 | 実装済み（文書） | 文書 §6.1〜§6.11（選択肢と tradeoff。Kata vs Firecracker、KVM CI runner、Console 認証、jailer uid / netns、IO 上限を含む） |
+| 8 | 有償 β へ進む条件を検証 / 契約 / 運用の単位で示す | 実装済み（文書、条件はすべて未達） | 文書 §7（V0〜V10、C1〜C6、O1〜O8、各項目に証明の方法） |
+| 9 | 公開・購入・本番移行・実請求を実行しない | 守った | 文書 §8。Linear の状態は変更していない |
+| 10 | knowledge 更新は PR 経由、無断 merge しない | draft PR を作成（未 merge、owner のレビュー待ち） | quantum-box/knowledge#287 の draft PR（branch `serverless/prototype-constraints-20260917`、`src/infrastructure/tachyon-serverless-prototype-constraints-20260917.md`）。URL は下の「検証」 |
+
+検証:
+
+| 検証 | 状態 | 証跡 |
+|---|---|---|
+| 受入証跡・性能結果から差分表をレビュー | 自己レビューのみ（作成した agent が各数値を `docs/benchmark.md`・`docs/evidence/bench-20260917T055450Z/summary.md`・`docs/failure-matrix.md`・ADR と照合） / 未実施（owner によるレビュー） | 文書 §2 の各行に出典 |
+| 文書内リンクが実在する file / directory を指す | 実装済み（ローカルの link 検査） | commit 時に markdown の相対リンクを検査（全件解決） |
+| knowledge PR | draft で作成、merge していない（owner のレビュー待ち） | https://github.com/quantum-box/knowledge/pull/287 |
 
 ## ADR-0001 残る測定の状況
 

@@ -31,6 +31,7 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 
 | 文書 | 内容 |
 |---|---|
+| [known-constraints-and-beta-gap.md](known-constraints-and-beta-gap.md) | **プロトタイプと本番サービスを混同しないための要約**（PLT-4650）: KVM 実測 / process 実測 / fake のみ / 未対応の機能一覧、RFC 仮目標と実測の差分、warm 対応 profile と queue の耐久条件、データ・秘密情報の所在地（全部 1 host・複製なし・backup なし）、単一 host の故障範囲、HA・国内 DC・鍵管理・実請求・abuse・SLA・原価などの後続判断、国内有償 β へ進む条件（検証 / 契約 / 運用） |
 | [inventory-tachyon-apps.md](inventory-tachyon-apps.md) | tachyon-apps（commit `ae727f1f7`）の棚卸し。領域ごとの reference / adapter candidate / 不要、port への対応、能力表（すべて unverified）、baseline KVM 測定プロファイル |
 | [acceptance.md](acceptance.md) | PLT-4613〜PLT-4630 の受入条件ごとの状態（実装済み / 実装済み・KVM実測あり / 未検証 / 未着手 / 対応中）と証跡（テスト名、スクリプト、evidence）、ADR-0001 の残る測定 M1〜M13 の状況、2026-09-16 のレビュー指摘 |
 
