@@ -260,7 +260,7 @@ demo_p3() {
 
   # 2. async, input above inline_input_max_bytes (64 KiB) -> encrypted object store
   local objs_before objs_after
-  objs_before="$(find "$OBJECTS_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  objs_before="$(object_files | wc -l | tr -d ' ')"
   python3 - "$DEMO_OUT/p3-async-large.json" "$PROVIDER" "$stamp" <<'PY'
 import json, sys
 path, provider, stamp = sys.argv[1:4]
@@ -271,11 +271,14 @@ PY
   api "$TOKEN_A" POST "/v1/functions/$fid:invokeAsync" "$DEMO_OUT/p3-async-large.json"
   inv="$(jqb .invocation_id)"
   status="$(wait_status "$inv" 60)"
-  objs_after="$(find "$OBJECTS_ROOT" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  objs_after="$(object_files | wc -l | tr -d ' ')"
   check p3.async_large_input_object_store "HTTP $HTTP_CODE status=$status objects under data/objects: $objs_before -> $objs_after (AES-256-GCM, lab key)" \
     test "$status" = succeeded -a "$objs_after" -gt "$objs_before"
-  if [ -n "$(find "$OBJECTS_ROOT" -type f 2>/dev/null | head -n 1)" ]; then
-    if grep -rqa 'xxxxxxxxxxxxxxxxxxxxxxxx' "$OBJECTS_ROOT" 2>/dev/null; then r=1; else r=0; fi
+  if [ -n "$(object_files)" ]; then
+    # grep: 0 found (plaintext leaked), 1 not found, 2 unreadable (counted as a failure, never as clean)
+    r=0
+    ${LAB_SUDO:+$LAB_SUDO }grep -rqa 'xxxxxxxxxxxxxxxxxxxxxxxx' "$OBJECTS_ROOT" 2>/dev/null || r=$?
+    if [ "$r" = 1 ]; then r=0; else r=1; fi
     check p3.object_store_ciphertext "the 100 KiB plaintext pad is not readable in data/objects" is "$r" 0
   fi
 
@@ -410,17 +413,24 @@ EOF
 # secret scan + main
 # ---------------------------------------------------------------------------
 
+# object_files -> files under the object root (root-owned in a privileged firecracker lab)
+object_files() { { ${LAB_SUDO:+$LAB_SUDO }find "$OBJECTS_ROOT" -type f 2>/dev/null || true; }; }
+
 demo_secret_scan() {
   section "secret values absent from logs, demo outputs and the ledger"
-  local v name hits=0 checked=0 target
+  local v name hits=0 checked=0 target rc
   for name in TOKEN_A TOKEN_A_ONCALL TOKEN_B METRICS_TOKEN DEMO_SECRET_VALUE; do
     v="$(eval "printf '%s' \"\$$name\"")"
     [ -n "$v" ] || continue
     for target in "$LOG_DIR" "$DEMO_DIR" "$DATA_DIR/state.db" "$DATA_DIR/state.db-wal"; do
       [ -e "$target" ] || continue
       checked=$((checked + 1))
-      if grep -rqaF -- "$v" "$target" 2>/dev/null; then
-        echo "  $name found in $target"
+      # 0 found, 1 not found, 2 unreadable: an unreadable file is a hit, never a clean result
+      # (a privileged firecracker lab's state.db is root-owned 0600; LAB_SUDO reads it).
+      rc=0
+      ${LAB_SUDO:+$LAB_SUDO }grep -rqaF -- "$v" "$target" 2>/dev/null || rc=$?
+      if [ "$rc" != 1 ]; then
+        echo "  $name found in (or could not read) $target (grep exit $rc)"
         hits=$((hits + 1))
       fi
     done
