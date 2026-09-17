@@ -262,6 +262,13 @@ resource_limits tachyon-serverless-application lib budget::tests::concurrent_res
 resource_limits tachyon-serverless-application lib budget::tests::property_duplicate_and_interleaved_transitions_never_break_the_balance
 resource_limits tachyon-serverless-application lib budget::tests::property_the_reservation_covers_every_rating_within_the_bounds
 resource_limits tachyon-serverless-application lib services::invoke_async::dispatch_tests::asynchronous_runs_reserve_budget_and_a_refused_run_is_deferred
+# --- PLT-4646: a locked SQLite store refuses every concurrent caller within a bounded time -------
+# (connection wait + busy timeout, not n x busy timeout): state.db, usage journal / ledger, budget, queue
+resource_limits tachyon-serverless-application lib repository::sqlite::tests::a_held_write_lock_fails_every_concurrent_caller_within_a_bounded_time
+resource_limits tachyon-serverless-application lib usage::tests::a_locked_journal_refuses_every_concurrent_append_within_a_bounded_time
+resource_limits tachyon-serverless-application lib usage::tests::a_locked_ledger_refuses_every_concurrent_delivery_within_a_bounded_time
+resource_limits tachyon-serverless-application lib budget::tests::a_locked_store_refuses_every_concurrent_reservation_within_a_bounded_time
+resource_limits tachyon-serverless-application lib durable::sqlite_queue::tests::a_locked_queue_refuses_every_concurrent_publish_within_a_bounded_time
 
 # --- PLT-4653 (X1, experimental): snapshot manifest, compatibility and clone refusals ----------
 # another tenant's snapshot is refused alone, even validly signed; sealed artifacts are tenant-bound

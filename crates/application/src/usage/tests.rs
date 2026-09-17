@@ -416,9 +416,106 @@ fn a_tampered_journal_row_stops_collection() {
     assert_eq!(chain_next("genesis", "x").len(), 64);
 }
 
+/// Bound of one store call while its database is locked: the connection wait
+/// plus the busy timeout, with slack for a loaded CI host.
+fn locked_store_bound() -> Duration {
+    crate::sqlite_wait::STORE_WAIT * 2 + Duration::from_secs(2)
+}
+
+/// `journal.db` is locked by another process. Every concurrent append must be
+/// refused (`usage_journal_unavailable`, fail closed) within one busy timeout
+/// plus the connection wait, not queue behind the other appends' busy
+/// timeouts on the connection mutex (PLT-4646: the n-th waited n x 5 s).
+#[test]
+fn a_locked_journal_refuses_every_concurrent_append_within_a_bounded_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.db");
+    let j = Arc::new(UsageJournal::open(Some(path.clone()), limits(1_000, 1)));
+    let f = FunctionId::generate();
+    let locker = rusqlite::Connection::open(&path).unwrap();
+    locker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let started = std::time::Instant::now();
+    let callers: Vec<_> = (0..4)
+        .map(|i| {
+            let (j, f) = (Arc::clone(&j), f.clone());
+            std::thread::spawn(move || {
+                let t = std::time::Instant::now();
+                let r = j.append(&settled(TENANT_A, &f, i, 1), t0());
+                (r, t.elapsed())
+            })
+        })
+        .collect();
+    for caller in callers {
+        let (result, elapsed) = caller.join().unwrap();
+        assert_eq!(result, Err(JournalRefusal::Unavailable));
+        assert!(
+            elapsed <= locked_store_bound(),
+            "an append waited {elapsed:?} (bound: connection wait + busy timeout)"
+        );
+    }
+    assert!(started.elapsed() < Duration::from_secs(14));
+    locker.execute_batch("ROLLBACK").unwrap();
+    assert!(j.probe());
+    assert_eq!(j.admission(), Ok(()));
+    j.append(&settled(TENANT_A, &f, 9, 1), t0()).unwrap();
+    assert_eq!(j.unjournaled_for(TENANT_A), 4, "every refusal is counted");
+}
+
 // ---------------------------------------------------------------------------
 // collector and ledger
 // ---------------------------------------------------------------------------
+
+/// `ledger.db` is locked by another process. Every concurrent delivery must
+/// fail within one busy timeout plus the connection wait (PLT-4646); the
+/// collector keeps its cursor, reports the error on `/readyz` and delivers
+/// everything once the lock is gone.
+#[test]
+fn a_locked_ledger_refuses_every_concurrent_delivery_within_a_bounded_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let meter = meter_in(Some(dir.path()), UsageConfig::default());
+    let f = FunctionId::generate();
+    for i in 0..2 {
+        meter
+            .journal()
+            .append(&settled(TENANT_A, &f, i, 1_000), t0())
+            .unwrap();
+    }
+    let locker = rusqlite::Connection::open(dir.path().join("usage/ledger.db")).unwrap();
+    locker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let started = std::time::Instant::now();
+    let callers: Vec<_> = (0..4)
+        .map(|i| {
+            let (meter, f) = (Arc::clone(&meter), f.clone());
+            std::thread::spawn(move || {
+                let t = std::time::Instant::now();
+                let r = meter
+                    .ledger()
+                    .accept(&[settled(TENANT_A, &f, 100 + i, 1)], t0());
+                (r, t.elapsed())
+            })
+        })
+        .collect();
+    for caller in callers {
+        let (result, elapsed) = caller.join().unwrap();
+        assert!(result.is_err(), "a locked ledger refuses: {result:?}");
+        assert!(
+            elapsed <= locked_store_bound(),
+            "a delivery waited {elapsed:?} (bound: connection wait + busy timeout)"
+        );
+    }
+    assert!(started.elapsed() < Duration::from_secs(14));
+    let t = std::time::Instant::now();
+    assert!(meter.collect().is_err(), "retried on the next tick");
+    assert!(t.elapsed() <= locked_store_bound());
+    let status = meter.status();
+    assert!(status.collector.last_error.is_some());
+    assert_eq!(status.journal.pending_events, 2, "the cursor did not move");
+    locker.execute_batch("ROLLBACK").unwrap();
+    let report = meter.collect().unwrap();
+    assert_eq!(report.inserted, 2);
+    assert_eq!(meter.ledger().stats().unwrap().events, 2);
+    assert!(meter.status().collector.last_error.is_none());
+}
 
 #[test]
 fn a_duplicate_event_is_a_single_ledger_row() {

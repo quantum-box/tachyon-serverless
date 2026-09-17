@@ -57,6 +57,11 @@ INSERT OR IGNORE INTO queue_meta (meta_key, meta_value) VALUES ('schema_version'
 ";
 
 fn backend(e: rusqlite::Error) -> QueueError {
+    // Another process holds `queue.db` past the busy timeout: retryable, like
+    // an unreachable broker (the outbox keeps its rows, the dispatcher defers).
+    if crate::sqlite_wait::is_busy(&e) {
+        return QueueError::Unavailable(e.to_string());
+    }
     QueueError::Backend(e.to_string())
 }
 
@@ -115,7 +120,8 @@ impl SqliteEventQueue {
         }
         create_private(path).map_err(|e| QueueError::Backend(e.to_string()))?;
         let conn = Connection::open(path).map_err(backend)?;
-        conn.busy_timeout(Duration::from_secs(5)).map_err(backend)?;
+        conn.busy_timeout(crate::sqlite_wait::STORE_WAIT)
+            .map_err(backend)?;
         let _mode: String = conn
             .query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))
             .map_err(backend)?;
@@ -142,7 +148,11 @@ impl SqliteEventQueue {
         f: impl FnOnce(&Connection, i64) -> Result<R, QueueError>,
     ) -> Result<R, QueueError> {
         let now = ms(self.clock.now());
-        let mut conn = self.conn.lock();
+        // Bounded (PLT-4646): while the holder sits in SQLite's busy timeout,
+        // the other callers are refused instead of queueing one busy timeout
+        // after the other.
+        let mut conn = crate::sqlite_wait::lock_connection(&self.conn)
+            .ok_or_else(|| QueueError::Unavailable(crate::sqlite_wait::busy_message("queue.db")))?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(backend)?;
@@ -579,5 +589,70 @@ mod tests {
             .unwrap();
         assert_eq!(got.len(), 10);
         assert_eq!(got[9].payload, vec![9u8]);
+    }
+
+    /// `queue.db` is locked by another process. Every concurrent publish must
+    /// be refused with the retryable `QueueError::Unavailable` (the outbox
+    /// keeps its rows, the dispatcher defers) within one busy timeout plus
+    /// the connection wait, not queue behind the other callers' busy timeouts
+    /// on the connection mutex (PLT-4646).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_locked_queue_refuses_every_concurrent_publish_within_a_bounded_time() {
+        use crate::sqlite_wait::STORE_WAIT;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SqliteEventQueue::FILE_NAME);
+        let q = Arc::new(
+            SqliteEventQueue::open(&path, testkit::small_limits(), Arc::new(SystemClock)).unwrap(),
+        );
+        let spec = ConsumerSpec {
+            name: ConsumerName::parse("dispatcher").unwrap(),
+            topic: Topic::parse("invoke").unwrap(),
+            ack_wait: Duration::from_secs(30),
+            max_deliver: 3,
+        };
+        q.ensure_consumer(&spec).await.unwrap();
+        let message = |i: usize| OutgoingMessage {
+            tenant_id: testkit::tenant_a(),
+            topic: spec.topic.clone(),
+            message_id: MessageId::parse(&format!("m-{i}")).unwrap(),
+            payload: vec![i as u8],
+        };
+        let locker = Connection::open(&path).unwrap();
+        locker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let started = std::time::Instant::now();
+        // Plain threads: the SQLite queue blocks the calling thread.
+        let callers: Vec<_> = (0..4)
+            .map(|i| {
+                let (q, m) = (Arc::clone(&q), message(i));
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap();
+                    let at = std::time::Instant::now();
+                    let r = rt.block_on(q.publish(m));
+                    (r, at.elapsed())
+                })
+            })
+            .collect();
+        for caller in callers {
+            let (result, elapsed) = caller.join().unwrap();
+            assert!(
+                matches!(result, Err(QueueError::Unavailable(_))),
+                "a locked queue is unavailable (retryable): {result:?}"
+            );
+            assert!(
+                elapsed <= STORE_WAIT * 2 + Duration::from_secs(2),
+                "a publish waited {elapsed:?} (bound: connection wait + busy timeout)"
+            );
+        }
+        assert!(started.elapsed() < Duration::from_secs(14));
+        locker.execute_batch("ROLLBACK").unwrap();
+        q.publish(message(9)).await.unwrap();
+        let got = q
+            .fetch(&spec.name, 10, Duration::from_millis(200))
+            .await
+            .unwrap();
+        assert_eq!(got.len(), 1, "only the publish after the lock went through");
     }
 }

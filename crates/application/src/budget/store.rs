@@ -20,6 +20,7 @@
 //!   aborts the transaction instead of committing it.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -286,15 +287,21 @@ pub struct StoreStats {
     pub oldest_finished_unsettled_at: Option<Timestamp>,
 }
 
-struct Inner {
-    conn: Option<Connection>,
-    last_error: Option<String>,
-    forced_unavailable: bool,
-}
+/// SQLite `busy_timeout` of `budget.db`. A call that finds the database
+/// locked by another process is refused (`Host.BudgetStoreUnavailable`)
+/// after at most this plus [`crate::sqlite_wait::STORE_WAIT`], whatever the
+/// number of concurrent callers (PLT-4646).
+pub(crate) const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct BudgetStore {
     path: Option<PathBuf>,
-    inner: Mutex<Inner>,
+    /// Taken with [`crate::sqlite_wait::lock_connection`] (bounded). Lock
+    /// order: `conn`, then `last_error`.
+    conn: Mutex<Option<Connection>>,
+    /// Kept apart from the connection so `/readyz` never waits behind a
+    /// caller that sits in the busy timeout.
+    last_error: Mutex<Option<String>>,
+    forced_unavailable: AtomicBool,
 }
 
 impl std::fmt::Debug for BudgetStore {
@@ -316,8 +323,7 @@ fn open_connection(path: Option<&Path>) -> Result<Connection, String> {
         }
         None => Connection::open_in_memory().map_err(|e| e.to_string())?,
     };
-    conn.busy_timeout(Duration::from_secs(10))
-        .map_err(|e| e.to_string())?;
+    conn.busy_timeout(BUSY_TIMEOUT).map_err(|e| e.to_string())?;
     if path.is_some() {
         let _: String = conn
             .query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))
@@ -537,11 +543,9 @@ impl BudgetStore {
         };
         Self {
             path,
-            inner: Mutex::new(Inner {
-                conn,
-                last_error,
-                forced_unavailable: false,
-            }),
+            conn: Mutex::new(conn),
+            last_error: Mutex::new(last_error),
+            forced_unavailable: AtomicBool::new(false),
         }
     }
 
@@ -552,35 +556,39 @@ impl BudgetStore {
     /// Test hook: behave as if the database were gone (`true`) or back.
     #[doc(hidden)]
     pub fn force_unavailable(&self, unavailable: bool) {
-        self.inner.lock().forced_unavailable = unavailable;
+        self.forced_unavailable.store(unavailable, Ordering::SeqCst);
     }
 
     pub fn last_error(&self) -> Option<String> {
-        self.inner.lock().last_error.clone()
+        self.last_error.lock().clone()
     }
 
     fn with_tx<T>(
         &self,
         f: impl FnOnce(&Transaction<'_>) -> rusqlite::Result<T>,
     ) -> Result<T, String> {
-        let mut inner = self.inner.lock();
-        if inner.forced_unavailable {
+        if self.forced_unavailable.load(Ordering::SeqCst) {
             return Err("budget store is unavailable (forced)".into());
         }
-        if inner.conn.is_none() {
+        let Some(mut guard) = crate::sqlite_wait::lock_connection(&self.conn) else {
+            let msg = crate::sqlite_wait::busy_message("budget store");
+            *self.last_error.lock() = Some(msg.clone());
+            return Err(msg);
+        };
+        if guard.is_none() {
             match open_connection(self.path.as_deref()) {
                 Ok(c) => {
                     tracing::info!("budget store available again");
-                    inner.conn = Some(c);
-                    inner.last_error = None;
+                    *guard = Some(c);
+                    *self.last_error.lock() = None;
                 }
                 Err(e) => {
-                    inner.last_error = Some(e.clone());
+                    *self.last_error.lock() = Some(e.clone());
                     return Err(e);
                 }
             }
         }
-        let conn = inner.conn.as_mut().expect("opened above");
+        let conn = guard.as_mut().expect("opened above");
         let result = (|| {
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             let v = f(&tx)?;
@@ -589,7 +597,7 @@ impl BudgetStore {
         })();
         match result {
             Ok(v) => {
-                inner.last_error = None;
+                *self.last_error.lock() = None;
                 Ok(v)
             }
             Err(e) => {
@@ -602,9 +610,9 @@ impl BudgetStore {
                         | Some(rusqlite::ErrorCode::SystemIoFailure)
                         | Some(rusqlite::ErrorCode::ReadOnly)
                 ) {
-                    inner.conn = None;
+                    *guard = None;
                 }
-                inner.last_error = Some(msg.clone());
+                *self.last_error.lock() = Some(msg.clone());
                 Err(msg)
             }
         }
