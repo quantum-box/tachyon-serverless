@@ -278,7 +278,7 @@ PASS  secrets.not_leaked                                         20 locations x 
 
 ## 6. 失敗時の復旧
 
-どの失敗でも最初に見るのは、そのコマンドの command log（`scripts/lab/lab.sh logs last`）と `logs gateway`。lab は使い捨てなので、原因が分からなければ **`teardown` → `bootstrap` → `up`** がいつでも使える最終手段（§7）。
+どの失敗でも最初に見るのは、そのコマンドの command log（`scripts/lab/lab.sh logs last`）と `logs gateway`。lab は使い捨てなので、原因が分からなければ **`teardown` → `bootstrap` → `up`** がいつでも使える最終手段（§7）。稼働中の controller・DB・queue・object store・usage journal・worker の障害で何が起き、どう収束するかの実測は docs/failure-matrix.md（PLT-4646、`scripts/chaos/matrix.sh`）にある。この節は lab の立ち上げと運用で詰まる場所だけを扱う。
 
 ### 6.1 bootstrap の取得失敗・checksum 不一致
 
