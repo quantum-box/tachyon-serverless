@@ -658,3 +658,55 @@ fn a_dropped_store_file_is_reopened() {
     store.reserve(&new_res("x", 5, None), t(0)).unwrap();
     assert_eq!(store.stats().unwrap().active_reservations, 1);
 }
+
+/// `budget.db` is locked by another process. Every concurrent reservation must
+/// be refused (`Host.BudgetStoreUnavailable`) within one busy timeout plus the
+/// connection wait, not queue behind the other callers' busy timeouts on the
+/// connection mutex, and the operator view (`last_error`) must not wait for
+/// the connection at all (PLT-4646).
+#[test]
+fn a_locked_store_refuses_every_concurrent_reservation_within_a_bounded_time() {
+    use std::time::{Duration, Instant};
+    let bound = store::BUSY_TIMEOUT + crate::sqlite_wait::STORE_WAIT + Duration::from_secs(2);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("budget.db");
+    let store = Arc::new(BudgetStore::open(Some(path.clone())));
+    store.reserve(&new_res("before", 5, None), t(0)).unwrap();
+    let locker = rusqlite::Connection::open(&path).unwrap();
+    locker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let started = Instant::now();
+    let callers: Vec<_> = (0..4)
+        .map(|i| {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                let at = Instant::now();
+                let r = store.reserve(&new_res(&format!("r{i}"), 5, None), t(1));
+                (r, at.elapsed())
+            })
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(200));
+    let view = Instant::now();
+    let _ = store.last_error();
+    assert!(
+        view.elapsed() < Duration::from_secs(1),
+        "the operator view never waits for the connection"
+    );
+    for caller in callers {
+        let (result, elapsed) = caller.join().unwrap();
+        assert!(result.is_err(), "a locked store refuses: {result:?}");
+        assert!(
+            elapsed <= bound,
+            "a reservation waited {elapsed:?} (bound: connection wait + busy timeout)"
+        );
+    }
+    assert!(started.elapsed() < bound + Duration::from_secs(2));
+    assert!(store.last_error().is_some());
+    locker.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(
+        store.reserve(&new_res("after", 5, None), t(2)).unwrap(),
+        ReserveOutcome::Reserved
+    );
+    assert_eq!(store.stats().unwrap().active_reservations, 2);
+    assert!(store.last_error().is_none());
+}

@@ -21,6 +21,7 @@ pub mod metrics;
 pub mod repository;
 pub mod services;
 pub mod snapshot;
+pub(crate) mod sqlite_wait;
 pub mod usage;
 
 pub use app::{Application, BootstrapOptions, ProviderFactory};

@@ -22,7 +22,6 @@
 //!   never written: nothing in the domain rows carries a secret value.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Params, TransactionBehavior, params};
@@ -155,11 +154,11 @@ impl std::fmt::Debug for SqliteStore {
 }
 
 /// How long one call waits for the database write lock (SQLite
-/// `busy_timeout`) and, separately, for this store's connection mutex. A
-/// store that stays locked answers `RepoError::Store` (503
-/// `Host.StoreUnavailable`) after at most twice this, whatever the number of
-/// concurrent callers (PLT-4646).
-const STORE_WAIT: Duration = Duration::from_secs(5);
+/// `busy_timeout`) and, separately, for this store's connection mutex
+/// ([`crate::sqlite_wait`]). A store that stays locked answers
+/// `RepoError::Store` (503 `Host.StoreUnavailable`) after at most twice this,
+/// whatever the number of concurrent callers (PLT-4646).
+use crate::sqlite_wait::STORE_WAIT;
 
 fn configure(conn: &Connection) -> Result<(), RepoError> {
     conn.busy_timeout(STORE_WAIT)?;
@@ -262,12 +261,8 @@ impl SqliteStore {
     /// sits in SQLite's busy timeout (a database locked by another process),
     /// callers must not queue behind it one busy timeout after the other.
     fn connection(&self) -> Result<parking_lot::MutexGuard<'_, Connection>, RepoError> {
-        self.conn.try_lock_for(STORE_WAIT).ok_or_else(|| {
-            RepoError::Store(format!(
-                "the store connection stayed busy for {} s (database locked?)",
-                STORE_WAIT.as_secs()
-            ))
-        })
+        crate::sqlite_wait::lock_connection(&self.conn)
+            .ok_or_else(|| RepoError::Store(crate::sqlite_wait::busy_message("store")))
     }
 
     fn read<R>(&self, f: impl FnOnce(&Connection) -> Result<R, RepoError>) -> Result<R, RepoError> {

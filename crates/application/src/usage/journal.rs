@@ -25,7 +25,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -119,19 +119,25 @@ pub struct JournalStatus {
     pub last_error: Option<String>,
 }
 
-struct Inner {
-    conn: Option<Connection>,
+/// Bookkeeping kept apart from the connection: it is only ever held for a
+/// moment, never while waiting for SQLite, so recording a refusal does not
+/// queue behind a caller that sits in the busy timeout (PLT-4646).
+#[derive(Default)]
+struct Notes {
     last_error: Option<String>,
     /// Refusals while the database could not record them itself.
     lost_unavailable: BTreeMap<String, u64>,
-    /// Test hook: behave as if the database were unavailable.
-    forced_unavailable: bool,
 }
 
 pub struct UsageJournal {
     path: Option<PathBuf>,
     limits: JournalLimits,
-    inner: Mutex<Inner>,
+    /// Taken with [`crate::sqlite_wait::lock_connection`] (bounded). Lock
+    /// order: `conn`, then `notes`.
+    conn: Mutex<Option<Connection>>,
+    notes: Mutex<Notes>,
+    /// Test hook: behave as if the database were unavailable.
+    forced_unavailable: AtomicBool,
 }
 
 impl std::fmt::Debug for UsageJournal {
@@ -154,7 +160,7 @@ fn open_connection(path: Option<&Path>) -> Result<Connection, String> {
         }
         None => Connection::open_in_memory().map_err(|e| e.to_string())?,
     };
-    conn.busy_timeout(Duration::from_secs(5))
+    conn.busy_timeout(crate::sqlite_wait::STORE_WAIT)
         .map_err(|e| e.to_string())?;
     if path.is_some() {
         let _: String = conn
@@ -200,12 +206,12 @@ impl UsageJournal {
         Self {
             path,
             limits,
-            inner: Mutex::new(Inner {
-                conn,
+            conn: Mutex::new(conn),
+            notes: Mutex::new(Notes {
                 last_error,
                 lost_unavailable: BTreeMap::new(),
-                forced_unavailable: false,
             }),
+            forced_unavailable: AtomicBool::new(false),
         }
     }
 
@@ -221,27 +227,32 @@ impl UsageJournal {
     /// (`true`) or restore it (`false`).
     #[doc(hidden)]
     pub fn force_unavailable(&self, unavailable: bool) {
-        self.inner.lock().forced_unavailable = unavailable;
+        self.forced_unavailable.store(unavailable, Ordering::SeqCst);
     }
 
     /// Re-open an unavailable journal. Returns whether it is usable now.
     pub fn probe(&self) -> bool {
-        let mut inner = self.inner.lock();
-        if inner.forced_unavailable {
+        if self.forced_unavailable.load(Ordering::SeqCst) {
             return false;
         }
-        if inner.conn.is_some() {
+        // Not waiting: while someone else holds the connection (the admission
+        // that just failed already waited for it), report "not usable now"
+        // rather than wait a second time (PLT-4646).
+        let Some(mut conn) = self.conn.try_lock() else {
+            return false;
+        };
+        if conn.is_some() {
             return true;
         }
         match open_connection(self.path.as_deref()) {
             Ok(c) => {
                 tracing::info!("usage journal available again");
-                inner.conn = Some(c);
-                inner.last_error = None;
+                *conn = Some(c);
+                self.notes.lock().last_error = None;
                 true
             }
             Err(e) => {
-                inner.last_error = Some(e);
+                self.notes.lock().last_error = Some(e);
                 false
             }
         }
@@ -251,12 +262,18 @@ impl UsageJournal {
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T, rusqlite::Error>,
     ) -> Result<T, String> {
-        let mut inner = self.inner.lock();
-        if inner.forced_unavailable {
+        if self.forced_unavailable.load(Ordering::SeqCst) {
             return Err("usage journal is unavailable (forced)".into());
         }
-        let Some(conn) = inner.conn.as_mut() else {
-            return Err(inner
+        let Some(mut guard) = crate::sqlite_wait::lock_connection(&self.conn) else {
+            let msg = crate::sqlite_wait::busy_message("usage journal");
+            self.notes.lock().last_error = Some(msg.clone());
+            return Err(msg);
+        };
+        let Some(conn) = guard.as_mut() else {
+            return Err(self
+                .notes
+                .lock()
                 .last_error
                 .clone()
                 .unwrap_or_else(|| "usage journal is not open".into()));
@@ -274,17 +291,17 @@ impl UsageJournal {
                         | Some(rusqlite::ErrorCode::SystemIoFailure)
                         | Some(rusqlite::ErrorCode::ReadOnly)
                 ) {
-                    inner.conn = None;
+                    *guard = None;
                 }
-                inner.last_error = Some(msg.clone());
+                self.notes.lock().last_error = Some(msg.clone());
                 Err(msg)
             }
         }
     }
 
     fn note_unavailable_loss(&self, tenant: &str) {
-        let mut inner = self.inner.lock();
-        *inner
+        let mut notes = self.notes.lock();
+        *notes
             .lost_unavailable
             .entry(tenant.to_string())
             .or_default() += 1;
@@ -501,7 +518,7 @@ impl UsageJournal {
     /// Events of `tenant` the journal refused (full or unavailable).
     pub fn unjournaled_for(&self, tenant: &str) -> u64 {
         let in_memory = self
-            .inner
+            .notes
             .lock()
             .lost_unavailable
             .get(tenant)
@@ -538,8 +555,8 @@ impl UsageJournal {
             Ok((cursor as u64, events as u64, bytes as u64, lost as u64))
         });
         let admitting = self.admission().is_ok();
-        let inner = self.inner.lock();
-        let lost_memory: u64 = inner.lost_unavailable.values().sum();
+        let notes = self.notes.lock();
+        let lost_memory: u64 = notes.lost_unavailable.values().sum();
         let (healthy, (cursor_seq, pending_events, pending_bytes, lost_disk)) = match state {
             Ok(s) => (true, s),
             Err(_) => (false, (0, 0, 0, 0)),
@@ -554,7 +571,7 @@ impl UsageJournal {
             limits: self.limits,
             admitting,
             unjournaled_events: lost_disk + lost_memory,
-            last_error: inner.last_error.clone(),
+            last_error: notes.last_error.clone(),
         }
     }
 }
