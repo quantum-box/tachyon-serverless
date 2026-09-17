@@ -1,0 +1,73 @@
+{
+  "node": {
+    "name": "burst-local",
+    "region": "us",
+    "hosts": 1,
+    "host_scale_out": "not_supported",
+    "capacity": {
+      "memory_mib": 900
+    },
+    "per_environment_overhead": {
+      "cpu_millis": 0,
+      "memory_mib": 24,
+      "ephemeral_storage_mib": 0
+    },
+    "max_concurrency": 8
+  },
+  "reserved": {
+    "cpu_millis": 0,
+    "memory_mib": 0,
+    "ephemeral_storage_mib": 0
+  },
+  "environments": {
+    "starting": 0,
+    "busy": 0,
+    "promised": 0,
+    "parking": 0,
+    "idle": 0,
+    "draining": 0
+  },
+  "in_flight": 0,
+  "queue": {
+    "length": 0,
+    "bytes": 0,
+    "max_length": 4,
+    "max_bytes": 33554432,
+    "timeout_seconds": 20
+  },
+  "start_rate": {
+    "per_second": 20,
+    "burst": 20,
+    "tokens": 20
+  },
+  "rejections": {
+    "placement": 1,
+    "queue_full": 7
+  },
+  "tenant": {
+    "tenant_id": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+    "in_flight": 0,
+    "queued": 0,
+    "queued_bytes": 0,
+    "weight": 1
+  },
+  "revisions": [
+    {
+      "revision_id": "rev_01m2pwfz2w0e01dv0vyebe6737",
+      "desired": 1,
+      "max_environments": 8,
+      "environments": {
+        "starting": 0,
+        "busy": 0,
+        "promised": 0,
+        "parking": 0,
+        "idle": 0,
+        "draining": 0
+      },
+      "queued": 0,
+      "arrival_rate_per_second": 1.422,
+      "avg_duration_ms": 411,
+      "circuit_breaker": "closed"
+    }
+  ]
+}

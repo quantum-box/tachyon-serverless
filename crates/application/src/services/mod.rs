@@ -1,6 +1,7 @@
 //! Use cases. Each service is a thin orchestration over the repositories
 //! and ports; all authorization goes through [`crate::authz`].
 
+pub mod admission;
 pub mod alias;
 pub mod artifact;
 pub mod dispatcher;
@@ -12,6 +13,7 @@ pub mod provider;
 pub mod reconcile;
 pub mod revision;
 
+pub use admission::{AdmissionController, Grant, RejectReason, Rejection};
 pub use alias::AliasService;
 pub use artifact::ArtifactService;
 pub use dispatcher::Dispatcher;

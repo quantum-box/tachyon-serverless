@@ -69,6 +69,7 @@ tsls functions list
 | コマンド | 説明 |
 |---|---|
 | `provider` | `GET /v1/provider`。kind / isolation / dev_only と capability 表、preflight を表示。`dev_only` なら「隔離なし」の警告を標準エラーに出す |
+| `capacity` | `GET /v1/capacity`（PLT-4634）。node（region、hosts、host scale-out の可否、容量、環境ごとの overhead）、予約の合計、状態別の環境数、in-flight、待ち行列、start rate と、自 tenant の revision ごとの desired / starting / busy / idle / queued / 到着率 / breaker を表示。`--json` で本文そのまま |
 | `health` | `GET /healthz` と `GET /readyz`。どちらかが 2xx でなければ exit 6 |
 | `dev --binary <path> ...` | 使い捨て gateway で 1 バイナリを end-to-end 実行（§9） |
 
@@ -83,6 +84,7 @@ tsls functions deploy --function <name|id> --binary <path>
     [--egress none|restricted|public-web]  # 既定 none（NIC なし）
     [--egress-allow [tcp|udp:]CIDR:PORT[,PORT...]]...  # restricted の許可先（必須、他 profile では不可）
     [--description <text>]
+    [--region <region>]                    # 例 jp。node の region が違えば invoke は 503 placement
     [--no-publish]                         # alias prod を動かさない
     [--wait | --no-wait] [--wait-timeout 120]
 ```
@@ -93,6 +95,7 @@ tsls functions deploy --function <name|id> --binary <path>
 - revision が `failed` → exit 2（理由を表示）。`--wait-timeout` 超過 → exit 4。
 - `--secret` の値は CLI を通らない。`binding_ref` は gateway 設定 `[[secrets.bindings]]` で解決される。
 - `--egress restricted` は `--egress-allow` で許可先を 1 つ以上指定する（例 `--egress-allow 1.1.1.1/32:443`、`--egress-allow udp:1.1.1.1/32:53`）。IPv4 CIDR のみで、private・link-local・metadata・loopback などの範囲は 400 になる。firecracker provider で `restricted` / `public-web` を実行するには host 側の権限が要る（`docs/adr/0005-egress-profiles.md`）。
+- `--region jp` は revision の `required_region`。gateway の `[capacity.node] region` が一致しない node では、容量に関係なく invoke が 503（`error.reason = placement`、exit 6）になる（`docs/adr/0006-autoscaling-and-admission.md`）。
 - firecracker provider では `--binary` は static Linux (musl) バイナリでなければならない。CLI は形式を検証しない（provider の validate で `failed` になる）。
 
 ## 5. `functions invoke`

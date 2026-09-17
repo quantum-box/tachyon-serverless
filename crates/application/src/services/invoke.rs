@@ -21,13 +21,13 @@
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
 use futures::FutureExt;
 use parking_lot::Mutex;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+use tokio::sync::watch;
 
 use tachyon_serverless_domain::{
     AliasName, AttemptId, Clock, Deadlines, EnvironmentId, ErrorClass, EventKind, EvidenceQuality,
@@ -55,6 +55,9 @@ use crate::repository::{
     SlotAcquire, SlotCompletion,
 };
 use crate::services::Dispatcher;
+use crate::services::admission::{
+    AdmissionController, Grant, GrantKind, Pending, RejectReason, WaitError, error_type_for,
+};
 use crate::services::history::{HistoryService, InvocationDetail};
 use crate::services::pool::{
     EnvironmentPool, WarmEnvironment, WarmStartTimings, environment_lifetime_ms, reuse_key_for,
@@ -183,9 +186,9 @@ pub struct InvokeService {
     dispatcher: Arc<Dispatcher>,
     /// Configuration cache and start restrictions (PLT-4636).
     gate: Arc<InvokeGate>,
-    global_slots: Arc<Semaphore>,
-    revision_slots: Mutex<HashMap<RevisionId, Arc<Semaphore>>>,
-    queued: Arc<AtomicUsize>,
+    /// Capacity ledger, fair queue, quotas, autoscaler gate, start-rate
+    /// limiter and circuit breakers (PLT-4634).
+    admission: Arc<AdmissionController>,
     in_flight: Mutex<HashMap<InvocationId, InFlight>>,
     draining: AtomicBool,
 }
@@ -206,12 +209,12 @@ pub struct InvokeServiceDeps {
     pub pool: Arc<EnvironmentPool>,
     pub dispatcher: Arc<Dispatcher>,
     pub gate: Arc<InvokeGate>,
+    pub admission: Arc<AdmissionController>,
 }
 
 impl InvokeService {
     pub fn new(deps: InvokeServiceDeps) -> Arc<Self> {
         Arc::new(Self {
-            global_slots: Arc::new(Semaphore::new(deps.capacity.max_concurrency)),
             repos: deps.repos,
             artifacts: deps.artifacts,
             secrets: deps.secrets,
@@ -227,8 +230,7 @@ impl InvokeService {
             pool: deps.pool,
             dispatcher: deps.dispatcher,
             gate: deps.gate,
-            revision_slots: Mutex::new(HashMap::new()),
-            queued: Arc::new(AtomicUsize::new(0)),
+            admission: deps.admission,
             in_flight: Mutex::new(HashMap::new()),
             draining: AtomicBool::new(false),
         })
@@ -344,21 +346,33 @@ impl InvokeService {
             return self.replay_binding(&req, &input_digest, binding).await;
         }
 
-        // 5 (first half). Capacity is checked before anything is recorded so
-        // that a full wait queue answers 429 without a ledger entry and
-        // without binding the idempotency key.
-        let pre = match self.preacquire(&revision) {
+        // 5 (first half). Admission is asked before anything is recorded so
+        // that a refusal (full queue, quota, placement, open breaker) answers
+        // without a ledger entry and without binding the idempotency key.
+        let ticket = self.admission.ticket(
+            &function.tenant_id,
+            &revision,
+            input_size,
+            invocation.deadlines.queue_deadline,
+        );
+        let mut pre = match self.admission.admit(ticket) {
             Ok(pre) => pre,
-            Err(e) => {
+            Err(rejection) => {
                 // A concurrent request with the same key may have been
                 // accepted in the meantime; its record is the better answer.
                 if let Some(binding) = self.bound_invocation(&req)? {
                     return self.replay_binding(&req, &input_digest, binding).await;
                 }
-                return Err(e);
+                tracing::info!(
+                    tenant_id = %function.tenant_id,
+                    revision_id = %revision.id,
+                    reason = rejection.reason.as_str(),
+                    "invocation refused by admission"
+                );
+                return Err(rejection.into());
             }
         };
-        if pre.queued() {
+        if pre.is_waiting() {
             let _ = invocation.mark_queued();
         }
 
@@ -402,6 +416,7 @@ impl InvokeService {
             cancel_rx,
             accepted_at: Instant::now(),
             pre: Some(pre),
+            grant: None,
             env_id: None,
             attempt_id: None,
             lease_id: None,
@@ -598,98 +613,11 @@ impl InvokeService {
             .get(id)?
             .ok_or_else(|| AppError::not_found("invocation not found"))
     }
-
-    /// Try to take both capacity permits without waiting. When at least one
-    /// is unavailable, reserve a slot in the bounded wait queue (or fail
-    /// with `CapacityExceeded` when the queue is full).
-    fn preacquire(&self, revision: &FunctionRevision) -> Result<Preacquired, AppError> {
-        let rev_sem = self.revision_semaphore(revision);
-        let global = self.global_slots.clone();
-        let rev = rev_sem.clone().try_acquire_owned().ok();
-        let global_permit = if rev.is_some() {
-            global.clone().try_acquire_owned().ok()
-        } else {
-            None
-        };
-        let slot = if rev.is_none() || global_permit.is_none() {
-            Some(
-                QueueSlot::take(self.queued.clone(), self.capacity.max_queue).ok_or_else(|| {
-                    AppError::CapacityExceeded(format!(
-                        "no capacity available and the wait queue ({} slots) is full",
-                        self.capacity.max_queue
-                    ))
-                })?,
-            )
-        } else {
-            None
-        };
-        Ok(Preacquired {
-            rev_sem,
-            global_sem: global,
-            rev,
-            global: global_permit,
-            slot,
-        })
-    }
-
-    fn revision_semaphore(&self, revision: &FunctionRevision) -> Arc<Semaphore> {
-        self.revision_slots
-            .lock()
-            .entry(revision.id.clone())
-            .or_insert_with(|| {
-                Arc::new(Semaphore::new(
-                    revision.spec.execution.max_concurrency.max(1) as usize,
-                ))
-            })
-            .clone()
-    }
 }
 
 // ---------------------------------------------------------------------------
 // driver
 // ---------------------------------------------------------------------------
-
-enum QueueError {
-    QueueTimeout,
-    Cancelled(CancelKind),
-    Closed,
-}
-
-/// RAII slot in the bounded wait queue.
-struct QueueSlot(Arc<AtomicUsize>);
-
-impl QueueSlot {
-    fn take(counter: Arc<AtomicUsize>, max: usize) -> Option<Self> {
-        counter
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |q| {
-                (q < max).then_some(q + 1)
-            })
-            .ok()
-            .map(|_| Self(counter))
-    }
-}
-
-impl Drop for QueueSlot {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-/// Capacity state handed from the synchronous part of `invoke` to the driver.
-struct Preacquired {
-    rev_sem: Arc<Semaphore>,
-    global_sem: Arc<Semaphore>,
-    rev: Option<OwnedSemaphorePermit>,
-    global: Option<OwnedSemaphorePermit>,
-    /// Held while waiting for a permit; bounds the queue length.
-    slot: Option<QueueSlot>,
-}
-
-impl Preacquired {
-    fn queued(&self) -> bool {
-        self.slot.is_some()
-    }
-}
 
 /// Outcome classification: the ledger result (output ref + http status on
 /// success, the error otherwise) and how the environment ends.
@@ -850,7 +778,12 @@ struct Driver {
     client_deadline: Timestamp,
     cancel_rx: watch::Receiver<Option<CancelKind>>,
     accepted_at: Instant,
-    pre: Option<Preacquired>,
+    /// The admission this invocation queued for in `invoke`.
+    pre: Option<Pending>,
+    /// The environment reservation (or pooled-environment promise) this
+    /// driver holds. Released when dropped; handed to the pool with the
+    /// environment when it is pooled.
+    grant: Option<Grant>,
     // What the driver has recorded so far, so that a panic can still clean
     // up (see `cleanup_after_panic`). Cleared once the normal path finished.
     env_id: Option<EnvironmentId>,
@@ -1104,86 +1037,150 @@ impl Driver {
         self.svc.usage.record(event).await;
     }
 
-    async fn acquire_one(
-        &mut self,
-        sem: Arc<Semaphore>,
-        deadline: Instant,
-    ) -> Result<OwnedSemaphorePermit, QueueError> {
-        if let Ok(p) = sem.clone().try_acquire_owned() {
-            return Ok(p);
+    /// Record why admission ended this invocation while it was queued.
+    fn fail_admission(&self, error: WaitError<CancelKind>, while_what: &str) {
+        let error = match error {
+            WaitError::Timeout(reason) => InvocationError::new(
+                ErrorClass::QueueTimeout,
+                error_type_for(reason),
+                format!(
+                    "no capacity became available before the queue deadline ({})",
+                    reason.as_str()
+                ),
+            ),
+            WaitError::Rejected(r) if r.reason == RejectReason::CircuitOpen => {
+                InvocationError::new(
+                    ErrorClass::PlatformError,
+                    error_type_for(r.reason),
+                    r.message,
+                )
+            }
+            WaitError::Rejected(r) => InvocationError::new(
+                ErrorClass::QueueTimeout,
+                error_type_for(r.reason),
+                r.message,
+            ),
+            WaitError::Cancelled(kind) => InvocationError::new(
+                ErrorClass::Cancelled,
+                "Host.Cancelled",
+                match kind {
+                    CancelKind::Client => format!("cancelled by request while {while_what}"),
+                    CancelKind::Shutdown => {
+                        format!("cancelled by gateway shutdown while {while_what}")
+                    }
+                },
+            ),
+            WaitError::Closed => InvocationError::new(
+                ErrorClass::PlatformError,
+                "Host.CapacityClosed",
+                "admission closed while the invocation waited",
+            ),
+        };
+        self.fail_invocation(error);
+    }
+
+    /// Complete the admission started in `invoke`. The wait ends at the
+    /// queue deadline, which never exceeds the client deadline.
+    async fn acquire_capacity(&mut self) -> Result<Grant, WaitError<CancelKind>> {
+        let deadline = (self.accepted_at + self.svc.capacity.queue_timeout())
+            .min(Instant::now() + self.client_remaining());
+        let pending = self.pre.take().expect("admission is taken once");
+        pending
+            .wait(deadline.into(), wait_cancel(&mut self.cancel_rx))
+            .await
+    }
+
+    /// Make sure this driver holds a *cold* reservation before it boots an
+    /// environment: a promise of a pooled environment that was not there is
+    /// redeemed on the spot when the node allows it, and otherwise the
+    /// invocation queues again (at the front of its tenant's queue, until
+    /// its client deadline) for a cold start. `false` means the invocation
+    /// has already been failed.
+    async fn ensure_cold_grant(&mut self) -> bool {
+        let svc = self.svc.clone();
+        match self.grant.take() {
+            Some(g) if g.kind() == GrantKind::Cold => {
+                self.grant = Some(g);
+                return true;
+            }
+            Some(promise) => {
+                if let Some(cold) = svc.admission.redeem(promise) {
+                    self.grant = Some(cold);
+                    return true;
+                }
+            }
+            None => {}
         }
-        tokio::select! {
-            r = tokio::time::timeout_at(deadline.into(), sem.acquire_owned()) => match r {
-                Ok(Ok(p)) => Ok(p),
-                Ok(Err(_)) => Err(QueueError::Closed),
-                Err(_) => Err(QueueError::QueueTimeout),
-            },
-            k = wait_cancel(&mut self.cancel_rx) => Err(QueueError::Cancelled(k)),
+        let ticket = svc.admission.ticket(
+            &self.function.tenant_id,
+            &self.revision,
+            self.input_size,
+            self.client_deadline,
+        );
+        let pending = match svc.admission.requeue_cold(ticket) {
+            Ok(p) => p,
+            Err(rejection) => {
+                self.fail_admission(WaitError::Rejected(rejection), "waiting for a cold start");
+                return false;
+            }
+        };
+        let until = Instant::now() + self.client_remaining();
+        match pending
+            .wait(until.into(), wait_cancel(&mut self.cancel_rx))
+            .await
+        {
+            Ok(g) => {
+                self.grant = Some(g);
+                true
+            }
+            Err(e) => {
+                self.fail_admission(e, "waiting for a cold start");
+                false
+            }
         }
     }
 
-    /// Complete the capacity acquisition started in `invoke`. The queue slot
-    /// is released as soon as both permits are held. The wait ends at the
-    /// queue deadline, which never exceeds the client deadline.
-    async fn acquire_capacity(
-        &mut self,
-    ) -> Result<(OwnedSemaphorePermit, OwnedSemaphorePermit), QueueError> {
-        let deadline = (self.accepted_at + self.svc.capacity.queue_timeout())
-            .min(Instant::now() + self.client_remaining());
-        let pre = self.pre.take().expect("capacity state is taken once");
-        let Preacquired {
-            rev_sem,
-            global_sem,
-            rev,
-            global,
-            slot,
-        } = pre;
-        let rev_permit = match rev {
-            Some(p) => p,
-            None => self.acquire_one(rev_sem, deadline).await?,
-        };
-        let global_permit = match global {
-            Some(p) => p,
-            None => self.acquire_one(global_sem, deadline).await?,
-        };
-        drop(slot);
-        Ok((rev_permit, global_permit))
+    /// Whether the invoke gate still lets this invocation boot an environment
+    /// (PLT-4636). A refusal fails the invocation with the gate's own error,
+    /// which stays distinct from every admission refusal (PLT-4634).
+    fn cold_start_permitted(&self) -> bool {
+        match self
+            .svc
+            .gate
+            .permit_cold_start(&self.revision, &self.function.tenant_id)
+        {
+            Ok(()) => true,
+            Err((kind, message)) => {
+                tracing::warn!(
+                    invocation_id = %self.invocation_id,
+                    error_type = kind.error_type(),
+                    "cold start refused"
+                );
+                self.fail_invocation(InvokeGate::invocation_error(kind, message));
+                false
+            }
+        }
+    }
+
+    /// Record a failed cold start for the revision's circuit breaker and
+    /// release the reservation (the environment is already terminated).
+    fn boot_failed(&mut self) {
+        if let Some(g) = self.grant.take() {
+            g.start_result(false);
+        }
     }
 
     /// The whole lifecycle after acceptance. Returns the handler output on
     /// success. Every early return has already recorded the terminal state.
     async fn execute(&mut self) -> Option<serde_json::Value> {
         // 5. capacity ------------------------------------------------------
-        let _permits = match self.acquire_capacity().await {
-            Ok(p) => p,
-            Err(QueueError::QueueTimeout) => {
-                self.fail_invocation(InvocationError::new(
-                    ErrorClass::QueueTimeout,
-                    "Host.QueueTimeout",
-                    "no capacity became available before the queue deadline",
-                ));
+        match self.acquire_capacity().await {
+            Ok(grant) => self.grant = Some(grant),
+            Err(e) => {
+                self.fail_admission(e, "queued");
                 return None;
             }
-            Err(QueueError::Cancelled(kind)) => {
-                self.fail_invocation(InvocationError::new(
-                    ErrorClass::Cancelled,
-                    "Host.Cancelled",
-                    match kind {
-                        CancelKind::Client => "cancelled by request while queued",
-                        CancelKind::Shutdown => "cancelled by gateway shutdown while queued",
-                    },
-                ));
-                return None;
-            }
-            Err(QueueError::Closed) => {
-                self.fail_invocation(InvocationError::new(
-                    ErrorClass::PlatformError,
-                    "Host.CapacityClosed",
-                    "capacity semaphore closed",
-                ));
-                return None;
-            }
-        };
+        }
         let queue_wait_ms = self.accepted_at.elapsed().as_millis() as u64;
         if self.client_deadline_elapsed() {
             self.fail_invocation(InvocationError::new(
@@ -1195,7 +1192,7 @@ impl Driver {
         }
 
         // 6..10. one dispatch onto an environment, warm or cold ------------
-        match self.attempt(1, queue_wait_ms, true).await {
+        let output = match self.attempt(1, queue_wait_ms, true).await {
             Attempted::Done(output) => output,
             // The reused environment was already gone when the `Invoke` frame
             // was written, so the handler cannot have started: retry exactly
@@ -1205,8 +1202,11 @@ impl Driver {
                 Attempted::Done(output) => output,
                 Attempted::RetryCold => None,
             },
-        }
-        // `_permits` is released here, after the last attempt finished.
+        };
+        // Whatever this driver still holds (an environment that was
+        // terminated, or a reservation it never used) is released here.
+        self.grant = None;
+        output
     }
 
     /// One dispatch of this invocation onto one environment: acquire the
@@ -1267,22 +1267,27 @@ impl Driver {
             false => None,
         };
         let prepared = match warm {
-            Some(warm) => self.prepare_warm(warm),
+            Some(mut warm) => {
+                // The pooled environment's reservation becomes this driver's;
+                // whatever it held for a cold start is released.
+                if let Some(idle) = warm.reservation.take() {
+                    let holder = self.grant.take();
+                    self.grant = Some(svc.admission.adopt(holder, idle));
+                }
+                self.prepare_warm(warm)
+            }
             None => {
                 // A new environment needs the revision and the tenant's
                 // authorization to still be valid, a provider whose control
                 // API answers and, during a control-plane outage, the outage
                 // policy's consent (PLT-4636). Nothing is booted otherwise.
-                if let Err((kind, message)) = svc
-                    .gate
-                    .permit_cold_start(&self.revision, &self.function.tenant_id)
-                {
-                    tracing::warn!(
-                        invocation_id = %self.invocation_id,
-                        error_type = kind.error_type(),
-                        "cold start refused"
-                    );
-                    self.fail_invocation(InvokeGate::invocation_error(kind, message));
+                // Checked before admission reserves anything, so a refusal
+                // never waits in the capacity queue, and again after it,
+                // because that wait can be long (PLT-4634).
+                if !self.cold_start_permitted() {
+                    return Attempted::Done(None);
+                }
+                if !self.ensure_cold_grant().await || !self.cold_start_permitted() {
                     return Attempted::Done(None);
                 }
                 match self
@@ -1517,6 +1522,10 @@ impl Driver {
         };
         let handler_started = !matches!(dispatch, Dispatch::NotDelivered { .. });
         let handler_ms = dispatched_at.elapsed().as_millis() as u64;
+        if handler_started {
+            svc.admission
+                .observe_duration(&self.revision.id, dispatched_at.elapsed());
+        }
         let finish_started = Instant::now();
 
         // 9. classify ------------------------------------------------------
@@ -1814,7 +1823,9 @@ impl Driver {
             // from here: it publishes the row only once the guest really is
             // quiesced, and if it cannot be, the pool terminates and meters it
             // instead. Either way this driver is done with it.
-            svc.pool.clone().release(&env, session, self.seq)
+            svc.pool
+                .clone()
+                .release_with(&env, session, self.seq, &mut self.grant)
         } else {
             Err(Box::new(session))
         };
@@ -1852,11 +1863,14 @@ impl Driver {
                 TerminateReason::Reconcile => "reconcile",
             })
             .await;
-        match svc
+        let terminated = svc
             .provider
             .terminate_environment(&env_id, env_end.reason)
-            .await
-        {
+            .await;
+        // The environment is gone (or its terminate failed and the startup
+        // reconcile owns it): its reservation goes back to the node.
+        self.grant = None;
+        match terminated {
             Ok(report) => logs.platform(
                 LogPhase::Shutdown,
                 None,
@@ -1940,6 +1954,8 @@ impl Driver {
             mut session,
             sequence,
             timings,
+            // Taken over by `attempt` before this is called.
+            reservation: _,
         } = warm;
         let logs = LogForwarder::new(
             self.svc.repos.logs.clone(),
@@ -2074,6 +2090,8 @@ impl Driver {
         {
             tracing::warn!(error = %e, environment_id = %env_id, "terminate of a gone environment failed");
         }
+        // Released with the environment; the cold retry reserves anew.
+        self.grant = None;
         let _ = match env_end.failure {
             None => env.mark_stopped(now),
             Some(reason) => env.mark_failed(reason, now),
@@ -2231,6 +2249,7 @@ impl Driver {
                     .provider
                     .terminate_environment(&env_id, TerminateReason::InitFailed)
                     .await;
+                self.boot_failed();
                 let (class, error_type) = match &e {
                     ProviderError::Boot(_)
                     | ProviderError::Timeout { .. }
@@ -2297,6 +2316,7 @@ impl Driver {
                     .provider
                     .terminate_environment(&env_id, TerminateReason::InitFailed)
                     .await;
+                self.boot_failed();
                 self.fail_invocation(InvocationError::new(
                     ErrorClass::InitError,
                     "Host.HandshakeFailed",
@@ -2364,6 +2384,7 @@ impl Driver {
                     .provider
                     .terminate_environment(&env_id, TerminateReason::InitFailed)
                     .await;
+                self.boot_failed();
                 self.fail_invocation(InvocationError::new(
                     ErrorClass::InitError,
                     error_type,
@@ -2374,6 +2395,12 @@ impl Driver {
         };
         let runtime_init_ms = connected_at.elapsed().as_millis() as u64;
         let _ = env.mark_ready(self.now());
+        // Starting -> Busy in the ledger, and a successful boot for the
+        // revision's circuit breaker.
+        if let Some(g) = &self.grant {
+            g.ready();
+            g.start_result(true);
+        }
         env.evidence
             .details
             .insert("guest_init_ms".into(), ready.guest_init_ms.into());

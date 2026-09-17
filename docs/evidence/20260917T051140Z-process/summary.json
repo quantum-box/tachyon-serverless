@@ -1,0 +1,182 @@
+{
+  "run_id": "20260917T051140Z-process",
+  "provider": "process",
+  "architecture": "aarch64",
+  "host": "Darwin 25.6.0 arm64",
+  "gateway_config": "target/e2e/gateway.toml",
+  "generated_at": "2026-09-17T05:12:15Z",
+  "steps": [
+    {
+      "name": "build",
+      "status": "PASS",
+      "duration_ms": 2873,
+      "message": ""
+    },
+    {
+      "name": "gateway healthz/readyz",
+      "status": "PASS",
+      "duration_ms": 3299,
+      "message": ""
+    },
+    {
+      "name": "tokens for tenant A and B",
+      "status": "PASS",
+      "duration_ms": 94,
+      "message": ""
+    },
+    {
+      "name": "provider capability table",
+      "status": "PASS",
+      "duration_ms": 100,
+      "message": ""
+    },
+    {
+      "name": "create functions (idempotent)",
+      "status": "PASS",
+      "duration_ms": 233,
+      "message": ""
+    },
+    {
+      "name": "deploy hello (GREETING=v1, DEMO_SECRET)",
+      "status": "PASS",
+      "duration_ms": 1337,
+      "message": ""
+    },
+    {
+      "name": "deploy http-axum",
+      "status": "PASS",
+      "duration_ms": 1978,
+      "message": ""
+    },
+    {
+      "name": "deploy cpu-burn",
+      "status": "PASS",
+      "duration_ms": 1369,
+      "message": ""
+    },
+    {
+      "name": "invoke hello ok (message, secret_present, greeting)",
+      "status": "PASS",
+      "duration_ms": 1905,
+      "message": ""
+    },
+    {
+      "name": "invoke hello fail -> exit 3 user_error",
+      "status": "PASS",
+      "duration_ms": 579,
+      "message": ""
+    },
+    {
+      "name": "invoke hello panic -> exit 3 crash",
+      "status": "PASS",
+      "duration_ms": 570,
+      "message": ""
+    },
+    {
+      "name": "init failure revision -> exit 3 init_error",
+      "status": "PASS",
+      "duration_ms": 1836,
+      "message": ""
+    },
+    {
+      "name": "http GET / -> 200 ok",
+      "status": "PASS",
+      "duration_ms": 1327,
+      "message": ""
+    },
+    {
+      "name": "http POST /echo -> body echoed",
+      "status": "PASS",
+      "duration_ms": 892,
+      "message": ""
+    },
+    {
+      "name": "http GET /status/404 -> 404 passthrough",
+      "status": "PASS",
+      "duration_ms": 1096,
+      "message": ""
+    },
+    {
+      "name": "http GET /headers -> custom header visible",
+      "status": "PASS",
+      "duration_ms": 857,
+      "message": ""
+    },
+    {
+      "name": "invoke cpu-burn 1s ok",
+      "status": "PASS",
+      "duration_ms": 2144,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn timeout 2s -> exit 4 timeout, wall < 10s",
+      "status": "PASS",
+      "duration_ms": 5024,
+      "message": ""
+    },
+    {
+      "name": "no orphan bridge / VMM processes",
+      "status": "PASS",
+      "duration_ms": 2199,
+      "message": ""
+    },
+    {
+      "name": "logs contain handler lines",
+      "status": "PASS",
+      "duration_ms": 123,
+      "message": ""
+    },
+    {
+      "name": "history shows attempts with boot evidence",
+      "status": "PASS",
+      "duration_ms": 125,
+      "message": ""
+    },
+    {
+      "name": "rollback: v2 -> rollback -> v1",
+      "status": "PASS",
+      "duration_ms": 2416,
+      "message": ""
+    },
+    {
+      "name": "cross-tenant get/invoke -> 404",
+      "status": "PASS",
+      "duration_ms": 137,
+      "message": ""
+    },
+    {
+      "name": "cancel running invocation",
+      "status": "PASS",
+      "duration_ms": 443,
+      "message": ""
+    },
+    {
+      "name": "collect evidence",
+      "status": "PASS",
+      "duration_ms": 520,
+      "message": ""
+    },
+    {
+      "name": "gateway stops on SIGTERM with exit 0",
+      "status": "PASS",
+      "duration_ms": 31,
+      "message": ""
+    },
+    {
+      "name": "secret values absent from gateway log, evidence and state",
+      "status": "PASS",
+      "duration_ms": 93,
+      "message": ""
+    },
+    {
+      "name": "no orphans after gateway shutdown",
+      "status": "PASS",
+      "duration_ms": 131,
+      "message": ""
+    }
+  ],
+  "passed": 28,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

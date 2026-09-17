@@ -90,6 +90,7 @@ pub fn build_revision_request(
         secrets,
         description: args.description.clone(),
         publish_to_prod: !args.no_publish,
+        required_region: args.region.clone(),
     })
 }
 
@@ -289,6 +290,7 @@ mod tests {
             description: "d".into(),
             egress: None,
             egress_allow: Vec::new(),
+            region: None,
             no_publish: true,
             wait: true,
             no_wait: false,

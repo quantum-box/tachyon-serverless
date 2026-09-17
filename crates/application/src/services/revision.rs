@@ -172,6 +172,9 @@ impl RevisionService {
                 })
                 .collect(),
             description: req.description.clone(),
+            placement: tachyon_serverless_domain::Placement {
+                region: req.required_region.clone(),
+            },
         })
     }
 

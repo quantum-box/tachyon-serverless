@@ -6,6 +6,7 @@
 //! GET    /healthz                                  liveness
 //! GET    /readyz                                   readiness (provider preflight ok)
 //! GET    /v1/provider                              provider kind + capabilities
+//! GET    /v1/capacity                              node capacity, reservations, queue, autoscaler
 //! POST   /v1/artifacts                             upload raw executable bytes -> digest
 //! POST   /v1/functions                             create
 //! GET    /v1/functions                             list (tenant scoped)
@@ -122,6 +123,11 @@ pub struct ApiError {
     pub invocation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_type: Option<String>,
+    /// Why admission refused or gave up on the request (PLT-4634):
+    /// `capacity` | `quota` | `queue_full` | `queue_deadline` |
+    /// `circuit_open` | `placement`. Absent for every other error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -213,6 +219,122 @@ impl ProviderInfo {
             reuse,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// capacity (PLT-4634)
+// ---------------------------------------------------------------------------
+
+/// CPU / memory / ephemeral storage. In [`NodeInfo::capacity`] a missing
+/// value means the dimension is not bounded by configuration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ResourceAmounts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_millis: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mib: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral_storage_mib: Option<u64>,
+}
+
+/// The physical host. Distinct from the number of environments on it: adding
+/// hosts is not something this single-node prototype does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NodeInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// Hosts behind this gateway. Always 1 in the prototype.
+    pub hosts: u32,
+    /// How hosts are added: `not_supported` (single node; scale-out is out of scope).
+    pub host_scale_out: String,
+    /// Configured capacity; a missing dimension is unbounded.
+    pub capacity: ResourceAmounts,
+    /// Added to every environment's reservation (VMM + bridge + host artefacts).
+    pub per_environment_overhead: ResourceAmounts,
+    /// Environments starting or busy at once, node-wide.
+    pub max_concurrency: u64,
+}
+
+/// Environments by lifecycle, as the admission ledger counts them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EnvironmentCounts {
+    /// Booting (reserved from the moment the start was granted).
+    pub starting: u64,
+    pub busy: u64,
+    /// Granted a pooled environment that has not been taken yet.
+    pub promised: u64,
+    /// Being quiesced on the way into the pool.
+    pub parking: u64,
+    pub idle: u64,
+    pub draining: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct QueueInfo {
+    pub length: u64,
+    pub bytes: u64,
+    pub max_length: u64,
+    pub max_bytes: u64,
+    pub timeout_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest_age_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct StartRateInfo {
+    pub per_second: u32,
+    pub burst: u32,
+    pub tokens: u32,
+}
+
+/// The caller's own tenant. Other tenants are never listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TenantCapacityInfo {
+    pub tenant_id: String,
+    pub in_flight: u64,
+    pub queued: u64,
+    pub queued_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest_age_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrency: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_queue: Option<u64>,
+    pub weight: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_region: Option<String>,
+}
+
+/// Autoscaler view of one revision of the caller's tenant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct RevisionCapacityInfo {
+    pub revision_id: String,
+    pub desired: u32,
+    pub max_environments: u32,
+    pub environments: EnvironmentCounts,
+    pub queued: u64,
+    pub arrival_rate_per_second: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avg_duration_ms: Option<u64>,
+    /// `closed` | `open` | `half_open`
+    pub circuit_breaker: String,
+}
+
+/// `GET /v1/capacity`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct CapacityInfo {
+    pub node: NodeInfo,
+    /// Sum of every live reservation (starting, busy, parking, idle, draining).
+    pub reserved: ResourceAmounts,
+    pub environments: EnvironmentCounts,
+    pub in_flight: u64,
+    pub queue: QueueInfo,
+    pub start_rate: StartRateInfo,
+    /// Rejections since start, by reason.
+    pub rejections: std::collections::BTreeMap<String, u64>,
+    pub tenant: TenantCapacityInfo,
+    pub revisions: Vec<RevisionCapacityInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +508,10 @@ pub struct CreateRevisionRequest {
     /// When true (default), also point alias `prod` at the revision once Ready.
     #[serde(default = "default_true")]
     pub publish_to_prod: bool,
+    /// Region the revision must run in (e.g. `jp`). Admission rejects the
+    /// invocation on a node with another or no region label (PLT-4634).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_region: Option<String>,
 }
 fn default_true() -> bool {
     true

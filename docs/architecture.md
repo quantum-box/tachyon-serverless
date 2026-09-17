@@ -70,9 +70,14 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      queue / init / execution は client_deadline を超えない。
      client_deadline  = now + min(client_timeout_ms header, timeout_seconds + init + queue)
      queue_deadline   = min(now + queue_timeout (config, default 10s), client_deadline)
-  5 容量: revision.max_concurrency と gateway 全体上限の semaphore。空きがなければ bounded queue
-     (config max_queue) で queue_deadline まで待つ。溢れ → 429 capacity_exceeded (ledger にも key にも残らない)。
-     queue_deadline 超過 → 504 queue_timeout。
+  5 容量 (admission、PLT-4634、ADR-0006): 配置 (required_region と node の region) が合わなければ 503 placement、
+     revision の起動失敗 breaker が open なら 503 circuit_open。tenant ごとの公平 queue に入れ、node の資源
+     (revision の resources + VMM / bridge の overhead)、node の max_concurrency、tenant quota、
+     revision.max_concurrency、起動の合流 (desired)、start rate をすべて満たした順に grant する。待機中のまま
+     queue の件数 / payload bytes / tenant の持ち分を超えたら 429 capacity_exceeded (reason queue_full / quota。
+     ledger にも key にも残らない)。queue_deadline 超過 → 504 queue_timeout (reason capacity / quota /
+     queue_deadline)。grant は cold 起動の予約 (Starting) か、pool の idle 環境の約束 (warm) で、予約は
+     Ready で Busy、pool へ渡すと pool が持ち、環境が消えたときに解放される (§4「admission・autoscaler」)。
      Invocation の保存と Idempotency-Key の結び付けは 1 回の store 更新で行う (同 key の並行 request は
      1 つだけが受け付けられ、残りは同じ Invocation を返す)。
   6 warm の環境が無く cold start になる場合、revision と tenant の認可が今も有効で、provider の preflight が失敗して
@@ -140,9 +145,32 @@ workdir = ".kvm/run"           # 環境ごとの socket / drive / log
 vsock_port = 5000
 
 [capacity]
-max_concurrency = 8            # gateway 全体
+max_concurrency = 8            # node 全体の Starting + Busy
 max_queue = 32
 queue_timeout_seconds = 10
+max_queue_bytes = 33554432     # 待ち行列の payload 合計
+
+[capacity.node]                # PLT-4634。省略時は資源の上限なし
+name = "kvm-node"
+region = "jp"                  # 配置ラベル。required_region はこれと一致する node でだけ動く
+memory_mib = 6144              # cpu_millis / ephemeral_storage_mib も同様。省略した次元は上限なし
+vmm_overhead_memory_mib = 64   # 環境ごとに予約へ足す。firecracker では VMM cgroup の memory_overhead_mib と揃える（既定 16）
+bridge_overhead_memory_mib = 0 # guest 内の bridge は guest memory に含まれる（process provider の既定 8）
+
+[capacity.tenant_defaults]     # [[capacity.tenants]] で tenant ごとに上書き（tenant_id, max_concurrency, max_queue, weight, required_region）
+max_concurrency = 6            # 1 tenant の同時環境数。node の max_concurrency 未満にする（非 preemptive のため）
+max_queue = 16
+
+[capacity.start_rate]
+per_second = 20
+burst = 20
+
+[capacity.circuit_breaker]
+failure_threshold = 5
+cooldown_seconds = 30
+
+[capacity.autoscaler]
+rate_window_seconds = 10
 
 [store]
 backend = "sqlite"             # sqlite（<data_dir>/state.db、既定）| memory（再起動で消える）
@@ -268,6 +296,19 @@ management gateway (combined)                          data-plane gateway (data_
 | cell | data plane は control plane と同じ `data_dir` を使う（台帳・artifact store は cell で共有、判断に使う設定だけを配信で受け取る） |
 
 revoke の遅延は、control plane に届く data plane で 1 refresh、届かない data plane で最大 `auth_lease_seconds`。
+
+### admission・autoscaler（PLT-4634）
+
+gateway 全体の semaphore を、資源で予約する admission に置き換えた（`crates/application/src/services/admission/`、決定と理由は `docs/adr/0006-autoscaling-and-admission.md`）。
+
+- **予約（capacity ledger）**: 1 環境 = revision の `resources` + `[capacity.node]` の per-environment overhead（VMM + bridge + host 側の成果物）。状態は `Starting`（起動を許可した時点）→ `Busy`（Ready）→ `Parking`（pool が quiesce 中）→ `Idle` → `Draining`（terminate 中）→ 解放。warm の約束（`Promised`）は in-flight に数えるが資源は持たない（idle 環境がすでに持つ）。予約は `Grant` という値で、driver → pool → 次の driver と所有者が移り、最後の所有者が drop した時点で解放されるので、二重加算も取り残しも起きない。terminate に失敗した pool の環境は、再試行が成功するまで予約を持ち続ける。
+- **node の上限**: `[capacity.node]` の cpu / memory / ephemeral storage（省略した次元は上限なし）と、`[capacity] max_concurrency`（Starting + Busy + Promised）。1 環境が node に一度も収まらなければ即時 429 `capacity`。
+- **公平 queue**: tenant ごとの sub-queue。in-flight / weight の小さい tenant から、同値は最後の割り当てが古い順。node 全体の制約で止まった待機者より後ろには cold start を許さない。件数 `max_queue`、payload bytes `max_queue_bytes`、tenant の持ち分 `max_queue`、各待機者の `queue_deadline` で有界。admission は preemptive ではないので、1 tenant が先に全枠を取るのを防ぐのは tenant quota（`tenant_defaults.max_concurrency` を node の `max_concurrency` 未満にする）。
+- **autoscaler**: revision ごとの `desired = ceil((max(到着率 × 平均時間, in_flight) + 待機数) / concurrency_per_environment)` を `[min_ready, min(max_concurrency, tenant quota)]` に clamp。`Starting + Busy + Idle + Parking < desired` のときだけ cold start する（N 件の burst は N 件起動しない）。起動は待機中の invocation の分だけで、先行起動・zero-scale は PLT-4635（`min_ready = 0` 固定）。縮小は pool の idle TTL / drain と、資源不足時の idle eviction（`EnvironmentPool::evict_idle`）。
+- **start rate / breaker**: node 全体の token bucket（`[capacity.start_rate]`）。revision ごとの起動失敗 breaker（`[capacity.circuit_breaker]`、create / handshake / init の失敗が連続 K 回で open、cooldown 後に probe 1 件）。open 中は 503 `circuit_open`。
+- **配置**: `[capacity.node] region` と、tenant（`[[capacity.tenants]] required_region`）・revision（`required_region`、`RevisionSpec.placement`）の要求が一致しなければ、負荷に関係なく 503 `placement`。緩めない。
+- **host と環境の区別**: `GET /v1/capacity`（`tsls capacity`）は node（`hosts = 1`、`host_scale_out = "not_supported"`、容量、overhead）と、予約・状態別の環境数・queue・start rate・拒否数・呼び出し元 tenant の revision を分けて返す。host の追加はこの prototype の範囲外。
+- 状態はプロセスのメモリだけにある（再起動で到着率・breaker は消える。環境は起動時 reconcile が片付ける）。同じ `data_dir` を共有する 2 つ目の gateway は自分の予約しか数えないので、node の上限は 1 host 1 gateway の前提でだけ守られる。
 
 ### 環境 pool と再利用キー（PLT-4632）
 

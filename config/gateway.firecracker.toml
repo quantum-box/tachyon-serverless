@@ -59,6 +59,33 @@ gid = 64000
 max_concurrency = 8
 max_queue = 32
 queue_timeout_seconds = 10
+max_queue_bytes = 33554432
+
+# admission・autoscaler（PLT-4634、docs/adr/0006-autoscaling-and-admission.md）。
+# 資源の上限は host に合わせて設定する。overhead は [provider.firecracker.cgroup] と揃える:
+# VMM の cgroup は memory.max = guest memory + memory_overhead_mib（既定 64）で強制されるので、
+# 予約もその上限（64 MiB）で数える。guest の runtime bridge は guest memory の内側で動くので 0。
+# cpu.max は cpu_millis に VMM の thread を含めるので CPU の overhead も 0。
+[capacity.node]
+name = "kvm-node"
+# region = "jp"                  # jp-only の tenant / revision を載せる node だけに付ける
+# cpu_millis = 4000
+# memory_mib = 6144              # guest の memory_mib + overhead の合計がこれを超えない
+# ephemeral_storage_mib = 32768
+vmm_overhead_memory_mib = 64     # = [provider.firecracker.cgroup] memory_overhead_mib
+bridge_overhead_memory_mib = 0
+
+# [capacity.tenant_defaults]
+# max_concurrency = 6            # max_concurrency 未満にして 1 tenant の独占を防ぐ
+# max_queue = 16
+#
+# [capacity.start_rate]
+# per_second = 5                 # microVM の起動暴走を防ぐ
+# burst = 8
+#
+# [capacity.circuit_breaker]
+# failure_threshold = 5
+# cooldown_seconds = 30
 
 [invoke]
 inline_output_max_bytes = 65536

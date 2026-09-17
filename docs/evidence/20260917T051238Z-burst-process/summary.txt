@@ -1,0 +1,9 @@
+PASS  burst-7-all-served  200s=7/7
+PASS  no-overshoot-in-flight  max in_flight=3 (node fits 3 incl. overhead)
+PASS  no-overshoot-memory  max reserved=840 MiB of 900
+PASS  queued-while-full  max queue length=4
+PASS  burst-14-bounded  200s=7 429s=7 reasons=[   7 queue_full;]
+PASS  queue-full-reason     7 queue_full;
+PASS  jp-only-placement  status=503 reason=placement
+PASS  capacity-report  {"node":"burst-local","hosts":1,"rejections":{"placement":1,"queue_full":7}}
+PASS  capacity-tenant-scoped  tenant B mentions=0

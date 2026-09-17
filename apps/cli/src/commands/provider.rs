@@ -1,6 +1,6 @@
 //! `provider` (capability table) and `health` (/healthz, /readyz).
 
-use tachyon_serverless_api_types::{ProviderInfo, ReuseInfo};
+use tachyon_serverless_api_types::{CapacityInfo, ProviderInfo, ResourceAmounts, ReuseInfo};
 
 use crate::client::ApiClient;
 use crate::error::{CliError, ExitCode};
@@ -126,6 +126,91 @@ pub async fn provider(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), Cli
         }
         p.table(&t)?;
     }
+    Ok(())
+}
+
+/// `cpu / memory / storage`, with `-` for a dimension that is not bounded.
+pub fn amounts(r: &ResourceAmounts) -> String {
+    let v = |x: Option<u64>| x.map_or("-".to_string(), |n| n.to_string());
+    format!(
+        "cpu {} m / mem {} MiB / disk {} MiB",
+        v(r.cpu_millis),
+        v(r.memory_mib),
+        v(r.ephemeral_storage_mib)
+    )
+}
+
+/// `GET /v1/capacity` (PLT-4634): the host, what is reserved on it, the queue
+/// and this tenant's revisions.
+pub async fn capacity(client: &ApiClient, p: &mut Printer<'_>) -> Result<(), CliError> {
+    let resp = client.get("/v1/capacity").await?.ok()?;
+    if p.json {
+        return p.raw(&resp.body_text());
+    }
+    let info: CapacityInfo = resp.json()?;
+    let e = &info.environments;
+    p.kv(&[
+        (
+            "node",
+            format!(
+                "{} (region {}, hosts {}, host scale-out {})",
+                info.node.name,
+                info.node.region.as_deref().unwrap_or("none"),
+                info.node.hosts,
+                info.node.host_scale_out
+            ),
+        ),
+        ("capacity", amounts(&info.node.capacity)),
+        ("overhead/env", amounts(&info.node.per_environment_overhead)),
+        ("reserved", amounts(&info.reserved)),
+        (
+            "environments",
+            format!(
+                "starting {} / busy {} / promised {} / parking {} / idle {} / draining {}",
+                e.starting, e.busy, e.promised, e.parking, e.idle, e.draining
+            ),
+        ),
+        (
+            "in_flight",
+            format!("{} of {}", info.in_flight, info.node.max_concurrency),
+        ),
+        (
+            "queue",
+            format!(
+                "{} of {} ({} of {} bytes), oldest {} ms, timeout {} s",
+                info.queue.length,
+                info.queue.max_length,
+                info.queue.bytes,
+                info.queue.max_bytes,
+                info.queue.oldest_age_ms.unwrap_or(0),
+                info.queue.timeout_seconds
+            ),
+        ),
+        (
+            "start_rate",
+            format!(
+                "{}/s, burst {}, tokens {}",
+                info.start_rate.per_second, info.start_rate.burst, info.start_rate.tokens
+            ),
+        ),
+    ])?;
+    let mut t = Table::new(&[
+        "REVISION", "DESIRED", "MAX", "STARTING", "BUSY", "IDLE", "QUEUED", "RATE/S", "BREAKER",
+    ]);
+    for r in &info.revisions {
+        t.row(vec![
+            r.revision_id.clone(),
+            r.desired.to_string(),
+            r.max_environments.to_string(),
+            r.environments.starting.to_string(),
+            r.environments.busy.to_string(),
+            r.environments.idle.to_string(),
+            r.queued.to_string(),
+            format!("{:.2}", r.arrival_rate_per_second),
+            r.circuit_breaker.clone(),
+        ]);
+    }
+    p.table(&t)?;
     Ok(())
 }
 

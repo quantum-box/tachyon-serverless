@@ -174,6 +174,7 @@ fn revision_request(
         }],
         description: "test".into(),
         publish_to_prod: true,
+        required_region: None,
     }
 }
 
@@ -605,7 +606,7 @@ async fn capacity_exceeded_and_queue_timeout() {
         .await
         .err()
         .unwrap();
-    assert!(matches!(err, AppError::CapacityExceeded(_)), "{err}");
+    assert!(matches!(err, AppError::Admission { .. }), "{err}");
     assert_eq!(err.http_status(), 429);
 
     let second = second.await.unwrap().unwrap();
@@ -1036,7 +1037,7 @@ async fn capacity_rejection_does_not_consume_the_idempotency_key() {
     for attempt in 0..2 {
         let err = app.invoke.invoke(keyed.clone()).await.err().unwrap();
         assert!(
-            matches!(err, AppError::CapacityExceeded(_)),
+            matches!(err, AppError::Admission { .. }),
             "attempt {attempt}: {err}"
         );
         assert_eq!(err.http_status(), 429);

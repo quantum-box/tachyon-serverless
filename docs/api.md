@@ -33,6 +33,7 @@
 | GET | `/healthz` | liveness | 200 | — |
 | GET | `/readyz` | readiness（provider preflight OK、dispatcher lease が有効、かつ新しい invocation を受け付ける。本文に `dispatcher: {id, instance, fenced}` と `control_plane`（§7）） | 200 | 503 |
 | GET | `/v1/provider` | provider 種別 / isolation / capability 表 / preflight | 200 `ProviderInfo` | — |
+| GET | `/v1/capacity` | node の容量と予約・状態別の環境数・待ち行列・start rate・拒否数・自 tenant の revision（PLT-4634、§5.1.1） | 200 `CapacityInfo` | 401 |
 | POST | `/v1/artifacts` | 実行ファイルの生バイト (`application/octet-stream`) を upload → digest | 200 `ArtifactUploadResponse` | 401, 413 `payload_too_large` |
 | POST | `/v1/functions` | Function 作成 | 201 `FunctionResponse` | 400 `invalid_request`, 409 `conflict`（同名） |
 | GET | `/v1/functions` | Function 一覧（テナント内） | 200 `ListResponse<FunctionResponse>` | — |
@@ -72,7 +73,31 @@ invoke / cancel は `:invoke` `/invoke` の両形式を受け付ける。CLI は
 }
 ```
 
-`invocation_id` と `error_type` は invoke 系の失敗でのみ入る（履歴・ログを引くために使う）。例外は `Idempotency-Key` の衝突で、409 `conflict` に key が結び付いている Invocation の id と `error_type = "Host.IdempotencyKeyReused"` が入る:
+`invocation_id` と `error_type` は invoke 系の失敗でのみ入る（履歴・ログを引くために使う）。
+
+admission（PLT-4634、`docs/adr/0006-autoscaling-and-admission.md`）が拒否した、または待機のまま打ち切った invoke には `reason` が入る:
+
+| `reason` | 意味 | HTTP / `code` |
+|---|---|---|
+| `queue_full` | 待ち行列の件数（`max_queue`）または payload bytes 合計（`max_queue_bytes`）の上限 | 429 `capacity_exceeded` |
+| `quota` | tenant の待ち行列の持ち分を超えた（429）、または tenant / revision の同時数 quota で待ったまま queue deadline（504、`error_type = Host.QuotaWaitTimeout`） | 429 `capacity_exceeded` / 504 `queue_timeout` |
+| `capacity` | 1 環境が node の容量に収まらない（429）、または node が満杯のまま queue deadline（504、`Host.CapacityWaitTimeout`） | 429 / 504 |
+| `queue_deadline` | 順番・start rate・起動の合流を待ったまま queue deadline（`Host.QueueTimeout`） | 504 `queue_timeout` |
+| `circuit_open` | revision の起動が連続して失敗し、起動を止めている（待機中だった invocation は `Host.StartCircuitOpen`） | 503 `provider_unavailable` |
+| `placement` | tenant / revision の `required_region` をこの node が満たさない（負荷に関係なく緩めない） | 503 `provider_unavailable` |
+
+```json
+{
+  "error": {
+    "code": "capacity_exceeded",
+    "message": "queue_full: no capacity available and the wait queue (4 slots) is full",
+    "request_id": "req_8f2b0c",
+    "reason": "queue_full"
+  }
+}
+```
+
+429 と、`placement` / `circuit_open` の 503 は invocation を作らず、`Idempotency-Key` も消費しない。例外は `Idempotency-Key` の衝突で、409 `conflict` に key が結び付いている Invocation の id と `error_type = "Host.IdempotencyKeyReused"` が入る:
 
 ```json
 {
@@ -94,18 +119,18 @@ invoke / cancel は `:invoke` `/invoke` の両形式を受け付ける。CLI は
 | `conflict` | 409 | 同名 / generation 不一致 / idempotency 衝突（`Host.IdempotencyKeyReused`）/ 別の gateway が実行中の invocation の cancel | 2 |
 | `invalid_request` | 400 | 検証エラー | 2 |
 | `payload_too_large` | 413 | payload / artifact 上限超過 | 2 |
-| `capacity_exceeded` | 429 | queue も満杯 | 2 |
+| `capacity_exceeded` | 429 | 待ち行列（件数 / bytes / tenant の持ち分）が満杯、または 1 環境が node に収まらない（`reason`） | 2 |
 | `revision_not_ready` | 409 | alias / revision が `ready` でない | 2 |
 | `function_deleted` | 409 | 削除済み Function への invoke | 2 |
 | `user_error` | 502 | handler が `Err` を返した（`Handler.Error`） | 3 |
 | `crash` | 502 | panic / プロセス異常終了（`Runtime.Panic`, `Runtime.Crash`） | 3 |
 | `init_error` | 502 | Ready 前に失敗 / init timeout | 3 |
 | `timeout` | 504 | 実行 deadline 超過（host が環境を終了） | 4 |
-| `queue_timeout` | 504 | queue deadline まで空きが出なかった | 4 |
+| `queue_timeout` | 504 | queue deadline まで grant されなかった（`reason` = `capacity` / `quota` / `queue_deadline`） | 4 |
 | `cancelled` | 499 | cancel API による中断 | 3 |
 | `outcome_unknown` | 502 | 結果を確認できない（自動再実行しない） | 5 |
 | `platform_error` | 500 | provider / bridge / 内部エラー | 6 |
-| `provider_unavailable` | 503 | provider が使えない（例: `/dev/kvm` 無し）、shutdown 中、dispatcher lease を失った gateway（別の gateway に送り直す）、または provider の制御 API が preflight に失敗していて新しい環境を起動できない（`Host.ProviderControlUnavailable`。実行中と warm 環境は継続） | 6 |
+| `provider_unavailable` | 503 | provider が使えない（例: `/dev/kvm` 無し）、shutdown 中、dispatcher lease を失った gateway（別の gateway に送り直す）、または provider の制御 API が preflight に失敗していて新しい環境を起動できない（`Host.ProviderControlUnavailable`。実行中と warm 環境は継続）、配置制約を満たさない node（`reason = placement`）、revision の起動 breaker が open（`reason = circuit_open`） | 6 |
 | `config_unavailable` | 503 | 設定 cache が新しい仕事を保証できない（PLT-4636、§7）。`error_type`: `Host.ConfigNotDelivered`（未配信）、`Host.ConfigExpired`（TTL 切れ）、`Host.AuthLeaseExpired`（認可 lease 切れ）、`Host.ColdStartRestricted`（control plane 到達不能で cold start を制限中） | 6 |
 | `control_plane_unavailable` | 503 | 管理 API を提供できない。`Host.ControlPlaneUnavailable`（data plane の gateway）、`Host.StoreUnavailable`（台帳 store が応答しない） | 6 |
 
@@ -170,6 +195,38 @@ ID は `<prefix>_<26 文字 lowercase ULID>`（`fn_` `rev_` `inv_` `att_` `env_`
 
 `enabled = true` かつ `verified = false` は「計測のために `[pool] allow_unverified_idle` で動かしている」という意味であり、warm が動く構成である**という主張ではない**。この組み合わせを「warm 成功」として扱ってはならない（PLT-4633）。
 
+### 5.1.1 `GET /v1/capacity` → `CapacityInfo`（PLT-4634）
+
+node（物理 host）と、その上の環境を分けて返す。`tenant` と `revisions` は呼び出し元 tenant の分だけで、他 tenant の id・queue・revision は出さない。
+
+```json
+{
+  "node": {
+    "name": "kvm-node", "region": "jp", "hosts": 1, "host_scale_out": "not_supported",
+    "capacity": {"cpu_millis": 4000, "memory_mib": 6144},
+    "per_environment_overhead": {"cpu_millis": 0, "memory_mib": 24, "ephemeral_storage_mib": 0},
+    "max_concurrency": 8
+  },
+  "reserved": {"cpu_millis": 1500, "memory_mib": 840, "ephemeral_storage_mib": 768},
+  "environments": {"starting": 1, "busy": 2, "promised": 0, "parking": 0, "idle": 0, "draining": 0},
+  "in_flight": 3,
+  "queue": {"length": 4, "bytes": 64, "max_length": 32, "max_bytes": 33554432, "timeout_seconds": 10, "oldest_age_ms": 350},
+  "start_rate": {"per_second": 20, "burst": 20, "tokens": 17},
+  "rejections": {"queue_full": 7, "placement": 1},
+  "tenant": {"tenant_id": "tn_...", "in_flight": 3, "queued": 4, "queued_bytes": 64, "oldest_age_ms": 350, "max_concurrency": 6, "weight": 1},
+  "revisions": [
+    {"revision_id": "rev_...", "desired": 7, "max_environments": 8,
+     "environments": {"starting": 1, "busy": 2, "promised": 0, "parking": 0, "idle": 0, "draining": 0},
+     "queued": 4, "arrival_rate_per_second": 1.2, "avg_duration_ms": 410, "circuit_breaker": "closed"}
+  ]
+}
+```
+
+- `node.capacity` で省略された次元は上限なし。`reserved` は `Starting` / `Busy` / `Parking` / `Idle` / `Draining` の予約（revision の resources + overhead）の合計。
+- `hosts` は常に 1、`host_scale_out` は `not_supported`（host の追加はこの prototype の範囲外）。admission が増減するのはこの node の上の環境だけ。
+- `desired` は autoscaler の目標（`docs/architecture.md` §4「admission・autoscaler」）。起動はこれを超えないが、待機中の invocation の無い先行起動はしない。
+- 状態は gateway プロセスのメモリにあり、再起動で `rejections`・到着率・breaker は初期化される。
+
 ### 5.2 `POST /v1/artifacts`
 
 - Request: `Content-Type: application/octet-stream`、本文は実行ファイルそのもの。firecracker provider では static Linux (musl) バイナリであること。
@@ -224,6 +281,7 @@ ID は `<prefix>_<26 文字 lowercase ULID>`（`fn_` `rev_` `inv_` `att_` `env_`
 
 - `artifact.kind` は `binary`（`digest` は `/v1/artifacts` の戻り値）または `oci_image`（`reference`。受け付けるが P1 provider では実行できず `failed` になる）。
 - `env_vars` は `[name, value]` の配列。`TACHYON_` で始まる名前は予約。secret の値は API を通らず、`binding_ref` が gateway 設定 `[[secrets.bindings]]` で解決され HelloAck の env にだけ載る。
+- `required_region`（任意）: この revision を動かしてよい region（例 `jp`）。node の `[capacity.node] region` が一致しなければ invoke は 503 `placement`。spec には `placement.region` として入り、未指定なら省略される（既存 revision の digest は変わらない）。
 - `egress`: `none`（既定。NIC なし）/ `restricted` / `public-web`。`egress_allow` は `restricted` のときだけ必須（1..=16 件）で、各要素は `{"cidr": "1.1.1.1/32", "protocol": "tcp", "ports": [443]}`（`protocol` は `tcp` 既定 / `udp`、`ports` は 1..=16 件）。IPv4 CIDR のみで、0/8・10/8・100.64/10・127/8・169.254/16・172.16/12・192.168/16 などの special-purpose 範囲と重なるものは 400。どの profile でも管理網・node・metadata・private 範囲・IPv6 には届かない（`docs/adr/0005-egress-profiles.md`）。spec の `egress_allow` は空なら省略される。
 - `publish_to_prod`（既定 true）: `ready` になった時点で alias `prod` を向ける。
 
@@ -418,8 +476,10 @@ event の `path` は `/http` より後ろの request-target path を **受け取
 | alias / revision が ready でない | 409 | `revision_not_ready` |
 | Function 削除済み | 409 | `function_deleted` |
 | payload 上限超過 | 413 | `payload_too_large` |
-| queue 溢れ | 429 | `capacity_exceeded` |
-| queue deadline 超過 | 504 | `queue_timeout` |
+| queue 溢れ（件数 / bytes / tenant の持ち分）、node に収まらない環境 | 429 | `capacity_exceeded`（`reason` = `queue_full` / `quota` / `capacity`） |
+| queue deadline 超過 | 504 | `queue_timeout`（`reason` = `capacity` / `quota` / `queue_deadline`） |
+| 配置制約（jp-only など）を満たさない node | 503 | `provider_unavailable`（`reason = placement`、invocation を作らない） |
+| revision の起動失敗が続き breaker が open | 503 | `provider_unavailable`（`reason = circuit_open`） |
 | init 失敗 / init timeout | 502 | `init_error` |
 | secret binding を解決できない（他 tenant の binding と存在しない binding は同じ応答。環境は作らない） | 502 | `init_error`（`Host.SecretBindingUnavailable`） |
 | handler が Err | 502 | `user_error` |
