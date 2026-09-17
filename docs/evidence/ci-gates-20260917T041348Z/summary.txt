@@ -1,5 +1,5 @@
-prove-gates run 20260917T034925Z
-commit      e4efda59da3ea7975301f0a70acacb15ff5163cb (changed or untracked paths outside docs/evidence at run time: 2)
+prove-gates run 20260917T041348Z
+commit      88c0a920a4bdb6a910cff580149f3d0c329699a3 (changed or untracked paths outside docs/evidence at run time: 0)
 host        Darwin 25.6.0 arm64
 rustc       rustc 1.95.0 (59807616e 2026-04-14)
 copy        rsync of the working tree without .git/target/.kvm/data/docs/evidence

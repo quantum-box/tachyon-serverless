@@ -2,9 +2,9 @@
 # what: an invocation whose client deadline already elapsed is accepted
 # gate: security:deadline
 # known-bad change (applied to a temporary copy only):
---- crates/domain/src/invocation.rs.orig	2026-09-17 12:52:07
-+++ crates/domain/src/invocation.rs	2026-09-17 12:52:07
-@@ -227,7 +227,7 @@
+--- crates/domain/src/invocation.rs.orig	2026-09-17 13:15:42
++++ crates/domain/src/invocation.rs	2026-09-17 13:15:42
+@@ -233,7 +233,7 @@
                  "must be 1..=256 chars",
              ));
          }
@@ -17,26 +17,26 @@
 security-regression: 11 listed tests from scripts/ci/security-regression.list
 
 ::group::cargo test -p tachyon-serverless-application --lib (1 tests)
-   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
-   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
-   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
-   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
-   Compiling tachyon-serverless-provider-fake v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/fake)
-   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.28s
-     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-e46bc06ffa756374)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/protocol)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/api-types)
+   Compiling tachyon-serverless-provider-fake v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/providers/fake)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.05s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-d2af85369fe83a8f)
 
 running 1 test
 test bridge_session::tests::init_error_timeout_and_disconnect ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 104 filtered out; finished in 0.06s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 126 filtered out; finished in 0.05s
 
 ::endgroup::
 
 ::group::cargo test -p tachyon-serverless-application --test pipeline (6 tests)
-   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.07s
-     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-d1151c96f3890c10)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.59s
+     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-46405d5f51c70707)
 
 running 6 tests
 test client_deadline_is_checked_again_right_before_dispatch ... ok
@@ -46,13 +46,13 @@ test client_deadline_clamps_the_execution_deadline ... ok
 test hang_times_out_cancels_and_terminates_with_timeout ... ok
 test capacity_exceeded_and_queue_timeout ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 1.60s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 1.57s
 
 ::endgroup::
 
 ::group::cargo test -p tachyon-serverless-domain --lib (3 tests)
-   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.03s
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/domain)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.46s
      Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_domain-c504a817fb9998ac)
 
 running 3 tests
@@ -64,25 +64,25 @@ failures:
 
 ---- invocation::tests::an_elapsed_client_deadline_alone_is_rejected stdout ----
 
-thread 'invocation::tests::an_elapsed_client_deadline_alone_is_rejected' (866311) panicked at crates/domain/src/invocation.rs:727:22:
-an elapsed client deadline must be rejected, got Ok(Invocation { id: InvocationId(inv_01m2pqx54yngwbptqwdx6dr4ab), tenant_id: TenantId(tn_01m2pqx54ys692adpwwre6gt4n), function_id: FunctionId(fn_01m2pqx54y038yhmybebvf38w5), alias: None, revision_id: RevisionId(rev_01m2pqx54y6vz9h94dsvtnb91f), mode: Sync, event_kind: Json, status: Accepted, deadlines: Deadlines { queue_deadline: 2026-09-15T00:00:10Z, init_deadline: None, execution_deadline: None, client_deadline: 2026-09-14T23:59:59Z }, idempotency_key: Some("key-1"), input_digest: Sha256Digest(sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855), input_size_bytes: 0, output: None, http_status: None, trace_id: "t", accepted_at: 2026-09-15T00:00:00Z, started_at: None, finished_at: None, attempt_ids: [] })
+thread 'invocation::tests::an_elapsed_client_deadline_alone_is_rejected' (1032550) panicked at crates/domain/src/invocation.rs:734:22:
+an elapsed client deadline must be rejected, got Ok(Invocation { id: InvocationId(inv_01m2ps803thp6q8kdkav2j0tet), tenant_id: TenantId(tn_01m2ps803t64vg1mmem9a3ftgn), function_id: FunctionId(fn_01m2ps803t6ehv7c8mmqpyd3eb), alias: None, revision_id: RevisionId(rev_01m2ps803tq9ecckxq0p7t1yj3), mode: Sync, event_kind: Json, status: Accepted, deadlines: Deadlines { queue_deadline: 2026-09-15T00:00:10Z, init_deadline: None, execution_deadline: None, client_deadline: 2026-09-14T23:59:59Z }, idempotency_key: Some("key-1"), input_digest: Sha256Digest(sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855), input_size_bytes: 0, output: None, http_status: None, trace_id: "t", accepted_at: 2026-09-15T00:00:00Z, started_at: None, finished_at: None, attempt_ids: [], dispatcher_id: None })
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
 
 failures:
     invocation::tests::an_elapsed_client_deadline_alone_is_rejected
 
-test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.00s
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 34 filtered out; finished in 0.00s
 
 error: test failed, to rerun pass `-p tachyon-serverless-domain --lib`
 ::endgroup::
 
 ::group::cargo test -p tachyon-serverless-runtime-bridge --lib (1 tests)
-   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
-   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
-   Compiling tachyon-serverless-sdk v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/sdk)
-   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/runtime-bridge)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.81s
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/protocol)
+   Compiling tachyon-serverless-sdk v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/sdk)
+   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/runtime-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.90s
      Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_runtime_bridge-04d0596ccf441d70)
 
 running 1 test

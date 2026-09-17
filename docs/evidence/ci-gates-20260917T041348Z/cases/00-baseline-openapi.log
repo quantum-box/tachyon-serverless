@@ -1,0 +1,10 @@
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/apps/gateway)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running tests/openapi_snapshot.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/openapi_snapshot-ce89a1cbb1d95f65)
+
+running 2 tests
+test every_management_route_requires_the_bearer_scheme ... ok
+test openapi_document_matches_the_committed_snapshot ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

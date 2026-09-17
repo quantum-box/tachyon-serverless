@@ -1,0 +1,105 @@
+# case: egress-gate-result-ignored
+# what: the pre-boot egress check is not enforced, so a VM with a NIC reaches InstanceStart
+# gate: security:egress_gate
+# known-bad change (applied to a temporary copy only):
+--- crates/providers/firecracker/src/provider.rs.orig	2026-09-17 13:15:56
++++ crates/providers/firecracker/src/provider.rs	2026-09-17 13:15:56
+@@ -515,8 +515,7 @@
+                 format!("egress gate: cannot read the VM configuration before InstanceStart: {e}"),
+             )
+         })?;
+-        check_vm_config(&vm_config, expected_nic.as_ref())
+-            .map_err(|e| Self::boot_error(paths, e))?;
++        let _ = check_vm_config(&vm_config, expected_nic.as_ref());
+         // Egress gate, part 3: the policy is still in force at the moment the
+         // guest is started (nobody flushed the chain since it was installed).
+         if let Some(policy) = &policy {
+# ---- gate output ----
+security-regression: 15 listed tests from scripts/ci/security-regression.list
+
+::group::cargo test -p tachyon-serverless-domain --lib (3 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/domain)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_domain-c504a817fb9998ac)
+
+running 3 tests
+test egress::tests::blocked_ranges_cover_management_metadata_and_private_space ... ok
+test egress::tests::allow_rules_refuse_special_ranges_empty_ports_and_ipv6 ... ok
+test revision::tests::egress_allowlists_are_validated_per_profile ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 34 filtered out; finished in 0.00s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-provider-firecracker --lib (11 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/protocol)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/provider-port)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/providers/firecracker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.96s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_provider_firecracker-099260c364b52c8e)
+
+running 11 tests
+test egress_gate::tests::plans_without_networking_pass ... ok
+test egress_gate::tests::plans_with_networking_fail_closed_without_a_policy ... ok
+test egress_gate::tests::a_policy_allows_exactly_its_interface_once_and_never_mmds ... ok
+test egress_gate::tests::a_vm_config_without_nic_passes ... ok
+test egress_gate::tests::a_vm_config_with_exactly_the_policed_nic_passes ... ok
+test network::tests::public_web_denies_special_ranges_and_foreign_dns_before_accepting ... ok
+test egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed ... ok
+test network::tests::base_script_is_default_deny_for_taps ... ok
+test network::tests::restricted_accepts_only_the_allowlist_and_ends_in_drop ... ok
+test provider::tests::create_rejects_non_none_egress_where_it_cannot_be_enforced ... ok
+test network::tests::read_back_fails_closed_on_any_divergence ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 60 filtered out; finished in 0.00s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-provider-firecracker --test fake_vmm (1 tests)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/providers/firecracker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.11s
+     Running tests/fake_vmm.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/fake_vmm-7046324dac539d61)
+
+running 1 test
+test egress_gate_refuses_to_start_a_vm_with_a_network_interface ... FAILED
+
+failures:
+
+---- egress_gate_refuses_to_start_a_vm_with_a_network_interface stdout ----
+
+thread 'egress_gate_refuses_to_start_a_vm_with_a_network_interface' (1034917) panicked at crates/providers/firecracker/tests/fake_vmm.rs:843:57:
+called `Result::unwrap_err()` on an `Ok` value: EnvironmentHandle { environment_id: EnvironmentId(env_01m2ps8cjj1h48w66nvs7gz1ec), evidence: BootEvidence { guest_boot_id: None, host_pid: Some(41233), details: {"boot_ms": Number(1033), "console_log": String("/tmp/fckFtQTq/run/env_01m2ps8cjj1h48w66nvs7gz1ec/console.log"), "console_log_max_bytes": Number(4194304), "egress_profile": String("none"), "env_dir": String("/tmp/fckFtQTq/run/env_01m2ps8cjj1h48w66nvs7gz1ec"), "fc_log_max_bytes": Number(4194304), "firecracker_version": String("v9.9.9-fake"), "function_drive_bytes": Number(9437184), "host_disk_budget_bytes": Number(152043640), "instance_id": String("env-01m2ps8cjj1h48w66nvs7gz1ec"), "kernel_path": String("/tmp/fckFtQTq/vmlinux"), "kernel_sha256": String("100d125cca4dd28597fbbbac418ec0091d3f121443803dc19156c766c432161e"), "mem_mib": Number(512), "network_interfaces": Number(0), "provider": String("firecracker"), "rootfs_path": String("/tmp/fckFtQTq/rootfs.ext4"), "rootfs_sha256": String("61c7d77f1b1d5b8eff183488acb242ddbfbdbac52c5d37b78ac1d2769c7a99a8"), "scratch_drive_bytes": Number(134217728), "scratch_drive_ms": Number(4), "scratch_drive_reserved": Bool(false), "vcpus": Number(2), "vsock_port": Number(5000)} }, .. }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    egress_gate_refuses_to_start_a_vm_with_a_network_interface
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 2.07s
+
+error: test failed, to rerun pass `-p tachyon-serverless-provider-firecracker --test fake_vmm`
+::endgroup::
+
+security regression group
+STATUS   CATEGORY         TEST
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_without_networking_pass
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_with_networking_fail_closed_without_a_policy
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_policy_allows_exactly_its_interface_once_and_never_mmds
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_exactly_the_policed_nic_passes
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_without_nic_passes
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed
+ok       egress_gate      tachyon-serverless-provider-firecracker lib provider::tests::create_rejects_non_none_egress_where_it_cannot_be_enforced
+ok       egress_gate      tachyon-serverless-provider-firecracker lib network::tests::restricted_accepts_only_the_allowlist_and_ends_in_drop
+ok       egress_gate      tachyon-serverless-provider-firecracker lib network::tests::public_web_denies_special_ranges_and_foreign_dns_before_accepting
+ok       egress_gate      tachyon-serverless-provider-firecracker lib network::tests::read_back_fails_closed_on_any_divergence
+ok       egress_gate      tachyon-serverless-provider-firecracker lib network::tests::base_script_is_default_deny_for_taps
+ok       egress_gate      tachyon-serverless-domain lib egress::tests::allow_rules_refuse_special_ranges_empty_ports_and_ipv6
+ok       egress_gate      tachyon-serverless-domain lib egress::tests::blocked_ranges_cover_management_metadata_and_private_space
+ok       egress_gate      tachyon-serverless-domain lib revision::tests::egress_allowlists_are_validated_per_profile
+FAILED   egress_gate      tachyon-serverless-provider-firecracker test:fake_vmm egress_gate_refuses_to_start_a_vm_with_a_network_interface
+
+security-regression: FAIL - 1 of 15 listed tests did not pass.
+  MISSING means the test no longer exists under that exact path (renamed, moved or removed).
+  Fix the regression, or update scripts/ci/security-regression.list in the same change.
+# gate exit code: 1

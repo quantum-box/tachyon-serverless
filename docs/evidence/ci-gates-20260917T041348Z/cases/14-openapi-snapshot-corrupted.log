@@ -2,9 +2,9 @@
 # what: the committed OpenAPI snapshot is edited by hand
 # gate: openapi
 # known-bad change (applied to a temporary copy only):
---- docs/openapi.json.orig	2026-09-17 12:55:40
-+++ docs/openapi.json	2026-09-17 12:55:40
-@@ -1200,7 +1200,7 @@
+--- docs/openapi.json.orig	2026-09-17 13:16:48
++++ docs/openapi.json	2026-09-17 13:16:48
+@@ -1237,7 +1237,7 @@
      "license": {
        "name": "MIT"
      },
@@ -14,11 +14,11 @@
    },
    "openapi": "3.1.0",
 # ---- gate output ----
-   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
-   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
-   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/apps/gateway)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.82s
-     Running tests/openapi_snapshot.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/openapi_snapshot-1edb08043348c51e)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/api-types)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/apps/gateway)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.98s
+     Running tests/openapi_snapshot.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/openapi_snapshot-ce89a1cbb1d95f65)
 
 running 2 tests
 test every_management_route_requires_the_bearer_scheme ... ok
@@ -28,7 +28,7 @@ failures:
 
 ---- openapi_document_matches_the_committed_snapshot stdout ----
 
-thread 'openapi_document_matches_the_committed_snapshot' (897076) panicked at apps/gateway/tests/openapi_snapshot.rs:102:5:
+thread 'openapi_document_matches_the_committed_snapshot' (1045458) panicked at apps/gateway/tests/openapi_snapshot.rs:102:5:
 the OpenAPI contract changed but docs/openapi.json was not updated.
 Differences (JSON pointer):
   /info/title: snapshot "Tachyon Serverless Gateway (edited)" != generated "Tachyon Serverless Gateway"
@@ -39,7 +39,7 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 failures:
     openapi_document_matches_the_committed_snapshot
 
-test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 error: test failed, to rerun pass `-p tachyon-serverless-gateway --test openapi_snapshot`
 # gate exit code: 101

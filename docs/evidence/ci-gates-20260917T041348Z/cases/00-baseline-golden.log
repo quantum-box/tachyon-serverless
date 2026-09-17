@@ -1,10 +1,10 @@
-   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.81s
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.14s
      Running tests/golden.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/golden-8cf1526a6f9f1260)
 
 running 7 tests
-test no_stale_fixture_is_left_behind ... ok
 test runtime_api_constants_match_the_golden_fixture ... ok
+test no_stale_fixture_is_left_behind ... ok
 test every_message_variant_and_error_kind_has_a_fixture ... ok
 test a_length_prefixed_frame_matches_the_golden_bytes ... ok
 test runtime_api_bodies_match_the_golden_fixtures ... ok

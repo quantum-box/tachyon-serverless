@@ -2,8 +2,8 @@
 # what: ensure_tenant lets a principal reach another tenant's resource
 # gate: security:tenant_authz
 # known-bad change (applied to a temporary copy only):
---- crates/application/src/authz.rs.orig	2026-09-17 12:51:17
-+++ crates/application/src/authz.rs	2026-09-17 12:51:17
+--- crates/application/src/authz.rs.orig	2026-09-17 13:15:13
++++ crates/application/src/authz.rs	2026-09-17 13:15:13
 @@ -46,7 +46,7 @@
  /// Tenant scoping: a resource owned by a different tenant does not exist
  /// from the caller's point of view.
@@ -17,9 +17,9 @@
 security-regression: 16 listed tests from scripts/ci/security-regression.list
 
 ::group::cargo test -p tachyon-serverless-application --lib (10 tests)
-   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.12s
-     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-e46bc06ffa756374)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.62s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-d2af85369fe83a8f)
 
 running 10 tests
 test error::tests::tenant_mismatch_is_not_found ... ok
@@ -37,7 +37,7 @@ failures:
 
 ---- authz::tests::foreign_tenant_is_not_found stdout ----
 
-thread 'authz::tests::foreign_tenant_is_not_found' (855312) panicked at crates/application/src/authz.rs:89:57:
+thread 'authz::tests::foreign_tenant_is_not_found' (1024759) panicked at crates/application/src/authz.rs:89:57:
 called `Result::unwrap_err()` on an `Ok` value: ()
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
@@ -45,15 +45,15 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 failures:
     authz::tests::foreign_tenant_is_not_found
 
-test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 95 filtered out; finished in 0.02s
+test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 117 filtered out; finished in 0.01s
 
 error: test failed, to rerun pass `-p tachyon-serverless-application --lib`
 ::endgroup::
 
 ::group::cargo test -p tachyon-serverless-application --test pipeline (2 tests)
-   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.65s
-     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-d1151c96f3890c10)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.77s
+     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-46405d5f51c70707)
 
 running 2 tests
 test cross_tenant_resources_are_not_found ... FAILED
@@ -63,7 +63,7 @@ failures:
 
 ---- cross_tenant_resources_are_not_found stdout ----
 
-thread 'cross_tenant_resources_are_not_found' (856444) panicked at crates/application/tests/pipeline.rs:663:5:
+thread 'cross_tenant_resources_are_not_found' (1025542) panicked at crates/application/tests/pipeline.rs:664:5:
 assertion failed: matches!(h.app.functions.get(&h.b, &function.id), Err(AppError::NotFound(_)))
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
@@ -71,28 +71,28 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 failures:
     cross_tenant_resources_are_not_found
 
-test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.08s
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.03s
 
 error: test failed, to rerun pass `-p tachyon-serverless-application --test pipeline`
 ::endgroup::
 
 ::group::cargo test -p tachyon-serverless-cli --test mock_gateway (2 tests)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.27s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
      Running tests/mock_gateway.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/mock_gateway-a2ecd3a55ef88ddd)
 
 running 2 tests
 test wrong_token_is_exit_2 ... ok
 test cross_tenant_resource_is_404_exit_2 ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.05s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.02s
 
 ::endgroup::
 
 ::group::cargo test -p tachyon-serverless-gateway --test gateway_integration (2 tests)
-   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
-   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/apps/gateway)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.24s
-     Running tests/gateway_integration.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/gateway_integration-7c95be4cc8f0d427)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/apps/gateway)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.11s
+     Running tests/gateway_integration.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/gateway_integration-7580544a0192b201)
 
 running 2 tests
 test operator_role_is_own_tenant_read_only ... FAILED
@@ -102,8 +102,8 @@ failures:
 
 ---- operator_role_is_own_tenant_read_only stdout ----
 
-thread 'operator_role_is_own_tenant_read_only' (858250) panicked at apps/gateway/tests/gateway_integration.rs:905:9:
-assertion `left == right` failed: GET /v1/functions/fn_01m2pqvjqfxpqm9z28vzwk0n3r
+thread 'operator_role_is_own_tenant_read_only' (1026769) panicked at apps/gateway/tests/gateway_integration.rs:926:9:
+assertion `left == right` failed: GET /v1/functions/fn_01m2ps73vmherdbzvh864253h0
   left: 200
  right: 404
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
@@ -112,7 +112,7 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 failures:
     operator_role_is_own_tenant_read_only
 
-test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.11s
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.10s
 
 error: test failed, to rerun pass `-p tachyon-serverless-gateway --test gateway_integration`
 ::endgroup::
