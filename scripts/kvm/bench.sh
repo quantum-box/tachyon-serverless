@@ -42,6 +42,8 @@
 #   BENCH_DIRTY              whether that tree had uncommitted changes (recorded as given)
 #   BENCH_HOST_NOTE          free text describing the physical host (a VM cannot see it)
 #   BENCH_NESTED             true / false, overrides the nested virtualization detection
+#   BENCH_MAX_CALIBRATION_MS refuse to start when the fixed CPU loop (calibration.jsonl) is slower
+#                            than this; unset = record only
 #   TSLS_SKIP_BUILD=1        do not run cargo build
 #   TSLS_GATEWAY_CONFIG      base config (default config/gateway.firecracker.toml, must require the
 #                            jailer and the host cgroup)
@@ -111,6 +113,8 @@ DEPLOYS="$EVIDENCE_DIR/deploys.jsonl"
 SWEEPS="$EVIDENCE_DIR/sweeps.jsonl"
 RESOURCES="$EVIDENCE_DIR/resources.jsonl"
 : > "$ATTEMPTS"; : > "$INVOCATIONS"; : > "$GATEWAY_RUNS"; : > "$DEPLOYS"; : > "$SWEEPS"; : > "$RESOURCES"
+CALIBRATION="$EVIDENCE_DIR/calibration.jsonl"
+: > "$CALIBRATION"
 
 BUILD_PROFILE="release"
 TSLS_BIN="${TSLS_BIN:-$REPO_ROOT/target/$BUILD_PROFILE/tsls}"
@@ -165,6 +169,26 @@ cleanup() {
   exit "$rc"
 }
 trap cleanup EXIT INT TERM
+
+# calibrate PHASE: wall time of a fixed single-threaded CPU loop, three times. A VM cannot see the
+# load of the machine it runs on (Apple's hypervisor reports no steal time), so this is the in-guest
+# signal that the physical host was busy: compare the rows of one run, and of runs on one host.
+calibrate() {
+  local phase="$1" i t0 runs="" worst
+  for i in 1 2 3; do
+    t0="$(now_ms)"
+    awk 'BEGIN { s = 0; for (i = 0; i < 3000000; i++) s += i }'
+    runs="$runs $(( $(now_ms) - t0 ))"
+  done
+  jq -nc --arg phase "$phase" --arg runs "$runs" --arg load "$(cut -d' ' -f1-3 /proc/loadavg)" \
+    '{phase: $phase, awk_loop_ms: ($runs | split(" ") | map(select(length > 0) | tonumber)), vm_loadavg: $load}' >> "$CALIBRATION"
+  worst="$(printf '%s' "$runs" | tr ' ' '\n' | sort -n | tail -n1)"
+  e2e_log "calibration ($phase): awk loop ms =$runs"
+  if [ -n "${BENCH_MAX_CALIBRATION_MS:-}" ] && [ "$worst" -gt "$BENCH_MAX_CALIBRATION_MS" ]; then
+    e2e_warn "calibration $worst ms > BENCH_MAX_CALIBRATION_MS=$BENCH_MAX_CALIBRATION_MS: the host looks busy"
+    return 1
+  fi
+}
 
 root_fs_pct() { df -P "$REPO_ROOT" | awk 'NR == 2 { gsub("%", "", $5); print $5 }'; }
 
@@ -608,6 +632,7 @@ main() {
   step "build (release gateway / cli, musl guests)" build_all
   write_configs
   step "metadata" write_metadata
+  step "calibration before the run (BENCH_MAX_CALIBRATION_MS)" calibrate start
   if [ "$(steps_failed_count)" -ne 0 ]; then
     steps_print_table || true
     exit 2
@@ -616,6 +641,7 @@ main() {
   local sample t raw
   for sample in $SAMPLES; do
     bin_of "$sample" >/dev/null || e2e_die "unknown sample $sample"
+    calibrate "before-$sample" || true
     for t in $(seq 1 "$FRESH_TRIALS"); do
       e2e_log "$sample: fresh host trial $t"
       stop_gateway 20
@@ -654,6 +680,7 @@ main() {
   done
 
   stop_gateway 30
+  calibrate end || true
   local clean=0
   step "cleanup proof (no gateway, VMM, jail, cgroup, tap, env dir)" prove_clean || true
   [ "${STEP_STATUS[${#STEP_STATUS[@]}-1]}" = "PASS" ] || clean=1

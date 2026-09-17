@@ -33,7 +33,9 @@ jq -n \
   --argjson res "$(slurp "$DIR/resources.jsonl")" \
   --argjson gw "$(slurp "$DIR/gateway-runs.jsonl")" \
   --argjson deploys "$(slurp "$DIR/deploys.jsonl")" \
-  --argjson teardown "$TEARDOWN" '
+  --argjson teardown "$TEARDOWN" \
+  --argjson calibration "$(slurp "$DIR/calibration.jsonl")" \
+  --argjson hostload "$(if [ -s "$DIR/physical-host-load.tsv" ]; then jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {at: .[0], load1: (.[1] | ltrimstr("{ ") | split(" ")[0] | tonumber)})' "$DIR/physical-host-load.tsv"; else echo null; fi)" '
   def pct($p): sort as $s | ($s | length) as $n
     | if $n == 0 then null else $s[([((($p / 100) * $n) | ceil) - 1, 0] | max)] end;
   def dist: map(select(. != null)) as $v
@@ -85,6 +87,9 @@ jq -n \
   | ($meta.load.samples) as $samples
   | {
       run: $meta.run, commit: $meta.commit,
+      host_contention: {calibration: $calibration,
+        physical_host_load1: (if $hostload == null then null else ([$hostload[].load1] | dist) end),
+        note: "calibration = wall ms of a fixed awk loop inside the VM; physical_host_load1 = 1-minute load average of the machine running the VM, sampled outside the VM when provided (physical-host-load.tsv)"},
       rules: "nearest-rank percentiles over all attempts of a group including failures; timing percentiles over attempts carrying the timing (n shown); nothing dropped",
       scenarios: [ $samples[] as $s | ["fresh-miss", "cold", "warm-prime", "warm"][] as $sc
         | [$r[] | select(.sample == $s and .scenario == $sc)] as $g
@@ -208,6 +213,8 @@ jq -r --argjson meta "$(cat "$DIR/metadata.json")" '
   "| 負荷 | fresh host \($meta.load.fresh_host_trials_per_sample) 回 / cold \($meta.load.cold_n) 回 / warm \($meta.load.warm_n) 回（間隔 \($meta.load.warm_gap_ms) ms）/ sweep \($meta.load.sweep_levels | map(tostring) | join(",")) 並列 × 各 \($meta.load.sweep_requests_per_level) request（\($meta.load.sweep_modes | join(" / "))）/ idle \($meta.load.idle_seconds) s |",
   "| payload | \($meta.load.payloads | kv) |",
   "| client / seed | \($meta.load.client)。\($meta.load.seeds) |",
+  "",
+  "| host の混み具合 | VM 内の固定 CPU loop（ms、3 回）: \(.host_contention.calibration | map("\(.phase) \(.awk_loop_ms | map(tostring) | join("/"))") | join("、"))。物理 host の 1 分 load average: \(if .host_contention.physical_host_load1 == null then "記録なし" else "p50 \(.host_contention.physical_host_load1.p50) / max \(.host_contention.physical_host_load1.max)（n=\(.host_contention.physical_host_load1.n)、`physical-host-load.tsv`）" end) |",
   "",
   "percentile は nearest-rank。client の分布は **失敗を含む全 attempt**、内訳の分布はその値を持つ attempt（n を併記）。外れ値は除外していない。生データは `attempts.jsonl`（1 request 1 行）と `invocations.jsonl`。",
   "",
