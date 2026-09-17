@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use tachyon_serverless_application::{GatewayConfig, Profile, ProviderKindConfig};
+use tachyon_serverless_application::{GatewayConfig, Profile, ProviderKindConfig, StoreBackend};
 use tachyon_serverless_domain::TenantId;
 
 fn config_dir() -> PathBuf {
@@ -35,6 +35,8 @@ fn dev_config_loads() {
             .iter()
             .all(|b| b.binding_ref == "demo-secret")
     );
+    assert_eq!(cfg.store.backend, StoreBackend::Sqlite);
+    assert_eq!(cfg.store.output_retention_seconds, 7 * 24 * 60 * 60);
 }
 
 #[test]
@@ -52,4 +54,5 @@ fn firecracker_config_loads() {
     assert!(f.workdir.is_absolute() && f.workdir.ends_with(".kvm/run"));
     assert_eq!(f.vsock_port, 5000);
     assert_eq!(cfg.identity.tokens.len(), 2);
+    assert_eq!(cfg.store.backend, StoreBackend::Sqlite);
 }

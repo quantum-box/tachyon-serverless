@@ -103,7 +103,7 @@ gateway 設定 `config/gateway.toml`（例は `config/gateway.dev.toml`）:
 ```toml
 listen = "127.0.0.1:8080"
 profile = "dev"                # dev | production。production では dev_only provider を拒否
-data_dir = "./data"            # artifacts と state.json
+data_dir = "./data"            # artifacts と state.db（台帳）
 
 [provider]
 kind = "process"               # process | firecracker
@@ -123,6 +123,10 @@ vsock_port = 5000
 max_concurrency = 8            # gateway 全体
 max_queue = 32
 queue_timeout_seconds = 10
+
+[store]
+backend = "sqlite"             # sqlite（<data_dir>/state.db、既定）| memory（再起動で消える）
+output_retention_seconds = 604800  # インライン出力の保持期限。過ぎたら digest に置き換える。0 は無期限
 
 [reconcile]
 on_startup = true              # 起動時に provider の孤児環境を回収する（既定 true）
@@ -151,13 +155,29 @@ value = "s3cr3t-a"
 
 ### 起動時の後始末（restart reconcile）
 
-前のプロセスが crash / kill で落ちた場合、台帳（`state.json`）も host の資源も中途半端に残る。gateway は次の順で収束させる。
+前のプロセスが crash / kill で落ちた場合、台帳（`state.db`）も host の資源も中途半端に残る。gateway は次の順で収束させる。
 
-1. **台帳**（`crates/application/src/repository.rs::reconcile_after_restart`、store の読み込み時）。`Running` だった Invocation は `Invoke` frame を書き終えており handler が走った可能性があるため `OutcomeUnknown{Host.Restarted}`（自動再実行しない。`docs/threat-model.md` §9）。`Accepted` / `Queued` のままだったものは一度も dispatch していないので `Failed{platform_error, Host.Restarted}`。Attempt は所属する Invocation に従い、Environment は `Lost`。terminal なものは触らない。
+1. **台帳**（`crates/application/src/repository/restart.rs` の規則を `SqliteStore::open` が 1 トランザクションで適用する）。`Running` だった Invocation は `Invoke` frame を書き終えており handler が走った可能性があるため `OutcomeUnknown{Host.Restarted}`（自動再実行しない。`docs/threat-model.md` §9）。`Accepted` / `Queued` のままだったものは一度も dispatch していないので `Failed{platform_error, Host.Restarted}`。Attempt は所属する Invocation に従い、Environment は `Lost`、未 release の Lease は release、Invocation の無い Idempotency key は削除。terminal なものは触らない。
 2. **host の資源**（`crates/application/src/services/reconcile.rs::ReconcileService`、`serve()` が listener を accept させる前に呼ぶ）。`ExecutionProvider::list_environments` を呼び、この gateway が active として知らない環境を `terminate_environment(Reconcile)` で回収する（process / socket / drive / workdir。冪等）。台帳には active なのに provider が知らない環境は `Lost` にする。
 3. **観測**。結果（found / adopted / terminated / failed / lost）を構造化ログ `startup reconcile finished` に出し、`GET /readyz` の `reconcile` にも載せる。
 
 規則: provider の列挙や terminate が失敗しても起動は止めない（warn を出して続行し、`reconcile.error` に残す）。実行中の invocation の環境は `create_environment` より前に台帳へ記録されるため必ず「知っている」側に入り、reconcile が terminate することはない。`[reconcile] on_startup = false` で 2 と 3 だけを止められる（1 は常に走る）。
+
+### 永続化（`state.db`、PLT-4618）
+
+台帳は `<data_dir>/state.db`（埋め込み SQLite）に置く。決定と比較は `docs/adr/0003-execution-state-persistence.md`、実装は `crates/application/src/repository/`。
+
+| 項目 | 内容 |
+|---|---|
+| 実装 | `SqliteStore`（`repository/sqlite/`）。`InMemoryStore` はテスト用の volatile 実装で、同じ契約テスト（`repository/contract_tests.rs`）を両方に流す |
+| 書き込み | 1 操作 = 1 つの `BEGIN IMMEDIATE` トランザクション（WAL、`synchronous = FULL`、`busy_timeout` 5 秒）。失敗は呼び出し側にエラーとして返る（P1 の「warn だけ」は廃止） |
+| 更新の原子性 | 読んだ値を条件にした CAS。alias は `generation`、environment は `epoch` と terminal flag（claim / release / sweep は `state` も）、invocation / attempt は terminal flag、lease は released flag。0 行更新は「負け」 |
+| 行の不変条件 | `repository/guard.rs`。親と tenant が違う行、id・tenant・親 id・spec・digest など identity の変更、terminal 行の書き換え、別 epoch の environment のコピー、上限を超えるインライン出力を `RepoError::Refused` で拒否する。同一 id の insert は `Conflict` |
+| schema | `repository/sqlite/migrations/NNN_*.sql`。`schema_version` に適用済みを記録し、起動時に未適用分を 1 トランザクションで適用する。前進のみで、binary より新しい schema は起動を拒否する |
+| 本文 | 入力は digest とサイズだけ。出力は `[invoke] inline_output_max_bytes` 以下のときだけ本文を持ち（store 側でも `limits.max_response_bytes` で拒否）、`[store] output_retention_seconds` を過ぎると digest に置き換える（起動時と 10 分ごと）。secret 値は書かない。log は memory のまま |
+| `state.json` からの移行 | `state.json` があり DB が空なら、起動時に 1 度だけ取り込み `state.json.imported-<UTC>` に rename する（削除しない）。行のある DB と `state.json` が同時にあれば両方の path を挙げて起動を拒否する。壊れた `state.json` は従来どおり拒否する。逆方向の変換は無い（戻すには rename された JSON を戻し、`state.db*` を退避する） |
+| 権限 | `state.db` は新規作成時に mode `0600`。`-wal` / `-shm` も SQLite が同じ mode で作る |
+| 対象外 | 複数 host、ネットワーク FS 上の `data_dir`、TiDB、backup / PITR、保存時暗号化。起動時の台帳 reconcile は「前のプロセスの in-flight は全部失われた」前提なので、**同じ `data_dir` を複数 gateway が同時に開く構成はまだ対象外**（PLT-4631 で lease の期限に基づく reconcile に狭める） |
 
 ### 環境 pool と再利用キー（PLT-4632）
 
@@ -225,7 +245,7 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 ## 5. 決め事（実装者が守ること）
 
 1. domain / application は `firecracker` `kube` `axum` を import しない。provider は `ExecutionProvider` だけを実装する。
-2. Secret 値は `SecretValue`（Debug は redacted）で運び、HelloAck の env にだけ載せる。ログ・API 応答・state.json に書かない。
+2. Secret 値は `SecretValue`（Debug は redacted）で運び、HelloAck の env にだけ載せる。ログ・API 応答・台帳（`state.db`）に書かない。
 3. guest の自己申告（handler_ms, Ready 時刻）は参考値。課金・timeout・権限の根拠は host 側計測。
 4. 結果は `attempt_id` と `epoch` が Lease と一致するものだけ受理する。
 5. terminate は冪等。terminate 後に process / socket / tap / drive / workdir が残らない（`TerminateReport.cleaned` に列挙）。
@@ -235,7 +255,7 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 9. ログは invocation 単位で `Limits` の行数・bytes 上限を守り、超過分は `dropped = true` で観測できるようにする。
 10. 「動いた」証跡: 環境の `BootEvidence`（guest_boot_id, host_pid, provider details）を Invocation の attempt に残し、API と CLI で表示する。
 11. 再起動で「開始したかもしれない」ものを `Failed` にしない。dispatch 済みは `OutcomeUnknown`、未 dispatch だけ `Failed`（§4「起動時の後始末」）。孤児環境の回収は listener を開ける前に済ませる。
-12. 永続化は P1 では in-memory + `state.json` の write-through（`crates/application/src/repository.rs`）で、調整（coordination）には使っていない。環境再利用・autoscaling・scale-to-zero が要求する複数プロセス間の原子性（slot 取得、Lease の期限、pool membership、reuse key 検索、Idempotency binding）は現在の store では表現できない。方針は `docs/adr/0003-execution-state-persistence.md`（control-plane と cell 局所状態を port で分け、プロトタイプは 1 file の埋め込み SQLite に載せる。TiDB は将来の adapter で §6 のとおり非対象のまま）。
+12. 永続化は `<data_dir>/state.db`（埋め込み SQLite、§4「永続化」、`docs/adr/0003-execution-state-persistence.md`）。repository を経由しない読み書きをしない。更新は「読んだ値を条件にした CAS」で、負けたら読み直す（`AliasService::apply`）。新しい列や表は migration を追加して入れ、適用済みの migration を書き換えない。TiDB は将来の adapter で §6 のとおり非対象のまま。
 
 ## 6. 非対象（P1）
 

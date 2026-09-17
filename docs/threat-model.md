@@ -34,7 +34,7 @@
 ┌────────────┐  B1   ┌──────────────────────────────────────────┐
 │  client    │──────▶│ gateway                                   │
 │ (tenant)   │◀──────│  control plane: 管理 API, artifact store, │
-└────────────┘       │                 repositories, state.json  │
+└────────────┘       │                 repositories, state.db    │
                      │  data plane:    invoke pipeline,          │
                      │                 bridge session, watchdog  │
                      └───────────────┬──────────────────────────┘
@@ -69,10 +69,10 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 | 資産 | 所在 | 損なわれ方 |
 |---|---|---|
 | A1 artifact（tenant の実行バイナリ） | `data_dir/artifacts`（digest 名） | 他 tenant による取得・実行、改竄 |
-| A2 secret 値 | `config/gateway.{dev,firecracker}.toml`（P1）、`HelloAck.env`（転送中）、guest プロセス環境 | ログ・API 応答・`state.json`・`BootEvidence.details` への混入、他 environment への配送 |
+| A2 secret 値 | `config/gateway.{dev,firecracker}.toml`（P1）、`HelloAck.env`（転送中）、guest プロセス環境 | ログ・API 応答・台帳（`state.db`）・`BootEvidence.details` への混入、他 environment への配送 |
 | A3 invocation の入出力 | request body、`Invocation.output`（inline ≤ 上限 / digest）、guest メモリ | 他 tenant による読み取り、改竄、上限を超える蓄積 |
 | A4 ログ | `LogRecord`（invocation 単位、上限付き） | 他 tenant による読み取り、洪水による retention 破壊、secret の混入 |
-| A5 ledger（Function / Revision / Alias / Invocation / Attempt / Environment / UsageEvent） | in-memory + `state.json` | 偽の結果による上書き、guest 申告に基づく計測 |
+| A5 ledger（Function / Revision / Alias / Invocation / Attempt / Environment / Lease / UsageEvent） | `<data_dir>/state.db`（埋め込み SQLite。UsageEvent と log は memory） | 偽の結果による上書き、guest 申告に基づく計測 |
 | A6 API token | `config/gateway.{dev,firecracker}.toml` | 漏洩、他 tenant への流用 |
 | A7 host 資源（KVM、CPU、memory、disk、fd） | provider host | orphan 環境、無制限の同時実行、暴走 handler |
 | A8 起動の証跡（`BootEvidence`、`AttemptTimings`） | Attempt | guest 申告での偽装、process provider の結果を microVM の結果と誤認 |
@@ -92,7 +92,7 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 1. **guest の自己申告は authz・metering・termination の根拠にしない。** `Ready.init_ms`、`Response.handler_ms`、`Heartbeat`、`Log.ts_ms`、`guest_boot_id` は表示・診断のための参考値。課金相当の事実は `UsageEvent{evidence_quality: HostObserved}` と `AttemptTimings`（host 計測）だけから作る。timeout の判定は host の watchdog が `execution_deadline` で行い、guest の申告や `Heartbeat` の有無で延長も短縮もしない。terminate は provider に対して host が発行し、guest の同意を要しない。
 2. **他 tenant の資源は存在しない扱い（404）。** 403 で存在を漏らさない。`Function::ensure_owned_by` / `Invocation::ensure_owned_by` が `TenantMismatch` を返したら、gateway は `NotFound` に写像する。
 3. **結果は Lease と一致するものだけ受理する。** `(attempt_id, epoch)` が一致しない `Response` / `Error` は捨てる。deadline 判定後に届いた結果も捨てる。
-4. **secret 値は `HelloAck.env` にだけ載せる。** `SecretValue` の `Debug` は redact。ログ・API 応答・`state.json`・`BootEvidence` に書かない。`HelloAck` frame そのものをログに出さない。
+4. **secret 値は `HelloAck.env` にだけ載せる。** `SecretValue` の `Debug` は redact。ログ・API 応答・台帳（`state.db`）・`BootEvidence` に書かない。`HelloAck` frame そのものをログに出さない。
 5. **Revision は受付時に固定され、以後変わらない。** `spec_digest` で不変性を検証する。alias は generation で CAS 更新する。
 6. **終了は冪等で、後始末は列挙する。** `terminate_environment` は 2 回目に `was_running = false` を返し、`TerminateReport.cleaned` に消したものを列挙する。
 7. **process provider の成功は microVM の成功ではない。** `Capabilities.dev_only = true` と `TACHYON_UNISOLATED=1` を必ず露出し、`profile = "production"` では拒否する（`docs/adr/0002-process-provider-dev-only.md`）。
@@ -183,9 +183,9 @@ B3 と B4 の間には権限境界が無い。user code が guest 内で権限�
 - 一致（同 key、同 `input_digest`）: 既存 Invocation を返し、**再実行しない**。terminal でなければ現在の状態（`accepted` / `queued` / `running`）を返し、client は `GET /v1/invocations/{id}` で追跡する。
 - 不一致（同 key、異なる `input_digest`）: 409 `conflict`。
 - key は Invocation の ledger 行と **同じ store 更新** で結び付ける。受付前に拒否された request（400 / 413 / 429 など）は key を消費せず、同じ key での再送は新規として受け付けられる。key が既存 Invocation に結び付いていれば、容量が満杯でも 429 ではなくその記録を返す。並行した同 key の request は 1 つだけが受け付けられ、残りは同じ Invocation を返す。
-- 旧版の `state.json` に残った「Invocation の無い key」は起動時の reconcile で捨てる（404 を返し続けない）。
+- 旧版の台帳（`state.json` の import を含む）に残った「Invocation の無い key」は起動時の reconcile で捨てる（404 を返し続けない）。
 - alias / revision の違いは key の一致判定に含めない（同 key なら最初に受け付けた revision の結果が返る）。
-- 保持期間: P1 は gateway プロセスの生存期間（`state.json` に保存されていればその間）。期限切れ後の再送は新規 invocation になる。これは SLA ではない。
+- 保持期間: key は invocation の行がある限り `state.db` に残る（行の retention は未実装）。インライン出力は `[store] output_retention_seconds`（既定 7 日）を過ぎると digest に置き換わるので、その後の同 key の再送は記録（状態と digest）を返すが出力本文は返さない。これは SLA ではない。
 - Idempotency-Key は副作用の exactly-once を保証しない。`OutcomeUnknown` / `Timeout` の後の再送は、同 key なら記録を返すだけで、副作用が起きたかどうかを確定させない。
 
 ## 11. payload と資源の上限
@@ -259,14 +259,14 @@ process provider（`crates/providers/process`）は隔離境界を持たない�
 
 ## 14. 残存リスクと未解決事項
 
-1. **artifact の tenant 境界（解消済み）。** `ArtifactStore`（`crates/provider-port/src/artifact.rs`）は content-addressed で tenant を持たないが、`POST /v1/artifacts` は `ArtifactService::upload` を通り、`(tenant_id, digest)` の所有を `state.json`（`artifact_owners`）に記録する。revision の作成と validation は revision の tenant が所有する digest しか解決せず、他 tenant だけが upload した digest は存在しない digest と同じ結果（`size_bytes = 0`、`failed` の理由 `artifact unavailable: artifact not found: <digest>`）になるので、digest の存在も漏れない。同じ bytes を自分で upload すれば参照できる。port の変更は無い。残り: 修正前の版で作られた Ready revision は再検証しない。テスト: `crates/application/tests/pipeline.rs::revisions_cannot_reference_another_tenants_artifact`、`apps/gateway/tests/gateway_integration.rs::foreign_artifact_digest_is_indistinguishable_from_a_missing_one`。
+1. **artifact の tenant 境界（解消済み）。** `ArtifactStore`（`crates/provider-port/src/artifact.rs`）は content-addressed で tenant を持たないが、`POST /v1/artifacts` は `ArtifactService::upload` を通り、`(tenant_id, digest)` の所有を台帳（`state.db` の `artifact_owners`）に記録する。revision の作成と validation は revision の tenant が所有する digest しか解決せず、他 tenant だけが upload した digest は存在しない digest と同じ結果（`size_bytes = 0`、`failed` の理由 `artifact unavailable: artifact not found: <digest>`）になるので、digest の存在も漏れない。同じ bytes を自分で upload すれば参照できる。port の変更は無い。残り: 修正前の版で作られた Ready revision は再検証しない。テスト: `crates/application/tests/pipeline.rs::revisions_cannot_reference_another_tenants_artifact`、`apps/gateway/tests/gateway_integration.rs::foreign_artifact_digest_is_indistinguishable_from_a_missing_one`。
 2. **jailer 未使用。** P1 の firecracker プロセスは gateway と同じユーザー・同じ mount namespace で走り、chroot・専用 uid・cgroup が無い。VMM 脱出時の影響範囲を狭めていない。PLT-4622 は Kata / seccomp / ServiceAccount token を挙げていたが、ADR-0001 で Firecracker を選んだので次のように読み替えた。
    - Kata の sandbox 境界 → Firecracker の microVM（KVM）。1 環境 = 1 VM = 1 tenant × 1 revision。
    - seccomp → Firecracker が既定で VMM の各 thread に入れる seccomp filter（provider は `--no-seccomp` を渡さない）。jailer による chroot / uid / namespace / cgroup は **未導入**。
    - ServiceAccount token → guest に platform の資格情報を置かない。rootfs は bridge だけ、function drive は artifact だけで、guest に渡るのは revision の env と Secret binding（PLT-4623）の値だけ。metadata service（MMDS）は構成せず、egress gate で拒否する。
    jailer / 専用ユーザー / host 側 cgroup（VMM の CPU quota と memory 上限）は後続。
 3. **平文 HTTP と静的 token。** B1 の保護は deployment 依存（§5-2, 5-3）。
-4. **`state.json` の権限。** invocation の入出力（inline）と log を含むため、ファイル権限は `config/gateway.{dev,firecracker}.toml` と同じ扱いにする。
+4. **台帳 file の権限。** `state.db`（と `-wal` / `-shm`）は invocation の inline 出力、入力の digest、idempotency key、boot evidence を含む（secret 値と log は含まない）。gateway は `state.db` を新規作成するときに mode `0600` で作り、SQLite は `-wal` / `-shm` を同じ mode で作る（`crates/application/src/repository/sqlite/tests.rs::the_database_file_is_private_to_its_owner`）。既存 file の mode は変えないので、P1 から移行した `data_dir` や手で作った file は運用者が `config/gateway.{dev,firecracker}.toml` と同じ扱いにする。取り込み後に残る `state.json.imported-*` も同じ内容を含む。インライン出力は `[store] output_retention_seconds` を過ぎると digest に置き換わる。`secure_delete = ON` で解放された領域は上書きされるが、置き換え前の page は WAL（`-wal`）に checkpoint まで残る（gateway は終了時に `wal_checkpoint(TRUNCATE)` を行う。`inline_output_is_replaced_by_its_digest_after_retention`）。`state.json.imported-*` と file system の snapshot / backup には残る。保存時暗号化は無い。
 5. **hypervisor 側の DoS（fork bomb、大量 fd）。** microVM の vCPU / memory 上限は Firecracker の `machine-config` で与え、guest から見える値と超過 alloc の `crash` 分類は実測した（ADR-0001 M9、`docs/evidence/isolation-20260917T011555Z/`）。CPU は vCPU 単位（500 m でも 1 vCPU を占有できる）で、VMM スレッドに host 側の cgroup quota は無い。同じ host に 2 tenant の環境を並べて負荷をかけた干渉（noisy neighbor）の計測はしていない。
 6. **時刻の単調性。** deadline は wall-clock。host の時刻が飛ぶと deadline 判定がずれる。P1 では `AttemptTimings` に `Instant` を使い、deadline だけ wall-clock とする。
 7. **`OutcomeUnknown` 後の副作用の可視化。** ledger は「不明」としか言えない。

@@ -384,6 +384,57 @@ impl PoolConfig {
     }
 }
 
+/// Which store backs the control-plane ledger (docs/adr/0003).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StoreBackend {
+    /// `<data_dir>/state.db`: embedded SQLite, WAL, forward-only migrations.
+    #[default]
+    Sqlite,
+    /// Volatile: nothing survives the process. For throwaway runs and tests.
+    Memory,
+}
+
+impl StoreBackend {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite",
+            Self::Memory => "memory",
+        }
+    }
+}
+
+/// `[store]`: where the ledger lives and how long invocation bodies stay.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct StoreConfig {
+    pub backend: StoreBackend,
+    /// Seconds an inline invocation output (at most
+    /// `[invoke] inline_output_max_bytes`) is kept after the invocation
+    /// finished. After that only its digest and size remain. `0` keeps it for
+    /// as long as the row exists.
+    pub output_retention_seconds: u64,
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            backend: StoreBackend::Sqlite,
+            output_retention_seconds: 7 * 24 * 60 * 60,
+        }
+    }
+}
+
+impl StoreConfig {
+    pub fn output_retention(&self) -> Option<chrono::Duration> {
+        (self.output_retention_seconds > 0).then(|| {
+            chrono::Duration::seconds(
+                self.output_retention_seconds.min(i64::MAX as u64 / 1000) as i64
+            )
+        })
+    }
+}
+
 /// Startup reconciliation (docs/architecture.md §4).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -422,6 +473,8 @@ pub struct GatewayConfig {
     pub reconcile: ReconcileConfig,
     #[serde(default)]
     pub pool: PoolConfig,
+    #[serde(default)]
+    pub store: StoreConfig,
 }
 
 fn default_listen() -> String {

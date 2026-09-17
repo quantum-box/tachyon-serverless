@@ -82,5 +82,7 @@ utoipa = { version = "5", features = ["chrono"] }
 libc = "0.2"
 tempfile = "3"
 parking_lot = "0.12"
+# embedded control-plane store (ADR-0003); bundled builds the C SQLite
+rusqlite = { version = "0.40", features = ["bundled"] }
 # guest vsock transport (Linux only; members reference it under a cfg(target_os = "linux") table)
 tokio-vsock = "0.7"

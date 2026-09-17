@@ -18,7 +18,7 @@ Tachyon のサーバーレス実行基盤の **動作プロトタイプ**。sing
 
 **でない**
 
-- 本番サービス、マルチノード、永続 DB（P1 は in-memory + `state.json`）
+- 本番サービス、マルチノード、DB サーバー（台帳は単一 host の埋め込み SQLite `data_dir/state.db`）
 - warm 再利用と idle 休止は既定では働かない（`[pool]` の既定が off。firecracker は実機計測済みで `supported`、process は `unsupported`）。snapshot/restore、非同期 invoke、cron、Console UI、egress 制御、OCI image の pull は Capability / API で明示的に `unsupported`
 
 ## 状態
@@ -29,7 +29,7 @@ Tachyon のサーバーレス実行基盤の **動作プロトタイプ**。sing
 | 実行 provider | `process`（macOS/Linux, 隔離なし）/ `firecracker`（Linux/KVM） |
 | 動作確認 | P1 の縦断（登録 → publish → invoke → logs → timeout → rollback → 他テナント 404 → cancel → 環境破棄）が **process provider（macOS）** と **実際の Firecracker microVM（Linux/KVM）** の両方で通った記録がある（下表） |
 | 同時実行 | 1 環境 1 実行、destroy-after-invoke |
-| 永続化 | in-memory + `data_dir/state.json` |
+| 永続化 | `data_dir/state.db`（埋め込み SQLite、WAL、前進のみの migration。旧 `state.json` は初回起動時に取り込む。[ADR-0003](docs/adr/0003-execution-state-persistence.md)） |
 | SLA | なし |
 
 ### 動作確認の記録
@@ -179,7 +179,7 @@ Issue や Pull Request を歓迎します。build / test / lint の手順は [CO
 
 ## セキュリティ
 
-脆弱性を発見した場合は、公開 Issue ではなく [SECURITY.md](SECURITY.md) の手順で報告してください。secret の値は HelloAck の env にだけ載り、ログ・API・`state.json` には書きません。
+脆弱性を発見した場合は、公開 Issue ではなく [SECURITY.md](SECURITY.md) の手順で報告してください。secret の値は HelloAck の env にだけ載り、ログ・API・台帳（`state.db`）には書きません。
 
 ## ライセンス
 

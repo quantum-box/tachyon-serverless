@@ -130,6 +130,8 @@ impl From<RepoError> for AppError {
         match e {
             RepoError::NotFound(what) => Self::NotFound(what),
             RepoError::Conflict(what) => Self::Conflict(what),
+            RepoError::Refused(what) => Self::Conflict(what),
+            RepoError::Store(msg) => Self::Platform(format!("storage: {msg}")),
             RepoError::Io(err) => Self::Platform(format!("storage: {err}")),
             RepoError::Serialization(msg) => Self::Platform(format!("storage: {msg}")),
         }

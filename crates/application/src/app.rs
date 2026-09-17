@@ -8,13 +8,13 @@ use tachyon_serverless_provider_port::{
     ArtifactStore, ExecutionProvider, IdentityProvider, SecretProvider, UsageSink,
 };
 
-use crate::config::{GatewayConfig, Profile, ProviderConfig};
+use crate::config::{GatewayConfig, Profile, ProviderConfig, StoreBackend};
 use crate::entrypoint::EntrypointPolicy;
 use crate::error::AppError;
 use crate::local_ports::{
     InMemoryUsageSink, LocalArtifactStore, StaticIdentityProvider, StaticSecretProvider,
 };
-use crate::repository::{InMemoryStore, Repositories};
+use crate::repository::{InMemoryStore, Repositories, SqliteOptions, SqliteStore, StateStore};
 use crate::services::invoke::InvokeServiceDeps;
 use crate::services::{
     AliasService, ArtifactService, EnvironmentPool, FunctionService, HistoryService, InvokeService,
@@ -35,7 +35,9 @@ pub struct Application {
     pub limits: Limits,
     pub clock: Arc<dyn Clock>,
     pub ids: Arc<dyn IdGenerator>,
-    pub store: Arc<InMemoryStore>,
+    /// The ledger: `<data_dir>/state.db` unless `[store] backend = "memory"`
+    /// or [`BootstrapOptions::persist_state`] is off.
+    pub store: Arc<dyn StateStore>,
     pub repos: Repositories,
     /// Content-addressed store. Tenant-facing uploads must go through
     /// [`Application::artifact_service`], which records ownership.
@@ -72,7 +74,9 @@ impl std::fmt::Debug for Application {
 pub struct BootstrapOptions {
     pub clock: Arc<dyn Clock>,
     pub ids: Arc<dyn IdGenerator>,
-    /// Write `state.json` through under `data_dir`. Artifacts are always on disk.
+    /// Keep the ledger in `<data_dir>/state.db` as `[store]` selects. When
+    /// false the ledger is volatile whatever `[store]` says. Artifacts are
+    /// always on disk.
     pub persist_state: bool,
     /// Secret backend to use instead of the static one built from
     /// `[[secrets.bindings]]`. Tests use it to rotate a value at runtime and
@@ -133,12 +137,35 @@ impl Application {
                 config.data_dir.display()
             ))
         })?;
-        let store = Arc::new(if options.persist_state {
-            InMemoryStore::with_persistence(&config.data_dir, limits.clone(), options.clock.now())?
-        } else {
-            InMemoryStore::new(limits.clone())
-        });
-        let repos = Repositories::in_memory(store.clone());
+        let store: Arc<dyn StateStore> =
+            if options.persist_state && config.store.backend == StoreBackend::Sqlite {
+                let sqlite = SqliteStore::open(
+                    &config.data_dir,
+                    limits.clone(),
+                    SqliteOptions {
+                        output_retention: config.store.output_retention(),
+                    },
+                    options.clock.now(),
+                )?;
+                let report = sqlite.open_report();
+                tracing::info!(
+                    path = %config.data_dir.join(SqliteStore::FILE_NAME).display(),
+                    schema_version = report.schema_version,
+                    migrations_applied = ?report.migrations_applied,
+                    imported_state_json = ?report.imported_state_json,
+                    settled_invocations = report.settled.invocations,
+                    settled_attempts = report.settled.attempts,
+                    settled_environments = report.settled.environments,
+                    released_leases = report.settled.leases,
+                    dropped_idempotency_keys = report.settled.idempotency_dropped,
+                    outputs_purged = report.outputs_purged,
+                    "state store opened"
+                );
+                Arc::new(sqlite)
+            } else {
+                Arc::new(InMemoryStore::new(limits.clone()))
+            };
+        let repos = Repositories::from_store(store.clone());
         let artifacts: Arc<dyn ArtifactStore> = Arc::new(LocalArtifactStore::new(
             &config.data_dir,
             limits.max_artifact_bytes,
@@ -229,6 +256,7 @@ impl Application {
             idle_quiesce = caps.idle_quiesce.status_str(),
             idle_resume = caps.idle_resume.status_str(),
             data_dir = %config.data_dir.display(),
+            store = store.backend(),
             "application bootstrapped"
         );
         if policy.reuse_enabled() && !policy.idle_verified() {
@@ -264,6 +292,19 @@ impl Application {
             reconcile,
             pool,
         }))
+    }
+
+    /// Replace inline invocation outputs past `[store]
+    /// output_retention_seconds` by their digest. The gateway runs this on a
+    /// timer; the store also runs it when it opens.
+    pub fn purge_expired_outputs(&self) -> usize {
+        match self.store.purge_expired_outputs(self.clock.now()) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(error = %e, "purging expired invocation outputs failed");
+                0
+            }
+        }
     }
 
     /// Terminate every pooled environment that is past its idle TTL. The

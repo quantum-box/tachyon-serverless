@@ -2,7 +2,7 @@
 
 ## ステータス
 
-Proposed（2026-09-16）。P2（環境再利用・autoscaling・scale-to-zero）の前提として決める。本 ADR は文書だけで、Rust は 1 行も変えていない。実装と測定は P2 の担当 issue（PLT-4631 ほか）。
+Accepted（2026-09-17、PLT-4618 で決定 2〜4 と移行を実装）。提案は 2026-09-16。実装の内容と、決定・受入条件のうちまだ入っていないものは「実装メモ（PLT-4618、2026-09-17）」にある。lease の期限評価と複数プロセスでの検証は PLT-4631。
 
 ## コンテキスト
 
@@ -168,6 +168,54 @@ P2 では pool と lease の更新（renew は invoke より高頻度になり�
 - log と UsageEvent の永続化。log は `Limits` で上限付きの memory のまま、UsageEvent は `InMemoryUsageSink` のまま。
 - 保存時暗号化。`docs/threat-model.md` §14-4 の「file 権限を設定ファイルと同じ扱いにする」前提を変えない。
 - ネットワーク FS 上の `data_dir`（SQLite の lock が成立しない構成）。preflight で検出はしない。対象外とだけ宣言する。
+
+## 実装メモ（PLT-4618、2026-09-17）
+
+「決定」2〜4 と「`state.json` からの移行」を実装した。決定 1・5・6 と受入条件のうち、この issue で入れていないものは下の表に理由とともに残す。以下の「コンテキスト」節は決定時点（P1、`repository.rs` 1 ファイル）の記述で、書き換えていない。
+
+### 入ったもの
+
+| 項目 | 実装 |
+|---|---|
+| store | `crates/application/src/repository/sqlite/`（`SqliteStore`）。依存は `rusqlite`（`bundled`）。repository API は同期のまま。1 store = 1 connection（mutex）で、書き込みは 1 操作 1 トランザクション（`BEGIN IMMEDIATE`）、`journal_mode = WAL`、`synchronous = FULL`、`busy_timeout = 5s` |
+| 設定 | `[store] backend = "sqlite" \| "memory"`（既定 sqlite）、`[store] output_retention_seconds`（既定 7 日、0 は無期限）。`BootstrapOptions::persist_state = false` は設定に関係なく volatile |
+| volatile 実装 | `InMemoryStore` は file を一切書かない。`state.json` の write-through と `persist_now` は削除した |
+| schema | `repository/sqlite/migrations/001_initial.sql`（全表と index）、`002_output_retention.sql`（expand のみ: 列と index の追加）。`schema_version` に記録し、未適用分を起動時に 1 トランザクションで適用する。binary より新しい schema は起動を拒否する |
+| 行の形 | 各行は domain object の JSON を `body` に持ち、列は検索・一意性・CAS・保持期限に使うものだけ。timestamp は固定幅の RFC 3339 UTC 文字列（文字列順 = 時刻順）。reuse key の版数は 64 bit をそのまま signed 列に入れる（一部が digest の切り詰めで `i64` を超えるため。等値比較しか使わない） |
+| CAS | alias は `AliasRepository::{insert, compare_and_set}` に置き換えた（closure を lock 内で呼ぶ `modify` は削除）。`AliasService::apply` は「読む → domain で更新 → 読んだ generation で CAS」で、期待 generation 付きの更新は負けたら `Conflict`、無条件の publish は読み直して再試行する。environment は `epoch` と terminal flag（claim / release / sweep は `state` も）、invocation / attempt は terminal flag、lease は released flag を `UPDATE ... WHERE` に置く |
+| 行の不変条件 | `repository/guard.rs` を両 store が使う: 親（function / revision / invocation / environment）が存在すれば tenant が一致すること、alias は同じ function の存在する revision だけを指すこと、identity（id・tenant・親 id・number・spec・digest・reuse key・作成時刻など）を変えないこと、terminal 行・Ready/Failed revision・release 済み lease・削除済み function を書き換えないこと（同一内容の再書き込みは no-op）、別 epoch の environment コピーを書かないこと、インライン出力が `limits.max_response_bytes` を超えないこと。違反は `RepoError::Refused`（API では 409）、id 重複は `RepoError::Conflict` |
+| 本文と保持期限 | 入力は digest とサイズだけ（従来どおり）。出力本文は `[invoke] inline_output_max_bytes` 以下のときだけ行に入り、terminal になった時点から `output_retention_seconds` 後に `PayloadRef::Digest`（sha256 とサイズ）へ置き換える（起動時と gateway の 10 分ごとの timer。`SqliteStore::purge_expired_outputs`）。置き換え後は idempotent replay と `GET /v1/invocations/{id}` が出力本文を返さない。secret 値はどの行にも無い |
+| 再起動 | P1 の規則をそのまま SQL に移した（`repository/restart.rs`）: `Running` → `OutcomeUnknown{Host.Restarted}`、`Accepted`/`Queued` → `Failed{PlatformError}`、attempt は invocation に従う、非 terminal の environment は `Lost`、Invocation の無い idempotency key は削除。追加で、未 release の lease を release する（P1 では lease がプロセスと一緒に消えていた） |
+| 移行 | `state.json` があり、DB が空なら 1 トランザクションで取り込み、`state.json.imported-<UTC>` に rename する。取り込んだ file の sha256 を `store_meta` に記録し、rename だけが失われた場合（同じ bytes の `state.json` が戻っている）は rename だけやり直す。行のある DB と別の `state.json` が並んでいれば両方の path を挙げて拒否、壊れた `state.json` は従来の hint 付きで拒否する。取り込み後の reconcile は上の「再起動」と同じ 1 回の処理で行う（「state.json を読む → reconcile → insert」の順ではなく「insert → reconcile」だが、結果の行は同じ） |
+| 権限 | `state.db` を新規作成するときは mode `0600`。`-wal` / `-shm` は SQLite が DB file と同じ mode で作る。既存 file の mode は変えない |
+
+### 決定・受入条件との差分
+
+| 項目 | 状態 | 内容 |
+|---|---|---|
+| 決定 1（slot / lease / pool を別 port `SlotStore` に分ける） | 未着手 | PLT-4632 が pool を `EnvironmentRepository::{claim_for_reuse, release_to_pool, take_idle_for_termination}` として先に入れており、この issue ではその signature を変えていない。両方とも同じ SQLite file に載るので、分割は TiDB adapter を作るときの作業として残る |
+| 決定 5（lease の `expires_at` を取得・renew・失効で評価する） | 一部 | lease は `leases` 表に永続化される。期限の評価・renew・他プロセスからの回収は未実装（PLT-4631） |
+| 決定 6（epoch を進める） | 実装済み（PLT-4632） | `ExecutionEnvironment::reassign` と `claim_for_reuse` の CAS |
+| A1 / A6（N 個の **OS プロセス**で slot / idempotency key を奪い合う） | 未検証 | 同じ file に別々の connection を持つ**スレッド**で alias CAS と claim を奪い合うテストだけがある（`repository/sqlite/tests.rs::cas_holds_across_separate_connections_to_the_same_file`）。プロセスを分けたテストは PLT-4631 |
+| A2 / A3（lease の失効と回収、期限切れ renew の拒否） | 未着手 | 上の決定 5 |
+| A4（再起動後も Ready / Idle の環境が pool に残る） | 未着手（意図的） | 起動時の台帳 reconcile は P1 と同じく非 terminal の環境をすべて `Lost` にする。pool の環境は bridge session を失っており、再起動後に駆動できないため（`crates/application/tests/pipeline.rs::a_pooled_environment_is_reclaimed_after_a_restart`）。**このため同じ `data_dir` を複数の gateway が同時に開く構成は対象外**（後から開いた側が先の側の in-flight を `Lost` / `OutcomeUnknown` にする） |
+| A5（reuse key の完全一致と index） | 実装済み（10k 行では未計測） | 8 field の完全一致は両 store の契約テスト、index 利用は `pool_lookups_use_their_indexes`（50 行 + `ANALYZE` の `EXPLAIN QUERY PLAN`） |
+| A7（書き込み量が台帳サイズに比例しない） | 未検証 | 構造上は触れた行だけを書くが、書き込み量を測るテストは無い |
+| A8（`state.json` の import） | 実装済み | `repository/sqlite/tests.rs::{a_p1_state_json_is_imported_once_and_moved_aside, an_interrupted_import_only_finishes_the_rename, a_state_json_next_to_a_populated_database_is_refused, corrupt_state_file_is_refused_with_a_hint, state_without_artifact_owners_still_loads}`、`apps/gateway/tests/gateway_integration.rs`（`state.json` を置いて起動する既存テスト） |
+| A9（共通 suite） | 実装済み | `repository/contract_tests.rs` の 21 テストを `memory::*` と `sqlite::*` の両方で実行する。永続化に固有のテスト（roundtrip、restart、import、corrupt）は volatile 実装に意味が無いので SQLite のみ |
+
+### TiDB（MySQL protocol）adapter にするときに変わるもの
+
+**TiDB 互換は主張しない**（TiDB でも MySQL でも実行していない）。SQL は移しやすい形に寄せた（`001_initial.sql` 冒頭の規則: `CREATE TABLE` / `CREATE [UNIQUE] INDEX` / `ALTER TABLE ADD COLUMN` だけ、key は長さ付き `VARCHAR`、partial index・`WITHOUT ROWID`・trigger・`ON CONFLICT` / `INSERT OR REPLACE` を使わず、upsert は「SELECT してから INSERT / UPDATE」を 1 トランザクションで行う、CAS 条件を `UPDATE ... WHERE` に置く）。それでも次は変わる。
+
+1. **トランザクション**: `BEGIN IMMEDIATE`（DB 全体の書き込み lock）に相当するものは無い。正しさは `UPDATE ... WHERE` の CAS 条件と一意制約に依存させ、read-modify-write で読んだ行は `SELECT ... FOR UPDATE`（pessimistic）で押さえる必要がある。「存在確認してから INSERT」は一意制約違反を `Conflict` として扱う形に寄せる（`ArtifactOwnerRepository::claim` など）。
+2. **DDL はトランザクションに入らない**: 1 migration に複数の DDL を書くと途中失敗で中途半端な schema が残る。1 DDL = 1 step とし、各 step を冪等（`IF NOT EXISTS`）にして `schema_version` を step 単位で進める。online DDL の制約（列追加の既定値、index 追加の backfill）も考える。
+3. **型**: `body TEXT` は MySQL の `TEXT`（64 KiB）では base64 のインライン出力（既定上限 64 KiB → 約 87 KiB）が入らないので `MEDIUMTEXT` か `JSON`。timestamp は `DATETIME(6)`（または固定幅文字列のまま）。reuse key の版数は `BIGINT UNSIGNED`。`SMALLINT` の flag は `BOOLEAN`/`TINYINT`。
+4. **主キー**: ULID は時刻順に増えるため TiDB では書き込みが末尾の region に集中する。clustered index を使わない（`NONCLUSTERED` + `SHARD_ROW_ID_BITS`）か、shard を足した複合キーにする。
+5. **外部キー**: 使っていない（TiDB 6.6 未満は無視する）。親の存在と tenant の一致は `guard.rs` がトランザクション内で確認している。
+6. **SQLite 固有の箇所**: `sqlite_master`（`migrations::current_version`）、`PRAGMA`、`EXPLAIN QUERY PLAN`、`ANALYZE`、`?N` placeholder の番号付き再利用（`(?8 IS NULL OR state = ?8)`）。前 2 つは `information_schema` と接続設定に、placeholder は位置引数に置き換える。
+7. **API**: repository trait は同期で、invoke driver から同期に呼ばれる。ネットワーク越しの DB では blocking pool に逃がすか、trait を async にする（`crates/application` 全体に波及する。「比較」表の (3)）。
+8. **reconcile**: 起動時に「非 terminal を全部 `Lost`」とする規則は、複数 gateway が同じ control-plane を共有した時点で成り立たない。lease の期限に基づく回収（決定 5、PLT-4631）が先に要る。
 
 ## 参照
 
