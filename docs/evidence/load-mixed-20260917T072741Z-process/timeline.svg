@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 380" width="960" height="380" font-family="system-ui, sans-serif" font-size="11">
+<style>
+  .surface { fill: #fcfcfb; } .ink { fill: #0b0b0b; } .muted { fill: #52514e; }
+  .grid { stroke: #e4e3dc; stroke-width: 1; } .gap { fill: #d9d8d0; opacity: .6; } .band { fill: #efeee8; }
+  .s-busy { stroke: #2a78d6; fill: none; }
+  .s-starting { stroke: #eb6834; fill: none; }
+  .s-idle { stroke: #1baf7a; fill: none; }
+  .s-queue { stroke: #e34948; fill: none; }
+
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; } .ink { fill: #ffffff; } .muted { fill: #c3c2b7; }
+    .grid { stroke: #3a3a37; } .gap { fill: #4a4a45; } .band { fill: #242423; }
+    .s-busy { stroke: #3987e5; fill: none; }
+    .s-starting { stroke: #d95926; fill: none; }
+    .s-idle { stroke: #199e70; fill: none; }
+    .s-queue { stroke: #e66767; fill: none; }
+
+  }
+</style>
+<title>mixed: long tenant A and short tenant B at once</title>
+<rect class="surface" width="960" height="380"/>
+<text class="ink" x="48" y="20" font-size="14" font-weight="600">mixed: long tenant A and short tenant B at once</text>
+<text class="muted" x="48" y="36">environments by admission state and queue length (tsls_environments, tsls_queue_length) sampled from GET /metrics; observations, not an SLA</text>
+<rect class="band" x="112.6" y="64" width="730.6" height="252.0"/>
+<text class="muted" x="477.9" y="346.0" text-anchor="middle" font-size="10">a-long</text>
+<text class="muted" x="501.2" y="358.0" text-anchor="middle" font-size="10">b-short</text>
+<rect class="band" x="889.9" y="64" width="1.0" height="252.0"/>
+<text class="muted" x="890.4" y="346.0" text-anchor="middle" font-size="10">idle</text>
+<line class="grid" x1="48" x2="936.0" y1="316.0" y2="316.0"/><text class="muted" x="42.0" y="320.0" text-anchor="end">0</text>
+<line class="grid" x1="48" x2="936.0" y1="253.0" y2="253.0"/><text class="muted" x="42.0" y="257.0" text-anchor="end">1</text>
+<line class="grid" x1="48" x2="936.0" y1="190.0" y2="190.0"/><text class="muted" x="42.0" y="194.0" text-anchor="end">2</text>
+<line class="grid" x1="48" x2="936.0" y1="127.0" y2="127.0"/><text class="muted" x="42.0" y="131.0" text-anchor="end">3</text>
+<line class="grid" x1="48" x2="936.0" y1="64.0" y2="64.0"/><text class="muted" x="42.0" y="68.0" text-anchor="end">4</text>
+<text class="muted" x="48.0" y="330.0" text-anchor="middle">0s</text>
+<text class="muted" x="196.0" y="330.0" text-anchor="middle">3s</text>
+<text class="muted" x="344.0" y="330.0" text-anchor="middle">6s</text>
+<text class="muted" x="492.0" y="330.0" text-anchor="middle">8s</text>
+<text class="muted" x="640.0" y="330.0" text-anchor="middle">11s</text>
+<text class="muted" x="788.0" y="330.0" text-anchor="middle">14s</text>
+<text class="muted" x="936.0" y="330.0" text-anchor="middle">17s</text>
+<path class="s-busy" d="M48.4,316.0 L61.7,316.0 L75.0,316.0 L88.3,316.0 L101.4,316.0 L114.8,64.0 L128.2,64.0 L141.5,64.0 L154.7,64.0 L167.9,64.0 L181.2,64.0 L194.4,64.0 L207.6,64.0 L220.9,64.0 L234.2,64.0 L247.4,64.0 L260.6,64.0 L273.8,64.0 L287.0,64.0 L300.3,64.0 L313.6,64.0 L326.8,64.0 L340.0,64.0 L353.2,64.0 L366.6,64.0 L379.8,64.0 L393.0,64.0 L406.3,64.0 L419.5,64.0 L432.8,64.0 L446.0,64.0 L459.3,64.0 L472.5,64.0 L485.8,64.0 L498.8,64.0 L512.2,64.0 L525.5,64.0 L538.7,64.0 L552.0,64.0 L565.1,64.0 L578.3,64.0 L591.7,64.0 L604.9,64.0 L618.1,64.0 L631.4,64.0 L644.6,64.0 L657.9,64.0 L671.1,64.0 L684.4,64.0 L697.5,64.0 L710.8,64.0 L724.1,64.0 L737.3,64.0 L750.6,64.0 L763.8,64.0 L777.0,64.0 L790.3,127.0 L803.5,190.0 L816.7,127.0 L830.0,127.0 L843.3,190.0 L856.5,190.0 L869.8,190.0 L882.9,253.0 L896.2,316.0 L909.5,316.0 L922.6,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round"/>
+<path class="s-starting" d="M48.4,316.0 L61.7,316.0 L75.0,316.0 L88.3,316.0 L101.4,316.0 L114.8,64.0 L128.2,64.0 L141.5,64.0 L154.7,316.0 L167.9,253.0 L181.2,190.0 L194.4,190.0 L207.6,316.0 L220.9,253.0 L234.2,253.0 L247.4,253.0 L260.6,316.0 L273.8,190.0 L287.0,127.0 L300.3,190.0 L313.6,127.0 L326.8,190.0 L340.0,190.0 L353.2,316.0 L366.6,316.0 L379.8,253.0 L393.0,253.0 L406.3,253.0 L419.5,253.0 L432.8,127.0 L446.0,127.0 L459.3,127.0 L472.5,64.0 L485.8,127.0 L498.8,190.0 L512.2,190.0 L525.5,190.0 L538.7,253.0 L552.0,190.0 L565.1,253.0 L578.3,253.0 L591.7,253.0 L604.9,253.0 L618.1,127.0 L631.4,127.0 L644.6,127.0 L657.9,253.0 L671.1,190.0 L684.4,190.0 L697.5,190.0 L710.8,190.0 L724.1,253.0 L737.3,253.0 L750.6,253.0 L763.8,253.0 L777.0,190.0 L790.3,253.0 L803.5,253.0 L816.7,253.0 L830.0,190.0 L843.3,190.0 L856.5,253.0 L869.8,316.0 L882.9,316.0 L896.2,316.0 L909.5,316.0 L922.6,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round"/>
+<path class="s-idle" d="M48.4,316.0 L61.7,316.0 L75.0,316.0 L88.3,316.0 L101.4,316.0 L114.8,316.0 L128.2,316.0 L141.5,316.0 L154.7,316.0 L167.9,316.0 L181.2,316.0 L194.4,316.0 L207.6,316.0 L220.9,316.0 L234.2,316.0 L247.4,316.0 L260.6,316.0 L273.8,316.0 L287.0,316.0 L300.3,316.0 L313.6,316.0 L326.8,316.0 L340.0,316.0 L353.2,316.0 L366.6,316.0 L379.8,316.0 L393.0,316.0 L406.3,316.0 L419.5,316.0 L432.8,316.0 L446.0,316.0 L459.3,316.0 L472.5,316.0 L485.8,316.0 L498.8,316.0 L512.2,316.0 L525.5,316.0 L538.7,316.0 L552.0,316.0 L565.1,316.0 L578.3,316.0 L591.7,316.0 L604.9,316.0 L618.1,316.0 L631.4,316.0 L644.6,316.0 L657.9,316.0 L671.1,316.0 L684.4,316.0 L697.5,316.0 L710.8,316.0 L724.1,316.0 L737.3,316.0 L750.6,316.0 L763.8,316.0 L777.0,316.0 L790.3,316.0 L803.5,316.0 L816.7,316.0 L830.0,316.0 L843.3,316.0 L856.5,316.0 L869.8,316.0 L882.9,316.0 L896.2,316.0 L909.5,316.0 L922.6,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round"/>
+<path class="s-queue" d="M48.4,316.0 L61.7,316.0 L75.0,316.0 L88.3,316.0 L101.4,316.0 L114.8,316.0 L128.2,64.0 L141.5,64.0 L154.7,64.0 L167.9,64.0 L181.2,64.0 L194.4,64.0 L207.6,64.0 L220.9,127.0 L234.2,127.0 L247.4,64.0 L260.6,64.0 L273.8,64.0 L287.0,127.0 L300.3,64.0 L313.6,127.0 L326.8,64.0 L340.0,64.0 L353.2,64.0 L366.6,64.0 L379.8,64.0 L393.0,64.0 L406.3,64.0 L419.5,127.0 L432.8,190.0 L446.0,64.0 L459.3,64.0 L472.5,127.0 L485.8,64.0 L498.8,127.0 L512.2,127.0 L525.5,64.0 L538.7,64.0 L552.0,127.0 L565.1,127.0 L578.3,64.0 L591.7,64.0 L604.9,127.0 L618.1,253.0 L631.4,190.0 L644.6,190.0 L657.9,190.0 L671.1,316.0 L684.4,253.0 L697.5,253.0 L710.8,253.0 L724.1,253.0 L737.3,253.0 L750.6,253.0 L763.8,253.0 L777.0,316.0 L790.3,316.0 L803.5,316.0 L816.7,316.0 L830.0,316.0 L843.3,316.0 L856.5,316.0 L869.8,316.0 L882.9,316.0 L896.2,316.0 L909.5,316.0 L922.6,316.0 L936.0,316.0 " fill="none" stroke-width="2" stroke-linejoin="round" stroke-dasharray="5 3"/>
+<line class="s-busy" x1="48.0" x2="64.0" y1="52.0" y2="52.0" stroke-width="2"/><text class="ink" x="68.0" y="56.0">in flight (starting + busy + promised)</text>
+<line class="s-starting" x1="308.0" x2="324.0" y1="52.0" y2="52.0" stroke-width="2"/><text class="ink" x="328.0" y="56.0">of which starting</text>
+<line class="s-idle" x1="442.0" x2="458.0" y1="52.0" y2="52.0" stroke-width="2"/><text class="ink" x="462.0" y="56.0">idle + parking (warm pool)</text>
+<line class="s-queue" x1="630.0" x2="646.0" y1="52.0" y2="52.0" stroke-width="2" stroke-dasharray="5 3"/><text class="ink" x="650.0" y="56.0">queue length</text>
+</svg>

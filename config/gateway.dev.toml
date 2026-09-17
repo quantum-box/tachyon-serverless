@@ -126,6 +126,14 @@ output_retention_seconds = 604800  # インライン出力の保持期限（7 �
 # allow_short_drain = false          # drain_timeout_seconds を「最大 timeout + grace」以下にするときだけ true
 # prestart_backoff_seconds = 5       # min_ready の先行起動が失敗した後の待ち
 
+# GET /metrics（PLT-4637、docs/metrics.md）。全 tenant の revision・待ちを含むので operator 専用の
+# credential でだけ応答する。未設定なら 404。tenant の token と同じ値は設定検証で拒否される。
+# [metrics]
+# bearer_token = "change-me-metrics-operator-token"   # 16 bytes 以上
+# max_revision_series = 64       # 超えた revision は tenant="_other",revision="_other" に合算
+# max_tenant_series = 32
+# max_environment_series = 128
+
 # 非同期イベントの durable queue と大きな入出力の object store（PLT-4638、docs/adr/0008）。
 # 既定はどちらも "none" で、何も接続・作成しない（同期 invoke だけの gateway のまま）。
 # invoke pipeline はまだ使わない（invokeAsync は PLT-4639）。単一 node・複製なしで HA ではない。

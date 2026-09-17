@@ -1,0 +1,8 @@
+{"end_t_ms":4371,"phase":"ramp-1","result":{"not_sent_duration_limit":0,"sent":3},"spec":{"concurrency":1,"handler_ms":400,"jitter_ms":100,"kind":"invoke","name":"ramp-1","requests":3,"tenant":"a"},"start_t_ms":1165}
+{"end_t_ms":8769,"phase":"ramp-2","result":{"not_sent_duration_limit":0,"sent":6},"spec":{"concurrency":2,"handler_ms":400,"jitter_ms":100,"kind":"invoke","name":"ramp-2","requests":6,"tenant":"a"},"start_t_ms":4372}
+{"end_t_ms":18024,"phase":"cap","result":{"not_sent_duration_limit":0,"sent":24},"spec":{"concurrency":8,"handler_ms":600,"jitter_ms":100,"kind":"invoke","name":"cap","requests":24,"tenant":"a"},"start_t_ms":8770}
+{"end_t_ms":21085,"phase":"down","result":{"not_sent_duration_limit":0,"sent":3},"spec":{"concurrency":1,"handler_ms":400,"jitter_ms":100,"kind":"invoke","name":"down","requests":3,"tenant":"a"},"start_t_ms":18024}
+{"end_t_ms":21087,"phase":"idle","result":{"reached_zero_t_ms":21087},"spec":{"kind":"idle_until_zero","name":"idle","tenant":"a","timeout_ms":30000},"start_t_ms":21086}
+{"end_t_ms":24090,"phase":"stay-idle","result":{},"spec":{"kind":"pause","ms":3000,"name":"stay-idle"},"start_t_ms":21087}
+{"end_t_ms":29402,"phase":"after-restart","result":{"not_sent_duration_limit":0,"sent":6},"spec":{"concurrency":2,"handler_ms":400,"jitter_ms":100,"kind":"invoke","name":"after-restart","requests":6,"tenant":"a"},"start_t_ms":26463}
+{"end_t_ms":29403,"phase":"idle-after","result":{"reached_zero_t_ms":29403},"spec":{"kind":"idle_until_zero","name":"idle-after","tenant":"a","timeout_ms":30000},"start_t_ms":29402}

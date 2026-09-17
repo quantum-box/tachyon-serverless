@@ -1,0 +1,9 @@
+{"done_t_ms":1931,"error_reason":null,"error_type":null,"handler_seconds":0.335,"invocation_id":"inv_01m2q41jb6zwqytbgn5kyerph5","latency_ms":734,"phase":"burst","sent_t_ms":1197,"seq":2,"status":200,"tenant":"a"}
+{"done_t_ms":1931,"error_reason":null,"error_type":null,"handler_seconds":0.335,"invocation_id":"inv_01m2q41ja0y8yd9e5ejwcc2tya","latency_ms":772,"phase":"burst","sent_t_ms":1159,"seq":3,"status":200,"tenant":"a"}
+{"done_t_ms":1951,"error_reason":null,"error_type":null,"handler_seconds":0.355,"invocation_id":"inv_01m2q41j9p7c2mrqm0ea0xvqf8","latency_ms":802,"phase":"burst","sent_t_ms":1149,"seq":1,"status":200,"tenant":"a"}
+{"done_t_ms":2498,"error_reason":null,"error_type":null,"handler_seconds":0.301,"invocation_id":"inv_01m2q41jb7e9pk4k7sw62t334f","latency_ms":1301,"phase":"burst","sent_t_ms":1197,"seq":0,"status":200,"tenant":"a"}
+{"done_t_ms":2593,"error_reason":null,"error_type":null,"handler_seconds":0.371,"invocation_id":"inv_01m2q41k304ycagaccr7drr96f","latency_ms":634,"phase":"burst","sent_t_ms":1959,"seq":4,"status":200,"tenant":"a"}
+{"done_t_ms":2615,"error_reason":null,"error_type":null,"handler_seconds":0.392,"invocation_id":"inv_01m2q41k2n5qzdygnaezx1t2rq","latency_ms":667,"phase":"burst","sent_t_ms":1948,"seq":5,"status":200,"tenant":"a"}
+{"done_t_ms":3101,"error_reason":null,"error_type":null,"handler_seconds":0.335,"invocation_id":"inv_01m2q41k3zfgpab797fg70nfm4","latency_ms":1111,"phase":"burst","sent_t_ms":1990,"seq":6,"status":200,"tenant":"a"}
+{"done_t_ms":3245,"error_reason":null,"error_type":null,"handler_seconds":0.397,"invocation_id":"inv_01m2q41kn2czp222h005e03fdf","latency_ms":708,"phase":"burst","sent_t_ms":2537,"seq":7,"status":200,"tenant":"a"}
+{"done_t_ms":8695,"error_reason":null,"error_type":null,"handler_seconds":0.1,"invocation_id":"inv_01m2q41s7khvsdrpfqwq7qkhf6","latency_ms":445,"phase":"reaccess","sent_t_ms":8250,"seq":0,"status":200,"tenant":"a"}

@@ -1,0 +1,41 @@
+listen = "127.0.0.1:63485"
+profile = "dev"
+data_dir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-load.IJjz4k/data"
+
+[provider]
+kind = "process"
+
+[provider.process]
+bridge_binary = "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a098f308a30abb212/target/debug/tachyon-serverless-runtime-bridge"
+workdir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-load.IJjz4k/data/process"
+
+[capacity]
+max_concurrency = 4
+max_queue = 64
+queue_timeout_seconds = 60
+
+[capacity.tenant_defaults]
+max_concurrency = 3
+
+[capacity.start_rate]
+per_second = 50
+burst = 50
+
+[scaling]
+reconcile_interval_ms = 500
+scale_down_cooldown_seconds = 1
+
+[metrics]
+bearer_token = "<redacted>"
+
+[[identity.tokens]]
+token = "<redacted>"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "load-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "<redacted>"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "load-b"
+roles = ["deploy", "invoke"]
