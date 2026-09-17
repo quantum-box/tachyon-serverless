@@ -7,7 +7,8 @@
 //! - **reservation overshoot**: reserved CPU / memory above the node's
 //!   capacity, in-flight above `max_concurrency`, a revision's starting + busy
 //!   + promised above its `max_environments`, a tenant above its quota;
-//! - **starvation**: a tenant's oldest waiter older than the threshold while
+//! - **starvation**: a tenant with nothing in flight and no grant during the
+//!   wait whose oldest waiter is older than the threshold while
 //!   other tenants were granted environments during that wait;
 //! - **unexpected idle resource use**: an environment idle in two successive
 //!   samples used more CPU per wall second than the threshold;
@@ -241,6 +242,16 @@ pub fn detect(snaps: &[Snapshot], th: &Thresholds) -> Report {
                     .sum()
             };
             let granted = others(&grants) - others(&then);
+            // A tenant that is itself being served (environments in flight,
+            // or grants during the wait) is waiting for its own quota or its
+            // fair share, not starving.
+            let own = |g: &BTreeMap<String, f64>| g.get(&tenant).copied().unwrap_or(0.0);
+            let own_progress = own(&grants) - own(&then);
+            let in_flight =
+                value(m, "tsls_tenant_in_flight", &[("tenant", &tenant)]).unwrap_or(0.0);
+            if in_flight > 0.0 || own_progress > 0.0 {
+                continue;
+            }
             if granted >= th.starvation_min_other_grants {
                 starving.insert(tenant.clone());
                 report.starvation.push(finding(
@@ -407,6 +418,29 @@ mod tests {
         // A short wait is never starvation.
         let short = vec![at(0, 0.0, 10.0), at(4_000, 4.0, 30.0)];
         assert!(detect(&short, &Thresholds::default()).starvation.is_empty());
+        // A tenant that has environments in flight (it waits for its own quota
+        // or its fair share behind its own long invocations) is not starving.
+        let mut at_quota = at(9_000, 8.5, 14.0);
+        at_quota
+            .metrics
+            .insert("tsls_tenant_in_flight{tenant=b}".into(), 3.0);
+        let busy_tenant = vec![at(0, 0.0, 10.0), at_quota];
+        assert!(
+            detect(&busy_tenant, &Thresholds::default())
+                .starvation
+                .is_empty()
+        );
+        // Nor is one that was granted something during the wait.
+        let mut progressed = at(9_000, 8.5, 14.0);
+        progressed
+            .metrics
+            .insert("tsls_tenant_grants_total{tenant=b}".into(), 2.0);
+        let progressing = vec![at(0, 0.0, 10.0), progressed];
+        assert!(
+            detect(&progressing, &Thresholds::default())
+                .starvation
+                .is_empty()
+        );
     }
 
     #[test]

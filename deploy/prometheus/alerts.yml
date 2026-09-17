@@ -62,11 +62,13 @@ groups:
   - name: tsls-starvation
     rules:
       - alert: TslsTenantStarved
-        # A tenant's oldest waiter is older than 5 s while other tenants were granted
-        # environments in the last minute. (The harness compares grants over the exact
-        # wait; this rule approximates it with a 1 m window.)
+        # A tenant with nothing in flight and no grant in the last minute has an oldest
+        # waiter older than 5 s while other tenants were granted environments. A tenant
+        # with environments in flight waits for its own quota or fair share, not starvation.
+        # (The harness compares grants over the exact wait; this rule uses a 1 m window.)
         expr: >-
           (tsls_tenant_queue_oldest_age_seconds{tenant!="_other"} > 5)
+          and on (tenant) (tsls_tenant_in_flight == 0)
           and on () (sum(increase(tsls_tenant_grants_total[1m])) > 0)
           unless on (tenant) (increase(tsls_tenant_grants_total[1m]) > 0)
         for: 15s
