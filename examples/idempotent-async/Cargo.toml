@@ -13,7 +13,8 @@ publish = false
 # (effects/<order_id>.json); every execution is appended to executions.log. The first N
 # executions of an order fail with Downstream.Unavailable (a retryable handler error);
 # response_bytes > 0 answers with that many bytes (for a response-too-large, non-retryable
-# failure); sleep_ms waits before the side effect (failure tests). No network access.
+# failure); sleep_ms waits before the side effect (failure tests). No network access, unless
+# IDEMPOTENT_ASYNC_URL=http://<ipv4>:<port> names an external HTTP store (microVMs, scripts/queue/effects-store.py).
 description = "Tachyon Serverless example: an asynchronous handler with a business idempotency key (at-least-once made harmless)."
 
 [dependencies]

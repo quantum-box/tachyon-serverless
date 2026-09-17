@@ -25,11 +25,17 @@
 #      9. tenant B sees nothing, also when naming A's function
 #     10. `tsls usage` prints the provisional report
 #
-# Firecracker (cgroup CPU usec as provider_reported) is NOT exercised here.
+# With TSLS_PROVIDER=firecracker (scripts/kvm/provider-lib.sh; the gateway needs root, e.g.
+# `sudo -n env PATH="$PATH" HOME="$HOME" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1
+# scripts/usage/usage-e2e.sh`) the same scenario runs in jailed microVMs and additionally checks
+#     11. every EnvironmentStopped event carries the VMM cgroup's CPU usec and memory.peak as
+#         provider_reported (AttemptSettled carries requested resources only: the host sample is
+#         read just before the environment is terminated, docs/adr/0012 §2)
 #
 # Environment (all optional):
 #   TSLS_SKIP_BUILD=1     do not run cargo build
 #   TSLS_EVIDENCE_DIR     evidence root (default docs/evidence)
+#   TSLS_PROVIDER         process (default) | firecracker
 #
 # Exit 0 only when every check passed.
 #
@@ -42,18 +48,22 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=scripts/e2e/lib.sh
 . "$REPO_ROOT/scripts/e2e/lib.sh"
 
+# shellcheck source=scripts/kvm/provider-lib.sh
+. "$REPO_ROOT/scripts/kvm/provider-lib.sh"
+
 require_tools curl jq cargo python3 || e2e_die "missing tools"
+provider_init "$REPO_ROOT" || e2e_die "provider"
 
 TENANT_A_ID="tn_01hzzzzzzzzzzzzzzzzzzzzzza"
 TENANT_B_ID="tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
-RUN_ID="usage-$(date -u +%Y%m%dT%H%M%SZ)-process"
+RUN_ID="usage-$(date -u +%Y%m%dT%H%M%SZ)-$PROVIDER"
 EVIDENCE_DIR="${TSLS_EVIDENCE_DIR:-$REPO_ROOT/docs/evidence}/$RUN_ID"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tsls-usage.XXXXXX")"
 DATA_DIR="$WORK_DIR/data"
 mkdir -p "$EVIDENCE_DIR"
 GATEWAY_BIN="$REPO_ROOT/target/debug/tachyon-serverless-gateway"
 TSLS_BIN="$REPO_ROOT/target/debug/tsls"
-GUEST="$REPO_ROOT/target/debug/example-cpu-burn"
+GUEST="$GUEST_DIR/example-cpu-burn"
 case "$(uname -m)" in
   x86_64 | amd64) ARCH=x86_64 ;;
   *) ARCH=aarch64 ;;
@@ -79,6 +89,9 @@ rc_of() { if "$@"; then echo 0; else echo 1; fi; }
 if [ "${TSLS_SKIP_BUILD:-0}" != "1" ]; then
   (cd "$REPO_ROOT" && cargo build -q -p tachyon-serverless-gateway -p tachyon-serverless-cli \
     -p tachyon-serverless-runtime-bridge -p example-cpu-burn)
+  if provider_is_fc; then
+    (cd "$REPO_ROOT" && cargo build -q --release --target "$(uname -m)-unknown-linux-musl" -p example-cpu-burn)
+  fi
 fi
 [ -x "$GUEST" ] || e2e_die "missing $GUEST"
 
@@ -91,12 +104,7 @@ listen = "127.0.0.1:$PORT"
 profile = "dev"
 data_dir = "$DATA_DIR"
 
-[provider]
-kind = "process"
-
-[provider.process]
-bridge_binary = "$REPO_ROOT/target/debug/tachyon-serverless-runtime-bridge"
-workdir = "$DATA_DIR/process"
+$(provider_toml "$DATA_DIR")
 
 [usage]
 collect_interval_ms = $2
@@ -294,8 +302,32 @@ if "$TSLS_BIN" usage --group-by function > "$EVIDENCE_DIR/tsls-usage.txt" 2>&1; 
 check "10-tsls-usage" "$(rc_of test "$urc" = 0 -a "$(grep -c '^PROVISIONAL' "$EVIDENCE_DIR/tsls-usage.txt")" = 1)" \
   "$(head -n 1 "$EVIDENCE_DIR/tsls-usage.txt")"
 
+if provider_is_fc; then
+  # 11. host cost from cgroup accounting: the VMM cgroup's usage_usec and memory.peak (guest + VMM)
+  sql "$LEDGER_DB" "select event_type, body from function_usage_events where event_type in ('attempt_settled', 'environment_stopped')" \
+    | jq -c '[.[] | (.[1] | fromjson) as $e | {type: .[0], environment_id: $e.environment_id, outcome: $e.outcome,
+        cpu_usec: $e.resources.cgroup_cpu_usec, memory_peak_bytes: $e.resources.cgroup_memory_peak_bytes,
+        lifetime_ms: $e.monotonic_duration_ms}]' > "$EVIDENCE_DIR/resources.json"
+  stopped="$(jq '[.[] | select(.type == "environment_stopped")] | length' "$EVIDENCE_DIR/resources.json")"
+  reported="$(jq '[.[] | select(.type == "environment_stopped" and .cpu_usec.measurement == "provider_reported"
+    and (.cpu_usec.value // 0) > 0 and .memory_peak_bytes.measurement == "provider_reported"
+    and (.memory_peak_bytes.value // 0) > 0)] | length' "$EVIDENCE_DIR/resources.json")"
+  check "11-environment-stopped-carries-cgroup-cpu-and-memory-peak" \
+    "$(rc_of test "$stopped" -ge 5 -a "$reported" = "$stopped")" \
+    "environment_stopped=$stopped provider_reported(cpu_usec>0, memory.peak>0)=$reported; $(jq -c '[.[] | select(.type == "environment_stopped") | {cpu_ms: ((.cpu_usec.value // 0) / 1000 | floor), peak_mib: ((.memory_peak_bytes.value // 0) / 1048576 | floor)}]' "$EVIDENCE_DIR/resources.json")"
+  settled_unknown="$(jq '[.[] | select(.type == "attempt_settled" and .cpu_usec.measurement == "unknown")] | length' "$EVIDENCE_DIR/resources.json")"
+  echo "note  attempt_settled events with resources.cgroup_cpu_usec unknown (by design): $settled_unknown" \
+    | tee -a "$EVIDENCE_DIR/summary.txt"
+  curl -sS -H "authorization: Bearer $TOKEN_A" "$API_URL/v1/functions/$FN/invocations?limit=20" > "$EVIDENCE_DIR/invocations.json" || true
+fi
+
 stop_process "$GATEWAY_PID" 15
 GATEWAY_PID=""
+if provider_is_fc; then
+  provider_leftovers > "$EVIDENCE_DIR/leftovers-after.txt" 2>&1
+  check "12-no-vmm-jail-cgroup-tap-left" "$(rc_of test ! -s "$EVIDENCE_DIR/leftovers-after.txt")" \
+    "$(wc -l < "$EVIDENCE_DIR/leftovers-after.txt" | tr -d ' ') leftovers"
+fi
 
 echo "evidence: $EVIDENCE_DIR" | tee -a "$EVIDENCE_DIR/summary.txt"
 if [ "$FAILED" -ne 0 ]; then

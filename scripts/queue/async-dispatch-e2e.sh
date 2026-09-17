@@ -24,8 +24,14 @@
 #
 # Usage:
 #   scripts/queue/async-dispatch-e2e.sh [--evidence DIR]
+#   sudo -n env PATH="$PATH" HOME="$HOME" TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 \
+#     scripts/queue/async-dispatch-e2e.sh                     # Firecracker (Linux/KVM, root)
 #
-# Environment: TSLS_SKIP_BUILD=1 skips cargo build. Exit 0 only when every check passed.
+# Environment: TSLS_SKIP_BUILD=1 skips cargo build. TSLS_PROVIDER=process (default) | firecracker
+# (scripts/kvm/provider-lib.sh): with firecracker every run executes in a jailed microVM, the warm
+# pool is on, and the handler's idempotency store is the external HTTP store of
+# scripts/queue/effects-netns.sh, reached through egress `restricted` (a microVM cannot see the host
+# file system). Exit 0 only when every check passed.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -50,6 +56,9 @@ QUEUE_HTTP_PORT="$(free_port)"
 export QUEUE_PORT QUEUE_HTTP_PORT
 # shellcheck source=scripts/queue/lib.sh
 . "$SCRIPT_DIR/lib.sh"
+# shellcheck source=scripts/kvm/provider-lib.sh
+. "$REPO_ROOT/scripts/kvm/provider-lib.sh"
+provider_init "$REPO_ROOT"
 
 GATEWAY_PORT="$(free_port)"
 API="http://127.0.0.1:$GATEWAY_PORT"
@@ -62,7 +71,7 @@ ACK_WAIT=4
 GATEWAY_BIN="$REPO_ROOT/target/debug/tachyon-serverless-gateway"
 PROBE="$REPO_ROOT/target/debug/tachyon-queue-probe"
 BRIDGE_BIN="$REPO_ROOT/target/debug/tachyon-serverless-runtime-bridge"
-SAMPLE_BIN="$REPO_ROOT/target/debug/example-idempotent-async"
+SAMPLE_BIN="$GUEST_DIR/example-idempotent-async"
 EFFECTS="$WORK_DIR/effects"
 GATEWAY_LOG="$EVIDENCE/gateway.log"
 ACCEPTED="$EVIDENCE/accepted.txt"
@@ -81,6 +90,11 @@ cleanup() {
     wait "$GATEWAY_PID" 2>/dev/null
   fi
   "$SCRIPT_DIR/down.sh" >/dev/null 2>&1
+  if provider_is_fc; then
+    cp "$(sed -n 's/^EFFECTS_STORE_LOG=//p' "$WORK_DIR/effects.env" 2>/dev/null)" "$EVIDENCE/effects-store.log" 2>/dev/null
+    "$SCRIPT_DIR/effects-netns.sh" down >/dev/null 2>&1
+    provider_leftovers >"$EVIDENCE/leftovers-after.txt" 2>&1
+  fi
   if [ -f "$QUEUE_STATE_DIR/nats-server.log" ]; then
     cp "$QUEUE_STATE_DIR/nats-server.log" "$EVIDENCE/nats-server.log"
   fi
@@ -114,6 +128,9 @@ if [ "${TSLS_SKIP_BUILD:-0}" != "1" ]; then
   cargo build -q -p tachyon-serverless-gateway --features failpoints
   cargo build -q -p tachyon-serverless-queue-nats --bin tachyon-queue-probe
   cargo build -q -p tachyon-serverless-runtime-bridge -p example-idempotent-async
+  if provider_is_fc; then
+    cargo build -q --release --target "$(uname -m)-unknown-linux-musl" -p example-idempotent-async
+  fi
 fi
 for b in "$GATEWAY_BIN" "$PROBE" "$BRIDGE_BIN" "$SAMPLE_BIN"; do
   [ -x "$b" ] || { echo "missing binary: $b" >&2; exit 1; }
@@ -126,18 +143,31 @@ probe() {
 }
 
 mkdir -p "$WORK_DIR/data" "$EFFECTS"
+# Where the handler keeps its idempotency records (see the header).
+REVISION_ENV="[[\"IDEMPOTENT_ASYNC_DIR\",\"$EFFECTS\"]]"
+REVISION_EGRESS=""
+INIT_TIMEOUT=10
+POOL_TOML=""
+if provider_is_fc; then
+  "$SCRIPT_DIR/effects-netns.sh" down >/dev/null 2>&1 || true
+  "$SCRIPT_DIR/effects-netns.sh" up "$EFFECTS" >"$WORK_DIR/effects.env"
+  STORE_URL="$(sed -n 's/^IDEMPOTENT_ASYNC_URL=//p' "$WORK_DIR/effects.env")"
+  STORE_ALLOW="$(sed -n 's/^EFFECTS_ALLOW=//p' "$WORK_DIR/effects.env")"
+  REVISION_ENV="[[\"IDEMPOTENT_ASYNC_URL\",\"$STORE_URL\"]]"
+  REVISION_EGRESS=",\"egress\":\"restricted\",\"egress_allow\":[{\"cidr\":\"${STORE_ALLOW%:*}\",\"ports\":[${STORE_ALLOW##*:}]}]"
+  # A cold microVM boot takes seconds on a nested host; the pool keeps later runs warm.
+  INIT_TIMEOUT=60
+  POOL_TOML=$'[pool]\nenabled = true\nmax_idle_per_revision = 4\nidle_ttl_seconds = 300'
+fi
 CONFIG="$WORK_DIR/gateway.toml"
 cat >"$CONFIG" <<EOF
 listen = "127.0.0.1:$GATEWAY_PORT"
 profile = "dev"
 data_dir = "$WORK_DIR/data"
 
-[provider]
-kind = "process"
+$(provider_toml "$WORK_DIR/data" "$BRIDGE_BIN")
 
-[provider.process]
-bridge_binary = "$BRIDGE_BIN"
-workdir = "$WORK_DIR/data/process"
+$POOL_TOML
 
 [limits]
 max_response_bytes = 65536
@@ -304,8 +334,8 @@ FUNCTION_ID="$(jqr .id)"
 DIGEST="$(curl -s --max-time 30 -X POST -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/octet-stream' --data-binary "@$SAMPLE_BIN" "$API/v1/artifacts" | jq -r .digest)"
 case "$(uname -m)" in arm64 | aarch64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
-printf '{"artifact":{"kind":"binary","digest":"%s"},"architecture":"%s","execution":{"timeout_seconds":10,"initialization_timeout_seconds":10,"max_concurrency":4},"env_vars":[["IDEMPOTENT_ASYNC_DIR","%s"]],"publish_to_prod":true}' \
-  "$DIGEST" "$ARCH" "$EFFECTS" >"$WORK_DIR/rev.json"
+printf '{"artifact":{"kind":"binary","digest":"%s"},"architecture":"%s","execution":{"timeout_seconds":10,"initialization_timeout_seconds":%s,"max_concurrency":4},"env_vars":%s%s,"publish_to_prod":true}' \
+  "$DIGEST" "$ARCH" "$INIT_TIMEOUT" "$REVISION_ENV" "$REVISION_EGRESS" >"$WORK_DIR/rev.json"
 http POST "/v1/functions/$FUNCTION_ID/revisions" "$TOKEN" "$WORK_DIR/rev.json"
 REVISION_ID="$(jqr .id)"
 for _ in $(seq 1 100); do
@@ -455,6 +485,21 @@ while read -r _order id; do
   esac
 done <"$ACCEPTED"
 check converge.every_invocation_terminal "not_terminal=$not_terminal" test "$not_terminal" = 0
+if provider_is_fc; then
+  # Every attempt that reached an environment ran in a jailed Firecracker microVM with a guest boot id.
+  : >"$EVIDENCE/attempt-environments.txt"
+  while read -r _order id; do
+    http GET "/v1/invocations/$id" "$TOKEN"
+    printf '%s' "$HTTP_BODY" | jq -r --arg id "$id" '.attempts[] | select(.environment_id != null) |
+      [$id, .id, .status, .start_kind, .environment_id, (.boot_evidence.details.provider // "-"),
+       (.boot_evidence.details.jailed // "-"), (.boot_evidence.guest_boot_id // "-")] | @tsv' \
+      >>"$EVIDENCE/attempt-environments.txt"
+  done <"$ACCEPTED"
+  not_vm="$(awk -F'\t' '$6 != "firecracker" || $7 != "true"' "$EVIDENCE/attempt-environments.txt" | wc -l | tr -d ' ')"
+  check microvm.every_attempt_in_a_jailed_firecracker_vm \
+    "attempts=$(wc -l <"$EVIDENCE/attempt-environments.txt" | tr -d ' ') not_microvm=$not_vm warm=$(awk -F'\t' '$4 == "warm"' "$EVIDENCE/attempt-environments.txt" | wc -l | tr -d ' ')" \
+    test "$not_vm" = 0 -a "$(wc -l <"$EVIDENCE/attempt-environments.txt" | tr -d ' ')" -gt 0
+fi
 stop_gateway
 
 python3 - "$WORK_DIR/data/state.db" "$EVIDENCE/ledger.txt" <<'PY'
@@ -493,9 +538,10 @@ check converge.each_side_effect_exactly_once "effects=$effects_count applied_exe
 {
   echo "nats_server_version=$NATS_SERVER_VERSION"
   echo "platform=$(queue_platform)"
+  echo "provider=$PROVIDER"
   echo "stamp=$STAMP"
   echo "host=$(uname -srm)"
-  echo "git_commit=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "git_commit=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "${TSLS_COMMIT:-unknown}")"
   echo "accepted=$(wc -l <"$ACCEPTED" | tr -d ' ')"
   echo "executions=$(wc -l <"$EFFECTS/executions.log" | tr -d ' ')"
 } >"$EVIDENCE/environment.txt"

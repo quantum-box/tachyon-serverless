@@ -27,10 +27,17 @@
 # Usage:
 #   scripts/queue/triggers-e2e.sh [--evidence DIR]
 #
-# Environment: TSLS_SKIP_BUILD=1 skips cargo build. Exit 0 only when every check passed.
+# Environment: TSLS_SKIP_BUILD=1 skips cargo build. TSLS_PROVIDER=process (default) | firecracker
+# (scripts/kvm/provider-lib.sh; run as root, e.g. `sudo -n env PATH="$PATH" HOME="$HOME"
+# TSLS_PROVIDER=firecracker TSLS_SKIP_BUILD=1 scripts/queue/triggers-e2e.sh`): every fire runs in a
+# jailed microVM with the warm pool on, and each attempt's environment is recorded and checked.
+# Exit 0 only when every check passed.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=scripts/kvm/provider-lib.sh
+. "$REPO_ROOT/scripts/kvm/provider-lib.sh"
+provider_init "$REPO_ROOT"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 EVIDENCE=""
 
@@ -54,7 +61,7 @@ TENANT="tn_01hzzzzzzzzzzzzzzzzzzzzzza"
 GATEWAY_BIN="$REPO_ROOT/target/debug/tachyon-serverless-gateway"
 TSLS="$REPO_ROOT/target/debug/tsls"
 BRIDGE_BIN="$REPO_ROOT/target/debug/tachyon-serverless-runtime-bridge"
-HELLO_BIN="$REPO_ROOT/target/debug/example-hello"
+HELLO_BIN="$GUEST_DIR/example-hello"
 GATEWAY_LOG="$EVIDENCE/gateway.log"
 RESULTS="$EVIDENCE/results.txt"
 DB="$WORK_DIR/data/state.db"
@@ -70,6 +77,7 @@ cleanup() {
     kill -TERM "$GATEWAY_PID" 2>/dev/null
     wait "$GATEWAY_PID" 2>/dev/null
   fi
+  if provider_is_fc; then provider_leftovers >"$EVIDENCE/leftovers-after.txt" 2>&1; fi
   rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
@@ -96,8 +104,11 @@ if [ "${TSLS_SKIP_BUILD:-0}" != "1" ]; then
   log "building the gateway, tsls, the bridge and example-hello"
   cargo build -q -p tachyon-serverless-gateway -p tachyon-serverless-cli \
     -p tachyon-serverless-runtime-bridge -p example-hello -p example-idempotent-async
+  if provider_is_fc; then
+    cargo build -q --release --target "$(uname -m)-unknown-linux-musl" -p example-hello -p example-idempotent-async
+  fi
 fi
-FAILING_BIN="$REPO_ROOT/target/debug/example-idempotent-async"
+FAILING_BIN="$GUEST_DIR/example-idempotent-async"
 for b in "$GATEWAY_BIN" "$TSLS" "$BRIDGE_BIN" "$HELLO_BIN" "$FAILING_BIN"; do
   [ -x "$b" ] || { echo "missing binary: $b" >&2; exit 1; }
 done
@@ -106,18 +117,20 @@ mkdir -p "$WORK_DIR/data"
 umask 077
 od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"$WORK_DIR/triggers.key"
 umask 022
+POOL_TOML=""
+if provider_is_fc; then
+  # A cold microVM boot takes seconds on a nested host; the pool keeps the 2 s cron warm.
+  POOL_TOML=$'[pool]\nenabled = true\nmax_idle_per_revision = 2\nidle_ttl_seconds = 300'
+fi
 CONFIG="$WORK_DIR/gateway.toml"
 cat >"$CONFIG" <<EOF
 listen = "127.0.0.1:$GATEWAY_PORT"
 profile = "dev"
 data_dir = "$WORK_DIR/data"
 
-[provider]
-kind = "process"
+$(provider_toml "$WORK_DIR/data" "$BRIDGE_BIN")
 
-[provider.process]
-bridge_binary = "$BRIDGE_BIN"
-workdir = "$WORK_DIR/data/process"
+$POOL_TOML
 
 [dispatcher]
 instance = "triggers-e2e"
@@ -477,6 +490,23 @@ done
 if [ "${metered:-0}" -ge $((total + 2)) ] 2>/dev/null; then rc=0; else rc=1; fi
 check dispatch.fire_runs_metered "$rc" "usage attempts=$metered (runs >= $((total + 2)))"
 
+if provider_is_fc; then
+  # Every attempt of every fire that reached an environment ran in a jailed Firecracker microVM.
+  : >"$EVIDENCE/attempt-environments.txt"
+  for inv in $(sql "SELECT id FROM invocations WHERE function_id IN ('$FUNCTION_ID', '$FAILING_ID') ORDER BY accepted_at"); do
+    api GET "/v1/invocations/$inv"
+    printf '%s' "$HTTP_BODY" | jq -r --arg id "$inv" '.attempts[] | select(.environment_id != null) |
+      [$id, .id, .status, .start_kind, .environment_id, (.boot_evidence.details.provider // "-"),
+       (.boot_evidence.details.jailed // "-"), (.boot_evidence.guest_boot_id // "-")] | @tsv' \
+      >>"$EVIDENCE/attempt-environments.txt"
+  done
+  n_att="$(wc -l <"$EVIDENCE/attempt-environments.txt" | tr -d ' ')"
+  not_vm="$(awk -F'\t' '$6 != "firecracker" || $7 != "true" || $8 == "-"' "$EVIDENCE/attempt-environments.txt" | wc -l | tr -d ' ')"
+  if [ "$not_vm" = 0 ] && [ "$n_att" -gt 0 ]; then rc=0; else rc=1; fi
+  check microvm.every_fire_attempt_in_a_jailed_firecracker_vm "$rc" \
+    "attempts=$n_att not_microvm=$not_vm cold=$(awk -F'\t' '$4 == "cold"' "$EVIDENCE/attempt-environments.txt" | wc -l | tr -d ' ') warm=$(awk -F'\t' '$4 == "warm"' "$EVIDENCE/attempt-environments.txt" | wc -l | tr -d ' ') environments=$(cut -f5 "$EVIDENCE/attempt-environments.txt" | sort -u | wc -l | tr -d ' ')"
+fi
+
 # ---------------------------------------------------------------------------
 # evidence
 # ---------------------------------------------------------------------------
@@ -494,9 +524,9 @@ fi
 {
   echo "stamp=$STAMP"
   echo "host=$(uname -srm)"
-  echo "git_commit=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "git_commit=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "${TSLS_COMMIT:-unknown}")"
   echo "queue=sqlite"
-  echo "provider=process"
+  echo "provider=$PROVIDER"
   echo "cron_fires=$n2"
   echo "downtime_seconds=$((restarted_at - killed_at))"
 } >"$EVIDENCE/environment.txt"
