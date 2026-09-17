@@ -69,8 +69,10 @@ provider_leftovers() {
   provider_is_fc || return 0
   # shellcheck disable=SC2009 # the full command line is needed
   ps -eo pid=,args= | grep -E '(^|/)(firecracker|jailer)( |$)' | grep -v -e grep -e 'ps -eo' || true
-  find /sys/fs/cgroup/tachyon -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's/^/cgroup /'
-  find /srv/jailer/firecracker -mindepth 1 -maxdepth 1 2>/dev/null | sed 's/^/jail /'
-  ip -br link 2>/dev/null | awk '$1 ~ /^tsls/ {print "tap " $1}'
-  nft list tables 2>/dev/null | grep tachyon_egress || true
+  # A missing directory is "nothing left" (find fails, and callers run with errexit + pipefail).
+  { find /sys/fs/cgroup/tachyon -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true; } | sed 's/^/cgroup /'
+  { find /srv/jailer/firecracker -mindepth 1 -maxdepth 1 2>/dev/null || true; } | sed 's/^/jail /'
+  { ip -br link 2>/dev/null || true; } | awk '$1 ~ /^tsls/ {print "tap " $1}'
+  { nft list tables 2>/dev/null || true; } | { grep tachyon_egress || true; }
+  return 0
 }
