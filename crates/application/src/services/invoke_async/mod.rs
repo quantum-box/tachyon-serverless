@@ -30,8 +30,13 @@
 
 pub mod config;
 pub mod consumer;
+pub mod dead_letters;
+pub mod dispatch;
 pub mod publisher;
+pub mod retry;
 
+#[cfg(test)]
+mod dispatch_tests;
 #[cfg(test)]
 mod tests;
 
@@ -65,7 +70,10 @@ use crate::services::invoke::MAX_TRACE_ID_BYTES;
 
 pub use config::InvokeAsyncConfig;
 pub use consumer::{AcceptedEvent, read_delivery};
+pub use dead_letters::{DeadLetterService, DeadLetterView, RedriveRequest, RedriveResult};
+pub use dispatch::{AsyncDispatcher, AsyncDispatcherDeps, HandleOutcome, ReapReport};
 pub use publisher::{OutboxPublisher, PublishReport};
+pub use retry::{AsyncDispatchConfig, Disposition, FunctionRetryPolicy, RetryPolicy, classify};
 
 /// Queue topic of asynchronous invoke events.
 pub const INVOKE_TOPIC: &str = "invoke";
@@ -189,6 +197,11 @@ pub struct InvokeEnvelope {
     pub accepted_at: Timestamp,
     pub queue_deadline: Timestamp,
     pub trace_id: String,
+    /// Delivery generation (PLT-4640): 0 at acceptance, n for the nth
+    /// scheduled retry. The queue message id carries it
+    /// ([`crate::repository::outbox::message_id_for`]).
+    #[serde(default)]
+    pub generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -499,6 +512,7 @@ impl AsyncInvokeService {
             accepted_at: now,
             queue_deadline,
             trace_id,
+            generation: 0,
         };
         let input_storage = input.storage();
         let payload = serde_json::to_string(&envelope)

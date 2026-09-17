@@ -69,6 +69,34 @@ pub enum Command {
     Usage(UsageArgs),
     /// Run a binary end to end on a throwaway local gateway (process provider, no isolation).
     Dev(DevArgs),
+    /// Inspect and redrive dead-lettered asynchronous invocations.
+    DeadLetters {
+        #[command(subcommand)]
+        command: DeadLettersCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DeadLettersCommand {
+    /// List the dead letters of a function (newest first).
+    List {
+        function: String,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Show one dead letter with its last error and redrives.
+    Show { dead_letter_id: String },
+    /// Re-submit a dead letter as a new asynchronous invocation (needs the
+    /// `invoke` and `redrive` roles).
+    Redrive {
+        dead_letter_id: String,
+        /// Run another revision of the same function instead of the original.
+        #[arg(long)]
+        revision_id: Option<String>,
+        /// Why (kept in the audit record).
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

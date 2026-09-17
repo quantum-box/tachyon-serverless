@@ -839,6 +839,123 @@ pub struct InvokeAsyncResponse {
     pub accepted_at: Timestamp,
 }
 
+/// The dispatch state of an asynchronous invocation (PLT-4640).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AsyncDispatchResponse {
+    /// `pending` (never claimed) | `running` | `scheduled` | `done` | `dead`.
+    pub state: String,
+    /// Runs that counted against `max_attempts`.
+    pub attempts: u32,
+    /// Runs deferred without counting (capacity, retry budget, shutdown).
+    pub deferrals: u32,
+    /// Delivery generation: 0 at acceptance, n after the nth scheduled retry.
+    pub generation: u64,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_attempt_at: Option<Timestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<InvocationErrorResponse>,
+    /// The dead letter this invocation ended in, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_letter_id: Option<String>,
+    /// The redrive that created this invocation, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redriven_from: Option<RedriveResponse>,
+}
+
+/// A dead-lettered asynchronous invocation, or a poison event (PLT-4640).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct DeadLetterResponse {
+    pub id: String,
+    /// `non_retryable` | `attempts_exhausted` | `expired` | `function_deleted`
+    /// | `revision_unavailable` | `poison`.
+    pub reason: String,
+    /// `open` | `redriven`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_id: Option<String>,
+    /// `null` for a poison event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision_id: Option<String>,
+    pub attempts: u32,
+    pub deferrals: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<InvocationErrorResponse>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_at: Option<Timestamp>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_attempt_at: Option<Timestamp>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attempt_at: Option<Timestamp>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_size_bytes: Option<u64>,
+    /// `inline` | `object`. The input is kept (never copied) while the entry
+    /// is open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_storage: Option<String>,
+    /// Poison only: the queue message id and why it could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub redrive_count: u32,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redriven_at: Option<Timestamp>,
+    /// Oldest first. Present on `GET /v1/dead-letters/{id}`.
+    #[serde(default)]
+    pub redrives: Vec<RedriveResponse>,
+}
+
+/// `POST /v1/dead-letters/{id}:redrive` body (PLT-4640).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RedriveRequestBody {
+    /// Run another revision **of the same function** instead of the original
+    /// one. Must be explicit; the default keeps the revision the invocation
+    /// was pinned to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision_id: Option<String>,
+    /// Why (kept in the audit record, at most 1024 bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The audit record of one redrive (PLT-4640).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RedriveResponse {
+    pub id: String,
+    pub dead_letter_id: String,
+    pub function_id: String,
+    /// The dead-lettered invocation.
+    pub source_invocation_id: String,
+    /// The new invocation.
+    pub invocation_id: String,
+    pub revision_id: String,
+    pub revision_overridden: bool,
+    /// The subject of the principal that asked.
+    pub requested_by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+}
+
+/// `202 Accepted` of a redrive: the audit record and the new invocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RedriveAcceptedResponse {
+    pub redrive: RedriveResponse,
+    pub invocation: InvokeAsyncResponse,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct InvocationResponse {
     pub id: String,
@@ -877,6 +994,10 @@ pub struct InvocationResponse {
     pub deadlines: DeadlinesResponse,
     #[serde(default)]
     pub attempts: Vec<AttemptResponse>,
+    /// Asynchronous invocations only: retries, dead letter and redrive links
+    /// (PLT-4640).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<AsyncDispatchResponse>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

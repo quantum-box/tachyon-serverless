@@ -828,6 +828,10 @@ pub struct GatewayConfig {
     /// key that seals webhook secrets. Used only where `invokeAsync` is.
     #[serde(default)]
     pub triggers: crate::services::triggers::TriggersConfig,
+    /// `[async_dispatch]` (PLT-4640): the consumer, retries, dead letters and
+    /// the reaper. Used only where asynchronous invoke is available.
+    #[serde(default)]
+    pub async_dispatch: crate::services::invoke_async::AsyncDispatchConfig,
 }
 
 /// `[metrics]` (PLT-4637, docs/metrics.md). `GET /metrics` exposes every
@@ -1206,6 +1210,9 @@ impl GatewayConfig {
         self.invoke_async.validate().map_err(ConfigError::Invalid)?;
         self.triggers
             .validate(self.effective_limits().max_payload_bytes)
+            .map_err(ConfigError::Invalid)?;
+        self.async_dispatch
+            .validate()
             .map_err(ConfigError::Invalid)?;
         if self.pool.enabled {
             if self.pool.max_idle_per_revision == 0 {

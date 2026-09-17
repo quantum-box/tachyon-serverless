@@ -106,6 +106,30 @@ fn invocation_json(status: &str) -> Value {
     })
 }
 
+const DLQ: &str = "dlq_01hzzzzzzzzzzzzzzzzzzzzzz1";
+const INV2: &str = "inv_01hzzzzzzzzzzzzzzzzzzzzzz2";
+
+fn redrive_json() -> Value {
+    json!({
+        "id": "rdv_01hzzzzzzzzzzzzzzzzzzzzzz1", "dead_letter_id": DLQ, "function_id": FN_HELLO,
+        "source_invocation_id": INV, "invocation_id": INV2, "revision_id": REV_A,
+        "revision_overridden": false, "requested_by": "oncall", "reason": "fixed",
+        "created_at": TS
+    })
+}
+
+fn dead_letter_json(redrives: usize) -> Value {
+    json!({
+        "id": DLQ, "reason": "attempts_exhausted", "status": if redrives > 0 { "redriven" } else { "open" },
+        "function_id": FN_HELLO, "invocation_id": INV, "revision_id": REV_A,
+        "attempts": 3, "deferrals": 0,
+        "last_error": {"class": "user_error", "error_type": "Handler.Downstream", "message": "503 from upstream"},
+        "created_at": TS, "input_digest": "sha256:ab", "input_size_bytes": 2, "input_storage": "inline",
+        "redrive_count": redrives,
+        "redrives": (0..redrives).map(|_| redrive_json()).collect::<Vec<_>>()
+    })
+}
+
 fn api_error(
     status: u16,
     code: &str,
@@ -309,6 +333,34 @@ async fn handler(
                 && m == "POST"
             {
                 return json_response(200, &invocation_json("cancelled"), &[]);
+            }
+            // Dead letters (PLT-4640).
+            if path == format!("/v1/functions/{FN_HELLO}/dead-letters") && m == "GET" {
+                return json_response(200, &json!({"items": [dead_letter_json(0)]}), &[]);
+            }
+            if path == format!("/v1/dead-letters/{DLQ}") && m == "GET" {
+                return json_response(200, &dead_letter_json(1), &[]);
+            }
+            if path == format!("/v1/dead-letters/{DLQ}/redrive") && m == "POST" {
+                let req: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+                if req["revision_id"] == REV_B {
+                    let (s, b) = api_error(404, "not_found", None, None);
+                    return json_response(s, &b, &[]);
+                }
+                return json_response(
+                    202,
+                    &json!({
+                        "redrive": redrive_json(),
+                        "invocation": {
+                            "invocation_id": INV2, "function_id": FN_HELLO, "revision_id": REV_A,
+                            "status": "accepted", "status_url": format!("/v1/invocations/{INV2}"),
+                            "input_digest": "sha256:ab", "input_size_bytes": 2,
+                            "input_storage": "inline", "replayed": false, "trace_id": INV2,
+                            "accepted_at": TS
+                        }
+                    }),
+                    &[],
+                );
             }
             let (s, b) = api_error(404, "not_found", None, None);
             json_response(s, &b, &[])
@@ -1079,4 +1131,45 @@ async fn create_and_list_functions() {
     assert_eq!(code, ExitCode::Ok);
     assert!(out.starts_with("ID"), "{out}");
     assert!(out.contains("hello") && out.contains("other"), "{out}");
+}
+
+/// `dead-letters list|show|redrive` (PLT-4640): the table, the detail with its
+/// redrives, the redrive body (default revision unless `--revision-id`), and
+/// the API error of a refused redrive.
+#[tokio::test]
+async fn dead_letters_list_show_and_redrive() {
+    let mock = Mock::start(MockState::default()).await;
+    let (code, out, err) = mock.tsls(&["dead-letters", "list", FN_HELLO]).await;
+    assert_eq!(code, ExitCode::Ok, "{err}");
+    assert!(out.starts_with("ID"), "{out}");
+    assert!(
+        out.contains(DLQ) && out.contains("attempts_exhausted"),
+        "{out}"
+    );
+    assert!(out.contains("user_error/Handler.Downstream"), "{out}");
+
+    let (code, out, _) = mock.tsls(&["dead-letters", "show", DLQ]).await;
+    assert_eq!(code, ExitCode::Ok);
+    assert!(out.contains("redriven") && out.contains(INV2), "{out}");
+    assert!(out.contains("503 from upstream"), "{out}");
+
+    let (code, out, _) = mock
+        .tsls(&["dead-letters", "redrive", DLQ, "--reason", "fixed"])
+        .await;
+    assert_eq!(code, ExitCode::Ok);
+    assert!(out.contains(INV2), "{out}");
+    let req = mock
+        .requests()
+        .into_iter()
+        .rfind(|r| r.path.ends_with("/redrive"))
+        .unwrap();
+    assert_eq!(req.method, "POST");
+    let body: Value = serde_json::from_slice(&req.body).unwrap();
+    assert_eq!(body, json!({"reason": "fixed"}));
+
+    let (code, _, err) = mock
+        .tsls(&["dead-letters", "redrive", DLQ, "--revision-id", REV_B])
+        .await;
+    assert_eq!(code, ExitCode::Api);
+    assert!(err.contains("not_found"), "{err}");
 }

@@ -47,6 +47,7 @@ use super::{
 };
 
 mod config;
+mod dispatch;
 pub mod migrations;
 mod objects;
 mod outbox;
@@ -346,12 +347,12 @@ impl SqliteStore {
             };
             let invocations: Vec<Invocation> = bodies(
                 tx,
-                // An asynchronous invocation that is still waiting to be
-                // dispatched survives a restart: its input and its outbox
-                // event are durable and delivery resumes (PLT-4639).
+                // An asynchronous invocation survives a restart in any
+                // non-terminal state: its input, its outbox event and its
+                // dispatch state are durable, and a run the restart cut short
+                // is retried once its claim expires (PLT-4639, PLT-4640).
                 "SELECT body FROM invocations WHERE terminal = 0 AND owner_id IS NULL \
-                 AND NOT (status IN ('accepted', 'queued') \
-                          AND id IN (SELECT invocation_id FROM invocation_inputs)) \
+                 AND id NOT IN (SELECT invocation_id FROM invocation_inputs) \
                  ORDER BY id",
                 [],
             )?;
@@ -369,7 +370,7 @@ impl SqliteStore {
             )?;
             for mut att in attempts {
                 let unknown = get_invocation(tx, &att.invocation_id)?
-                    .is_some_and(|inv| restart::is_outcome_unknown(&inv));
+                    .is_some_and(|inv| restart::attempts_unknown(&inv));
                 if restart::settle_attempt(&mut att, unknown, now) {
                     update_attempt_row(tx, &att)?;
                     s.attempts += 1;

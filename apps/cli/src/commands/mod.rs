@@ -1,6 +1,7 @@
 //! Command implementations. Each module takes an [`ApiClient`] and a
 //! [`Printer`] and returns a [`CliError`] whose exit code the binary uses.
 
+pub mod dead_letters;
 pub mod deploy;
 pub mod dev;
 pub mod functions;
@@ -17,7 +18,7 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 use tachyon_serverless_api_types::ListResponse;
 
-use crate::args::{Cli, Command, FunctionsCommand, TriggersCommand};
+use crate::args::{Cli, Command, DeadLettersCommand, FunctionsCommand, TriggersCommand};
 use crate::client::{ApiClient, ApiResponse, ClientConfig};
 use crate::error::CliError;
 use crate::output::Printer;
@@ -144,5 +145,30 @@ pub async fn dispatch(cli: Cli, p: &mut Printer<'_>) -> Result<(), CliError> {
             usage::usage(&client, &args, p).await
         }
         Command::Dev(args) => dev::run(&args, &cfg, p).await,
+        Command::DeadLetters { command } => {
+            let client = ApiClient::new(cfg)?;
+            match command {
+                DeadLettersCommand::List { function, limit } => {
+                    dead_letters::list(&client, &function, limit, p).await
+                }
+                DeadLettersCommand::Show { dead_letter_id } => {
+                    dead_letters::show(&client, &dead_letter_id, p).await
+                }
+                DeadLettersCommand::Redrive {
+                    dead_letter_id,
+                    revision_id,
+                    reason,
+                } => {
+                    dead_letters::redrive(
+                        &client,
+                        &dead_letter_id,
+                        revision_id.as_deref(),
+                        reason.as_deref(),
+                        p,
+                    )
+                    .await
+                }
+            }
+        }
     }
 }

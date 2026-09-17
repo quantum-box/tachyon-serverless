@@ -312,7 +312,9 @@ impl Invocation {
         match self.status {
             InvocationStatus::Accepted | InvocationStatus::Queued => {
                 self.status = InvocationStatus::Running;
-                self.started_at = Some(now);
+                // A retried asynchronous invocation keeps the start of its
+                // first dispatch (PLT-4640).
+                self.started_at.get_or_insert(now);
                 self.deadlines.execution_deadline = Some(execution_deadline);
                 self.deadlines.init_deadline = Some(init_deadline);
                 self.attempt_ids.push(attempt_id);
@@ -345,6 +347,21 @@ impl Invocation {
             }
             _ => Err(self.illegal("retry")),
         }
+    }
+
+    /// An asynchronous invocation whose run ended with a retryable outcome
+    /// goes back to waiting for its next dispatch (PLT-4640). Its attempts,
+    /// `started_at` and pinned revision are kept; the deadlines of the run
+    /// that ended are cleared.
+    pub fn mark_requeued(&mut self) -> Result<(), DomainError> {
+        self.ensure_not_terminal()?;
+        if self.mode != InvocationMode::Async {
+            return Err(self.illegal("requeued"));
+        }
+        self.status = InvocationStatus::Queued;
+        self.deadlines.execution_deadline = None;
+        self.deadlines.init_deadline = None;
+        Ok(())
     }
 
     pub fn mark_succeeded(

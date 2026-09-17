@@ -102,10 +102,13 @@ impl ObjectReferenceRepository for SqliteStore {
             }
             // A reference whose invocation row is missing protects the object
             // too: the ledger cannot prove that invocation finished.
+            // An open dead letter keeps its input for a redrive (PLT-4640).
             let live: i64 = tx.query_row(
                 "SELECT COUNT(*) FROM object_refs r
                  LEFT JOIN invocations i ON i.id = r.invocation_id
-                 WHERE r.object_id = ?1 AND (i.id IS NULL OR i.terminal = 0)",
+                 WHERE r.object_id = ?1 AND (i.id IS NULL OR i.terminal = 0
+                   OR r.invocation_id IN
+                      (SELECT invocation_id FROM dead_letters WHERE status = 'open'))",
                 [object.id.as_str()],
                 |r| r.get(0),
             )?;

@@ -148,6 +148,75 @@
         ],
         "type": "object"
       },
+      "AsyncDispatchResponse": {
+        "description": "The dispatch state of an asynchronous invocation (PLT-4640).",
+        "properties": {
+          "attempts": {
+            "description": "Runs that counted against `max_attempts`.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dead_letter_id": {
+            "description": "The dead letter this invocation ended in, if any.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deferrals": {
+            "description": "Runs deferred without counting (capacity, retry budget, shutdown).",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "generation": {
+            "description": "Delivery generation: 0 at acceptance, n after the nth scheduled retry.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InvocationErrorResponse"
+              }
+            ]
+          },
+          "next_attempt_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redriven_from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RedriveResponse",
+                "description": "The redrive that created this invocation, if any."
+              }
+            ]
+          },
+          "state": {
+            "description": "`pending` (never claimed) | `running` | `scheduled` | `done` | `dead`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "attempts",
+          "deferrals",
+          "generation"
+        ],
+        "type": "object"
+      },
       "AttemptResponse": {
         "properties": {
           "boot_evidence": {
@@ -468,6 +537,149 @@
         },
         "required": [
           "expression"
+        ],
+        "type": "object"
+      },
+      "DeadLetterResponse": {
+        "description": "A dead-lettered asynchronous invocation, or a poison event (PLT-4640).",
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deferrals": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "first_attempt_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "function_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input_size_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_storage": {
+            "description": "`inline` | `object`. The input is kept (never copied) while the entry\nis open.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invocation_id": {
+            "description": "`null` for a poison event.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_attempt_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InvocationErrorResponse"
+              }
+            ]
+          },
+          "message_id": {
+            "description": "Poison only: the queue message id and why it could not be read.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "description": "`non_retryable` | `attempts_exhausted` | `expired` | `function_deleted`\n| `revision_unavailable` | `poison`.",
+            "type": "string"
+          },
+          "redrive_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "redriven_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "redrives": {
+            "description": "Oldest first. Present on `GET /v1/dead-letters/{id}`.",
+            "items": {
+              "$ref": "#/components/schemas/RedriveResponse"
+            },
+            "type": "array"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "`open` | `redriven`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reason",
+          "status",
+          "attempts",
+          "deferrals",
+          "created_at",
+          "redrive_count"
         ],
         "type": "object"
       },
@@ -882,6 +1094,17 @@
           "deadlines": {
             "$ref": "#/components/schemas/DeadlinesResponse"
           },
+          "dispatch": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AsyncDispatchResponse",
+                "description": "Asynchronous invocations only: retries, dead letter and redrive links\n(PLT-4640)."
+              }
+            ]
+          },
           "error": {
             "oneOf": [
               {
@@ -1100,6 +1323,166 @@
         ],
         "type": "object"
       },
+      "ListResponse_DeadLetterResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "description": "A dead-lettered asynchronous invocation, or a poison event (PLT-4640).",
+              "properties": {
+                "accepted_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "attempts": {
+                  "format": "int32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "deferrals": {
+                  "format": "int32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "first_attempt_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "function_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "input_digest": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "input_size_bytes": {
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "input_storage": {
+                  "description": "`inline` | `object`. The input is kept (never copied) while the entry\nis open.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "invocation_id": {
+                  "description": "`null` for a poison event.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "last_attempt_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "last_error": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvocationErrorResponse"
+                    }
+                  ]
+                },
+                "message_id": {
+                  "description": "Poison only: the queue message id and why it could not be read.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "description": "`non_retryable` | `attempts_exhausted` | `expired` | `function_deleted`\n| `revision_unavailable` | `poison`.",
+                  "type": "string"
+                },
+                "redrive_count": {
+                  "format": "int32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "redriven_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "redrives": {
+                  "description": "Oldest first. Present on `GET /v1/dead-letters/{id}`.",
+                  "items": {
+                    "$ref": "#/components/schemas/RedriveResponse"
+                  },
+                  "type": "array"
+                },
+                "revision_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "description": "`open` | `redriven`.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "reason",
+                "status",
+                "attempts",
+                "deferrals",
+                "created_at",
+                "redrive_count"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "ListResponse_FunctionResponse": {
         "properties": {
           "items": {
@@ -1200,6 +1583,17 @@
                 },
                 "deadlines": {
                   "$ref": "#/components/schemas/DeadlinesResponse"
+                },
+                "dispatch": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AsyncDispatchResponse",
+                      "description": "Asynchronous invocations only: retries, dead letter and redrive links\n(PLT-4640)."
+                    }
+                  ]
                 },
                 "error": {
                   "oneOf": [
@@ -1889,6 +2283,96 @@
           "max_length",
           "max_bytes",
           "timeout_seconds"
+        ],
+        "type": "object"
+      },
+      "RedriveAcceptedResponse": {
+        "description": "`202 Accepted` of a redrive: the audit record and the new invocation.",
+        "properties": {
+          "invocation": {
+            "$ref": "#/components/schemas/InvokeAsyncResponse"
+          },
+          "redrive": {
+            "$ref": "#/components/schemas/RedriveResponse"
+          }
+        },
+        "required": [
+          "redrive",
+          "invocation"
+        ],
+        "type": "object"
+      },
+      "RedriveRequestBody": {
+        "description": "`POST /v1/dead-letters/{id}:redrive` body (PLT-4640).",
+        "properties": {
+          "reason": {
+            "description": "Why (kept in the audit record, at most 1024 bytes).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision_id": {
+            "description": "Run another revision **of the same function** instead of the original\none. Must be explicit; the default keeps the revision the invocation\nwas pinned to.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RedriveResponse": {
+        "description": "The audit record of one redrive (PLT-4640).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "dead_letter_id": {
+            "type": "string"
+          },
+          "function_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "invocation_id": {
+            "description": "The new invocation.",
+            "type": "string"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requested_by": {
+            "description": "The subject of the principal that asked.",
+            "type": "string"
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "revision_overridden": {
+            "type": "boolean"
+          },
+          "source_invocation_id": {
+            "description": "The dead-lettered invocation.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dead_letter_id",
+          "function_id",
+          "source_invocation_id",
+          "invocation_id",
+          "revision_id",
+          "revision_overridden",
+          "requested_by",
+          "created_at"
         ],
         "type": "object"
       },
@@ -3311,6 +3795,169 @@
         ]
       }
     },
+    "/v1/dead-letters/{dead_letter_id}": {
+      "get": {
+        "operationId": "get_dead_letter",
+        "parameters": [
+          {
+            "description": "dead letter id (`dlq_...`)",
+            "in": "path",
+            "name": "dead_letter_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterResponse"
+                }
+              }
+            },
+            "description": "the entry and its redrives"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "unknown, or another tenant's"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "dead-letters"
+        ]
+      }
+    },
+    "/v1/dead-letters/{dead_letter_id}/redrive": {
+      "post": {
+        "operationId": "redrive",
+        "parameters": [
+          {
+            "description": "dead letter id (`dlq_...`); `:redrive` is accepted too",
+            "in": "path",
+            "name": "dead_letter_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedriveRequestBody"
+              }
+            }
+          },
+          "description": "optional: `revision_id` (another revision of the same function) and `reason`",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedriveAcceptedResponse"
+                }
+              }
+            },
+            "description": "a new asynchronous invocation was committed with its outbox event and the audit record"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "invalid body, or `revision_id` of another function"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "the `invoke` and `redrive` roles are both required"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "unknown, or another tenant's dead letter or revision"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "already redriven, a poison event, the function deleted, or the revision not ready"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`reason` = `backlog` | `queue_full`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`reason` = `queue_unavailable` | `not_configured`"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "dead-letters"
+        ]
+      }
+    },
     "/v1/functions": {
       "get": {
         "operationId": "list_functions",
@@ -3650,6 +4297,72 @@
         ],
         "tags": [
           "aliases"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/dead-letters": {
+      "get": {
+        "operationId": "list_dead_letters",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "max items (default 50, at most 1000)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_DeadLetterResponse"
+                }
+              }
+            },
+            "description": "newest first; another tenant's function lists nothing"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`reason` = `not_configured`"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "dead-letters"
         ]
       }
     },
@@ -5259,6 +5972,9 @@
     },
     {
       "name": "triggers"
+    },
+    {
+      "name": "dead-letters"
     },
     {
       "name": "internal"

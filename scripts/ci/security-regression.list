@@ -234,3 +234,19 @@ lease_epoch tachyon-serverless-application lib services::triggers::tests::two_sc
 lease_epoch tachyon-serverless-application lib services::triggers::tests::a_disable_or_delete_racing_a_scheduled_fire_commits_nothing
 # oversized webhook bodies are refused while reading (Content-Length and streaming)
 resource_limits tachyon-serverless-gateway test:triggers_http webhook_http_refuses_before_storing_and_dedups_resends
+# --- PLT-4640: async dispatcher, dead letters, redrive -------------------------------------------
+# redrive needs invoke + redrive, a dead letter never crosses a tenant (404 / empty list), redrive
+# keeps the tenant, function, pinned revision and input reference
+tenant_authz tachyon-serverless-application lib services::invoke_async::dispatch_tests::redrive_is_authorized_and_never_crosses_a_tenant
+tenant_authz tachyon-serverless-application lib services::invoke_async::dispatch_tests::a_redrive_creates_an_audited_invocation_on_the_pinned_revision_and_input
+tenant_authz tachyon-serverless-gateway test:gateway_integration dead_letters_and_redrive_are_authorized_audited_and_tenant_scoped
+# a forged envelope naming another tenant's invocation is poison, never run
+tenant_authz tachyon-serverless-application lib services::invoke_async::dispatch_tests::poison_events_are_dead_lettered_once_and_never_redelivered
+# one run per claim; a taken-over claim cannot settle; ACK loss and duplicates never run twice
+lease_epoch tachyon-serverless-application lib services::invoke_async::dispatch_tests::a_settle_from_a_claim_that_was_taken_over_is_refused
+lease_epoch tachyon-serverless-application lib services::invoke_async::dispatch_tests::concurrent_duplicate_deliveries_run_the_handler_once
+lease_epoch tachyon-serverless-application lib services::invoke_async::dispatch_tests::an_ack_lost_after_the_terminal_commit_is_not_run_again
+# retries are bounded by attempts, age (queue deadline) and the retry budget
+deadline tachyon-serverless-application lib services::invoke_async::dispatch_tests::an_event_past_its_maximum_age_is_dead_lettered_without_running
+resource_limits tachyon-serverless-application lib services::invoke_async::dispatch_tests::retries_over_the_budget_are_deferred_without_counting
+resource_limits tachyon-serverless-application lib services::invoke_async::dispatch_tests::exhausted_attempts_are_dead_lettered_with_the_last_error

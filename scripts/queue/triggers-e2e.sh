@@ -14,10 +14,15 @@
 #                valid 202; the same event id again -> 202 with the same invocation; a bad
 #                signature, an expired timestamp (401) and an oversized body (413) leave no
 #                invocation and no fire row; a missing event id is 400; disabled 410; deleted 404
+#   5. dispatch: every cron and webhook fire is executed by the asynchronous dispatcher (PLT-4640)
+#                and reaches a terminal state, and a webhook fire whose handler always fails
+#                (examples/idempotent-async without a top-level order_id) is retried and ends in
+#                one `attempts_exhausted` dead letter through the common path; the runs are metered
+#                (`AttemptSettled`, PLT-4642)
 # and writes key=value results plus logs to the evidence directory.
 #
-# Invocations are only accepted and queued: nothing consumes the queue yet (PLT-4640), which is
-# exactly what is checked here (the acceptance path shared with invokeAsync).
+# Fires are accepted like invokeAsync (the shared acceptance path) and run by the same dispatcher;
+# the trigger service has no retry code of its own.
 #
 # Usage:
 #   scripts/queue/triggers-e2e.sh [--evidence DIR]
@@ -90,9 +95,10 @@ cd "$REPO_ROOT"
 if [ "${TSLS_SKIP_BUILD:-0}" != "1" ]; then
   log "building the gateway, tsls, the bridge and example-hello"
   cargo build -q -p tachyon-serverless-gateway -p tachyon-serverless-cli \
-    -p tachyon-serverless-runtime-bridge -p example-hello
+    -p tachyon-serverless-runtime-bridge -p example-hello -p example-idempotent-async
 fi
-for b in "$GATEWAY_BIN" "$TSLS" "$BRIDGE_BIN" "$HELLO_BIN"; do
+FAILING_BIN="$REPO_ROOT/target/debug/example-idempotent-async"
+for b in "$GATEWAY_BIN" "$TSLS" "$BRIDGE_BIN" "$HELLO_BIN" "$FAILING_BIN"; do
   [ -x "$b" ] || { echo "missing binary: $b" >&2; exit 1; }
 done
 
@@ -134,6 +140,19 @@ max_catchup_seconds = 600
 fire_retention_seconds = 3600
 webhook_max_body_bytes = 4096
 secret_key_file = "$WORK_DIR/triggers.key"
+
+# PLT-4640: fires are executed by the asynchronous dispatcher; short retries for the failing fire.
+[async_dispatch]
+workers = 2
+fetch_wait_ms = 200
+ack_wait_seconds = 5
+claim_ttl_seconds = 4
+max_attempts = 2
+backoff_initial_ms = 200
+backoff_max_ms = 500
+backoff_floor_ms = 100
+retry_budget = 0
+reaper_interval_seconds = 1
 EOF
 
 start_gateway() {
@@ -290,9 +309,6 @@ n4="$(fires_accepted)"
 i4="$(sql "SELECT COUNT(*) FROM invocations WHERE function_id = '$FUNCTION_ID'")"
 if [ "$n3" = "$n4" ] && [ "$i3" = "$i4" ]; then rc=0; else rc=1; fi
 check disable.no_new_fires "$rc" "fires $n3 -> $n4, invocations $i3 -> $i4 over 5s"
-queued="$(sql "SELECT COUNT(*) FROM invocations WHERE function_id = '$FUNCTION_ID' AND status IN ('queued', 'accepted')")"
-if [ "$queued" = "$i4" ]; then rc=0; else rc=1; fi
-check disable.accepted_fires_stay_queued "$rc" "accepted_or_queued=$queued of $i4"
 
 # ---------------------------------------------------------------------------
 # 4. webhook
@@ -386,6 +402,80 @@ if [ "$HTTP_CODE" = 404 ]; then rc=0; else rc=1; fi
 check webhook.deleted_404 "$rc" "code=$HTTP_CODE"
 if [ "$(sql "SELECT COUNT(*) FROM triggers WHERE id = '$HOOK_ID' AND secret_sealed IS NULL")" = 1 ]; then rc=0; else rc=1; fi
 check webhook.deleted_secret_erased "$rc" ""
+
+# ---------------------------------------------------------------------------
+# 5. dispatch (PLT-4640): fires run through the common asynchronous path
+# ---------------------------------------------------------------------------
+
+# wait_all_terminal FUNCTION_ID SECONDS -> 0 when no invocation of the function is non-terminal
+wait_all_terminal() {
+  local deadline=$((SECONDS + $2)) open
+  while :; do
+    open="$(sql "SELECT COUNT(*) FROM invocations WHERE function_id = '$1' AND terminal = 0")"
+    [ "$open" = 0 ] && return 0
+    [ "$SECONDS" -lt "$deadline" ] || return 1
+    sleep 0.5
+  done
+}
+if wait_all_terminal "$FUNCTION_ID" 90; then rc=0; else rc=1; fi
+total="$(sql "SELECT COUNT(*) FROM invocations WHERE function_id = '$FUNCTION_ID'")"
+succeeded="$(sql "SELECT COUNT(*) FROM invocations WHERE function_id = '$FUNCTION_ID' AND status = 'succeeded'")"
+check dispatch.every_fire_terminal "$rc" "invocations=$total succeeded=$succeeded"
+cron_done="$(sql "SELECT COUNT(*) FROM trigger_fires f JOIN invocations i ON i.id = f.invocation_id WHERE f.trigger_id = '$CRON_ID' AND i.status = 'succeeded'")"
+if [ "$cron_done" -ge 1 ] && [ "$cron_done" = "$(fires_accepted)" ]; then rc=0; else rc=1; fi
+check dispatch.cron_fires_succeeded "$rc" "succeeded=$cron_done of $(fires_accepted)"
+api GET "/v1/invocations/$first_inv"
+if [ "$(printf '%s' "$HTTP_BODY" | jq -r .status)" = succeeded ] \
+  && [ "$(printf '%s' "$HTTP_BODY" | jq -r .output.message)" = "hello, world" ]; then rc=0; else rc=1; fi
+check dispatch.webhook_fire_succeeded "$rc" "$(printf '%s' "$HTTP_BODY" | jq -c '{status, dispatch: .dispatch.state, attempts: (.attempts | length)}')"
+
+printf '{"name":"trigger-failing","description":"PLT-4640 failing trigger"}' >"$WORK_DIR/fn2.json"
+api POST /v1/functions "$WORK_DIR/fn2.json"
+FAILING_ID="$(printf '%s' "$HTTP_BODY" | jq -r .id)"
+DIGEST2="$(curl -s --max-time 30 -X POST -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/octet-stream' --data-binary "@$FAILING_BIN" "$API/v1/artifacts" | jq -r .digest)"
+printf '{"artifact":{"kind":"binary","digest":"%s"},"architecture":"%s","env_vars":[["IDEMPOTENT_ASYNC_DIR","%s"]],"publish_to_prod":true}' \
+  "$DIGEST2" "$ARCH" "$WORK_DIR/effects" >"$WORK_DIR/rev2.json"
+api POST "/v1/functions/$FAILING_ID/revisions" "$WORK_DIR/rev2.json"
+REVISION2_ID="$(printf '%s' "$HTTP_BODY" | jq -r .id)"
+for _ in $(seq 1 100); do
+  api GET "/v1/functions/$FAILING_ID/revisions/$REVISION2_ID"
+  [ "$(printf '%s' "$HTTP_BODY" | jq -r .status)" = ready ] && break
+  sleep 0.1
+done
+tsls --json triggers create "$FAILING_ID" --name always-fails --kind webhook >"$WORK_DIR/hook2.json"
+HOOK_ID="$(jq -r .id "$WORK_DIR/hook2.json")"
+SECRET="$(jq -r .secret "$WORK_DIR/hook2.json")"
+# The handler reads `order_id` at the top level; a webhook wraps the body, so every run fails
+# with the retryable handler error Order.InvalidKey.
+printf '{"order_id":"o-1"}' >"$WORK_DIR/fail.json"
+now="$(date -u +%s)"
+deliver "$now" "$(sign "$now" "$WORK_DIR/fail.json")" evt-fail "$WORK_DIR/fail.json"
+FAIL_INV="$(printf '%s' "$HTTP_BODY" | jq -r .invocation_id)"
+if [ "$HTTP_CODE" = 202 ]; then rc=0; else rc=1; fi
+check dispatch.failing_webhook_accepted "$rc" "code=$HTTP_CODE invocation=$FAIL_INV"
+if wait_all_terminal "$FAILING_ID" 60; then rc=0; else rc=1; fi
+api GET "/v1/invocations/$FAIL_INV"
+fail_view="$(printf '%s' "$HTTP_BODY" | jq -c '{status, error: .error.error_type, attempts: (.attempts | length), dispatch: .dispatch.state, dead_letter: .dispatch.dead_letter_id}')"
+if [ "$rc" = 0 ] && [ "$(printf '%s' "$HTTP_BODY" | jq -r .status)" = failed ] \
+  && [ "$(printf '%s' "$HTTP_BODY" | jq -r '.attempts | length')" = 2 ] \
+  && [ "$(printf '%s' "$HTTP_BODY" | jq -r .error.error_type)" = Order.InvalidKey ]; then rc=0; else rc=1; fi
+check dispatch.failing_fire_retried_then_failed "$rc" "$fail_view"
+api GET "/v1/functions/$FAILING_ID/dead-letters"
+printf '%s\n' "$HTTP_BODY" >"$EVIDENCE/dead-letters.json"
+if [ "$(printf '%s' "$HTTP_BODY" | jq -r '[.items[] | select(.invocation_id == "'"$FAIL_INV"'" and .reason == "attempts_exhausted")] | length')" = 1 ] \
+  && [ "$(printf '%s' "$HTTP_BODY" | jq -r '.items | length')" = 1 ]; then rc=0; else rc=1; fi
+check dispatch.failing_fire_one_dead_letter "$rc" "$(printf '%s' "$HTTP_BODY" | jq -c '[.items[] | {reason, attempts}]')"
+# Metering (PLT-4642): every run of a fire emits AttemptSettled, first then retry.
+metered=""
+for _ in $(seq 1 40); do
+  api GET "/v1/usage?group_by=function"
+  metered="$(printf '%s' "$HTTP_BODY" | jq -r '.totals.usage.attempts // 0')"
+  [ "$metered" -ge $((total + 2)) ] 2>/dev/null && break
+  sleep 0.5
+done
+if [ "${metered:-0}" -ge $((total + 2)) ] 2>/dev/null; then rc=0; else rc=1; fi
+check dispatch.fire_runs_metered "$rc" "usage attempts=$metered (runs >= $((total + 2)))"
 
 # ---------------------------------------------------------------------------
 # evidence

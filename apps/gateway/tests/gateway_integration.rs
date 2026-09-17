@@ -2110,3 +2110,149 @@ async fn usage_report_is_provisional_tenant_scoped_and_fails_closed() {
     assert_eq!(not_ready.json()["usage"]["accepting"], false);
     app.usage_meter.journal().force_unavailable(false);
 }
+
+// ---------------------------------------------------------------------------
+// dead letters and redrive (PLT-4640)
+// ---------------------------------------------------------------------------
+
+const TOKEN_A_REDRIVE: &str = "dev-token-redrive-a";
+const TOKEN_B_REDRIVE: &str = "dev-token-redrive-b";
+
+/// Redrive over HTTP: reading needs `invoke` and stays in the tenant (another
+/// tenant lists nothing and gets 404), a redrive without the `redrive` role is
+/// 403 and another tenant's redrive 404; a permitted redrive answers 202 with
+/// the audit record, links both invocations, and a second one is 409.
+#[tokio::test]
+async fn dead_letters_and_redrive_are_authorized_audited_and_tenant_scoped() {
+    let dir = tempfile::tempdir().unwrap();
+    let toml = format!(
+        "{}\n[queue]\nbackend = \"sqlite\"\n\n[invoke_async]\ninline_input_max_bytes = 1024\n\n\
+         [async_dispatch]\nmax_attempts = 1\nfetch_wait_ms = 20\n\n\
+         [[identity.tokens]]\ntoken = \"{TOKEN_A_REDRIVE}\"\ntenant_id = \"{TENANT_A}\"\nsubject = \"oncall-a\"\nroles = [\"invoke\", \"redrive\"]\n\n\
+         [[identity.tokens]]\ntoken = \"{TOKEN_B_REDRIVE}\"\ntenant_id = \"{TENANT_B}\"\nsubject = \"oncall-b\"\nroles = [\"invoke\", \"redrive\"]\n",
+        config_toml(dir.path())
+    );
+    let fake = Arc::new(FakeExecutionProvider::new());
+    fake.push_script(FakeGuestScript::HandlerError {
+        error_type: "Handler.Downstream".into(),
+        message: "downstream 503".into(),
+    });
+    let app = Application::bootstrap_with(
+        GatewayConfig::from_toml(&toml).unwrap(),
+        fake.clone(),
+        BootstrapOptions::default(),
+    )
+    .unwrap();
+    app.async_dispatcher
+        .as_ref()
+        .unwrap()
+        .ensure_consumer()
+        .await
+        .unwrap();
+    let r = &router(app.clone());
+    let (function_id, revision_id) = deploy(r, "dlq-http").await;
+    let accepted = post_json(
+        r,
+        &format!("/v1/functions/{function_id}:invokeAsync"),
+        TOKEN_A,
+        serde_json::json!({"order": 7}),
+    )
+    .await;
+    assert_eq!(accepted.status, StatusCode::ACCEPTED);
+    let source = accepted.json()["invocation_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    app.publish_outbox().await.unwrap();
+    let outcome = app.dispatch_async_once().await.unwrap();
+    assert!(
+        format!("{outcome:?}").contains("DeadLettered"),
+        "{outcome:?}"
+    );
+
+    let list_path = format!("/v1/functions/{function_id}/dead-letters");
+    let listed = get(r, &list_path, TOKEN_A).await;
+    assert_eq!(listed.status, StatusCode::OK);
+    let items = listed.json()["items"].as_array().unwrap().clone();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["reason"], "attempts_exhausted");
+    assert_eq!(items[0]["invocation_id"], source.as_str());
+    assert_eq!(items[0]["last_error"]["error_type"], "Handler.Downstream");
+    let dl = items[0]["id"].as_str().unwrap().to_string();
+    let foreign_list = get(r, &list_path, TOKEN_B).await;
+    assert_eq!(foreign_list.status, StatusCode::OK);
+    assert!(foreign_list.json()["items"].as_array().unwrap().is_empty());
+    let foreign = get(r, &format!("/v1/dead-letters/{dl}"), TOKEN_B).await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+    assert!(!String::from_utf8_lossy(&foreign.body).contains(&source));
+
+    let source_view = get(r, &format!("/v1/invocations/{source}"), TOKEN_A).await;
+    assert_eq!(source_view.json()["status"], "failed");
+    assert_eq!(source_view.json()["dispatch"]["state"], "dead");
+    assert_eq!(
+        source_view.json()["dispatch"]["dead_letter_id"],
+        dl.as_str()
+    );
+
+    let body = serde_json::json!({"reason": "downstream recovered"});
+    let redrive_path = format!("/v1/dead-letters/{dl}:redrive");
+    let no_role = post_json(r, &redrive_path, TOKEN_A, body.clone()).await;
+    assert_eq!(no_role.status, StatusCode::FORBIDDEN);
+    let other_tenant = post_json(r, &redrive_path, TOKEN_B_REDRIVE, body.clone()).await;
+    assert_eq!(other_tenant.status, StatusCode::NOT_FOUND);
+    let bad_revision = post_json(
+        r,
+        &redrive_path,
+        TOKEN_A_REDRIVE,
+        serde_json::json!({"revision_id": "rev_01hzzzzzzzzzzzzzzzzzzzzzzz"}),
+    )
+    .await;
+    assert_eq!(bad_revision.status, StatusCode::NOT_FOUND);
+
+    let done = post_json(r, &redrive_path, TOKEN_A_REDRIVE, body.clone()).await;
+    assert_eq!(
+        done.status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&done.body)
+    );
+    let j = done.json();
+    assert_eq!(j["redrive"]["dead_letter_id"], dl.as_str());
+    assert_eq!(j["redrive"]["source_invocation_id"], source.as_str());
+    assert_eq!(j["redrive"]["requested_by"], "oncall-a");
+    assert_eq!(j["redrive"]["reason"], "downstream recovered");
+    assert_eq!(j["redrive"]["revision_id"], revision_id.as_str());
+    assert_eq!(j["invocation"]["revision_id"], revision_id.as_str());
+    let new_id = j["invocation"]["invocation_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(new_id, source);
+    assert_eq!(
+        done.header("location"),
+        Some(format!("/v1/invocations/{new_id}").as_str())
+    );
+    let again = post_json(
+        r,
+        &format!("/v1/dead-letters/{dl}/redrive"),
+        TOKEN_A_REDRIVE,
+        body,
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::CONFLICT);
+
+    let shown = get(r, &format!("/v1/dead-letters/{dl}"), TOKEN_A).await;
+    assert_eq!(shown.json()["status"], "redriven");
+    assert_eq!(shown.json()["redrives"].as_array().unwrap().len(), 1);
+    app.publish_outbox().await.unwrap();
+    let outcome = app.dispatch_async_once().await.unwrap();
+    assert!(format!("{outcome:?}").contains("succeeded"), "{outcome:?}");
+    let new_view = get(r, &format!("/v1/invocations/{new_id}"), TOKEN_A).await;
+    assert_eq!(new_view.json()["status"], "succeeded");
+    assert_eq!(
+        new_view.json()["dispatch"]["redriven_from"]["dead_letter_id"],
+        dl.as_str()
+    );
+    let foreign_new = get(r, &format!("/v1/invocations/{new_id}"), TOKEN_B).await;
+    assert_eq!(foreign_new.status, StatusCode::NOT_FOUND);
+}

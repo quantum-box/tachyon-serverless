@@ -15,7 +15,8 @@
 #                        auth refusal, kill -9 persistence, capacity, max_age, JetStream contract,
 #                        object store (PLT-4638); scripts/queue/async-e2e.sh: invokeAsync + outbox
 #                        crash/outage convergence (PLT-4639); scripts/queue/triggers-e2e.sh: cron
-#                        and signed webhook triggers (PLT-4641)
+#                        and signed webhook triggers (PLT-4641); scripts/queue/async-dispatch-e2e.sh:
+#                        dispatcher, retry, DLQ, poison, redrive, SIGKILL before ACK / commit (PLT-4640)
 # - scripts:             bash -n + shellcheck + helper self-tests for scripts/
 # - ci-gate:             aggregate status
 #
@@ -256,6 +257,14 @@ jobs:
       # by event id and signature, and refused (401 / 413 / 400) before anything is stored. ~1 min.
       - name: scripts/queue/triggers-e2e.sh
         run: scripts/queue/triggers-e2e.sh --evidence "$RUNNER_TEMP/queue-evidence/triggers-e2e"
+
+      # PLT-4640: the asynchronous dispatcher against the real nats-server with the process provider
+      # and examples/idempotent-async: retries with backoff, attempts_exhausted / non_retryable /
+      # poison dead letters, SIGKILL after the terminal commit (redelivery acked without running)
+      # and after the side effect before the commit (re-executed, effect once), redrive authz and
+      # audit, and one terminal record / dead letter per invocation in state.db.
+      - name: scripts/queue/async-dispatch-e2e.sh
+        run: scripts/queue/async-dispatch-e2e.sh --evidence "$RUNNER_TEMP/queue-evidence/async-dispatch-e2e"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
