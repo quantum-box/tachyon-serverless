@@ -25,7 +25,9 @@
 //! executions of an order fail with the retryable handler error
 //! `Downstream.Unavailable`; `response_bytes: M` answers with an M-byte string
 //! (over the gateway's response limit this is the non-retryable
-//! `Host.ResponseTooLarge`). No network access.
+//! `Host.ResponseTooLarge`); `sleep_ms: T` (at most 60 000) waits before the
+//! side effect, so a failure test can stop the gateway mid-run. No network
+//! access.
 
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
@@ -64,7 +66,9 @@ fn append_line(path: &Path, line: &str) -> Result<(), HandlerError> {
         .append(true)
         .open(path)
         .map_err(io)?;
-    writeln!(f, "{line}").map_err(io)
+    // One write(2) per line: `writeln!` issues several, and two runs appending
+    // at once (at-least-once re-execution) interleaved their lines (PLT-4646).
+    f.write_all(format!("{line}\n").as_bytes()).map_err(io)
 }
 
 /// How many times this order was executed, including this execution.
@@ -120,6 +124,13 @@ async fn handler(event: Event, ctx: Context) -> Result<Value, HandlerError> {
             &format!("{key} {} {} oversized", ctx.invocation_id, ctx.attempt_id),
         )?;
         return Ok(json!({ "order_id": key, "blob": "x".repeat(bytes as usize) }));
+    }
+    // `sleep_ms` keeps the run in flight before its side effect, so a failure
+    // test (PLT-4646) can stop or kill the gateway while the handler runs.
+    if let Some(ms) = payload.get("sleep_ms").and_then(Value::as_u64)
+        && ms > 0
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(ms.min(60_000))).await;
     }
     // The side effect, at most once per business key: an atomic create.
     let effect = dir.join("effects").join(format!("{key}.json"));

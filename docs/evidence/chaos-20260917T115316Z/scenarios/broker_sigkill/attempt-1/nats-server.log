@@ -1,0 +1,62 @@
+[2452] 2026/09/17 20:58:32.048324 [INF] Starting nats-server
+[2452] 2026/09/17 20:58:32.048428 [INF]   Version:  2.14.7
+[2452] 2026/09/17 20:58:32.048439 [INF]   Git:      [8d8b69a]
+[2452] 2026/09/17 20:58:32.048444 [INF]   Name:     tachyon-queue-local
+[2452] 2026/09/17 20:58:32.048451 [INF]   Node:     OBUMwGpe
+[2452] 2026/09/17 20:58:32.048455 [INF]   ID:       NB6Z5ZCETU64HI5EVTFRDCRDP4POPDGYXQTYV32MEJR5MD4UXAZIH6YQ
+[2452] 2026/09/17 20:58:32.048463 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+[2452] 2026/09/17 20:58:32.048476 [INF] Using configuration file: /private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.Sdl0zb/nats/nats-server.conf (sha256:47effa1b9c65483ac37958610061584ad597c4cd6fd287b1978bf3eedf803953)
+[2452] 2026/09/17 20:58:32.048776 [INF] Starting http monitor on 127.0.0.1:61189
+[2452] 2026/09/17 20:58:32.048857 [INF] Starting JetStream
+[2452] 2026/09/17 20:58:32.049006 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+[2452] 2026/09/17 20:58:32.049013 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+[2452] 2026/09/17 20:58:32.049017 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+[2452] 2026/09/17 20:58:32.049021 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+[2452] 2026/09/17 20:58:32.049025 [INF] 
+[2452] 2026/09/17 20:58:32.049029 [INF]          https://docs.nats.io/jetstream
+[2452] 2026/09/17 20:58:32.049032 [INF] 
+[2452] 2026/09/17 20:58:32.049035 [INF] ---------------- JETSTREAM ----------------
+[2452] 2026/09/17 20:58:32.049038 [INF]   Strict:          true
+[2452] 2026/09/17 20:58:32.049049 [INF]   Max Memory:      64.00 MB
+[2452] 2026/09/17 20:58:32.049053 [INF]   Max Storage:     2.00 GB
+[2452] 2026/09/17 20:58:32.049057 [INF]   Store Directory: "/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.Sdl0zb/nats/jetstream/jetstream"
+[2452] 2026/09/17 20:58:32.049063 [INF]   API Level:       4
+[2452] 2026/09/17 20:58:32.049067 [INF] -------------------------------------------
+[2452] 2026/09/17 20:58:32.049498 [INF] Took 632.334µs to start JetStream
+[2452] 2026/09/17 20:58:32.049529 [INF] Listening for client connections on 127.0.0.1:61188
+[2452] 2026/09/17 20:58:32.049541 [INF] Server is ready
+[3211] 2026/09/17 20:58:45.137791 [INF] Starting nats-server
+[3211] 2026/09/17 20:58:45.137977 [INF]   Version:  2.14.7
+[3211] 2026/09/17 20:58:45.137983 [INF]   Git:      [8d8b69a]
+[3211] 2026/09/17 20:58:45.137987 [INF]   Name:     tachyon-queue-local
+[3211] 2026/09/17 20:58:45.137992 [INF]   Node:     OBUMwGpe
+[3211] 2026/09/17 20:58:45.137995 [INF]   ID:       NBKU42LN7ZWX6KCYNULTGUGJF27WDOA4SLTUAJQGKLDTVGEANM23T7CA
+[3211] 2026/09/17 20:58:45.138000 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+[3211] 2026/09/17 20:58:45.138010 [INF] Using configuration file: /private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.Sdl0zb/nats/nats-server.conf (sha256:47effa1b9c65483ac37958610061584ad597c4cd6fd287b1978bf3eedf803953)
+[3211] 2026/09/17 20:58:45.138191 [INF] Starting http monitor on 127.0.0.1:61189
+[3211] 2026/09/17 20:58:45.138243 [INF] Starting JetStream
+[3211] 2026/09/17 20:58:45.138397 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+[3211] 2026/09/17 20:58:45.138402 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+[3211] 2026/09/17 20:58:45.138404 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+[3211] 2026/09/17 20:58:45.138407 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+[3211] 2026/09/17 20:58:45.138409 [INF] 
+[3211] 2026/09/17 20:58:45.138412 [INF]          https://docs.nats.io/jetstream
+[3211] 2026/09/17 20:58:45.138414 [INF] 
+[3211] 2026/09/17 20:58:45.138416 [INF] ---------------- JETSTREAM ----------------
+[3211] 2026/09/17 20:58:45.138418 [INF]   Strict:          true
+[3211] 2026/09/17 20:58:45.138424 [INF]   Max Memory:      64.00 MB
+[3211] 2026/09/17 20:58:45.138427 [INF]   Max Storage:     2.00 GB
+[3211] 2026/09/17 20:58:45.138429 [INF]   Store Directory: "/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.Sdl0zb/nats/jetstream/jetstream"
+[3211] 2026/09/17 20:58:45.138433 [INF]   API Level:       4
+[3211] 2026/09/17 20:58:45.138440 [INF] -------------------------------------------
+[3211] 2026/09/17 20:58:45.139098 [INF]   Starting restore for stream 'TACHYON > TACHYON_EVENTS'
+[3211] 2026/09/17 20:58:45.139617 [INF]   Restored 8 messages for stream 'TACHYON > TACHYON_EVENTS' in 1ms
+[3211] 2026/09/17 20:58:45.139653 [INF]   Recovering 1 consumers for stream - 'TACHYON > TACHYON_EVENTS'
+[3211] 2026/09/17 20:58:45.140095 [INF] Took 1.846583ms to start JetStream
+[3211] 2026/09/17 20:58:45.140116 [INF] Listening for client connections on 127.0.0.1:61188
+[3211] 2026/09/17 20:58:45.140121 [INF] Server is ready
+[3211] 2026/09/17 20:59:01.986850 [INF] Trapped "terminated" signal
+[3211] 2026/09/17 20:59:01.987160 [INF] Initiating Shutdown...
+[3211] 2026/09/17 20:59:01.987172 [INF] Initiating JetStream Shutdown...
+[3211] 2026/09/17 20:59:01.987429 [INF] JetStream Shutdown
+[3211] 2026/09/17 20:59:01.987521 [INF] Server Exiting..

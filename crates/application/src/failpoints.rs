@@ -195,20 +195,79 @@ impl Failpoints {
             Action::Panic => panic!("failpoint {name} fired"),
             Action::Kill => {
                 tracing::error!(name, "failpoint fired: SIGKILL");
-                // SAFETY: kill(2) on our own pid with a constant signal.
-                unsafe {
-                    libc::kill(libc::getpid(), libc::SIGKILL);
-                }
-                // SIGKILL cannot be caught; this is never reached.
-                std::process::abort()
+                kill_self()
             }
         }
     }
 }
 
+/// `SIGKILL` this process and never return.
+///
+/// `kill(2)` on the own pid can return before the signal is delivered while
+/// other threads run (seen on macOS, PLT-4646): the `abort()` that used to
+/// follow it won the race and the process died of `SIGABRT`. This thread
+/// waits for the pending `SIGKILL` instead, so nothing after the failpoint
+/// runs. `SIGKILL` cannot be blocked or ignored; the abort is a safety net.
+fn kill_self() -> ! {
+    // SAFETY: kill(2) on our own pid with a constant signal.
+    unsafe {
+        libc::kill(libc::getpid(), libc::SIGKILL);
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    std::process::abort()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Child half of [`a_kill_failpoint_dies_of_sigkill_even_with_busy_threads`].
+    #[test]
+    fn kill_failpoint_child() {
+        if std::env::var_os("TSLS_FAILPOINT_KILL_CHILD").is_none() {
+            return;
+        }
+        // Busy threads, like a gateway's runtime workers.
+        for _ in 0..8 {
+            std::thread::spawn(|| {
+                let mut x = 0u64;
+                loop {
+                    x = std::hint::black_box(x.wrapping_add(1));
+                }
+            });
+        }
+        let fp = Failpoints::default();
+        fp.set(OUTBOX_AFTER_PUBLISH, Action::Kill, None);
+        fp.fire(OUTBOX_AFTER_PUBLISH);
+        unreachable!("a kill failpoint returned");
+    }
+
+    /// PLT-4646: the process must die of SIGKILL (no destructor, no flush),
+    /// not of a SIGABRT that raced the self-signal.
+    #[cfg(unix)]
+    #[test]
+    fn a_kill_failpoint_dies_of_sigkill_even_with_busy_threads() {
+        use std::os::unix::process::ExitStatusExt;
+        for _ in 0..10 {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "failpoints::tests::kill_failpoint_child",
+                    "--nocapture",
+                    "--test-threads",
+                    "1",
+                ])
+                .env("TSLS_FAILPOINT_KILL_CHILD", "1")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert_eq!(status.signal(), Some(libc::SIGKILL), "{status:?}");
+        }
+    }
 
     #[test]
     fn counted_failpoints_disarm_themselves() {

@@ -1,0 +1,5 @@
+{"key":"setup.pids","value":"bridge=34289 user=34291 env=env_01m2qhep5nef0c79w692vf89ka"}
+{"key":"client.answer","value":"502 crash Runtime.Crash"}
+{"key":"ledger.status","value":"failed Runtime.Crash"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":3}

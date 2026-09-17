@@ -64,6 +64,7 @@ PR は `base...merge commit`、main への push は `before...sha` の差分で�
 - PLT-4640 の dispatcher（`services/invoke_async/{dispatch,retry,dead_letters}.rs`、`apps/gateway/src/dead_letters.rs`、`examples/idempotent-async/**`、`scripts/queue/async-dispatch-e2e.sh`）も KVM 必要にしない。実行は既存の driver（`services/invoke.rs`）を通り、guest・bridge・provider の境界は変えない。E2E は process provider で、`durable-queue` job が実際の nats-server に対して走らせる。
 - PLT-4644 の `apps/console/**`・`scripts/console/**`・`apps/gateway/src/console.rs` は KVM 必要にしない。console は公開 management API の client で、gateway 側の変更は `[console]` の静的配信だけ（`apps/gateway/*` なので契約 path には入る）。
 - PLT-4631 の `crates/application/src/services/dispatcher.rs`・`crates/application/src/repository/slot.rs`（dispatcher lease、slot の CAS、fencing）は KVM 必要にしない。provider に依存しない control plane の排他で、`crates/application/tests/leases.rs` と repository 契約テスト（別プロセスの競合を含む）が決定的に検査し、security regression group（`lease_epoch`）に入れている。
+- PLT-4646 の `scripts/chaos/**` は KVM 必要にしない（process provider と local の nats-server だけを使う）。約 50 分かかり timing に依存するので CI では実行しない（shellcheck だけ）。同じ変更の `crates/application/src/failpoints.rs` と `repository/sqlite/mod.rs`（connection mutex の待ちの上限）は unit test が検査する。`examples/idempotent-async` の `sleep_ms` は guest probe ではない。
 - `crates/application` の lease / fencing / deadline のロジックは fake provider で決定的に試験できるので、KVM ではなく security regression group で守る（`bridge_session.rs` と `services/pool.rs` だけは実 VM の frame・休止に依存するので KVM 必要）。
 - 分類は path だけを見る保守的な規則で、変更の中身は見ない。docs 以外の path が 1 つでもあれば docs-only にはならない。
 
@@ -153,6 +154,7 @@ runtime profile = Firecracker の版（`FIRECRACKER_VERSION`、`scripts/kvm/boot
 | 非同期 dispatcher・retry・DLQ・redrive | `scripts/queue/async-dispatch-e2e.sh`（証跡は既定で `target/queue/async-dispatch-e2e-<UTC>/`） |
 | durable queue / object store | `scripts/queue/verify.sh`（証跡は既定で `target/queue/verify-<UTC>/`、`--evidence DIR` で変更）。手で試すなら `eval "$(scripts/queue/up.sh)"` → `TACHYON_NATS_REQUIRED=1 cargo test -p tachyon-serverless-queue-nats` → `scripts/queue/down.sh --purge` |
 | Functions console | `cd apps/console && pnpm install --frozen-lockfile && pnpm lint && pnpm ts && pnpm test && pnpm check:api && pnpm build`（CI の `console` job と同じ）。E2E は `scripts/console/e2e.sh [--evidence DIR]`（gateway・example の build、console の build、Chromium headless で 15 シナリオ、約 1〜2 分。`docs/console.md`） |
+| 故障マトリクス（PLT-4646） | `scripts/chaos/matrix.sh`（約 50 分、単一 host・process provider。証跡は既定で `docs/evidence/chaos-<UTC>/`、`--only` / `--retries` / `--evidence`。手順と判定は `docs/failure-matrix.md`） |
 | 分類・gate 判定の自己テスト | `scripts/ci/selftest.sh` |
 | 変更の分類 | `scripts/ci/classify-changes.sh --base origin/main --head HEAD` |
 | gate が壊れた変更を検出することの確認 | `scripts/ci/prove-gates.sh`（作業ツリーの一時コピーに既知の悪い変更を 1 つずつ入れ、対応する gate が失敗することを確認。証跡は `docs/evidence/ci-gates-<UTC>/`） |

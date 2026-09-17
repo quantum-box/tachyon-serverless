@@ -1,0 +1,10 @@
+pre-i1 inv_01m2qg5z5131pk4xsq8mfa2j1a inline
+pre-o1 inv_01m2qg5zedx2xv0d4drbfn0mgt object
+pre-w1 inv_01m2qg5zn3dfyhfmbcjnr8ewry webhook
+pre-i2 inv_01m2qg60ch2kqtxsw9650ts7rg inline
+pre-o2 inv_01m2qg60jb8aa6fpzwjns3jxmq object
+pre-w2 inv_01m2qg60q3jbpra0y46w9ba4nt webhook
+fp-async_kill_after_publish inv_01m2qg62ztj3nfyw8av3htcv0q object
+post-i1 inv_01m2qg68yzb5aaeje3gca5pcgb inline
+post-o1 inv_01m2qg697gcr3pafkbbw1ymksz object
+post-w1 inv_01m2qg69cd29906zpnw3stsb4n webhook

@@ -1,0 +1,32 @@
+[95683] 2026/09/17 20:05:14.857580 [INF] Starting nats-server
+[95683] 2026/09/17 20:05:14.857912 [INF]   Version:  2.14.7
+[95683] 2026/09/17 20:05:14.857939 [INF]   Git:      [8d8b69a]
+[95683] 2026/09/17 20:05:14.857947 [INF]   Name:     tachyon-queue-local
+[95683] 2026/09/17 20:05:14.857956 [INF]   Node:     OBUMwGpe
+[95683] 2026/09/17 20:05:14.857965 [INF]   ID:       NBADAOY2DOCZGG2H245PMCIRSOQA4FGRJIARXZGPHSQ45L6F23SAPU6N
+[95683] 2026/09/17 20:05:14.857982 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+[95683] 2026/09/17 20:05:14.858017 [INF] Using configuration file: /private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.YBB2rb/nats/nats-server.conf (sha256:b6fc1972775a075877741584c8d074d2c893aa180171c229a65c7b5b92c74c73)
+[95683] 2026/09/17 20:05:14.858539 [INF] Starting http monitor on 127.0.0.1:62726
+[95683] 2026/09/17 20:05:14.858699 [INF] Starting JetStream
+[95683] 2026/09/17 20:05:14.859105 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+[95683] 2026/09/17 20:05:14.859123 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+[95683] 2026/09/17 20:05:14.859132 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+[95683] 2026/09/17 20:05:14.859139 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+[95683] 2026/09/17 20:05:14.859147 [INF] 
+[95683] 2026/09/17 20:05:14.859153 [INF]          https://docs.nats.io/jetstream
+[95683] 2026/09/17 20:05:14.859160 [INF] 
+[95683] 2026/09/17 20:05:14.859167 [INF] ---------------- JETSTREAM ----------------
+[95683] 2026/09/17 20:05:14.859173 [INF]   Strict:          true
+[95683] 2026/09/17 20:05:14.859194 [INF]   Max Memory:      64.00 MB
+[95683] 2026/09/17 20:05:14.859202 [INF]   Max Storage:     2.00 GB
+[95683] 2026/09/17 20:05:14.859209 [INF]   Store Directory: "/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.YBB2rb/nats/jetstream/jetstream"
+[95683] 2026/09/17 20:05:14.859218 [INF]   API Level:       4
+[95683] 2026/09/17 20:05:14.859225 [INF] -------------------------------------------
+[95683] 2026/09/17 20:05:14.860174 [INF] Took 1.458959ms to start JetStream
+[95683] 2026/09/17 20:05:14.860317 [INF] Listening for client connections on 127.0.0.1:62725
+[95683] 2026/09/17 20:05:14.860339 [INF] Server is ready
+[95683] 2026/09/17 20:05:41.443260 [INF] Trapped "terminated" signal
+[95683] 2026/09/17 20:05:41.443521 [INF] Initiating Shutdown...
+[95683] 2026/09/17 20:05:41.443563 [INF] Initiating JetStream Shutdown...
+[95683] 2026/09/17 20:05:41.444128 [INF] JetStream Shutdown
+[95683] 2026/09/17 20:05:41.444291 [INF] Server Exiting..

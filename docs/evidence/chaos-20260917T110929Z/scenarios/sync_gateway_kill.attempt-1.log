@@ -1,0 +1,28 @@
+[chaos sync_gateway_kill] begin (SIGKILL gateway with one sync invocation running and one queued behind it) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.8SGabl
+[chaos sync_gateway_kill]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos sync_gateway_kill]   ok   workload.async_accepted accepted=6 refused=0
+[chaos sync_gateway_kill]   ok   setup.one_running_one_not_dispatched running=inv_01m2qgyhvz6acav1ew98p1sgf3:running queued=inv_01m2qgykcb3a26pzcdgz5b20fw:queued
+[chaos sync_gateway_kill] fault injected
+[chaos sync_gateway_kill]   ok   client.no_answer_from_killed_gateway running_client=000 queued_client=000 (transport error: the client retries or reads the status URL)
+[chaos sync_gateway_kill] fault removed
+[chaos sync_gateway_kill] converged
+[chaos sync_gateway_kill]   ok   ledger.dispatched_is_outcome_unknown running -> outcome_unknown Host.Restarted
+[chaos sync_gateway_kill]   ok   ledger.not_dispatched_is_failed_platform queued -> failed Host.Restarted
+[chaos sync_gateway_kill]   ok   ledger.not_dispatched_has_no_attempt_run attempts=
+[chaos sync_gateway_kill]   ok   orphans.worker_of_dead_gateway_terminated env=env_01m2qgyhw4y78ccz4wnsa5k5n0 processes_left=0 reconcile={"found":0,"terminated":0,"lost":0,"reclaim":{"dispatchers":0,"error":null,"fenced":0,"invocations":0,"leases":0,"pending":0,"terminated":1}}
+[chaos sync_gateway_kill]   ok   client.retry_of_not_started_succeeds code=200
+[chaos sync_gateway_kill]   ok   client.replay_of_unknown_does_not_rerun code=502 error=outcome_unknown invocation=inv_01m2qgyhvz6acav1ew98p1sgf3
+[chaos sync_gateway_kill]   ok   cv.accepted_never_lost accepted=6 missing_rows=0
+[chaos sync_gateway_kill]   ok   cv.accepted_all_terminal accepted=6 not_terminal=0
+[chaos sync_gateway_kill]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos sync_gateway_kill]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos sync_gateway_kill]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=4
+[chaos sync_gateway_kill]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos sync_gateway_kill]   ok   cv.ledger_all_terminal invocations=14 non_terminal=0 by_status=failed:1,outcome_unknown:1,succeeded:12
+[chaos sync_gateway_kill]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos sync_gateway_kill]   ok   cv.cron_each_time_once fires=3 distinct_times=3
+[chaos sync_gateway_kill]   ok   cv.usage_counted_once journal_pending=0 ledger_events=62 distinct=62 attempts_settled_twice=0 duplicates_ignored=0
+[chaos sync_gateway_kill]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos sync_gateway_kill]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos sync_gateway_kill]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos sync_gateway_kill]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded)

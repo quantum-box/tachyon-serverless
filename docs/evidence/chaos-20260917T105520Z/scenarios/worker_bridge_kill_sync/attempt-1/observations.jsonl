@@ -1,0 +1,5 @@
+{"key":"setup.pids","value":"bridge=98573 user=98576 env=env_01m2qgq4q18srwa530dxk4vc74"}
+{"key":"client.answer","value":"502 outcome_unknown Host.OutcomeUnknown"}
+{"key":"ledger.status","value":"outcome_unknown Host.OutcomeUnknown"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":3}

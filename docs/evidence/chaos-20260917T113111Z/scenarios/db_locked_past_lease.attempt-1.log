@@ -1,0 +1,27 @@
+[chaos db_locked_past_lease] begin (state.db write-locked for 12 s > dispatcher lease 6 s + skew) work=/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/tsls-chaos.m8RNIF
+[chaos db_locked_past_lease]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos db_locked_past_lease]   ok   workload.async_accepted accepted=6 refused=0
+[chaos db_locked_past_lease] fault injected
+[chaos db_locked_past_lease]   ok   outage.answers_success_or_retryable_503 other_answers=0 store_unavailable=1 slowest_ms=11792 (a write waits at most connection wait + busy timeout)
+[chaos db_locked_past_lease] fault removed
+[chaos db_locked_past_lease]   ok   recovery.fenced_itself_after_losing_its_lease sync=503 readyz={"ready":false,"fenced":true} (known limitation: restart required)
+[chaos db_locked_past_lease] converged
+[chaos db_locked_past_lease]   ok   recovery.restart_recovers fenced gateway restarted
+[chaos db_locked_past_lease]   ok   outage.no_partial_rows functions 3 + created 0 -> 3; rows for refused async keys=0; invocations before the outage=11 (all terminal: cv.ledger_all_terminal)
+[chaos db_locked_past_lease]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos db_locked_past_lease]   ok   workload.async_accepted accepted=6 refused=0
+[chaos db_locked_past_lease]   ok   recovery.cron_resumed fires 3 -> 7
+[chaos db_locked_past_lease]   ok   cv.accepted_never_lost accepted=13 missing_rows=0
+[chaos db_locked_past_lease]   ok   cv.accepted_all_terminal accepted=13 not_terminal=0
+[chaos db_locked_past_lease]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos db_locked_past_lease]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos db_locked_past_lease]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=9
+[chaos db_locked_past_lease]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos db_locked_past_lease]   ok   cv.ledger_all_terminal invocations=24 non_terminal=0 by_status=succeeded:24
+[chaos db_locked_past_lease]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos db_locked_past_lease]   ok   cv.cron_each_time_once fires=7 distinct_times=7
+[chaos db_locked_past_lease]   ok   cv.usage_counted_once journal_pending=0 ledger_events=120 distinct=120 attempts_settled_twice=0 duplicates_ignored=0
+[chaos db_locked_past_lease]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos db_locked_past_lease]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos db_locked_past_lease]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos db_locked_past_lease]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded)

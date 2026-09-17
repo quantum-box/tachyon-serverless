@@ -1,0 +1,6 @@
+{"key":"before.running_async","value":2}
+{"key":"outage.accepted","value":6}
+{"key":"outage.outbox_unsent","value":7}
+{"key":"after.redelivered","value":0}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":16}
