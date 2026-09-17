@@ -223,6 +223,29 @@ dispatcher を動かす gateway（`[queue]` と durable ledger があり `[async
 
 見方: `skipped_terminal` が増えるのは ACK の喪失か重複配送で、実行はしていない。`retries_scheduled_total{kind="deferral"}` の増加は容量不足か retry budget の頭打ち、`dead_letters_total{reason="attempts_exhausted"}` の急増は依存先の障害を示す。alert は定義していない。
 
+### 3.10 予算（PLT-4643、ADR-0016）
+
+金額は価格表の通貨の 10⁻⁶ 単位（`*_micros`）で、PLT-4642 の**仮料金**。tenant label の系列は現在の期間（UTC の暦月）について、確約（reserved + settled + unmetered hold）の大きい順に `[metrics] max_tenant_series` 件まで（それ以上は出さない）。counter はこのプロセスの累計。
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_budget_enabled` | gauge | | `[budget] enabled` なら 1 |
+| `tsls_budget_store_healthy` | gauge | | 予算 store（`usage/budget.db`）を読み書きできれば 1。0 の間は 503 `Host.BudgetStoreUnavailable` |
+| `tsls_budget_collector_stalled` | gauge | | finish 済みで未精算の run が `max_unsettled_age_seconds` を越えていれば 1。1 の間は新規 invoke を 503 `Host.BudgetUnknown` |
+| `tsls_budget_active_reservations` | gauge | | reserved のままの予約（全 tenant） |
+| `tsls_budget_unsettled_runs` | gauge | | 終わったが利用量がまだ精算されていない run |
+| `tsls_budget_oldest_unsettled_age_seconds` | gauge | | そのうち最古の run の待ち時間（予算から見た collector の遅れ）。無ければ系列なし |
+| `tsls_budget_reserved_micros` | gauge | `tenant` | 未精算の run が予約している最大料金の合計 |
+| `tsls_budget_settled_micros` | gauge | `tenant` | 精算済み run の仮料金の合計 |
+| `tsls_budget_unmetered_hold_micros` | gauge | `tenant` | 計測しきれなかった run（失効、journal に入らなかった event、unknown の区間）について予約のまま残した額。課金額ではない |
+| `tsls_budget_remaining_micros` | gauge | `tenant` | hard limit − 確約（0 で下げ止まり）。hard limit のある tenant だけ |
+| `tsls_budget_reservations_total` | counter | | このプロセスが作った予約 |
+| `tsls_budget_refusals_total` | counter | `reason`, `cause` | 予算による拒否。`reason`: `budget_exhausted` / `budget_unknown` / `budget_store_unavailable`。`cause`: `tenant_hard_limit` / `function_hard_limit` / `not_delivered` / `lease_expired` / `price_table_mismatch` / `collector_stalled` / `store_unavailable`（すべての組を 0 から出す） |
+| `tsls_budget_recheck_refusals_total` | counter | | queue で待った後、grant の時点の再確認で拒否した invocation |
+| `tsls_budget_transitions_total` | counter | `result` | 予約の終わり方: `settled` / `settled_incomplete`（unmetered hold が残った）/ `released` / `expired` |
+| `tsls_budget_alerts_total` | counter | `scope` | soft limit の閾値を初めて越えた回数（`tenant` / `function`）。alert は何も止めない |
+| `tsls_budget_overrun_micros_total` | counter | | 実測が予約を超えた額（全額精算した） |
+
 ## 4. boot identity（再利用の証跡）
 
 - guest bridge は Hello で `/proc/sys/kernel/random/boot_id` を報告し、環境の `BootEvidence.guest_boot_id` に残る（PLT-4630）。attempt の API（`attempts[].boot_evidence`）にも出る。

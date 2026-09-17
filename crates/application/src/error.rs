@@ -88,6 +88,15 @@ pub enum AppError {
         refusal: crate::usage::JournalRefusal,
         message: String,
     },
+    /// Refused by the budget (PLT-4643, docs/adr/0016): a hard limit does not
+    /// admit the maximum charge (429 `budget_exhausted`), or the budget cannot
+    /// be known / stored (503 `budget_unavailable`, fail closed). `reason` is
+    /// `budget` in the body.
+    #[error("budget: {message}")]
+    Budget {
+        refusal: crate::budget::BudgetRefusal,
+        message: String,
+    },
 }
 
 /// `error_type` of a refusal because the usage journal is full (PLT-4642).
@@ -147,6 +156,16 @@ impl AppError {
             {
                 ErrorCode::ProviderUnavailable
             }
+            // A queued invocation the budget refused when it was granted
+            // capacity (PLT-4643): the code of the refusal.
+            Self::Invocation { error, .. }
+                if crate::budget::BudgetRefusal::from_error_type(&error.error_type).is_some() =>
+            {
+                budget_code(
+                    crate::budget::BudgetRefusal::from_error_type(&error.error_type)
+                        .unwrap_or(crate::budget::BudgetRefusal::Unknown),
+                )
+            }
             // A cold start refused after acceptance is recorded as a platform
             // error, but answers with the code of its refusal (503).
             Self::Invocation { error, .. } => ControlError::from_error_type(&error.error_type)
@@ -155,6 +174,7 @@ impl AppError {
             Self::Platform(_) => ErrorCode::PlatformError,
             Self::Control { kind, .. } => kind.code(),
             Self::UsageJournal { .. } => ErrorCode::UsageJournalFull,
+            Self::Budget { refusal, .. } => budget_code(*refusal),
         }
     }
 
@@ -187,6 +207,7 @@ impl AppError {
                     .to_string(),
                 ),
             ),
+            Self::Budget { refusal, .. } => (None, Some(refusal.error_type().to_string())),
             Self::FunctionDeleted(_)
             | Self::Admission {
                 reason: RejectReason::FunctionDeleted,
@@ -200,10 +221,16 @@ impl AppError {
         let reason = match self {
             Self::Admission { reason, .. } => Some(reason.as_str().to_string()),
             Self::AsyncRefused { reason, .. } => Some(reason.as_str().to_string()),
+            Self::Invocation { error, .. }
+                if crate::budget::BudgetRefusal::from_error_type(&error.error_type).is_some() =>
+            {
+                Some(crate::budget::REASON.to_string())
+            }
             Self::Invocation { error, .. } => {
                 reason_for_error_type(&error.error_type).map(|r| r.as_str().to_string())
             }
             Self::UsageJournal { refusal, .. } => Some(refusal.as_str().to_string()),
+            Self::Budget { .. } => Some(crate::budget::REASON.to_string()),
             _ => None,
         };
         ApiErrorBody {
@@ -215,6 +242,15 @@ impl AppError {
                 error_type,
                 reason,
             },
+        }
+    }
+}
+
+fn budget_code(refusal: crate::budget::BudgetRefusal) -> ErrorCode {
+    match refusal {
+        crate::budget::BudgetRefusal::Exhausted => ErrorCode::BudgetExhausted,
+        crate::budget::BudgetRefusal::Unknown | crate::budget::BudgetRefusal::StoreUnavailable => {
+            ErrorCode::BudgetUnavailable
         }
     }
 }

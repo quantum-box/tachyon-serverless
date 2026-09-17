@@ -1,0 +1,26 @@
+listen = "127.0.0.1:63202"
+profile = "dev"
+data_dir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-usage.071tZ7/data"
+
+[provider]
+kind = "process"
+
+[provider.process]
+bridge_binary = "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a5de39500dff2de28/target/debug/tachyon-serverless-runtime-bridge"
+workdir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-usage.071tZ7/data/process"
+
+[usage]
+collect_interval_ms = 3600000
+collect_batch = 4
+
+[[identity.tokens]]
+token = "usage-token-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "usage-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "usage-token-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "usage-b"
+roles = ["deploy", "invoke"]

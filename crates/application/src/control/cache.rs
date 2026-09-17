@@ -146,6 +146,19 @@ pub struct RefreshReport {
     pub generation: u64,
 }
 
+/// A tenant's delivered budget as the cache holds it (PLT-4643).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BudgetEntry {
+    /// Never delivered, or removed (a tombstone).
+    NotDelivered,
+    /// Delivered but not confirmed within the auth lease.
+    Expired,
+    Valid {
+        budget: crate::budget::TenantBudget,
+        generation: u64,
+    },
+}
+
 /// What an invocation resolves to.
 #[derive(Debug, Clone)]
 pub struct Resolved {
@@ -742,6 +755,30 @@ impl ConfigCache {
             ),
             Lookup::Valid(ConfigValue::Function(f)) if f.is_deleted()
         )
+    }
+
+    /// The delivered budget of `tenant` (PLT-4643), with its generation.
+    /// Never refreshed on the request path beyond what `authenticate` /
+    /// `resolve` already did.
+    pub fn budget(&self, tenant: &TenantId) -> BudgetEntry {
+        let now = self.clock.now();
+        let s = self.inner.read();
+        if !s.status.ever_synced {
+            return BudgetEntry::NotDelivered;
+        }
+        let key = ConfigKey::Budget {
+            tenant_id: tenant.clone(),
+        };
+        let generation = s.entries.get(&key).map(|e| e.generation);
+        match Self::lookup(&s, &key, now) {
+            Lookup::Unknown => BudgetEntry::NotDelivered,
+            Lookup::Expired => BudgetEntry::Expired,
+            Lookup::Valid(ConfigValue::Budget(b)) => BudgetEntry::Valid {
+                budget: b.clone(),
+                generation: generation.unwrap_or(0),
+            },
+            Lookup::Valid(_) => BudgetEntry::NotDelivered,
+        }
     }
 
     /// Whether `revision` and the authorization of `tenant` are still valid

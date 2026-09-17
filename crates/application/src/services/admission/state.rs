@@ -817,6 +817,14 @@ impl AdmissionState {
         }
     }
 
+    /// [`Self::check_static`] on its own, counted like a refusal of
+    /// [`Self::enqueue`] (PLT-4643 asks it before the budget).
+    pub fn precheck(&mut self, ticket: &Ticket, now: Timestamp) -> Result<(), Rejection> {
+        self.check_static(ticket, now).inspect_err(|r| {
+            self.reject_count(r.reason);
+        })
+    }
+
     /// Checks that do not depend on the moment: placement, an open breaker,
     /// and a reservation that can never fit.
     fn check_static(&mut self, t: &Ticket, now: Timestamp) -> Result<(), Rejection> {

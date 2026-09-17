@@ -1,0 +1,21 @@
+function=fn_01m2qe4zj3se8p5dhp7h8qv0k3 revision=rev_01m2qe509tqnmcbj0cbwp94qk7
+PASS  1-probe-reserved-and-settled  status=200 max_charge=146040 settled=868 micros
+PASS  2-limit-delivered  hard_limit=512008 generation=11
+PASS  3a-parallel-refused-by-budget  200=3 429-budget=5 other=0
+PASS  3b-reserved-never-above-limit  reserved=438120 (3 x 146040) committed=438988 limit=512008
+PASS  4a-excess-returned-all-settled  reserved=0 hold=0 settlements=4 settled=5132 (4 runs reserved 584160)
+PASS  4b-settled-matches-ledger-rating  budget settled=5132 usage ledger total=5132 |diff|=0 (per-run rounding bound 8)
+PASS  4c-remaining  remaining=506876 = 512008 - 5132
+PASS  4d-store-totals-equal-rows  rows=[5132,0,0] totals=[5132,0,0] states=[["settled",4]]
+PASS  5-admitted-after-settlement  status=200
+PASS  6-soft-limit-alerts-only  alerts_fired=[50,100] (soft limit 868 = the probe, crossed by the next settlement; no refusal from it)
+PASS  7a-stalled-collector-refuses  status=503 {"code":"budget_unavailable","reason":"budget","error_type":"Host.BudgetUnknown"}
+PASS  7b-readyz-reports-stall  readyz=503 oldest_unsettled_age=4s
+PASS  7c-running-work-finished  started before the stall threshold: status=200
+PASS  8-collector-resumed-admission-resumes  status=200
+PASS  9-lower-refuses-raise-resumes  at committed=7158: 429; raised to 1467558: 200 generation=13
+PASS  10-no-budget-fails-closed-and-isolated  status=503 error_type=Host.BudgetUnknown config_state=not_delivered
+PASS  11a-metrics  refusals budget_exhausted/tenant_hard_limit=6 budget_unknown/collector_stalled=1
+PASS  11b-tsls-budget  PROVISIONAL - provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype
+evidence: /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a5de39500dff2de28/docs/evidence/budget-20260917T102104Z-process
+budget e2e: all checks passed

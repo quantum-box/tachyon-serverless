@@ -50,13 +50,21 @@ pub enum ConfigKey {
     },
     /// The invoke policy (one per control plane).
     Policy,
+    /// A tenant's budget (PLT-4643). Lives under the auth lease: an expired
+    /// budget refuses new work like an expired grant.
+    Budget {
+        tenant_id: TenantId,
+    },
 }
 
 impl ConfigKey {
     /// Authorization entries live under the auth lease, everything else
     /// under the config TTL.
     pub fn is_authorization(&self) -> bool {
-        matches!(self, Self::Grant { .. } | Self::Tenant { .. })
+        matches!(
+            self,
+            Self::Grant { .. } | Self::Tenant { .. } | Self::Budget { .. }
+        )
     }
 
     /// Stable text form, the primary key of the publication table.
@@ -77,6 +85,7 @@ impl ConfigKey {
             Self::Grant { .. } => "grant",
             Self::Tenant { .. } => "tenant",
             Self::Policy => "policy",
+            Self::Budget { .. } => "budget",
         }
     }
 }
@@ -95,7 +104,8 @@ pub struct TenantGrant {
     pub tenant_id: TenantId,
 }
 
-/// Invoke policy. Quotas and budget tokens are P3 (PLT-4643).
+/// Invoke policy. Budgets are delivered per tenant as `ConfigValue::Budget`
+/// (PLT-4643).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigPolicy {
     /// Egress profiles a revision may be started with.
@@ -111,6 +121,8 @@ pub enum ConfigValue {
     Grant(AuthGrant),
     Tenant(TenantGrant),
     Policy(ConfigPolicy),
+    /// PLT-4643.
+    Budget(crate::budget::TenantBudget),
 }
 
 impl ConfigValue {
@@ -135,7 +147,7 @@ impl ConfigValue {
                 RevisionStatus::Validating => 2,
                 RevisionStatus::Ready | RevisionStatus::Failed { .. } => 3,
             },
-            Self::Grant(_) | Self::Tenant(_) | Self::Policy(_) => 0,
+            Self::Grant(_) | Self::Tenant(_) | Self::Policy(_) | Self::Budget(_) => 0,
         }
     }
 }

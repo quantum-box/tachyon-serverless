@@ -11,11 +11,11 @@ use base64::Engine;
 use serde::Deserialize;
 
 use tachyon_serverless_api_types::{
-    AliasResponse, ApiErrorBody, ArtifactUploadResponse, AttemptResponse, CapacityInfo,
-    CreateFunctionRequest, CreateRevisionRequest, DeadlinesResponse, FunctionResponse,
-    InvocationErrorResponse, InvocationResponse, InvokeAsyncResponse, InvokeQuery, ListResponse,
-    LogEntryResponse, LogsResponse, ProviderInfo, RevisionResponse, TimingsResponse,
-    UpdateAliasRequest, UsageReportResponse, UsageSummaryResponse, headers,
+    AliasResponse, ApiErrorBody, ArtifactUploadResponse, AttemptResponse, BudgetReportResponse,
+    CapacityInfo, CreateFunctionRequest, CreateRevisionRequest, DeadlinesResponse,
+    FunctionResponse, InvocationErrorResponse, InvocationResponse, InvokeAsyncResponse,
+    InvokeQuery, ListResponse, LogEntryResponse, LogsResponse, ProviderInfo, RevisionResponse,
+    TimingsResponse, UpdateAliasRequest, UsageReportResponse, UsageSummaryResponse, headers,
 };
 use tachyon_serverless_application::services::invoke::inline_output;
 use tachyon_serverless_application::services::invoke_async::{AsyncRefusal, InvokeAsyncRequest};
@@ -59,7 +59,14 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
     // Metering (PLT-4642): a journal that is full or unavailable refuses new
     // invocations under the default policy, so the gateway is not ready.
     let usage = state.usage_meter.status();
-    let ready = report.ok && !fenced && control.new_invocations == "accepted" && usage.accepting;
+    // Budgets (PLT-4643): an unavailable budget store or stalled usage
+    // collection refuses new invocations when budgets are enforced.
+    let budget = state.budget.status();
+    let ready = report.ok
+        && !fenced
+        && control.new_invocations == "accepted"
+        && usage.accepting
+        && budget.accepting;
     let status = if ready {
         StatusCode::OK
     } else {
@@ -81,6 +88,8 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
             // Operator facts of the usage journal, collector and ledger: no
             // tenant data (PLT-4642).
             "usage": usage,
+            // Operator facts of budget enforcement: no tenant data (PLT-4643).
+            "budget": budget,
         })),
     )
         .into_response()
@@ -1156,6 +1165,40 @@ pub async fn usage_report(
     let report = state
         .usage_meter
         .report(&ctx.principal, &query)
+        .ctx(&ctx.request_id)?;
+    Ok(Json(report))
+}
+
+/// `GET /v1/budget` parameters (PLT-4643).
+#[derive(Debug, Default, Deserialize)]
+pub struct BudgetQuery {
+    pub period: Option<String>,
+}
+
+/// The caller's budget in one period (PLT-4643): hard and soft limits,
+/// reserved, settled, unmetered holds, remaining and the alerts fired.
+/// Tenant-scoped (the token's tenant only). Provisional amounts; nothing is
+/// charged.
+#[utoipa::path(get, path = "/v1/budget", tag = "budget", security(("bearer" = [])),
+    params(
+        ("period" = Option<String>, Query, description = "`YYYY-MM` (default: the current UTC month)")
+    ),
+    responses(
+        (status = 200, description = "the tenant's provisional budget state", body = BudgetReportResponse),
+        (status = 400, body = ApiErrorBody),
+        (status = 401, body = ApiErrorBody),
+        (status = 403, body = ApiErrorBody),
+        (status = 503, description = "the budget store is unavailable", body = ApiErrorBody)
+    ))]
+pub async fn budget_report(
+    State(state): State<AppState>,
+    ctx: Ctx,
+    Query(q): Query<BudgetQuery>,
+) -> ApiResult<Json<BudgetReportResponse>> {
+    let report = state
+        .budget
+        .report(&ctx.principal, q.period.as_deref())
+        .await
         .ctx(&ctx.request_id)?;
     Ok(Json(report))
 }

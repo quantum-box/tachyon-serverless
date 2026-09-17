@@ -464,6 +464,87 @@ pub const FAMILIES: &[(&str, &str, &str)] = &[
         "counter",
         "What the reaper committed: abandoned (a run whose claim expired, rescheduled), republished (an event the broker lost), dead_lettered, lost (fence moved on), failed.",
     ),
+    // budget (PLT-4643)
+    (
+        "tsls_budget_enabled",
+        "gauge",
+        "1 when this gateway enforces budgets ([budget] enabled).",
+    ),
+    (
+        "tsls_budget_store_healthy",
+        "gauge",
+        "1 when the budget store (usage/budget.db) can be read and written.",
+    ),
+    (
+        "tsls_budget_collector_stalled",
+        "gauge",
+        "1 when a finished run waited longer than [budget] max_unsettled_age_seconds for settlement: new invocations are refused (Host.BudgetUnknown).",
+    ),
+    (
+        "tsls_budget_active_reservations",
+        "gauge",
+        "Budget reservations not yet settled, released or expired (all tenants).",
+    ),
+    (
+        "tsls_budget_unsettled_runs",
+        "gauge",
+        "Finished runs whose usage has not been settled yet.",
+    ),
+    (
+        "tsls_budget_oldest_unsettled_age_seconds",
+        "gauge",
+        "Age of the oldest finished, unsettled run (collector lag as the budget sees it). Absent when there is none.",
+    ),
+    (
+        "tsls_budget_reserved_micros",
+        "gauge",
+        "Maximum charges reserved by unsettled runs in the current period, per tenant (bounded by [metrics] max_tenant_series), in micro-units of the price table currency.",
+    ),
+    (
+        "tsls_budget_settled_micros",
+        "gauge",
+        "Provisional rated charges of settled runs in the current period, per tenant.",
+    ),
+    (
+        "tsls_budget_unmetered_hold_micros",
+        "gauge",
+        "Reserved amounts kept because a run's usage could not be fully measured (expired or unjournaled), per tenant. Never billable.",
+    ),
+    (
+        "tsls_budget_remaining_micros",
+        "gauge",
+        "Hard limit minus committed (reserved + settled + unmetered holds), per tenant with a hard limit.",
+    ),
+    (
+        "tsls_budget_reservations_total",
+        "counter",
+        "Budget reservations this process made.",
+    ),
+    (
+        "tsls_budget_refusals_total",
+        "counter",
+        "Invocations this process refused because of the budget, by reason (budget_exhausted, budget_unknown, budget_store_unavailable) and cause.",
+    ),
+    (
+        "tsls_budget_recheck_refusals_total",
+        "counter",
+        "Queued invocations refused by the budget re-check when they were granted capacity.",
+    ),
+    (
+        "tsls_budget_transitions_total",
+        "counter",
+        "Reservations this process closed, by result (settled, settled_incomplete, released, expired).",
+    ),
+    (
+        "tsls_budget_alerts_total",
+        "counter",
+        "Soft-limit alert thresholds crossed (each fires once per scope and period), by scope (tenant, function). Alerts never stop anything.",
+    ),
+    (
+        "tsls_budget_overrun_micros_total",
+        "counter",
+        "Measured charges above their reservation, settled in full.",
+    ),
     (
         "tsls_metrics_series_truncated",
         "gauge",

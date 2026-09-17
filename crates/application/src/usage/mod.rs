@@ -55,6 +55,11 @@ use crate::local_ports::InMemoryUsageSink;
 pub const CRASH_POINT_ENV: &str = "TSLS_USAGE_CRASH_POINT";
 pub const CRASH_AFTER_LEDGER_COMMIT: &str = "collector.after_ledger_commit";
 
+/// A file whose presence pauses the collector (`<data_dir>/usage/` + this),
+/// honoured only under `profile = "dev"`: the E2E of PLT-4643 stops usage
+/// collection with it to prove budget admission fails closed.
+pub const COLLECTOR_PAUSE_FILE: &str = "collector.pause";
+
 /// The notice every usage report carries.
 pub const PROVISIONAL_NOTICE: &str = "provisional usage estimate: not an invoice, nothing is \
      charged, billing is disabled in this prototype";
@@ -116,6 +121,8 @@ pub struct UsageMeter {
     clock: Arc<dyn Clock>,
     collector: Mutex<CollectorStatus>,
     crash_after_ledger_commit: bool,
+    /// Dev-only pause flag file (PLT-4643 E2E).
+    pause_flag: Option<std::path::PathBuf>,
 }
 
 impl std::fmt::Debug for UsageMeter {
@@ -157,6 +164,10 @@ impl UsageMeter {
                 "usage collector crash point armed (dev profile, test only)"
             );
         }
+        let pause_flag = match (&dir, profile) {
+            (Some(d), Profile::Dev) => Some(d.join(COLLECTOR_PAUSE_FILE)),
+            _ => None,
+        };
         Ok(Arc::new(Self {
             config: config.clone(),
             journal,
@@ -165,6 +176,7 @@ impl UsageMeter {
             clock,
             collector: Mutex::new(CollectorStatus::default()),
             crash_after_ledger_commit,
+            pause_flag,
         }))
     }
 
@@ -228,6 +240,14 @@ impl UsageMeter {
         let mut status = self.collector.lock();
         status.runs += 1;
         status.last_run_at = Some(self.clock.now());
+        if let Some(flag) = self.pause_flag.as_ref().filter(|f| f.exists()) {
+            let e = format!(
+                "collector paused by {} (dev profile, test only)",
+                flag.display()
+            );
+            status.last_error = Some(e.clone());
+            return Err(e);
+        }
         let result = self.collect_locked();
         match &result {
             Ok(r) => {

@@ -94,6 +94,8 @@ pub struct LedgerConfigSource {
     /// Serializes publications within this process (the store transaction
     /// serializes them across processes).
     publishing: Mutex<()>,
+    /// Tenant budgets (PLT-4643). `None`: no budget is published.
+    budgets: Option<Arc<crate::budget::BudgetPublisher>>,
 }
 
 impl std::fmt::Debug for LedgerConfigSource {
@@ -140,7 +142,18 @@ impl LedgerConfigSource {
             auth_lease_seconds: control.auth_lease_seconds,
             name,
             publishing: Mutex::new(()),
+            budgets: None,
         }
+    }
+
+    /// Publish tenant budgets with the rest (PLT-4643).
+    pub fn with_budgets(mut self, budgets: Arc<crate::budget::BudgetPublisher>) -> Self {
+        self.budgets = Some(budgets);
+        self
+    }
+
+    pub fn budgets(&self) -> Option<&Arc<crate::budget::BudgetPublisher>> {
+        self.budgets.as_ref()
     }
 
     fn observe(&self, rows: crate::repository::ConfigRows) -> Vec<(ConfigKey, ConfigValue)> {
@@ -174,6 +187,17 @@ impl LedgerConfigSource {
         for (key, grant) in &self.grants {
             tenants.insert(grant.tenant_id.clone());
             out.push((key.clone(), ConfigValue::Grant(grant.clone())));
+        }
+        if let Some(budgets) = &self.budgets {
+            let known: Vec<TenantId> = tenants.iter().cloned().collect();
+            for budget in budgets.budgets(&known) {
+                out.push((
+                    ConfigKey::Budget {
+                        tenant_id: budget.tenant_id.clone(),
+                    },
+                    ConfigValue::Budget(budget),
+                ));
+            }
         }
         for tenant_id in tenants {
             out.push((
@@ -246,8 +270,10 @@ impl ConfigSource for LedgerConfigSource {
     }
 
     fn change_marker(&self) -> Option<(u64, u64)> {
+        // A changed budget file moves the marker too (PLT-4643).
+        let budgets = self.budgets.as_ref().map_or(0, |b| b.marker());
         Some((
-            self.signal.version(),
+            self.signal.version() ^ budgets.rotate_left(17),
             self.store.external_change_marker().unwrap_or(0),
         ))
     }

@@ -284,6 +284,267 @@
         ],
         "type": "object"
       },
+      "BudgetAlert": {
+        "properties": {
+          "consumed_micros": {
+            "description": "Settled + unmetered holds when it fired.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fired_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "soft_limit_micros": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "threshold_percent": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "threshold_percent",
+          "soft_limit_micros",
+          "consumed_micros",
+          "fired_at"
+        ],
+        "type": "object"
+      },
+      "BudgetReportResponse": {
+        "description": "`GET /v1/budget`: the caller's budget in one period. Amounts are integer\nmicro-units of the price table's currency, **provisional**, and cover only\nwhat PLT-4642 rates (billable segments of `AttemptSettled`). Nothing is\ncharged; billing is disabled.",
+        "properties": {
+          "admitting": {
+            "description": "Whether new invocations of this tenant are admitted as far as the\nbudget is concerned (before a per-function limit).",
+            "type": "boolean"
+          },
+          "billing_enabled": {
+            "description": "Always false in the prototype.",
+            "type": "boolean"
+          },
+          "config_generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "config_state": {
+            "description": "`valid`, `expired` or `not_delivered`: the delivered budget as this\ngateway's configuration cache holds it.",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether this gateway enforces budgets.",
+            "type": "boolean"
+          },
+          "functions": {
+            "description": "Functions with a budget or with reservations in the period.",
+            "items": {
+              "$ref": "#/components/schemas/BudgetScopeReport"
+            },
+            "type": "array"
+          },
+          "guarantee": {
+            "description": "What the amounts do and do not guarantee.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "notice": {
+            "type": "string"
+          },
+          "period": {
+            "description": "`YYYY-MM`.",
+            "type": "string"
+          },
+          "period_end": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "period_kind": {
+            "description": "`calendar_month_utc`.",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "price_table_version": {
+            "type": "string"
+          },
+          "provisional": {
+            "description": "Always true.",
+            "type": "boolean"
+          },
+          "refusal": {
+            "description": "Why not, when `admitting` is false (`error_type`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant": {
+            "$ref": "#/components/schemas/BudgetScopeReport"
+          },
+          "tenant_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "provisional",
+          "billing_enabled",
+          "notice",
+          "tenant_id",
+          "period",
+          "period_kind",
+          "period_start",
+          "period_end",
+          "currency",
+          "price_table_version",
+          "config_state",
+          "admitting",
+          "tenant",
+          "functions",
+          "guarantee"
+        ],
+        "type": "object"
+      },
+      "BudgetScopeReport": {
+        "properties": {
+          "active_reservations": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "alert_thresholds_percent": {
+            "items": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "alerts_fired": {
+            "items": {
+              "$ref": "#/components/schemas/BudgetAlert"
+            },
+            "type": "array"
+          },
+          "committed_micros": {
+            "description": "`reserved + settled + unmetered_hold`: what the hard limit compares.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expiries": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "function_id": {
+            "description": "`None` for the tenant.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hard_limit_micros": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "overrun_micros": {
+            "description": "Measured charges above their reservation (settled in full).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "refusals": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "releases": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "remaining_micros": {
+            "description": "`hard_limit - committed` (0 when over). `None` without a hard limit.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reservations": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reserved_micros": {
+            "description": "Maximum charges held by runs not yet settled.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settled_micros": {
+            "description": "Rated (provisional) charges of settled runs.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settlements": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "soft_limit_micros": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "unmetered_hold_micros": {
+            "description": "Reserved amounts kept because the run's usage could not be fully\nmeasured (expired runs, unjournaled or unknown segments). Counted\nagainst the limit, never billable.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alert_thresholds_percent",
+          "reserved_micros",
+          "settled_micros",
+          "unmetered_hold_micros",
+          "committed_micros",
+          "overrun_micros",
+          "active_reservations",
+          "reservations",
+          "settlements",
+          "releases",
+          "expiries",
+          "refusals",
+          "alerts_fired"
+        ],
+        "type": "object"
+      },
       "CapacityInfo": {
         "description": "`GET /v1/capacity`.",
         "properties": {
@@ -866,7 +1127,9 @@
           "control_plane_unavailable",
           "async_unavailable",
           "usage_journal_full",
-          "gone"
+          "gone",
+          "budget_exhausted",
+          "budget_unavailable"
         ],
         "type": "string"
       },
@@ -3759,6 +4022,83 @@
         ]
       }
     },
+    "/v1/budget": {
+      "get": {
+        "operationId": "budget_report",
+        "parameters": [
+          {
+            "description": "`YYYY-MM` (default: the current UTC month)",
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetReportResponse"
+                }
+              }
+            },
+            "description": "the tenant's provisional budget state"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "the budget store is unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "The caller's budget in one period (PLT-4643): hard and soft limits,\nreserved, settled, unmetered holds, remaining and the alerts fired.\nTenant-scoped (the token's tenant only). Provisional amounts; nothing is\ncharged.",
+        "tags": [
+          "budget"
+        ]
+      }
+    },
     "/v1/capacity": {
       "get": {
         "operationId": "capacity_info",
@@ -5975,6 +6315,9 @@
     },
     {
       "name": "dead-letters"
+    },
+    {
+      "name": "budget"
     },
     {
       "name": "internal"

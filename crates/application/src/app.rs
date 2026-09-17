@@ -61,6 +61,8 @@ pub struct Application {
     /// Usage journal, collector, ledger and provisional rating (PLT-4642).
     /// The driver and the pool emit through it; `usage` is the in-memory view.
     pub usage_meter: Arc<crate::usage::UsageMeter>,
+    /// Budget reservations, limits and alerts (PLT-4643).
+    pub budget: Arc<crate::budget::BudgetService>,
     pub provider: Arc<dyn ExecutionProvider>,
     pub functions: Arc<FunctionService>,
     pub revisions: Arc<RevisionService>,
@@ -367,14 +369,27 @@ impl Application {
         // gateway publishes from its ledger and reads its own publication in
         // process; a data plane reads what its control plane delivered.
         let control = &config.control_plane;
+        // Budgets (PLT-4643) are published by the control plane with the rest
+        // of the configuration, in the price table's units.
+        let budget_publisher = match (control.role, config.budget.publishes()) {
+            (GatewayRole::Combined, true) => Some(Arc::new(
+                crate::budget::BudgetPublisher::new(&config.budget, usage_meter.price_table())
+                    .map_err(|e| AppError::InvalidRequest(format!("[budget]: {e}")))?,
+            )),
+            _ => None,
+        };
         let config_publisher = (control.role == GatewayRole::Combined).then(|| {
-            Arc::new(LedgerConfigSource::new(
+            let source = LedgerConfigSource::new(
                 store.clone(),
                 config_signal.clone(),
                 &config.identity.tokens,
                 control,
                 dispatcher.instance().to_string(),
-            ))
+            );
+            Arc::new(match &budget_publisher {
+                Some(p) => source.with_budgets(p.clone()),
+                None => source,
+            })
         });
         let config_source: Arc<dyn ConfigSource> = match (control.role, &options.config_source) {
             (GatewayRole::Combined, None) => config_publisher
@@ -400,6 +415,23 @@ impl Application {
             CacheSettings::from_config(control),
             grant_secret(control),
         ));
+        let budget = crate::budget::BudgetService::open(
+            &config.budget,
+            (options.persist_state && config.store.backend == StoreBackend::Sqlite)
+                .then_some(config.data_dir.as_path()),
+            usage_meter.clone(),
+            config_cache.clone(),
+            clock.clone(),
+            crate::budget::GatewayBounds {
+                handshake_timeout_ms: config.invoke.handshake_timeout_ms,
+                cancel_grace_ms: config.invoke.cancel_grace_ms,
+                max_response_bytes: limits.max_response_bytes,
+            },
+        )
+        .map_err(|e| AppError::InvalidRequest(format!("[budget]: {e}")))?;
+        if let Some(p) = &budget_publisher {
+            budget.set_publisher(p.clone());
+        }
         let invoke_gate = Arc::new(InvokeGate::new(
             config_cache.clone(),
             provider_service.clone(),
@@ -461,6 +493,7 @@ impl Application {
             gate: invoke_gate.clone(),
             admission: admission.clone(),
             meter: usage_meter.clone(),
+            budget: budget.clone(),
         });
         let scaling = ScaleController::new(
             admission.clone(),
@@ -652,6 +685,7 @@ impl Application {
             secrets,
             usage,
             usage_meter,
+            budget,
             provider,
             functions,
             revisions,
@@ -778,7 +812,14 @@ impl Application {
     /// runs this every `[usage] collect_interval_ms` and once more on
     /// shutdown; tests call it directly.
     pub fn collect_usage(&self) -> Result<crate::usage::CollectReport, String> {
-        self.usage_meter.collect()
+        let result = self.usage_meter.collect();
+        // Budget settlement (PLT-4643) follows every collection, whether it
+        // delivered anything or not: expiries do not depend on the collector.
+        let settled = self.budget.settle_ready();
+        if settled != crate::budget::SettleReport::default() {
+            tracing::debug!(?settled, "budget settlement pass");
+        }
+        result
     }
 
     /// Renew this dispatcher's lease and the slot leases of its in-flight
@@ -891,6 +932,7 @@ impl Application {
             usage: Some(self.usage_metrics()),
             triggers: self.triggers.as_ref().map(|t| t.metrics().snapshot()),
             dispatch: self.dispatch_metrics.as_ref().map(|m| m.snapshot()),
+            budget: Some(self.budget.metrics(m.max_tenant_series)),
         })
     }
 

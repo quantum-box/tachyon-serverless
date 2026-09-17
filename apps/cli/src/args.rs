@@ -67,6 +67,9 @@ pub enum Command {
     /// Provisional usage report of the tenant (not an invoice; billing is
     /// disabled).
     Usage(UsageArgs),
+    /// The tenant's budget for a period: limits, reserved, settled, unmetered
+    /// holds, remaining and alerts (provisional; nothing is charged).
+    Budget(BudgetArgs),
     /// Run a binary end to end on a throwaway local gateway (process provider, no isolation).
     Dev(DevArgs),
     /// Inspect and redrive dead-lettered asynchronous invocations.
@@ -466,6 +469,14 @@ pub struct UsageArgs {
     /// Only this function (name or fn_ id).
     #[arg(long)]
     pub function: Option<String>,
+}
+
+/// `tsls budget` (PLT-4643).
+#[derive(Debug, Args, Clone)]
+pub struct BudgetArgs {
+    /// Period `YYYY-MM` (default: the current UTC month).
+    #[arg(long)]
+    pub period: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]

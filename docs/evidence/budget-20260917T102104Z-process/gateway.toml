@@ -1,0 +1,34 @@
+listen = "127.0.0.1:62984"
+profile = "dev"
+data_dir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-budget.8fzTiD/data"
+
+[provider]
+kind = "process"
+
+[provider.process]
+bridge_binary = "/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-a5de39500dff2de28/target/debug/tachyon-serverless-runtime-bridge"
+workdir = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-budget.8fzTiD/data/process"
+
+[usage]
+collect_interval_ms = 300
+
+[budget]
+enabled = true
+file = "/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-budget.8fzTiD/budgets.toml"
+max_unsettled_age_seconds = 3
+expiry_grace_seconds = 5
+
+[metrics]
+bearer_token = "budget-metrics-operator-token"
+
+[[identity.tokens]]
+token = "budget-token-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "budget-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "budget-token-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "budget-b"
+roles = ["deploy", "invoke"]

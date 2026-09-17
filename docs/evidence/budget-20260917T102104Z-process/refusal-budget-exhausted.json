@@ -1,0 +1,1 @@
+{"error":{"code":"budget_exhausted","message":"budget: the tenant budget's hard limit (512008 micro-units) does not admit this invocation's maximum charge of 146040 (438988 already committed in 2026-09)","request_id":"01m2qe5378wg7vzaxk2am2epeq","error_type":"Host.BudgetExhausted","reason":"budget"}}

@@ -47,6 +47,7 @@ use crate::authz::{ensure_tenant, require_invoke};
 use crate::bridge_session::{
     BridgeSession, HelloAckParams, InvokeParams, LogContext, LogForwarder, Outcome, SessionError,
 };
+use crate::budget::{BudgetHold, BudgetService, RunRequest};
 use crate::config::{CapacityConfig, InvokeConfig};
 use crate::control::{InvokeGate, Resolved};
 use crate::entrypoint::EntrypointPolicy;
@@ -282,6 +283,9 @@ pub struct InvokeService {
     /// Usage journal admission (PLT-4642): no new invocation starts that
     /// could not be metered, unless the dev-only policy says otherwise.
     meter: Arc<UsageMeter>,
+    /// Budget reservation at admission, re-check at grant, settlement
+    /// (PLT-4643).
+    budget: Arc<BudgetService>,
     in_flight: Mutex<HashMap<InvocationId, InFlight>>,
     draining: AtomicBool,
 }
@@ -304,6 +308,7 @@ pub struct InvokeServiceDeps {
     pub gate: Arc<InvokeGate>,
     pub admission: Arc<AdmissionController>,
     pub meter: Arc<UsageMeter>,
+    pub budget: Arc<BudgetService>,
 }
 
 impl InvokeService {
@@ -326,6 +331,7 @@ impl InvokeService {
             gate: deps.gate,
             admission: deps.admission,
             meter: deps.meter,
+            budget: deps.budget,
             in_flight: Mutex::new(HashMap::new()),
             draining: AtomicBool::new(false),
         })
@@ -442,6 +448,7 @@ impl InvokeService {
             meter: AttemptMeter::default(),
             async_run: None,
             attempt_base: 0,
+            budget: BudgetRun::default(),
         };
         let result = match AssertUnwindSafe(driver.prewarm()).catch_unwind().await {
             Ok(r) => r,
@@ -585,15 +592,54 @@ impl InvokeService {
         // 5 (first half). Admission is asked before anything is recorded so
         // that a refusal (full queue, quota, placement, open breaker) answers
         // without a ledger entry and without binding the idempotency key.
+        // One ordered decision (PLT-4643): the static quota / placement
+        // checks, then the budget reservation (a refusal consumes no capacity
+        // grant), then the queue and capacity.
         let ticket = self.admission.ticket(
             &function.tenant_id,
             &revision,
             input_size,
             invocation.deadlines.queue_deadline,
         );
+        if let Err(rejection) = self.admission.precheck(&ticket) {
+            if let Some(binding) = self.bound_invocation(&req)? {
+                return self.replay_binding(&req, &input_digest, binding).await;
+            }
+            tracing::info!(
+                tenant_id = %function.tenant_id,
+                revision_id = %revision.id,
+                reason = rejection.reason.as_str(),
+                "invocation refused by admission"
+            );
+            return Err(rejection.into());
+        }
+        let budget_hold = match self.budget.reserve(&RunRequest {
+            run_id: invocation_id.to_string(),
+            function: &function,
+            revision: &revision,
+            invocation_id: &invocation_id,
+            request_bytes: input_size,
+            window_ms: client_ms,
+            queue_timeout_ms: self.capacity.queue_timeout_seconds * 1000,
+            run_deadline: client_deadline,
+        }) {
+            Ok(hold) => hold,
+            Err(e) => {
+                if let Some(binding) = self.bound_invocation(&req)? {
+                    return self.replay_binding(&req, &input_digest, binding).await;
+                }
+                return Err(e);
+            }
+        };
+        let release_budget = |hold: &Option<BudgetHold>| {
+            if let Some(h) = hold {
+                self.budget.release(h);
+            }
+        };
         let mut pre = match self.admission.admit(ticket) {
             Ok(pre) => pre,
             Err(rejection) => {
+                release_budget(&budget_hold);
                 // A concurrent request with the same key may have been
                 // accepted in the meantime; its record is the better answer.
                 if let Some(binding) = self.bound_invocation(&req)? {
@@ -608,7 +654,8 @@ impl InvokeService {
                 return Err(rejection.into());
             }
         };
-        if pre.is_waiting() {
+        let queued = pre.is_waiting();
+        if queued {
             let _ = invocation.mark_queued();
         }
 
@@ -634,10 +681,13 @@ impl InvokeService {
                 // Lost the race for the key: nothing of ours was recorded.
                 self.in_flight.lock().remove(&invocation_id);
                 drop(pre);
+                release_budget(&budget_hold);
                 return self.replay_binding(&req, &input_digest, binding).await;
             }
             Err(e) => {
                 self.in_flight.lock().remove(&invocation_id);
+                drop(pre);
+                release_budget(&budget_hold);
                 return Err(e.into());
             }
         }
@@ -668,6 +718,11 @@ impl InvokeService {
             },
             async_run: None,
             attempt_base: 0,
+            budget: BudgetRun {
+                hold: budget_hold,
+                recheck: queued,
+                attempts: Vec::new(),
+            },
         };
         tokio::spawn(driver.run(done_tx));
 
@@ -764,9 +819,49 @@ impl InvokeService {
             invocation.input_size_bytes,
             admission_deadline,
         );
-        let pre = match self.admission.admit(ticket) {
+        // The same ordered decision as a synchronous invoke (PLT-4643):
+        // static admission, then the budget reservation of this run, then the
+        // queue and capacity. A budget refusal is returned before anything
+        // was admitted; the dispatcher defers it.
+        let static_refusal = self.admission.precheck(&ticket).err();
+        let budget_hold = match static_refusal {
+            Some(_) => None,
+            None => match self.budget.reserve(&RunRequest {
+                // One reservation per run: a deferred run of the same attempt
+                // base is another run.
+                run_id: format!(
+                    "{}:run-{attempt_base}:{}",
+                    invocation.id,
+                    self.ids.next_ulid()
+                ),
+                function: &function,
+                revision: &revision,
+                invocation_id: &invocation.id,
+                request_bytes: invocation.input_size_bytes,
+                window_ms: u64::try_from(budget.as_millis()).unwrap_or(u64::MAX),
+                queue_timeout_ms: u64::try_from(admission_wait.as_millis()).unwrap_or(u64::MAX),
+                run_deadline: client_deadline,
+            }) {
+                Ok(hold) => hold,
+                Err(AppError::Budget { refusal, message }) => {
+                    return refused(refusal.error_type(), message);
+                }
+                Err(e) => return refused(crate::budget::BUDGET_UNKNOWN, e.to_string()),
+            },
+        };
+        let release_budget = |hold: &Option<BudgetHold>| {
+            if let Some(h) = hold {
+                self.budget.release(h);
+            }
+        };
+        let admitted = match static_refusal {
+            Some(rejection) => Err(rejection),
+            None => self.admission.admit(ticket),
+        };
+        let mut pre = match admitted {
             Ok(pre) => pre,
             Err(rejection) => {
+                release_budget(&budget_hold);
                 return AsyncRunReport {
                     outcome: Err(InvocationError::new(
                         match rejection.reason {
@@ -780,12 +875,14 @@ impl InvokeService {
                 };
             }
         };
+        let pre_waiting = pre.is_waiting();
         let sink = Arc::new(AsyncRunSink::default());
         let (cancel_tx, cancel_rx) = watch::channel(None);
         let (done_tx, done_rx) = watch::channel(None);
         {
             let mut map = self.in_flight.lock();
             if map.contains_key(&invocation.id) {
+                release_budget(&budget_hold);
                 return refused(
                     "Host.AlreadyRunning",
                     format!("invocation {} is already running here", invocation.id),
@@ -827,6 +924,11 @@ impl InvokeService {
             meter: AttemptMeter {
                 unmetered,
                 ..AttemptMeter::default()
+            },
+            budget: BudgetRun {
+                recheck: pre_waiting,
+                hold: budget_hold,
+                attempts: Vec::new(),
             },
         };
         // The driver runs in its own task, like a synchronous one: a panic in
@@ -1238,6 +1340,20 @@ struct Driver {
     /// Attempts this invocation already had before this run (the ledger
     /// numbers attempts across every run of an asynchronous invocation).
     attempt_base: u32,
+    /// The budget reservation of this run and what settles it (PLT-4643).
+    budget: BudgetRun,
+}
+
+/// A run's budget reservation (PLT-4643, docs/adr/0016).
+#[derive(Debug, Default)]
+struct BudgetRun {
+    hold: Option<BudgetHold>,
+    /// The run waited in the admission queue: re-check the budget when it is
+    /// granted capacity.
+    recheck: bool,
+    /// Attempts this run emitted `AttemptSettled` for, in order: settlement
+    /// rates exactly these from the usage ledger.
+    attempts: Vec<String>,
 }
 
 /// What the driver measured of the attempt it is on, for `AttemptSettled`
@@ -1344,9 +1460,13 @@ async fn wait_cancel(rx: &mut watch::Receiver<Option<CancelKind>>) -> CancelKind
 impl Driver {
     async fn run(mut self, done: watch::Sender<Option<Arc<DriverResult>>>) {
         let id = self.invocation_id.clone();
+        let mut complete = true;
         let output = match AssertUnwindSafe(self.execute()).catch_unwind().await {
             Ok(output) => output,
             Err(_) => {
+                // The attempts list cannot be vouched for after a panic: the
+                // budget keeps what it cannot measure (PLT-4643).
+                complete = false;
                 tracing::error!(invocation_id = %id, "invoke driver panicked");
                 // The cleanup must never keep the in-flight entry or the
                 // completion signal from being released below.
@@ -1370,6 +1490,15 @@ impl Driver {
                 None
             }
         };
+        // Every usage event of this run was appended before this point: the
+        // budget can settle it once the collector delivered them (PLT-4643).
+        if let Some(hold) = self.budget.hold.take() {
+            let attempts = std::mem::take(&mut self.budget.attempts);
+            let svc = self.svc.clone();
+            let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                svc.budget.finish(&hold, &attempts, complete)
+            }));
+        }
         self.svc.in_flight.lock().remove(&id);
         done.send_replace(Some(Arc::new(DriverResult { output })));
     }
@@ -1640,6 +1769,7 @@ impl Driver {
         guest_handler_ms: Option<u64>,
     ) {
         self.seq += 1;
+        self.budget.attempts.push(attempt_id.to_string());
         let mut event = self.usage_event(
             env,
             Some(attempt_id),
@@ -1847,6 +1977,25 @@ impl Driver {
                 self.fail_admission(e, "queued");
                 return None;
             }
+        }
+        // A queued run re-checks its budget when it is granted (PLT-4643):
+        // the budget may have expired or been lowered while it waited. The
+        // grant is given back before anything boots.
+        if self.budget.recheck
+            && let Some(hold) = &self.budget.hold
+            && let Err(e) = self.svc.budget.recheck(hold)
+        {
+            self.grant = None;
+            let (error_type, message) = match &e {
+                AppError::Budget { refusal, message } => (refusal.error_type(), message.clone()),
+                other => (crate::budget::BUDGET_UNKNOWN, other.to_string()),
+            };
+            self.fail_invocation(InvocationError::new(
+                ErrorClass::PlatformError,
+                error_type,
+                message,
+            ));
+            return None;
         }
         let queue_wait = self.accepted_at.elapsed();
         self.meter.queue_wait = Some(queue_wait);

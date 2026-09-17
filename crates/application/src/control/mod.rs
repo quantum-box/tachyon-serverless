@@ -18,8 +18,8 @@ pub mod source;
 pub mod wire;
 
 pub use cache::{
-    ApplyReport, CacheSettings, CacheState, CacheStatus, ConfigCache, EntryState, RefreshReport,
-    Resolved, ScaleView,
+    ApplyReport, BudgetEntry, CacheSettings, CacheState, CacheStatus, ConfigCache, EntryState,
+    RefreshReport, Resolved, ScaleView,
 };
 pub use gate::{InvokeGate, InvokeView};
 pub use source::{

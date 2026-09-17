@@ -62,6 +62,7 @@ impl utoipa::Modify for SecurityAddon {
         handlers::invocation_logs,
         handlers::usage,
         handlers::usage_report,
+        handlers::budget_report,
         handlers::internal_config,
         trigger_handlers::create_trigger,
         trigger_handlers::list_triggers,
@@ -140,10 +141,13 @@ impl utoipa::Modify for SecurityAddon {
         api::TriggerResponse,
         api::TriggerFireResponse,
         api::WebhookAcceptedResponse,
+        api::BudgetReportResponse,
+        api::BudgetScopeReport,
+        api::BudgetAlert,
     )),
     tags(
         (name = "meta"), (name = "provider"), (name = "artifacts"), (name = "functions"),
-        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "triggers"), (name = "dead-letters"), (name = "internal")
+        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "triggers"), (name = "dead-letters"), (name = "budget"), (name = "internal")
     ),
     modifiers(&SecurityAddon)
 )]

@@ -1,0 +1,7 @@
+2026-09-17T10:21:58.351Z [platform/boot] creating environment env_01m2qe6aaxpyb61thh24419zn2 with provider process
+2026-09-17T10:21:59.280Z [platform/boot] bridge connected after 927 ms (host_pid=Some(3293))
+2026-09-17T10:21:59.283Z [platform/init] user process started (pid 3298)
+2026-09-17T10:21:59.781Z [stderr/init] hello: starting (unisolated=true)
+2026-09-17T10:21:59.788Z [stdout/handler] hello: handling invocation=inv_01m2qe6aanq3pss2eqqvjfd26w attempt=att_01m2qe6c39xdzjbpk79rz3c2ab remaining_ms=29997
+2026-09-17T10:21:59.788Z [stderr/handler] hello: payload={"name":"demo"}
+2026-09-17T10:21:59.799Z [platform/shutdown] environment terminated (Completed); cleaned: /tmp/tsls-01m2qe6aaxpyb61thh24419zn2.sock, /var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-e2e.4oZtqc/data/process/env_01m2qe6aaxpyb61thh24419zn2/bridge.sock, /var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-e2e.4oZtqc/data/process/env_01m2qe6aaxpyb61thh24419zn2/bridge.pid, /var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-e2e.4oZtqc/data/process/env_01m2qe6aaxpyb61thh24419zn2/bridge.stdout, /var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-e2e.4oZtqc/data/process/env_01m2qe6aaxpyb61thh24419zn2/bridge.stderr, /var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T//tsls-e2e.4oZtqc/data/process/env_01m2qe6aaxpyb61thh24419zn2
