@@ -56,7 +56,9 @@ Accepted（2026-09-17、PLT-4635）。実装: `crates/application/src/services/s
    - **関数削除（`function_deleted`）**: `DELETE /v1/functions/{id}` で `deleted_at` が付く（`deletion_state = deleting`）。受付は `resolve` で 409 `function_deleted`（`error_type = Host.FunctionDeleted`）。reconciler は関数の全 revision の drain を始め、**待機中の invocation を即座に同じ理由で終える**（起動していないので `Failed{platform_error, Host.FunctionDeleted}`、HTTP 409、attempt なし）。admission の再キュー（cold のやり直し）も拒否し、driver は環境を用意する前と dispatch の直前にもう一度削除を確認する（その間に削除されたら handler を起動せず環境を terminate して同じ失敗にする）。`Idempotency-Key` の再送は `resolve` が先に拒否するので、完了済みの invocation の再生も含めて 409 になる。実行中の invocation は完了まで待つ。何も残らなくなったら（この gateway の in-flight 0、admission の予約・待機 0、台帳の最近 1000 件の invocation がすべて terminal、関数の revision の active な環境 0）、管理 store を持つ gateway（`combined`）が `drained_at` を記録する（`deletion_state = deleted`）。削除済みの関数に許す書き込みはこの 1 回だけ（`repository/guard.rs`）。
    - route の観測は**遷移**で判断する。起動直後の最初の観測より前に行われた切替は drain されない（その時点でこのプロセスに環境は無い）。
 
-8. **drain timeout。** drain を始めてから `[scaling] drain_timeout_seconds`（既定 300）を過ぎても、drain を始める前に受け付けた invocation がまだ走っていれば、reconciler はそれを止める（`CancelKind::Drain`）。handler 実行中なら通常の timeout と同じく `Cancel` → grace → terminate で、結果は `Failed{timeout, Host.DrainTimeout}`（HTTP 504）、環境は `Failed{drain timeout}`。まだ dispatch していなければ同じ error_type で起動しない。接続が切れて結果が分からなければ従来どおり `OutcomeUnknown`（自動再実行しない）。1 つの drain について 1 回だけ行う。
+8. **drain timeout。既定は「どの revision の timeout より長い」値にする。** `[scaling] drain_timeout_seconds` を省略すると、gateway は `limits.max_execution_timeout_seconds`（revision が設定できる最大の timeout、既定 900）+ cancel grace（秒に切り上げ）+ 60 s（既定では 961 s）を使う。drain（alias 切替・secret 世代変更・関数削除のどれも同じ値）はこの既定では、自分の timeout の内側にいる invocation を決して止めない。drain が止めるのは、それより長く残っているもの（通常はありえない。handler の時間は host が execution deadline で強制する）だけで、既定の drain timeout は「既存実行をすり替えない・切らない」ための安全網にすぎない。`drain_timeout_seconds` を明示的に「最大 timeout + grace」以下に設定するのは、drain で長い handler を途中で止めることを受け入れる設定なので、`[scaling] allow_short_drain = true` が無ければ設定検証で起動を拒否する（`services::scaling::tests::the_drain_timeout_defaults_past_the_longest_revision_timeout_and_short_ones_need_a_switch`）。削除にだけ短い timeout を持たせる設定は作らない（削除中の in-flight も同じ規則で完了を待つ）。
+
+   drain を始めてから drain timeout を過ぎても、drain を始める前に受け付けた invocation がまだ走っていれば、reconciler はそれを止める（`CancelKind::Drain`）。handler 実行中なら通常の timeout と同じく `Cancel` → grace → terminate で、結果は `Failed{timeout, Host.DrainTimeout}`（HTTP 504）、環境は `Failed{drain timeout}`。まだ dispatch していなければ同じ error_type で起動しない。接続が切れて結果が分からなければ従来どおり `OutcomeUnknown`（自動再実行しない）。1 つの drain について 1 回だけ行う。
 
 9. **振動しない。** (a) scale-down は cooldown と待機者・約束で止まる。(b) 先行起動は `min_ready` まで、待機者がいれば行わず、失敗したら backoff。(c) 設定 cache が期限切れ（control plane 停止）の間、route の集合は**前回の有効な観測のまま保持**し（`view = held`）、drain を始めない・終えない・`min_ready` の環境も route されたものとして守る。再接続の嵐（切断と接続の反復）でも、有効な観測の内容が変わらない限り何も起こらない（`tests/scaling.rs::an_outage_holds_routes_and_a_reconnect_storm_does_not_flap`）。(d) 1 回の reconcile は 1 つずつ（`tokio::sync::Mutex`）。
 
@@ -64,7 +66,7 @@ Accepted（2026-09-17、PLT-4635）。実装: `crates/application/src/services/s
 
 ## 結果（consequences）
 
-- 既存の設定はそのまま動く。`[scaling]` は省略可能（reconcile 1 s、cooldown 30 s、drain timeout 300 s、backoff 5 s）。gateway は reuse の有無にかかわらず reconcile loop を回す（drain と削除の確定は pool が無くても必要）。旧来の「`idle_ttl/2` ごとの sweeper」はこの loop に置き換わった。
+- 既存の設定はそのまま動く。`[scaling]` は省略可能（reconcile 1 s、cooldown 30 s、drain timeout は最大 revision timeout + grace + 60 s（既定 961 s）、backoff 5 s）。gateway は reuse の有無にかかわらず reconcile loop を回す（drain と削除の確定は pool が無くても必要）。旧来の「`idle_ttl/2` ごとの sweeper」はこの loop に置き換わった。
 - pool が有効な構成では、TTL を過ぎた idle 環境の終了が cooldown（既定 30 s）だけ遅れうる。活性化の直後に消えなくなった代わりである。
 - alias を別 revision に移すと、旧 revision の idle 環境は次の reconcile（既定 1 s 以内）で terminate される。pin 指定で旧 revision を使っている呼び出し元は、その間 warm を失う。
 - 削除後、待機中だった invocation は 409 で終わる（以前は起動していた）。
@@ -78,4 +80,5 @@ Accepted（2026-09-17、PLT-4635）。実装: `crates/application/src/services/s
 - pipeline（fake provider、`crates/application/tests/scaling.rs`）: 0 → burst → idle → 0 → 再アクセス（cold）、0 からの burst の合流、Busy 環境を消さない、sweep と invocation の race 25 回、alias 切替中の長い処理（旧 revision で完了・route generation・旧 revision の drain）、drain timeout（`Host.DrainTimeout`）、削除中の実行・待機・再送（`Host.FunctionDeleted`、`drained_at`）、`min_ready` の先行起動と非振動、secret rotate による drain、data plane の停止中の保持と再接続の嵐。
 - 台帳の契約（memory / SQLite）: 先行起動した `Ready`（epoch 0）の pool 入り。
 - 実 gateway（process provider）: `scripts/e2e/zero-scale.sh`（`docs/evidence/*-zero-scale-process/`）。process provider は `idle_quiesce` を持たないので pool は無く、「idle → 0」は destroy-after-invoke による 0 である（script はそう記録する）。
+- 既定の drain timeout で、alias 切替から 400 s・900 s 経っても長い handler は止まらず元の revision で完了する: `tests/scaling.rs::under_the_default_drain_timeout_an_alias_switch_never_stops_a_long_handler`。短い drain timeout（`allow_short_drain = true`）で止める経路: `a_drain_timeout_stops_what_still_runs_on_a_drained_revision`。
 - **Firecracker（実 microVM、pool 有効）での zero-scale E2E は未検証**（検証 VM を別作業の benchmark が使用中）。script は `TSLS_GATEWAY_CONFIG` で任意の provider の設定を受け取る。

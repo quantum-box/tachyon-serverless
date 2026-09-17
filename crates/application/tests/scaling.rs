@@ -546,9 +546,53 @@ async fn an_alias_switch_routes_only_new_invocations_and_drains_the_old_revision
 /// An invocation still running on a drained revision when the drain timeout
 /// passes is stopped like an execution timeout (`Host.DrainTimeout`), and
 /// its environment is terminated.
+/// Acceptance 3 under the defaults: the drain timeout is derived from the
+/// longest revision timeout (900 s) + cancel grace + 60 s, so an invocation
+/// that is still inside its own timeout is never cut short by an alias
+/// switch. The clock moves 400 s and then 900 s past the switch (far beyond
+/// the old 300 s default) while the handler runs: nothing is stopped and the
+/// invocation completes on its revision.
+#[tokio::test]
+async fn under_the_default_drain_timeout_an_alias_switch_never_stops_a_long_handler() {
+    let h = harness(POOL);
+    let snap = h.app.admission.snapshot(&h.a.tenant_id);
+    // 900 s max execution timeout + 1 s cancel grace (100 ms, rounded up) + 60 s.
+    assert_eq!(snap.scaling.drain_timeout_seconds, 961);
+    let (f, rev1) = h
+        .deploy("long-drain", |r| r.execution.timeout_seconds = 900)
+        .await;
+    let long = h.spawn_invoke(h.request(&f, serde_json::json!({"sleep_ms": 1_500})));
+    h.until("the long invocation runs", |h| {
+        h.rev_info(&rev1).is_some_and(|r| r.environments.busy == 1)
+    })
+    .await;
+    h.app.reconcile_scaling().await;
+    h.revision(&f, |_| {}).await;
+    let report = h.app.reconcile_scaling().await;
+    assert_eq!(
+        report.drains_started,
+        vec![(rev1.id.clone(), "alias_switch")]
+    );
+    for advance_s in [400, 500] {
+        h.advance(advance_s * 1_000);
+        let report = h.app.reconcile_scaling().await;
+        assert_eq!(
+            report.drain_timeouts,
+            0,
+            "stopped {} s after the switch under the default drain timeout",
+            if advance_s == 400 { 400 } else { 900 }
+        );
+    }
+    let out = long.await.unwrap().unwrap();
+    assert!(out.succeeded(), "{:?}", out.invocation().status);
+    assert_eq!(out.invocation().revision_id, rev1.id);
+}
+
 #[tokio::test]
 async fn a_drain_timeout_stops_what_still_runs_on_a_drained_revision() {
-    let h = harness(&format!("{POOL}[scaling]\ndrain_timeout_seconds = 1\n"));
+    let h = harness(&format!(
+        "{POOL}[scaling]\ndrain_timeout_seconds = 1\nallow_short_drain = true\n"
+    ));
     let (f, rev1) = h.deploy("drain-timeout", |_| {}).await;
     let long = h.spawn_invoke(h.request(&f, serde_json::json!({"sleep_ms": 20_000})));
     h.until("the long invocation runs", |h| {

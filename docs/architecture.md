@@ -180,7 +180,9 @@ rate_window_seconds = 10
 [scaling]                      # PLT-4635。scale reconciler（idle sweep・min_ready・drain）
 reconcile_interval_ms = 1000   # reconcile の周期
 scale_down_cooldown_seconds = 30  # scale-up / 活性化の後、この間は scale-down しない（revision の既定）
-drain_timeout_seconds = 300    # drain（alias 切替・削除）開始からこれを過ぎて実行中の invocation は Host.DrainTimeout
+# drain_timeout_seconds = 961  # drain（alias 切替・secret 世代・削除）開始からこれを過ぎて実行中の invocation は Host.DrainTimeout。
+                               # 省略時 = limits.max_execution_timeout_seconds + cancel grace + 60 s（どの revision の timeout より長い）
+# allow_short_drain = false    # 上の値を「最大 timeout + grace」以下にするときだけ true（長い handler を drain で止めることを受け入れる）
 prestart_backoff_seconds = 5   # min_ready の先行起動が失敗した後の待ち
 
 [store]

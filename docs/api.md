@@ -224,7 +224,7 @@ node（物理 host）と、その上の環境を分けて返す。`tenant` と `
   ],
   "scaling": {
     "reconcile_interval_ms": 1000, "default_idle_ttl_seconds": 60, "default_scale_down_cooldown_seconds": 30,
-    "drain_timeout_seconds": 300, "warm_pool": true,
+    "drain_timeout_seconds": 961, "warm_pool": true,
     "at_zero": "zero environments is not zero host cost: the gateway, its store and the node keep running"
   }
 }
@@ -568,7 +568,7 @@ revoke の遅延上限: control plane に届く data plane では 1 refresh、�
 - **zero**: `min_ready = 0`（既定）の revision は、pool の idle 環境が `idle_ttl` と cooldown を過ぎ、待機中の invocation も約束も無ければ scale reconciler（既定 1 s ごと）が終わらせ、環境数 0 になる。次の invoke は cold start（`attempts[].start_kind = "cold"`）。**環境数 0 は host 費用 0 ではない**（gateway・store・node は動き続ける。`GET /v1/capacity` の `scaling.at_zero`）。pool が無い gateway（`scaling.warm_pool = false`）では環境は invocation と一緒に終わる。
 - **0 からの burst**: 起動は `desired`・`max_concurrency`・quota・node 容量・start rate の範囲でだけ行い、残りは待つ（§4 の `reason`）。最初の応答は cold start ぶん遅い。
 - **route**: alias は受付時に 1 回だけ解決し、`InvocationResponse.alias_generation` に記録する。受付後の alias 切替で実行中・待機中の invocation の revision は変わらない。
-- **drain**: alias が別 revision に移ると、旧 revision の idle 環境は次の reconcile で終わり、実行中の環境は完了後に pool へ戻らない（`route_state = superseded`）。secret の値が変わった revision では、古い世代の idle 環境が次の reconcile で終わる。削除は `deleting` → 待機中を 409 → 実行中の完了 → `deleted`。drain の開始から `drain_timeout_seconds` を過ぎて実行中の invocation は 504 `Host.DrainTimeout`。
+- **drain**: alias が別 revision に移ると、旧 revision の idle 環境は次の reconcile で終わり、実行中の環境は完了後に pool へ戻らない（`route_state = superseded`）。secret の値が変わった revision では、古い世代の idle 環境が次の reconcile で終わる。削除は `deleting` → 待機中を 409 → 実行中の完了 → `deleted`。drain の開始から `drain_timeout_seconds` を過ぎて実行中の invocation は 504 `Host.DrainTimeout`。既定の drain timeout はどの revision の timeout より長いので、既定の設定では drain が自分の timeout の内側にいる invocation を止めることはない（alias 切替・secret 世代変更・削除のどれでも同じ）。
 - **振動しない**: cooldown、待機者・約束の優先、先行起動の backoff。control plane に届かず設定が期限切れの間は route の観測を保持し、drain も先行起動の取り消しもしない。
 
-gateway 設定 `[scaling]`: `reconcile_interval_ms`（既定 1000）、`scale_down_cooldown_seconds`（30）、`drain_timeout_seconds`（300）、`prestart_backoff_seconds`（5）。
+gateway 設定 `[scaling]`: `reconcile_interval_ms`（既定 1000）、`scale_down_cooldown_seconds`（30）、`drain_timeout_seconds`（省略時は `limits.max_execution_timeout_seconds` + cancel grace + 60 s。既定の limits では 961。自分の timeout の内側にいる invocation を drain が止めないための値で、これ以下を設定するには `allow_short_drain = true` が要る）、`prestart_backoff_seconds`（5）。`GET /v1/capacity` の `scaling.drain_timeout_seconds` は実際に使う値。

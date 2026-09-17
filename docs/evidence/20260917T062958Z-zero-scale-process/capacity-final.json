@@ -47,7 +47,7 @@
   },
   "revisions": [
     {
-      "revision_id": "rev_01m2q0etdpsgrns1gxhcbzg4qe",
+      "revision_id": "rev_01m2q0xkggvrxv165bkb07n7dk",
       "desired": 1,
       "max_environments": 3,
       "environments": {
@@ -59,8 +59,8 @@
         "draining": 0
       },
       "queued": 0,
-      "arrival_rate_per_second": 0.165,
-      "avg_duration_ms": 1074,
+      "arrival_rate_per_second": 0.176,
+      "avg_duration_ms": 1073,
       "circuit_breaker": "closed",
       "min_ready": 0,
       "idle_ttl_seconds": 2,
@@ -69,11 +69,11 @@
       "last_scale_event": {
         "kind": "drain",
         "reason": "function_deleted",
-        "at": "2026-09-17T06:22:11.570850Z"
+        "at": "2026-09-17T06:30:15.068368Z"
       }
     },
     {
-      "revision_id": "rev_01m2q0eyp72246fn83nt4z0chx",
+      "revision_id": "rev_01m2q0xq567375yhz21v8ypt1n",
       "desired": 1,
       "max_environments": 3,
       "environments": {
@@ -85,8 +85,8 @@
         "draining": 0
       },
       "queued": 0,
-      "arrival_rate_per_second": 0.063,
-      "avg_duration_ms": 1344,
+      "arrival_rate_per_second": 0.064,
+      "avg_duration_ms": 1278,
       "circuit_breaker": "closed",
       "min_ready": 0,
       "idle_ttl_seconds": 2,
@@ -95,11 +95,11 @@
       "last_scale_event": {
         "kind": "drain",
         "reason": "function_deleted",
-        "at": "2026-09-17T06:22:11.570833Z"
+        "at": "2026-09-17T06:30:15.068381Z"
       }
     },
     {
-      "revision_id": "rev_01m2q0f2x5rbk5j2fsxhwemhh0",
+      "revision_id": "rev_01m2q0xv992wybjhzr0gr9b35e",
       "desired": 1,
       "max_environments": 3,
       "environments": {
@@ -111,7 +111,7 @@
         "draining": 0
       },
       "queued": 0,
-      "arrival_rate_per_second": 0.07,
+      "arrival_rate_per_second": 0.069,
       "avg_duration_ms": 3001,
       "circuit_breaker": "closed",
       "min_ready": 0,
@@ -121,7 +121,7 @@
       "last_scale_event": {
         "kind": "drain",
         "reason": "function_deleted",
-        "at": "2026-09-17T06:22:11.570784Z"
+        "at": "2026-09-17T06:30:15.068319Z"
       }
     }
   ],

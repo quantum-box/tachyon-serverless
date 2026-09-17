@@ -30,7 +30,7 @@
 #   TSLS_GATEWAY_CONFIG   use this config as-is instead of generating one; then also set
 #                         TSLS_API_URL (its listen address) and TSLS_TOKEN_A (a deploy+invoke token).
 #                         Recommended for a warm run: [pool] enabled = true, [scaling]
-#                         reconcile_interval_ms = 500, drain_timeout_seconds = 5.
+#                         reconcile_interval_ms = 500, drain_timeout_seconds = 5, allow_short_drain = true.
 #   TSLS_GUEST_DIR        directory with example-cpu-burn (default target/debug)
 #   TSLS_ARCH             aarch64 | x86_64 (default: host)
 #   TSLS_SKIP_BUILD=1     do not run cargo build
@@ -116,6 +116,7 @@ queue_timeout_seconds = 30
 reconcile_interval_ms = 500
 scale_down_cooldown_seconds = 1
 drain_timeout_seconds = 5
+allow_short_drain = true   # the drain-timeout step needs a short timeout on purpose
 
 [[identity.tokens]]
 token = "$TOKEN_A"

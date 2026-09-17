@@ -55,10 +55,20 @@ pub struct ScalingConfig {
     /// Scale-down cooldown of a revision that does not set
     /// `execution.scale_down_cooldown_seconds`.
     pub scale_down_cooldown_seconds: u64,
-    /// How long invocations of a drained revision (alias switch, deletion)
-    /// may keep running after the drain started before they are stopped as
-    /// `Host.DrainTimeout`.
-    pub drain_timeout_seconds: u64,
+    /// How long invocations of a drained revision (alias switch, secret
+    /// rotation, deletion) may keep running after the drain started before
+    /// they are stopped as `Host.DrainTimeout`.
+    ///
+    /// Unset (the default): derived as the longest execution timeout a
+    /// revision may have (`limits.max_execution_timeout_seconds`) + the cancel
+    /// grace + 60 s, so a drain never stops an invocation that is still
+    /// within its own timeout. A configured value at or below that bound is
+    /// refused unless `allow_short_drain = true`.
+    pub drain_timeout_seconds: Option<u64>,
+    /// Accept a `drain_timeout_seconds` that can stop invocations still
+    /// within their own execution timeout (an alias switch then cuts long
+    /// handlers short). Off by default.
+    pub allow_short_drain: bool,
     /// Wait before a revision's next `min_ready` pre-start after one failed
     /// (boot failure, refused by the pool, cold starts restricted).
     pub prestart_backoff_seconds: u64,
@@ -69,22 +79,61 @@ impl Default for ScalingConfig {
         Self {
             reconcile_interval_ms: 1_000,
             scale_down_cooldown_seconds: 30,
-            drain_timeout_seconds: 300,
+            drain_timeout_seconds: None,
+            allow_short_drain: false,
             prestart_backoff_seconds: 5,
         }
     }
 }
 
 impl ScalingConfig {
-    pub fn validate(&self) -> Result<(), String> {
+    /// The drain timeout no invocation within its own execution timeout can
+    /// reach: max revision timeout + cancel grace (rounded up) + 60 s.
+    pub fn safe_drain_timeout_seconds(
+        max_execution_timeout_seconds: u32,
+        cancel_grace: Duration,
+    ) -> u64 {
+        u64::from(max_execution_timeout_seconds)
+            + cancel_grace.as_millis().div_ceil(1000) as u64
+            + 60
+    }
+
+    /// The drain timeout in effect: the configured one, or the safe default.
+    pub fn effective_drain_timeout_seconds(
+        &self,
+        max_execution_timeout_seconds: u32,
+        cancel_grace: Duration,
+    ) -> u64 {
+        self.drain_timeout_seconds.unwrap_or_else(|| {
+            Self::safe_drain_timeout_seconds(max_execution_timeout_seconds, cancel_grace)
+        })
+    }
+
+    pub fn validate(
+        &self,
+        max_execution_timeout_seconds: u32,
+        cancel_grace: Duration,
+    ) -> Result<(), String> {
         if !(50..=60_000).contains(&self.reconcile_interval_ms) {
             return Err("scaling.reconcile_interval_ms must be within 50..=60000".into());
         }
         if self.scale_down_cooldown_seconds > 3_600 {
             return Err("scaling.scale_down_cooldown_seconds must be <= 3600".into());
         }
-        if self.drain_timeout_seconds == 0 || self.drain_timeout_seconds > 86_400 {
-            return Err("scaling.drain_timeout_seconds must be within 1..=86400".into());
+        if let Some(d) = self.drain_timeout_seconds {
+            if d == 0 || d > 86_400 {
+                return Err("scaling.drain_timeout_seconds must be within 1..=86400".into());
+            }
+            let floor = u64::from(max_execution_timeout_seconds)
+                + cancel_grace.as_millis().div_ceil(1000) as u64;
+            if d <= floor && !self.allow_short_drain {
+                return Err(format!(
+                    "scaling.drain_timeout_seconds ({d}) must be longer than the maximum revision \
+                     execution timeout plus the cancel grace ({floor} s), or a drain stops \
+                     invocations still within their own timeout; set \
+                     scaling.allow_short_drain = true to accept that"
+                ));
+            }
         }
         if self.prestart_backoff_seconds == 0 || self.prestart_backoff_seconds > 3_600 {
             return Err("scaling.prestart_backoff_seconds must be within 1..=3600".into());
@@ -94,10 +143,6 @@ impl ScalingConfig {
 
     pub fn reconcile_interval(&self) -> Duration {
         Duration::from_millis(self.reconcile_interval_ms)
-    }
-
-    fn drain_timeout(&self) -> chrono::Duration {
-        chrono::Duration::seconds(self.drain_timeout_seconds as i64)
     }
 
     fn prestart_backoff(&self) -> chrono::Duration {
@@ -147,6 +192,8 @@ pub struct ScaleController {
     repos: Repositories,
     clock: Arc<dyn Clock>,
     config: ScalingConfig,
+    /// `drain_timeout_seconds` in effect (configured, or derived).
+    drain_timeout_seconds: u64,
     /// This gateway owns the management store and records `drained_at`.
     finalizes: bool,
     state: Mutex<ControllerState>,
@@ -173,6 +220,7 @@ impl ScaleController {
         repos: Repositories,
         clock: Arc<dyn Clock>,
         config: ScalingConfig,
+        drain_timeout_seconds: u64,
         finalizes: bool,
     ) -> Arc<Self> {
         let this = Arc::new(Self {
@@ -183,6 +231,7 @@ impl ScaleController {
             repos,
             clock,
             config,
+            drain_timeout_seconds,
             finalizes,
             state: Mutex::new(ControllerState::default()),
             running: tokio::sync::Mutex::new(()),
@@ -308,7 +357,7 @@ impl ScaleController {
         // 2. drain timeout -------------------------------------------------------
         let expired: Vec<(RevisionId, Timestamp)> = {
             let mut state = self.state.lock();
-            let limit = self.config.drain_timeout();
+            let limit = chrono::Duration::seconds(self.drain_timeout_seconds.min(86_400) as i64);
             state
                 .drains
                 .iter_mut()
@@ -325,7 +374,7 @@ impl ScaleController {
                 tracing::warn!(
                     revision_id = %r,
                     stopped,
-                    drain_timeout_seconds = self.config.drain_timeout_seconds,
+                    drain_timeout_seconds = self.drain_timeout_seconds,
                     "drain timeout: stopping invocations still running on a drained revision"
                 );
             }
@@ -524,5 +573,61 @@ impl ScaleController {
         self.repos.functions.update(current)?;
         tracing::info!(function_id = %function.id, "function deletion drained: no work and no environment left");
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The default drain timeout outlasts every invocation still inside its
+    /// own execution timeout, and a shorter configured one is refused unless
+    /// explicitly allowed.
+    #[test]
+    fn the_drain_timeout_defaults_past_the_longest_revision_timeout_and_short_ones_need_a_switch() {
+        let grace = Duration::from_millis(1_000);
+        let default = ScalingConfig::default();
+        assert_eq!(default.drain_timeout_seconds, None);
+        assert_eq!(default.effective_drain_timeout_seconds(900, grace), 961);
+        assert_eq!(
+            default.effective_drain_timeout_seconds(900, Duration::from_millis(1_500)),
+            962,
+            "the grace is rounded up"
+        );
+        default.validate(900, grace).unwrap();
+
+        let short = ScalingConfig {
+            drain_timeout_seconds: Some(300),
+            ..ScalingConfig::default()
+        };
+        let err = short.validate(900, grace).unwrap_err();
+        assert!(err.contains("allow_short_drain"), "{err}");
+        let at_bound = ScalingConfig {
+            drain_timeout_seconds: Some(901),
+            ..ScalingConfig::default()
+        };
+        assert!(
+            at_bound.validate(900, grace).is_err(),
+            "timeout + grace is not enough"
+        );
+        let longer = ScalingConfig {
+            drain_timeout_seconds: Some(902),
+            ..ScalingConfig::default()
+        };
+        longer.validate(900, grace).unwrap();
+        assert_eq!(longer.effective_drain_timeout_seconds(900, grace), 902);
+        let allowed = ScalingConfig {
+            drain_timeout_seconds: Some(5),
+            allow_short_drain: true,
+            ..ScalingConfig::default()
+        };
+        allowed.validate(900, grace).unwrap();
+        assert_eq!(allowed.effective_drain_timeout_seconds(900, grace), 5);
+        let zero = ScalingConfig {
+            drain_timeout_seconds: Some(0),
+            allow_short_drain: true,
+            ..ScalingConfig::default()
+        };
+        assert!(zero.validate(900, grace).is_err());
     }
 }

@@ -1137,7 +1137,12 @@ impl GatewayConfig {
                 )));
             }
         }
-        self.scaling.validate().map_err(ConfigError::Invalid)?;
+        self.scaling
+            .validate(
+                limits.max_execution_timeout_seconds,
+                self.invoke.cancel_grace(),
+            )
+            .map_err(ConfigError::Invalid)?;
         Ok(())
     }
 }

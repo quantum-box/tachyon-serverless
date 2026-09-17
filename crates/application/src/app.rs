@@ -359,6 +359,10 @@ impl Application {
             AdmissionSettings::from_config(&config.capacity),
             clock.clone(),
         );
+        let drain_timeout = config.scaling.effective_drain_timeout_seconds(
+            limits.max_execution_timeout_seconds,
+            config.invoke.cancel_grace(),
+        );
         admission.set_scale_defaults(ScaleDefaults {
             idle_ttl_seconds: config.pool.idle_ttl_seconds,
             scale_down_cooldown_seconds: config.scaling.scale_down_cooldown_seconds,
@@ -366,7 +370,7 @@ impl Application {
                 reconcile_interval_ms: config.scaling.reconcile_interval_ms,
                 default_idle_ttl_seconds: config.pool.idle_ttl_seconds,
                 default_scale_down_cooldown_seconds: config.scaling.scale_down_cooldown_seconds,
-                drain_timeout_seconds: config.scaling.drain_timeout_seconds,
+                drain_timeout_seconds: drain_timeout,
                 warm_pool: policy.reuse_enabled(),
                 at_zero: "zero environments is not zero host cost: the gateway, its store and \
                           the node keep running"
@@ -412,6 +416,7 @@ impl Application {
             repos.clone(),
             clock.clone(),
             config.scaling.clone(),
+            drain_timeout,
             control.role == GatewayRole::Combined,
         );
         // Reuse is visible at startup, on or off, with the gate that decided
