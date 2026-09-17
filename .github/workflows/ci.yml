@@ -115,7 +115,10 @@ jobs:
       - name: clippy (feature failpoints)
         run: cargo clippy -p tachyon-serverless-gateway -p tachyon-serverless-application --all-targets --features tachyon-serverless-application/failpoints -- -D warnings
 
+      # A hung test must fail this step instead of holding the whole job until its 45 min
+      # timeout (a warm run takes ~2-3 min; the bound leaves room for a cold cache).
       - name: test (unit / property / integration, all crates)
+        timeout-minutes: 25
         run: cargo test --workspace
 
       - name: build
