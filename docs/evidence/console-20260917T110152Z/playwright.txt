@@ -1,0 +1,20 @@
+
+Running 15 tests using 1 worker
+
+  ✓   1 [chromium] › e2e/console.spec.ts:9:5 › sign-in refuses an unknown token and a mismatched tenant, then accepts tenant A (1.5s)
+  ✓   2 [chromium] › e2e/console.spec.ts:33:5 › function list shows only the tenant’s functions and navigates to the detail (376ms)
+  ✓   3 [chromium] › e2e/console.spec.ts:53:5 › deploy state: ready and failed revisions, aliases, secrets by binding name only (480ms)
+  ✓   4 [chromium] › e2e/console.spec.ts:83:5 › test invoke: synchronous success opens the invocation, its attempt, logs and revision (1.7s)
+  ✓   5 [chromium] › e2e/console.spec.ts:147:5 › test invoke: handler error and asynchronous accept are shown with their invocation (4.8s)
+  ✓   6 [chromium] › e2e/console.spec.ts:186:5 › invocation history: filters, retries versus new invocations, and dead letters (599ms)
+  ✓   7 [chromium] › e2e/console.spec.ts:220:5 › redrive: confirmation with a reason, result toast, and a new invocation linked to its source (1.5s)
+  ✓   8 [chromium] › e2e/console.spec.ts:281:5 › rollback: confirmation dialog, result toast, alias back on the previous revision (1.3s)
+  ✓   9 [chromium] › e2e/console.spec.ts:304:5 › cancel: confirmation dialog, result toast, invocation ends cancelled (4.1s)
+  ✓  10 [chromium] › e2e/console.spec.ts:339:5 › OutcomeUnknown is explained on the invocation page and on a test invoke (mocked API responses) (745ms)
+  ✓  11 [chromium] › e2e/console.spec.ts:414:5 › permission denied: an operator token reads functions but not invocations or usage (686ms)
+  ✓  12 [chromium] › e2e/console.spec.ts:431:5 › cross-tenant URLs answer not found for functions, invocations and dead letters (768ms)
+  ✓  13 [chromium] › e2e/console.spec.ts:454:5 › usage and budget show the provisional banner; budget state; capacity renders (944ms)
+  ✓  14 [chromium] › e2e/console.spec.ts:510:5 › loading, empty, error and unauthorized states (mocked API responses) (611ms)
+  ✓  15 [chromium] › e2e/console.spec.ts:560:5 › no secret value or token anywhere in the DOM across the main pages (5.7s)
+
+  15 passed (26.7s)

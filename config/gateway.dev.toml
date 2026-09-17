@@ -153,3 +153,10 @@ output_retention_seconds = 604800  # インライン出力の保持期限（7 �
 # regions = ["local"]
 # max_object_bytes = 8388608
 # tenant_quota_bytes = 1073741824
+
+# Functions console（PLT-4644、docs/console.md）。既定は無効。有効にすると gateway が
+# apps/console の static export を /console/ で配る（credential は持たず、画面は閲覧者の token で /v1 を呼ぶ）。
+# 事前に `cd apps/console && pnpm install --frozen-lockfile && pnpm build` が要る（out/index.html が無いと起動しない）。
+# [console]
+# enabled = true
+# dir = "apps/console/out"

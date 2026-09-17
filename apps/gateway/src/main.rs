@@ -82,6 +82,8 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = GatewayConfig::load(&args.config)
         .map_err(|e| anyhow::anyhow!("{}: {e}", args.config.display()))?;
+    let console = tachyon_serverless_gateway::console::ConsoleConfig::load(&args.config)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", args.config.display()))?;
     tracing::info!(config = %args.config.display(), "configuration loaded");
-    tachyon_serverless_gateway::serve(config, shutdown_signal()).await
+    tachyon_serverless_gateway::serve_with_console(config, console, shutdown_signal()).await
 }

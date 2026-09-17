@@ -42,6 +42,8 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 | [metrics.md](metrics.md) | `GET /metrics` の catalog・認証・cardinality、boot identity、detector と alert rule（`deploy/prometheus/alerts.yml`）、負荷シナリオ（`scripts/load/scenarios.sh`）の上限と出力。数値は観測値で SLA ではない | PLT-4637 |
 | [benchmark.md](benchmark.md) | cold / warm の first response・同時実行・資源原価のベンチマーク（`scripts/kvm/bench.sh`）の手順・集計規則・結果・RFC 仮目標との比較。SLA・価格ではない | PLT-4647 |
 | [api.md](api.md) | 管理 API と Invoke API の使い方、認証 header、エラー応答、OpenAPI の場所 | PLT-4619 / PLT-4626 |
+| [console.md](console.md) | Functions 最小 console（`apps/console`、Next.js static export、gateway の `[console]` で `/console/` に配信）の構成・実行・E2E・秘密情報の扱い・制約 | PLT-4644 |
+| [console-integration.md](console-integration.md) | 既存 Tachyon Console（tachyon-apps）への統合計画（未着手、設計のみ）: 置き場所・認証 adapter・置き換える部分 | PLT-4644 |
 | [cli.md](cli.md) | `tsls deploy / invoke / logs / rollback / dev` の使い方と設定 | PLT-4629 |
 
 ## 実行記録（evidence）

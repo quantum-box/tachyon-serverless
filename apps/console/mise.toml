@@ -1,0 +1,4 @@
+# Node toolchain of the console only (the Rust workspace pins its toolchain in the root mise.toml).
+[tools]
+node = "22.21.1"
+pnpm = "10.34.5"

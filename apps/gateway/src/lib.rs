@@ -14,6 +14,7 @@
 //!   `/http/` and `/http/{*path}` for any method.
 
 pub mod config_client;
+pub mod console;
 pub mod dead_letters;
 pub mod durable;
 pub mod error;
@@ -44,6 +45,13 @@ pub type AppState = Arc<Application>;
 /// and invocation reads against the configuration cache (PLT-4636), and
 /// `/v1/internal/config` against the internal credential.
 pub fn router(state: AppState) -> Router {
+    router_with_console(state, &console::ConsoleConfig::default())
+}
+
+/// [`router`] plus the static console under `/console/` when `[console]
+/// enabled` (PLT-4644). The console routes carry no credential and sit
+/// outside `/v1`: the pages call the API with the viewer's own token.
+pub fn router_with_console(state: AppState, console_config: &console::ConsoleConfig) -> Router {
     let limits = state.limits.clone();
     let artifact_limit = usize::try_from(limits.max_artifact_bytes).unwrap_or(usize::MAX);
     let payload_limit = usize::try_from(limits.max_payload_bytes.saturating_mul(2))
@@ -198,6 +206,7 @@ pub fn router(state: AppState) -> Router {
             post(trigger_handlers::receive_webhook).layer(DefaultBodyLimit::disable()),
         )
         .merge(authenticated)
+        .merge(console::routes(console_config))
         .fallback(handlers::not_found)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -212,6 +221,17 @@ pub async fn serve(
     config: GatewayConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    serve_with_console(config, console::ConsoleConfig::default(), shutdown).await
+}
+
+/// [`serve`] with `[console]` (PLT-4644). The binary reads the section from
+/// the same configuration file.
+pub async fn serve_with_console(
+    config: GatewayConfig,
+    console_config: console::ConsoleConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
+    console_config.validate().map_err(|e| anyhow::anyhow!(e))?;
     let provider = providers::build_provider(&config)?;
     let config_source: Option<Arc<dyn ConfigSource>> = match config.control_plane.role {
         GatewayRole::Combined => None,
@@ -267,7 +287,11 @@ pub async fn serve(
         provider = app.provider.kind().as_str(),
         "gateway listening"
     );
-    let service = router(app.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    if console_config.enabled {
+        tracing::info!(dir = %console_config.root().display(), "console served under /console/");
+    }
+    let service = router_with_console(app.clone(), &console_config)
+        .into_make_service_with_connect_info::<SocketAddr>();
     // The scale reconciler (PLT-4635): routes and drains, drain timeouts, the
     // idle sweep (scale to zero), `min_ready` pre-starts and deletion
     // finalization. Always runs: drains and deletions matter without reuse

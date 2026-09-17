@@ -1,0 +1,7 @@
+run: 20260917T110217Z
+host: Darwin 25.6.0 arm64
+gateway: process provider, [queue] backend = sqlite, [budget] enabled (file), [console] enabled
+playwright: Version 1.61.1
+node: v22.21.1
+tests: expected=15 unexpected=0 flaky=0 skipped=0
+exit: 0

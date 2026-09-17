@@ -18,6 +18,8 @@
 #                        and signed webhook triggers (PLT-4641); scripts/queue/async-dispatch-e2e.sh:
 #                        dispatcher, retry, DLQ, poison, redrive, SIGKILL before ACK / commit (PLT-4640)
 # - scripts:             bash -n + shellcheck + helper self-tests for scripts/
+# - console:             apps/console lint / typecheck / vitest / API types vs docs/openapi.json /
+#                        static export (PLT-4644; the Playwright E2E is local only)
 # - ci-gate:             aggregate status
 #
 # Docs-only changes (docs/**, *.md, issue templates; NOT docs/openapi.json) skip rust,
@@ -308,9 +310,56 @@ jobs:
       - name: CI helper self-test (path classification, kvm-gate, security list)
         run: scripts/ci/selftest.sh
 
+  # PLT-4644: static checks of the Functions console (apps/console). The Playwright E2E needs a
+  # built gateway, Chromium and ~1 min of real invokes; it runs locally (scripts/console/e2e.sh,
+  # docs/console.md) and is not a CI job.
+  console:
+    name: console (lint / typecheck / unit / API types / build)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/console
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          version: 10.34.5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.21.1
+          cache: pnpm
+          cache-dependency-path: apps/console/pnpm-lock.yaml
+
+      - name: install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: lint (biome)
+        run: pnpm lint
+
+      - name: typecheck
+        run: pnpm ts
+
+      - name: unit tests (vitest)
+        run: pnpm test
+
+      - name: API types match docs/openapi.json
+        run: pnpm check:api
+
+      - name: static export
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm build
+
   ci-gate:
     name: ci-gate
-    needs: [changes, rust, contracts, guest-musl-build, durable-queue, scripts]
+    needs: [changes, rust, contracts, guest-musl-build, durable-queue, scripts, console]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -324,6 +373,7 @@ jobs:
           R_MUSL: ${{ needs.guest-musl-build.result }}
           R_QUEUE: ${{ needs.durable-queue.result }}
           R_SCRIPTS: ${{ needs.scripts.result }}
+          R_CONSOLE: ${{ needs.console.result }}
         run: |
           set -euo pipefail
           fail=0
@@ -345,9 +395,10 @@ jobs:
           check contracts "$R_CONTRACTS" "$skip_ok"
           check guest-musl-build "$R_MUSL" "$skip_ok"
           check durable-queue "$R_QUEUE" "$skip_ok"
+          check console "$R_CONSOLE" "$skip_ok"
           {
             echo "### ci-gate"
             echo
-            echo "docs_only=$DOCS_ONLY changes=$R_CHANGES rust=$R_RUST contracts=$R_CONTRACTS guest-musl-build=$R_MUSL durable-queue=$R_QUEUE scripts=$R_SCRIPTS"
+            echo "docs_only=$DOCS_ONLY changes=$R_CHANGES rust=$R_RUST contracts=$R_CONTRACTS guest-musl-build=$R_MUSL durable-queue=$R_QUEUE scripts=$R_SCRIPTS console=$R_CONSOLE"
           } >>"$GITHUB_STEP_SUMMARY"
           exit "$fail"
