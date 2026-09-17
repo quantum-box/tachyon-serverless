@@ -1,0 +1,26 @@
+[
+  {
+    "scenario": "cold-1",
+    "result": "FAIL",
+    "metric_ms": null,
+    "detail": "no Ready within 60 s (cloud-hypervisor still running; host code 1); console: cloud-hypervisor:   0.307710s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:305 -- _virtio-pci-_vsock3: Barrier released cloud-hypervisor:   0.307742s: <vcpu0> INFO:vmm/src/vm.rs:466 -- Barrier released \u001b[2m2026-09-17T08:52:14.579289Z\u001b[0m \u001b[32m INFO\u001b[0m x1: session starting behind the pump \u001b[3menvironment_id\u001b[0m\u001b[2m=\u001b[0menv_x1restore \u001b[3mport\u001b[0m\u001b[2m=\u001b[0m5000 "
+  },
+  {
+    "scenario": "mechanics-snapshot",
+    "result": "INFO",
+    "metric_ms": 260,
+    "detail": "ch-remote pause + snapshot accepted on a guest that never reached the handshake (files: state.json memory-ranges config.json )"
+  },
+  {
+    "scenario": "mechanics-restore",
+    "result": "INFO",
+    "metric_ms": 3198,
+    "detail": "fresh process --restore: resume accepted=yes, VMM state after 3 s=Running, host connections=0; guest liveness NOT verified"
+  },
+  {
+    "scenario": "snapshot-restore-of-running-guest",
+    "result": "FAIL",
+    "metric_ms": null,
+    "detail": "not measurable: the guest does not reach the bridge handshake on this host with v51.1"
+  }
+]

@@ -1,0 +1,2 @@
+08:16:14.206501057 PUT /snapshot/load -> 204 (8 ms)
+  request: {"snapshot_path":"../snap/vmstate","mem_backend":{"backend_type":"File","backend_path":"../snap/mem"},"resume_vm":true,"vsock_override":{"uds_path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T081534Z/restore-3/override.sock"}}

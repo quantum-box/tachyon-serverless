@@ -1,0 +1,29 @@
+2026-09-17T17:15:44.504352880 [anonymous-instance:main:INFO] Running Firecracker v1.17.0
+2026-09-17T17:15:44.504430241 [anonymous-instance:main:INFO] Listening on API socket ("api.sock").
+2026-09-17T17:15:44.504617155 [anonymous-instance:fc_api:INFO] API server started.
+2026-09-17T17:15:44.511738915 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/machine-config" with body "{\"vcpu_count\":1,\"mem_size_mib\":256}".
+2026-09-17T17:15:44.511805811 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:15:44.519905131 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/boot-source" with body "{\"kernel_image_path\":\"/home/takanorifukuyama.guest/tsls/.kvm/vmlinux\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc\"}".
+2026-09-17T17:15:44.519973031 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:15:44.527760648 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/drives/rootfs" with body "{\"drive_id\":\"rootfs\",\"path_on_host\":\"rootfs.ext4\",\"is_root_device\":true,\"is_read_only\":true}".
+2026-09-17T17:15:44.527858437 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:15:44.535750081 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/drives/function" with body "{\"drive_id\":\"function\",\"path_on_host\":\"function.ext4\",\"is_root_device\":false,\"is_read_only\":true}".
+2026-09-17T17:15:44.535845317 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:15:44.543714773 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/drives/scratch" with body "{\"drive_id\":\"scratch\",\"path_on_host\":\"scratch.ext4\",\"is_root_device\":false,\"is_read_only\":false}".
+2026-09-17T17:15:44.543786985 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:15:44.551772943 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/vsock" with body "{\"guest_cid\":3,\"uds_path\":\"v.sock\"}".
+2026-09-17T17:15:44.551916614 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:15:44.559723361 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/actions" with body "{\"action_type\":\"InstanceStart\"}".
+2026-09-17T17:15:44.565832063 [anonymous-instance:main:WARN] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T17:15:44.565888493 [anonymous-instance:main:WARN] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T17:15:44.566021404 [anonymous-instance:main:INFO] Artificially kick devices
+2026-09-17T17:15:44.566086249 [anonymous-instance:fc_vcpu 0:WARN] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-17T17:15:44.566150465 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:15:46.239056758 [anonymous-instance:fc_vcpu 0:INFO] [Block:rootfs] notifying queues
+2026-09-17T17:15:46.289878856 [anonymous-instance:fc_vcpu 0:INFO] [Block:function] notifying queues
+2026-09-17T17:15:46.325461412 [anonymous-instance:fc_vcpu 0:INFO] [Block:scratch] notifying queues
+2026-09-17T17:15:46.610934609 [anonymous-instance:fc_vcpu 0:INFO] [Vsock:vsock] notifying queues
+2026-09-17T17:15:47.382687653 [anonymous-instance:fc_vcpu 0:INFO] Received KVM_SYSTEM_EVENT: type: 1, event: [0]
+2026-09-17T17:15:47.382733409 [anonymous-instance:main:INFO] Vmm is stopping.
+2026-09-17T17:15:47.382831826 [anonymous-instance:main:INFO] Killing vCPU threads
+2026-09-17T17:15:47.385653320 [anonymous-instance:main:INFO] Firecracker exiting successfully. exit_code=0

@@ -1,0 +1,14 @@
+# Verification VM (tsls-kvm) after the X1 runs and after copying this evidence out (2026-09-17)
+# removed: ~/x1-out, ~/tsls/.kvm/x1, ~/tsls/.kvm/ch (downloaded Cloud Hypervisor binaries), /tmp probes
+firecracker: none
+cloud-hypervisor: none
+x1-host: none
+jailer: none
+~/tsls/.kvm: bin dl manifest.json rootfs.ext4 run vmlinux   (as before the experiment)
+~/x1-out, ~/tsls/.kvm/x1, ~/tsls/.kvm/ch: No such file or directory
+tsls* network links: 0
+/dev/vda1 38G 15G 24G 39% /
+# same-VM gates after the rebase onto origin/main 14a4887:
+#   cargo clippy -p tachyon-serverless-x1-restore -p tachyon-serverless-runtime-bridge --all-targets -- -D warnings: ok (Linux, covers the cfg(linux) guest code)
+#   cargo test -p tachyon-serverless-x1-restore: 6 passed
+#   cargo build --release --target aarch64-unknown-linux-musl (bridge, 5 examples, x1-guest-init): all static (no PT_INTERP)

@@ -1,0 +1,33 @@
+2026-09-17T17:16:14.640321084 [anonymous-instance:main:INFO] Running Firecracker v1.17.0
+2026-09-17T17:16:14.640385803 [anonymous-instance:main:INFO] Listening on API socket ("api.sock").
+2026-09-17T17:16:14.640537929 [anonymous-instance:fc_api:INFO] API server started.
+2026-09-17T17:16:14.645615404 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/machine-config" with body "{\"vcpu_count\":1,\"mem_size_mib\":256}".
+2026-09-17T17:16:14.645686276 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:14.653904527 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/boot-source" with body "{\"kernel_image_path\":\"/home/takanorifukuyama.guest/tsls/.kvm/vmlinux\",\"boot_args\":\"console=ttyS0 reboot=k panic=1 pci=off keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc\"}".
+2026-09-17T17:16:14.653971715 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:14.662130186 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/drives/rootfs" with body "{\"drive_id\":\"rootfs\",\"path_on_host\":\"rootfs.ext4\",\"is_root_device\":true,\"is_read_only\":true}".
+2026-09-17T17:16:14.662221613 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:14.670132303 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/drives/function" with body "{\"drive_id\":\"function\",\"path_on_host\":\"function.ext4\",\"is_root_device\":false,\"is_read_only\":true}".
+2026-09-17T17:16:14.670215190 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:14.678402169 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/drives/scratch" with body "{\"drive_id\":\"scratch\",\"path_on_host\":\"scratch.ext4\",\"is_root_device\":false,\"is_read_only\":false}".
+2026-09-17T17:16:14.678500922 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:14.686938821 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/vsock" with body "{\"guest_cid\":3,\"uds_path\":\"v.sock\"}".
+2026-09-17T17:16:14.687054276 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:14.695356669 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/actions" with body "{\"action_type\":\"InstanceStart\"}".
+2026-09-17T17:16:14.702955028 [anonymous-instance:main:WARN] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T17:16:14.703004969 [anonymous-instance:main:WARN] Could not read the coherency line size, size, number of sets for cache level 1.
+2026-09-17T17:16:14.703125950 [anonymous-instance:main:INFO] Artificially kick devices
+2026-09-17T17:16:14.703182882 [anonymous-instance:fc_vcpu 0:WARN] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-17T17:16:14.703242494 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:16.380115163 [anonymous-instance:fc_vcpu 0:INFO] [Block:rootfs] notifying queues
+2026-09-17T17:16:16.427019110 [anonymous-instance:fc_vcpu 0:INFO] [Block:function] notifying queues
+2026-09-17T17:16:16.461759613 [anonymous-instance:fc_vcpu 0:INFO] [Block:scratch] notifying queues
+2026-09-17T17:16:16.741788624 [anonymous-instance:fc_vcpu 0:INFO] [Vsock:vsock] notifying queues
+2026-09-17T17:16:17.486573544 [anonymous-instance:fc_api:INFO] The API server received a Patch request on "/vm" with body "{\"state\":\"Paused\"}".
+2026-09-17T17:16:17.486720815 [anonymous-instance:main:INFO] 'pause vm' VMM action took 101 us.
+2026-09-17T17:16:17.486750746 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:17.486763681 [anonymous-instance:fc_api:INFO] 'pause vm' API request took 193 us.
+2026-09-17T17:16:17.495441199 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/snapshot/create" with body "{\"snapshot_type\":\"Full\",\"snapshot_path\":\"../bsnap/vmstate\",\"mem_file_path\":\"../bsnap/mem\"}".
+2026-09-17T17:16:17.766579699 [anonymous-instance:main:INFO] 'create full snapshot' VMM action took 271080 us.
+2026-09-17T17:16:17.766637720 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:17.766644376 [anonymous-instance:fc_api:INFO] 'create full snapshot' API request took 271206 us.

@@ -1,0 +1,2 @@
+08:16:03.369556498 PUT /snapshot/load -> 204 (10 ms)
+  request: {"snapshot_path":"../snap/vmstate","mem_backend":{"backend_type":"File","backend_path":"../snap/mem"},"resume_vm":true}

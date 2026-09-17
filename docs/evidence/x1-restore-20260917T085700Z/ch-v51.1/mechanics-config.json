@@ -1,0 +1,23 @@
+{
+  "disks": [
+    {
+      "path": "rootfs.ext4",
+      "readonly": true
+    },
+    {
+      "path": "function.ext4",
+      "readonly": true
+    },
+    {
+      "path": "scratch.ext4",
+      "readonly": false
+    }
+  ],
+  "vsock": {
+    "cid": 3,
+    "socket": "v.sock",
+    "iommu": false,
+    "id": "_vsock3",
+    "pci_segment": 0
+  }
+}

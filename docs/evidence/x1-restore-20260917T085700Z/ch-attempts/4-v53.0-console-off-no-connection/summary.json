@@ -1,0 +1,14 @@
+[
+  {
+    "scenario": "cold-1",
+    "result": "FAIL",
+    "metric_ms": null,
+    "detail": "no Ready within 60 s (cloud-hypervisor still running; host code 1); console: cloud-hypervisor:   0.144370s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:347 -- _virtio-pci-_vsock3: Waiting for barrier cloud-hypervisor:   0.144380s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-_vsock3: Barrier released cloud-hypervisor:   0.144396s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released "
+  },
+  {
+    "scenario": "snapshot",
+    "result": "UNSUPPORTED",
+    "metric_ms": null,
+    "detail": "not attempted: the guest does not boot on this host with v53.0"
+  }
+]

@@ -1,0 +1,3 @@
+# leftovers after the run
+firecracker processes: none
+x1-host processes: none

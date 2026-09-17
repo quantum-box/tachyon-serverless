@@ -1,0 +1,19 @@
+2026-09-17T17:16:17.795831727 [anonymous-instance:main:INFO] Running Firecracker v1.17.0
+2026-09-17T17:16:17.795906199 [anonymous-instance:main:INFO] Listening on API socket ("api.sock").
+2026-09-17T17:16:17.796033250 [anonymous-instance:fc_api:INFO] API server started.
+2026-09-17T17:16:17.802829995 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/snapshot/load" with body "{\"snapshot_path\":\"../bsnap/vmstate\",\"mem_backend\":{\"backend_type\":\"File\",\"backend_path\":\"../bsnap/mem\"},\"resume_vm\":true}".
+2026-09-17T17:16:17.803008159 [anonymous-instance:main:INFO] Host CPU manufacturer ID: 97
+2026-09-17T17:16:17.803013517 [anonymous-instance:main:INFO] Snapshot CPU manufacturer ID: 97
+2026-09-17T17:16:17.805573291 [anonymous-instance:main:INFO] Artificially kick devices
+2026-09-17T17:16:17.805580156 [anonymous-instance:main:INFO] [Vsock:vsock] signaling event queue
+2026-09-17T17:16:17.805585012 [anonymous-instance:main:INFO] [Vsock:vsock] notifying tx queue
+2026-09-17T17:16:17.805589114 [anonymous-instance:main:INFO] [Block:scratch] notifying queues
+2026-09-17T17:16:17.805592422 [anonymous-instance:main:INFO] [Block:function] notifying queues
+2026-09-17T17:16:17.805595687 [anonymous-instance:main:INFO] [Block:rootfs] notifying queues
+2026-09-17T17:16:17.805631144 [anonymous-instance:fc_vcpu 0:WARN] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-17T17:16:17.805679159 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:16:17.805685439 [anonymous-instance:fc_api:INFO] 'load snapshot' API request took 2858 us.
+2026-09-17T17:16:22.715976480 [anonymous-instance:fc_vcpu 0:INFO] Received KVM_SYSTEM_EVENT: type: 1, event: [0]
+2026-09-17T17:16:22.716026044 [anonymous-instance:main:INFO] Vmm is stopping.
+2026-09-17T17:16:22.716140411 [anonymous-instance:main:INFO] Killing vCPU threads
+2026-09-17T17:16:22.717004064 [anonymous-instance:main:INFO] Firecracker exiting successfully. exit_code=0

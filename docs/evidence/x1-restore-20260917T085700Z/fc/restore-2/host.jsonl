@@ -1,0 +1,14 @@
+{"event":"listening","host_wall_ms":1789632973772,"mode":"clone","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T081534Z/restore-2/v.sock_5000","t_ms":0}
+{"attempts":4,"event":"doorbell_ok","host_wall_ms":1789632973820,"reply":"OK 1073741824","t_ms":48}
+{"event":"accepted","host_wall_ms":1789632973868,"t_ms":95}
+{"clocks":{"boottime_ms":3085,"monotonic_ms":3085,"wall_ms":1789632954499},"connection":1,"event":"guest_control","guest_boot_id":"61064d5b-e079-4be8-b284-9776ff664f82","host_wall_ms":1789632973884,"lost":"vsock doorbell","t_ms":112,"type":"x1_reconnect","urandom_hex":"0491cbad2195c70c6e8c933426daae18"}
+{"event":"restore_identified","host_wall_ms":1789632973884,"t_ms":112}
+{"event":"host_control","generation":1,"host_wall_ms":1789632973884,"instance_id":"restore-2","restored":true,"t_ms":112,"type":"x1_continue"}
+{"bytes":10,"error":null,"event":"guest_control","host_wall_ms":1789632973930,"path":"/tmp/x1-instance","t_ms":157,"type":"x1_scratch_written"}
+{"event":"guest_log","host_wall_ms":1789632973979,"line":"lifecycle continue answered (restored)","phase":"init","t_ms":207}
+{"event":"guest_log","host_wall_ms":1789632974002,"line":"restore-aware: after_restore: restored=true generation=1 instance=restore-2-2707aefb4a6a84b5","phase":"init","t_ms":229}
+{"event":"guest_frame","host_wall_ms":1789632974035,"init_ms":1433,"t_ms":263,"type":"ready"}
+{"attempt_id":"att_x1_0","event":"invoke_sent","host_wall_ms":1789632974035,"t_ms":263}
+{"attempt_id":"att_x1_0","epoch":1,"event":"guest_frame","handler_ms":10,"host_wall_ms":1789632974083,"payload":{"connection_id":"conn-7d6a32ab38c497fa","connection_opened_at_ms":1789632954618,"connection_queries":1,"generation":1,"instance_id":"restore-2-2707aefb4a6a84b5","is_prime":true,"n":97,"random":15490789550946096472,"restored":true,"secret_present":false,"started_at_ms":1789632954582,"table_primes":9592},"t_ms":310,"type":"response"}
+{"event":"connection_closed","host_wall_ms":1789632974115,"t_ms":342}
+{"code":0,"event":"exit","host_wall_ms":1789632974115,"t_ms":342}

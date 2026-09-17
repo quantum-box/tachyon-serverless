@@ -1,0 +1,3 @@
+scenario	result	metric_ms	detail
+cold-1	FAIL		no Ready within 60 s (cloud-hypervisor still running; host code 1); console: cloud-hypervisor:   0.151176s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-_vsock3: Barrier released cloud-hypervisor:   0.151196s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released [2m2026-09-17T08:41:14.544277Z[0m [32m INFO[0m x1: session starting behind the pump [3menvironment_id[0m[2m=[0menv_x1restore [3mport[0m[2m=[0m5000 
+snapshot	UNSUPPORTED		not attempted: the guest does not boot on this host with v53.0

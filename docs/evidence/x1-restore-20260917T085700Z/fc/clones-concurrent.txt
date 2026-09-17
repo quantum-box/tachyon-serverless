@@ -1,0 +1,13 @@
+# both clone VMMs alive at the same time, both mapping the one snapshot memory file
+clone-a firecracker pid 134914 alive=yes
+e0ca37c00000-e0ca47c00000 rw-p 00000000 fd:01 1367535                    /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T081534Z/snap/mem
+  Rss:               28996 kB
+  Pss:               15610 kB
+  Shared_Clean:      26756 kB
+  Private_Dirty:      2232 kB
+clone-b firecracker pid 134924 alive=yes
+fe589e000000-fe58ae000000 rw-p 00000000 fd:01 1367535                    /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T081534Z/snap/mem
+  Rss:               28992 kB
+  Pss:               15606 kB
+  Shared_Clean:      26756 kB
+  Private_Dirty:      2220 kB

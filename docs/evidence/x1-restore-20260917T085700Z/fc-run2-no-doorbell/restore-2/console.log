@@ -1,0 +1,12 @@
+[    3.290143] random: crng reseeded due to virtual machine fork
+[    3.290143] random: crng reseeded due to virtual machine fork
+[2m2026-09-17T08:10:25.253949Z[0m [33m WARN[0m x1: host connection lost; reconnecting [3mlost[0m[2m=[0mwrite: io: Socket not connected (os error 107) [3mconnection[0m[2m=[0m0
+[2m2026-09-17T08:10:25.279547Z[0m [32m INFO[0m x1: reconnected [3mconnection[0m[2m=[0m1 [3mafter_ms[0m[2m=[0m9
+[2m2026-09-17T08:10:25.310385Z[0m [32m INFO[0m x1: continue answered restored [3minstance_id[0m[2m=[0mrestore-2 [3mgeneration[0m[2m=[0m1
+[2m2026-09-17T08:10:25.323123Z[0m [32m INFO[0m experimental lifecycle: continue answered [3mrestored[0m[2m=[0mtrue
+[2m2026-09-17T08:10:25.396478Z[0m [32m INFO[0m user process ready [3minit_ms[0m[2m=[0m5208
+[2m2026-09-17T08:10:25.413164Z[0m [32m INFO[0m invoke received [3mattempt_id[0m[2m=[0matt_x1_0 [3mepoch[0m[2m=[0m1 [3mhost_deadline_ms[0m[2m=[0m1789632697986 [3mremaining_ms[0m[2m=[0m30000 [3mdeadline_ms[0m[2m=[0m1789632655413
+[2m2026-09-17T08:10:25.447489Z[0m [32m INFO[0m response received [3mattempt_id[0m[2m=[0matt_x1_0 [3mhandler_ms[0m[2m=[0mSome(6)
+[2m2026-09-17T08:10:25.458389Z[0m [32m INFO[0m shutdown received [3mreason[0m[2m=[0mx1 done
+[    7.338704] reboot: Power down
+[    7.338704] reboot: Power down

@@ -1,0 +1,5 @@
+scenario	result	metric_ms	detail
+cold-1	FAIL		no Ready within 60 s (cloud-hypervisor still running; host code 1); console: cloud-hypervisor:   0.281045s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:347 -- _virtio-pci-_vsock3: Waiting for barrier cloud-hypervisor:   0.281062s: <vmm> INFO:virtio-devices/src/transport/pci_device.rs:349 -- _virtio-pci-_vsock3: Barrier released cloud-hypervisor:   0.281082s: <vcpu0> INFO:vmm/src/vm.rs:490 -- Barrier released 
+mechanics-snapshot	INFO	382	ch-remote pause + snapshot accepted on a guest that never reached the handshake (files: state.json memory-ranges config.json )
+mechanics-restore	INFO	3242	fresh process --restore: resume accepted=yes, VMM state after 3 s=Running, host connections=0; guest liveness NOT verified
+snapshot-restore-of-running-guest	FAIL		not measurable: the guest does not reach the bridge handshake on this host with v53.0

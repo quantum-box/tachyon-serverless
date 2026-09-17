@@ -1,0 +1,13 @@
+{"event":"listening","host_wall_ms":1789632672373,"mode":"bridge","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/bridge-source/v.sock_5000","t_ms":0}
+{"event":"accepted","host_wall_ms":1789632674808,"t_ms":2575}
+{"architecture":"aarch64","bridge_version":"0.1.0","environment_id":"env_x1restore","event":"guest_frame","guest_boot_id":"1b6c45f4-be9b-41f9-8f18-9415f13699c7","host_wall_ms":1789632674824,"protocol_version":2,"t_ms":2590,"type":"hello"}
+{"env_vars":0,"event":"hello_ack_sent","host_wall_ms":1789632674824,"t_ms":2590}
+{"event":"guest_log","host_wall_ms":1789632674918,"line":"user process started (pid 104)","phase":"init","t_ms":2684}
+{"event":"guest_log","host_wall_ms":1789632675020,"line":"restore-aware: bootstrap: building the lookup table (no runtime, no secrets)","phase":"init","t_ms":2786}
+{"event":"guest_log","host_wall_ms":1789632675055,"line":"lifecycle continue answered (cold)","phase":"init","t_ms":2821}
+{"event":"guest_log","host_wall_ms":1789632675081,"line":"restore-aware: after_restore: restored=false generation=0 instance=env_x1restore-e037f9ceaa2bda05","phase":"init","t_ms":2848}
+{"event":"guest_frame","host_wall_ms":1789632675109,"init_ms":231,"t_ms":2876,"type":"ready"}
+{"attempt_id":"att_x1_0","event":"invoke_sent","host_wall_ms":1789632675109,"t_ms":2876}
+{"attempt_id":"att_x1_0","epoch":1,"event":"guest_frame","handler_ms":14,"host_wall_ms":1789632675180,"payload":{"connection_id":"conn-07edd175ad9e8905","connection_opened_at_ms":1789632675439,"connection_queries":1,"generation":0,"instance_id":"env_x1restore-e037f9ceaa2bda05","is_prime":true,"n":97,"random":18137199074130318163,"restored":false,"secret_present":false,"started_at_ms":1789632675418,"table_primes":9592},"t_ms":2946,"type":"response"}
+{"event":"bridge_idle","host_wall_ms":1789632675180,"t_ms":2946}
+{"event":"connection_closed","host_wall_ms":1789632675595,"t_ms":3362}

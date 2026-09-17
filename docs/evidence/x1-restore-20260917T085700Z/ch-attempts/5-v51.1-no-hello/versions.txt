@@ -1,0 +1,13 @@
+cloud-hypervisor-static-aarch64 9b40547644a60036ba8b6815878dee2c16359e4337e41d7c161e8ed51d330bf7 https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v51.1/cloud-hypervisor-static-aarch64
+ch-remote-static-aarch64 92550c3668da72b376edbcd06d219fafc1bdca484a5e98ed4d6e76197438526c https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v51.1/ch-remote-static-aarch64
+cloud_hypervisor_version cloud-hypervisor v51.1
+ch_remote_version ch-remote v51.1
+kernel_sha256 e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+kernel_file Linux kernel ARM64 boot executable Image, little-endian, 4K pages
+host_uname Linux 7.0.0-31-generic aarch64
+commit d6e729f28ab8a953babbc4307b35ed9740035203
+cmdline console=hvc0 loglevel=1 root=/dev/vda ro reboot=k panic=1 keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc
+mem_mib 256 vcpus 1
+rootfs-x1.ext4 3912b93cbe76942ad9060cb395aa6bc63b3b46f8619878ee7190aca633d629da
+function.ext4 7fd755a338d534bcde0f5d20fc03fc278b8ef47e58e2834762c2cd40c7571788
+scratch-empty.ext4 2c71ffb7e43b8774f523377ddc8e3f2c97b1c9140947cdfbc2d7688dd2d452bf

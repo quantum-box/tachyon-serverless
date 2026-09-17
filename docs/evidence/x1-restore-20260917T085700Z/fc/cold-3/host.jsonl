@@ -1,0 +1,15 @@
+{"event":"listening","host_wall_ms":1789632947405,"mode":"cold","path":"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T081534Z/cold-3/v.sock_5000","t_ms":0}
+{"event":"accepted","host_wall_ms":1789632950060,"t_ms":2654}
+{"architecture":"aarch64","bridge_version":"0.1.0","environment_id":"env_x1restore","event":"guest_frame","guest_boot_id":"cde92388-52aa-42ff-9b36-c5b2252a9824","host_wall_ms":1789632950109,"protocol_version":2,"t_ms":2703,"type":"hello"}
+{"env_vars":0,"event":"hello_ack_sent","host_wall_ms":1789632950109,"t_ms":2703}
+{"event":"guest_log","host_wall_ms":1789632950184,"line":"user process started (pid 105)","phase":"init","t_ms":2779}
+{"event":"guest_log","host_wall_ms":1789632950299,"line":"restore-aware: bootstrap: building the lookup table (no runtime, no secrets)","phase":"init","t_ms":2893}
+{"clocks":{"boottime_ms":2085,"monotonic_ms":2085,"wall_ms":1789632950458},"event":"guest_control","host_wall_ms":1789632950311,"t_ms":2906,"type":"x1_waiting"}
+{"event":"host_control","generation":0,"host_wall_ms":1789632950311,"instance_id":null,"restored":false,"t_ms":2906,"type":"x1_continue"}
+{"event":"guest_log","host_wall_ms":1789632950348,"line":"lifecycle continue answered (cold)","phase":"init","t_ms":2942}
+{"event":"guest_log","host_wall_ms":1789632950363,"line":"restore-aware: after_restore: restored=false generation=0 instance=env_x1restore-dfe81444526db2c6","phase":"init","t_ms":2958}
+{"event":"guest_frame","host_wall_ms":1789632950387,"init_ms":228,"t_ms":2982,"type":"ready"}
+{"attempt_id":"att_x1_0","event":"invoke_sent","host_wall_ms":1789632950387,"t_ms":2982}
+{"attempt_id":"att_x1_0","epoch":1,"event":"guest_frame","handler_ms":14,"host_wall_ms":1789632950455,"payload":{"connection_id":"conn-3ddf95721b22b79b","connection_opened_at_ms":1789632950507,"connection_queries":1,"generation":0,"instance_id":"env_x1restore-dfe81444526db2c6","is_prime":true,"n":97,"random":2115544261528722784,"restored":false,"secret_present":false,"started_at_ms":1789632950487,"table_primes":9592},"t_ms":3050,"type":"response"}
+{"event":"connection_closed","host_wall_ms":1789632950484,"t_ms":3078}
+{"code":0,"event":"exit","host_wall_ms":1789632950484,"t_ms":3078}

@@ -1,0 +1,19 @@
+2026-09-17T17:11:08.131263493 [anonymous-instance:main:INFO] Running Firecracker v1.17.0
+2026-09-17T17:11:08.131430857 [anonymous-instance:main:INFO] Listening on API socket ("api.sock").
+2026-09-17T17:11:08.131704215 [anonymous-instance:fc_api:INFO] API server started.
+2026-09-17T17:11:08.139449216 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/snapshot/load" with body "{\"snapshot_path\":\"../snap/vmstate\",\"mem_backend\":{\"backend_type\":\"File\",\"backend_path\":\"../snap/mem\"},\"resume_vm\":true,\"vsock_override\":{\"uds_path\":\"/home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/restore-3/override.sock\"}}".
+2026-09-17T17:11:08.139704825 [anonymous-instance:main:INFO] Host CPU manufacturer ID: 97
+2026-09-17T17:11:08.139710309 [anonymous-instance:main:INFO] Snapshot CPU manufacturer ID: 97
+2026-09-17T17:11:08.142906426 [anonymous-instance:main:INFO] Artificially kick devices
+2026-09-17T17:11:08.142913668 [anonymous-instance:main:INFO] [Vsock:vsock] signaling event queue
+2026-09-17T17:11:08.142919193 [anonymous-instance:main:INFO] [Vsock:vsock] notifying tx queue
+2026-09-17T17:11:08.142923924 [anonymous-instance:main:INFO] [Block:function] notifying queues
+2026-09-17T17:11:08.142928612 [anonymous-instance:main:INFO] [Block:rootfs] notifying queues
+2026-09-17T17:11:08.142932966 [anonymous-instance:main:INFO] [Block:scratch] notifying queues
+2026-09-17T17:11:08.142962060 [anonymous-instance:fc_vcpu 0:WARN] Received a VcpuEvent::Resume message with immediate_exit enabled. immediate_exit was disabled before proceeding
+2026-09-17T17:11:08.143116112 [anonymous-instance:fc_api:INFO] The request was executed successfully. Status code: 204 No Content.
+2026-09-17T17:11:08.143138969 [anonymous-instance:fc_api:INFO] 'load snapshot' API request took 3693 us.
+2026-09-17T17:11:12.295516895 [anonymous-instance:fc_vcpu 0:INFO] Received KVM_SYSTEM_EVENT: type: 1, event: [0]
+2026-09-17T17:11:12.295609452 [anonymous-instance:main:INFO] Vmm is stopping.
+2026-09-17T17:11:12.295754713 [anonymous-instance:main:INFO] Killing vCPU threads
+2026-09-17T17:11:12.299224188 [anonymous-instance:main:INFO] Firecracker exiting successfully. exit_code=0

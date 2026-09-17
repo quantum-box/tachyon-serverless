@@ -1,0 +1,9 @@
+2026-09-17T17:16:14.607079824 [anonymous-instance:main:INFO] Running Firecracker v1.17.0
+2026-09-17T17:16:14.607162208 [anonymous-instance:main:INFO] Listening on API socket ("api.sock").
+2026-09-17T17:16:14.607946115 [anonymous-instance:fc_api:INFO] API server started.
+2026-09-17T17:16:14.613363090 [anonymous-instance:fc_api:INFO] The API server received a Put request on "/snapshot/load" with body "{\"snapshot_path\":\"../snap/vmstate\",\"mem_backend\":{\"backend_type\":\"File\",\"backend_path\":\"../snap/mem\"},\"resume_vm\":true}".
+2026-09-17T17:16:14.613565325 [anonymous-instance:main:INFO] Host CPU manufacturer ID: 97
+2026-09-17T17:16:14.613570307 [anonymous-instance:main:INFO] Snapshot CPU manufacturer ID: 97
+2026-09-17T17:16:14.620946713 [anonymous-instance:fc_api:ERROR] Received Error. Status code: 400 Bad Request. Message: Load snapshot error: Failed to restore from snapshot: Failed to build microVM from snapshot: Failed to restore devices: Error restoring MMIO devices: Block: Virtio backend error: Error manipulating the backing file: No such file or directory (os error 2) scratch.ext4
+2026-09-17T17:16:14.621051410 [anonymous-instance:main:ERROR] RunWithApiError error: Failed to build MicroVM: Loading snapshot failed..
+2026-09-17T17:16:14.621065350 [anonymous-instance:main:ERROR] Firecracker exiting with error. exit_code=1

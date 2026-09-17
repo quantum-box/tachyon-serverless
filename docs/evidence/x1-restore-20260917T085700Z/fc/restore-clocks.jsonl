@@ -1,0 +1,5 @@
+{"scenario":"clone-a","host_wall_ms":1789632963479,"clocks":{"boottime_ms":3099,"monotonic_ms":3099,"wall_ms":1789632954512},"urandom_hex":"c280721a575275115e0a7d3b49b43873","lost":"vsock doorbell"}
+{"scenario":"clone-b","host_wall_ms":1789632963485,"clocks":{"boottime_ms":3091,"monotonic_ms":3091,"wall_ms":1789632954504},"urandom_hex":"a320f3b670857a8e1427bfe89f6a24c4","lost":"vsock doorbell"}
+{"scenario":"restore-1","host_wall_ms":1789632973512,"clocks":{"boottime_ms":6929,"monotonic_ms":6929,"wall_ms":1789632958342},"urandom_hex":"d24c9a6724d86b98bd588c0c8fe4f52d","lost":"write: io: Socket not connected (os error 107)"}
+{"scenario":"restore-2","host_wall_ms":1789632973884,"clocks":{"boottime_ms":3085,"monotonic_ms":3085,"wall_ms":1789632954499},"urandom_hex":"0491cbad2195c70c6e8c933426daae18","lost":"vsock doorbell"}
+{"scenario":"restore-3","host_wall_ms":1789632974306,"clocks":{"boottime_ms":3089,"monotonic_ms":3089,"wall_ms":1789632954503},"urandom_hex":"699c2665e35b5d2b0d759c4438635573","lost":"vsock doorbell"}

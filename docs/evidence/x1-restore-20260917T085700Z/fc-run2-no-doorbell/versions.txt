@@ -1,0 +1,16 @@
+firecracker Firecracker v1.17.0
+firecracker_sha256 fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c
+kernel_sha256 e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591
+kernel_file Linux kernel ARM64 boot executable Image, little-endian, 4K pages
+rootfs-x1.ext4 97e5dbf4424f7a6d51fb0b5a8eba453eaa1d314fdc1bfb9d0cc5ca334934812e
+rootfs-bridge.ext4 27656022e1f0c7374d49c23ac28aefa81ddf93793ed2117e89066d53449e5b0c
+function.ext4 3b41b3f3ae4ac4b2cf6ec953c5036594352bd41ac64bf9531966e51994987d9c
+scratch-empty.ext4 c5577a8c1386c90722e5052a16fa91330fec83464411674249cb19164dc50258
+x1-guest-init c319972f11df63d8f2b4646d73c167dfdd3ef80055f32de9593c878f2a32b759
+tachyon-serverless-runtime-bridge edb5f38be20b4b715bbbd84b6c6ff6c5e05b2af4e5b353316998645197541fa8
+example-restore-aware 520367593eab721cb0ab262861fd6d6772d8337feddaf241e8e00215356fd61e
+host_uname Linux 7.0.0-31-generic aarch64
+host_cpu 0x000
+commit d6e729f28ab8a953babbc4307b35ed9740035203
+boot_args console=ttyS0 reboot=k panic=1 pci=off keep_bootcon init=/sbin/tachyon-init tachyon.env_id=env_x1restore tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc
+mem_mib 256 vcpus 1

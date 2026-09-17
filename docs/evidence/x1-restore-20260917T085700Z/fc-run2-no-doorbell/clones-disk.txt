@@ -1,0 +1,8 @@
+# scratch drive marker per copy (debugfs cat /x1-instance)
+snapshot copy: /x1-instance: File not found by ext2_lookup 
+clone-a: clone-a
+clone-b: clone-b
+# snapshot files after the clones ran (must equal snapshot-files.txt)
+c5aacdae5bddc4eedfd6b9ef89dd85ae0f4a76cd471f4c9922f23d01c786870d  /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/snap/vmstate
+8fc59284f05379e4610c33b8107f3bb75a98e0e7cc1cf53247b325c3cb569438  /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/snap/mem
+fe430f9dceb3cdce62e903861f2fcc6e670ecce0602c80a39b889713892de123  /home/takanorifukuyama.guest/tsls/.kvm/x1/fc-20260917T080958Z/snap/scratch.ext4

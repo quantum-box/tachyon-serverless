@@ -1,0 +1,37 @@
+[package]
+name = "tachyon-serverless-x1-restore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+# X1 (PLT-4652, experimental, non-blocking): measurement harness for VMM-level snapshot /
+# restore / clone of a microVM that runs the runtime bridge + examples/restore-aware.
+# Not used by the gateway or any provider (PLT-4653 owns the provider clone path).
+#   x1-guest-init  PID 1 for an experiment rootfs: the unmodified bridge session behind a
+#                  frame pump that survives a vsock transport reset and answers the lifecycle
+#                  `continue` from host control frames (x1_*).
+#   x1-host        host side of one VMM: handshake, control frames, invokes, JSON-lines events.
+description = "Experimental (X1, PLT-4652): snapshot/restore feasibility harness for the runtime bridge; not part of the product."
+
+[dependencies]
+tachyon-serverless-protocol = { workspace = true }
+tachyon-serverless-runtime-bridge = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+libc = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-vsock = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
