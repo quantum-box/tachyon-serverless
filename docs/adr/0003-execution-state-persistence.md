@@ -322,6 +322,10 @@ MySQL では実行していない。TiDB 版 migration は `ADD COLUMN IF NOT EX
 | MySQL | 対象外 | 実行していない。TiDB 版 migration は TiDB 拡張を使う |
 | budget の store（PLT-4643） | 対象外（この検証の時点） | `<data_dir>/usage/budget.db` は `state.db` の migration ではない別の SQLite（`crates/application/src/budget/store.rs`）で、TiDB 版を作っていない。`state.db` の migration は 008 まで mirror 済み（`versions_mirror_the_sqlite_migrations` が数の不一致で失敗する） |
 
+## Addendum（2026-09-17、invocation log の永続化）
+
+決定 5 の「log は memory のまま」と「非対象」の「log の永続化」は **ADR-0018 で置き換えた**。invocation log は `state.db` ではなく別の SQLite `<data_dir>/logs/logs.db` に、上限付き queue と writer thread の batch commit で書く（台帳の writer lock を log が奪い合わない）。保持期限（`[logs] retention_seconds`、既定 7 日）と総量上限（`max_total_bytes`、既定 1 GiB）があり、log store が使えなくても invocation は止めない。`state.db` の schema と migration は変わらない。`[store] backend = "memory"` のときは従来どおり memory buffer。上の本文（決定時点と PLT-4618 / PLT-4631 の実装メモ）の「log は memory」「log は永続化しない」は書き換えていない。
+
 ## 参照
 
 - 基準 RFC: quantum-box/knowledge PR #284「Tachyon Serverless 全体設計 RFC v0.1」（`docs/architecture.md` の先頭、`README.md` の「設計文書」）。**本リポジトリが節番号まで引用しているのは `crates/domain/src/environment.rs` の `ReuseKey`（RFC §5.3）だけ**である。本 ADR の「durable な control-plane と cell 局所 store の分割」は RFC §15 の形として PLT-4618 の指示で与えられたものを指しており、RFC 本文はこのリポジトリからは参照できない。RFC 本文と食い違う場合は RFC を正とし、本 ADR を改版する。

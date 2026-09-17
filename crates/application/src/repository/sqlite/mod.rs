@@ -1401,8 +1401,8 @@ impl LogRepository for SqliteStore {
         self.logs.append(&self.limits, record)
     }
 
-    fn query(&self, invocation: &InvocationId) -> LogQuery {
-        self.logs.query(invocation)
+    fn query(&self, tenant: &TenantId, invocation: &InvocationId) -> Result<LogQuery, RepoError> {
+        Ok(self.logs.query(tenant, invocation))
     }
 }
 

@@ -77,6 +77,8 @@ pub struct MetricsInput {
     pub dispatch: Option<crate::metrics::dispatch::AsyncDispatchSnapshot>,
     /// Budget reservations, settlement and refusals (PLT-4643).
     pub budget: Option<crate::budget::BudgetMetrics>,
+    /// The durable log store (docs/adr/0018), when the ledger is durable.
+    pub logs: Option<crate::logs::LogStoreMetrics>,
 }
 
 /// Usage metering pipeline state (PLT-4642, docs/adr/0012).
@@ -1009,6 +1011,50 @@ pub fn render(input: &MetricsInput) -> String {
             "tsls_budget_overrun_micros_total",
             &[],
             c.overrun_micros as f64,
+        );
+    }
+
+    if let Some(l) = &input.logs {
+        let flag = |v: bool| f64::from(u8::from(v));
+        w.sample("tsls_logs_store_healthy", &[], flag(l.healthy));
+        w.sample("tsls_logs_lines_written_total", &[], l.lines_written as f64);
+        w.sample("tsls_logs_bytes_written_total", &[], l.bytes_written as f64);
+        w.sample(
+            "tsls_logs_lines_truncated_total",
+            &[],
+            l.lines_truncated as f64,
+        );
+        w.sample("tsls_logs_marker_lines_total", &[], l.marker_lines as f64);
+        for reason in crate::logs::DROP_REASONS {
+            w.sample(
+                "tsls_logs_lines_dropped_total",
+                &[("reason", reason)],
+                l.lines_dropped.get(reason).copied().unwrap_or(0) as f64,
+            );
+        }
+        w.sample("tsls_logs_queue_lines", &[], l.queued_lines as f64);
+        w.sample("tsls_logs_queue_bytes", &[], l.queued_bytes as f64);
+        if let Some(lag) = l.last_flush_lag_ms {
+            w.sample("tsls_logs_flush_lag_seconds", &[], lag / 1000.0);
+        }
+        w.sample(
+            "tsls_logs_flush_failures_total",
+            &[],
+            l.flush_failures as f64,
+        );
+        w.sample("tsls_logs_stored_bytes", &[], l.stored_bytes as f64);
+        w.sample("tsls_logs_stored_lines", &[], l.stored_lines as f64);
+        for reason in ["age", "size"] {
+            w.sample(
+                "tsls_logs_retention_deleted_lines_total",
+                &[("reason", reason)],
+                l.retention_deleted_lines.get(reason).copied().unwrap_or(0) as f64,
+            );
+        }
+        w.sample(
+            "tsls_logs_retention_skipped_non_terminal",
+            &[],
+            l.retention_skipped_non_terminal as f64,
         );
     }
 

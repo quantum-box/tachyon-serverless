@@ -246,6 +246,29 @@ dispatcher を動かす gateway（`[queue]` と durable ledger があり `[async
 | `tsls_budget_alerts_total` | counter | `scope` | soft limit の閾値を初めて越えた回数（`tenant` / `function`）。alert は何も止めない |
 | `tsls_budget_overrun_micros_total` | counter | | 実測が予約を超えた額（全額精算した） |
 
+### 3.11 invocation log（ADR-0018）
+
+台帳が durable（`[store] backend = "sqlite"`）なときだけ出る。tenant label は無い。counter はこのプロセスの累計、保存量の gauge は `logs.db` 全体（同じ `data_dir` の他の gateway の分も含む）。
+
+| family | type | labels | 意味 |
+|---|---|---|---|
+| `tsls_logs_store_healthy` | gauge | | `logs/logs.db` が開いていて直近の flush が commit できれば 1。0 は degraded（invoke は続き、行は捨てて数える。`/readyz` の `logs.healthy`） |
+| `tsls_logs_lines_written_total` | counter | | commit した行（marker を除く） |
+| `tsls_logs_bytes_written_total` | counter | | commit した行の bytes |
+| `tsls_logs_lines_truncated_total` | counter | | commit した行のうち `max_log_line_bytes` で切ったもの |
+| `tsls_logs_marker_lines_total` | counter | | 上限・欠落について書いた `[tachyon] ` marker 行 |
+| `tsls_logs_lines_dropped_total` | counter | `reason` | 保存しなかった行: `queue_full`（writer queue の上限）/ `store_unavailable`（`logs.db` が batch を拒否・開けない）/ `invocation_limit` / `attempt_limit` / `unattributed`（invocation に属さない行。API で読めないので保存しない） |
+| `tsls_logs_queue_lines` | gauge | | writer queue で待っている行 |
+| `tsls_logs_queue_bytes` | gauge | | 同じく bytes |
+| `tsls_logs_flush_lag_seconds` | gauge | | 直近に commit した batch の最古の行が queue に入ってから commit までの時間。まだ flush していなければ系列なし |
+| `tsls_logs_flush_failures_total` | counter | | `logs.db` が拒否した batch（lock、disk 満杯、開けない） |
+| `tsls_logs_stored_bytes` | gauge | | 保存している行の bytes（marker 込み、SQLite の page と index は含まない）。`[logs] max_total_bytes` と比べる値 |
+| `tsls_logs_stored_lines` | gauge | | 保存している行（marker 込み） |
+| `tsls_logs_retention_deleted_lines_total` | counter | `reason` | 保持処理が消した行: `age`（`retention_seconds`）/ `size`（`max_total_bytes`） |
+| `tsls_logs_retention_skipped_non_terminal` | gauge | | 直近の総量上限の処理で、台帳が terminal と答えなかったため残した invocation |
+
+見方: `lines_dropped_total{reason="queue_full"}` の増加と `flush_lag_seconds` の伸びは disk が遅いか log の多い handler、`store_healthy = 0` と `reason="store_unavailable"` は `logs.db` の lock か disk 満杯。`stored_bytes` が `max_total_bytes` を超えたままで `retention_skipped_non_terminal` が正なら、実行中の invocation の log だけで上限を超えている。alert は定義していない。
+
 ## 4. boot identity（再利用の証跡）
 
 - guest bridge は Hello で `/proc/sys/kernel/random/boot_id` を報告し、環境の `BootEvidence.guest_boot_id` に残る（PLT-4630）。attempt の API（`attempts[].boot_evidence`）にも出る。

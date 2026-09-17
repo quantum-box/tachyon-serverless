@@ -581,6 +581,10 @@ pub async fn serve_with_console(
     if let Err(e) = app.store.flush() {
         tracing::warn!(error = %e, "final state checkpoint failed");
     }
+    // Commit the log lines still queued (docs/adr/0018).
+    if let Some(logs) = &app.log_store {
+        logs.shutdown();
+    }
     tracing::info!("gateway stopped");
     Ok(())
 }

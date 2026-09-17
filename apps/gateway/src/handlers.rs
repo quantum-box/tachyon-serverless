@@ -90,6 +90,11 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
             "usage": usage,
             // Operator facts of budget enforcement: no tenant data (PLT-4643).
             "budget": budget,
+            // The invocation log store (docs/adr/0018). Informational only: a
+            // degraded log store (`healthy: false`) drops and counts log
+            // lines but never refuses invocations, so it does not fail
+            // readiness.
+            "logs": state.log_store_status(),
         })),
     )
         .into_response()

@@ -277,6 +277,9 @@ async fn full_api_roundtrip() {
     let ready = call(r, Request::get("/readyz").body(Body::empty()).unwrap()).await;
     assert_eq!(ready.status, StatusCode::OK);
     assert_eq!(ready.json()["ready"], true);
+    // A volatile ledger keeps logs in the memory buffer (docs/adr/0018).
+    assert_eq!(ready.json()["logs"]["backend"], "memory");
+    assert_eq!(ready.json()["logs"]["durable"], false);
 
     // auth
     let anon = call(
@@ -1281,6 +1284,38 @@ async fn bootstrap_converges_on_a_state_file_left_behind_by_a_crash() {
     assert_eq!(ready.json()["reconcile"]["found"], 1);
     assert_eq!(ready.json()["reconcile"]["terminated"], 1);
     assert_eq!(ready.json()["reconcile"]["error"], serde_json::Value::Null);
+    // A durable ledger writes logs to logs/logs.db (docs/adr/0018).
+    let logs = &ready.json()["logs"];
+    assert_eq!(logs["backend"], "sqlite", "{logs}");
+    assert_eq!(logs["durable"], true);
+    assert_eq!(logs["healthy"], true);
+    assert!(logs["path"].as_str().unwrap().ends_with("logs/logs.db"));
+}
+
+/// docs/adr/0018: a degraded log store is reported on `/readyz` but does not
+/// fail readiness: invocations still run, their lines are dropped and
+/// counted.
+#[tokio::test]
+async fn a_degraded_log_store_is_reported_without_failing_readiness() {
+    let dir = tempfile::tempdir().unwrap();
+    // `logs` is a file: logs/logs.db cannot be created.
+    std::fs::write(dir.path().join("logs"), b"not a directory").unwrap();
+    let fake = Arc::new(FakeExecutionProvider::with_scripts(vec![]));
+    let app = Application::bootstrap_with(
+        config(dir.path()),
+        fake,
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let r = router(app);
+    let ready = call(&r, Request::get("/readyz").body(Body::empty()).unwrap()).await;
+    assert_eq!(ready.status, StatusCode::OK, "{}", ready.json());
+    assert_eq!(ready.json()["ready"], true);
+    assert_eq!(ready.json()["logs"]["healthy"], false);
+    assert!(ready.json()["logs"]["last_error"].is_string());
 }
 
 // ---------------------------------------------------------------------------
