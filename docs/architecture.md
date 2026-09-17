@@ -534,6 +534,41 @@ OutboxPublisher::run_once ◀────────┘（gateway の loop、ca
 | 再起動 | 非同期 invocation は dispatcher を持たず（`dispatcher_id = None`）、restart reconcile の対象外。outbox の未送信行は次の pass が送る。claim を持ったまま落ちた publisher の行は `claim_ttl_seconds` 後に取り直す |
 | 重複 | ACK 後・mark 前に落ちると再 publish。broker の duplicate window 内なら 1 通、外なら同じ message id の 2 通目が保存される（at-least-once）。consumer は台帳の invocation id で決着する |
 | 複数 gateway | 同じ `state.db` の publisher のうち 1 つだけが行を claim する（`BEGIN IMMEDIATE` と CAS）。outbox の上限もトランザクション内で判定するので、gateway の数だけ上限を越えることはない。queue の状態（満杯・停止）はプロセスローカル |
+
+### 非同期 dispatcher・retry・DLQ（PLT-4640）
+
+決定は `docs/adr/0013-async-dispatch-retry-dlq.md`、API は `docs/api.md` §5.6.2・§5.6.3。
+
+```
+EventQueue ─fetch(1)─▶ AsyncDispatcher::handle（worker × [async_dispatch] workers）
+    1. envelope を decode・台帳と照合 ── 合わない ─▶ dead letter(poison) → term
+    2. invocation が terminal ─▶ ACK（重複 / ACK 喪失の再配送。実行しない）
+    3. generation が古い・生きた claim がある ─▶ ACK / 期限前 ─▶ NAK(残り)
+    4. 期限・回数・削除・固定 Revision・retry budget ─▶ dead letter / 先送り
+    5. claim_dispatch（async_dispatch 行の CAS、attempts + 1、claim 期限）
+    6. 入力を台帳 / object store から読み digest を検証
+    7. InvokeService::run_async（同期 invoke と同じ driver。invocation は terminal にせず結果を返す）
+         claim を TTL/3 ごとに延長
+    8. settle_dispatch（1 トランザクション、claim で fence）:
+         invocations(terminal | queued) + async_dispatch + dead_letters? + outbox(generation + 1)?
+    9. COMMIT の後に ACK
+OutboxPublisher ─ generation n の event を next_attempt_at に publish（message id = inv_….g<n>）
+AsyncDispatcher::reap（reaper_interval_seconds）:
+    claim 切れの running → 次の generation を予約 / attempts_exhausted
+    期限切れ → expired、broker が失った event → 次の generation を publish
+```
+
+| 項目 | 内容 |
+|---|---|
+| 台帳 | migration 008: `async_dispatch`（state、generation、attempts、deferrals、claim、`next_attempt_at`、`last_error`）、`dead_letters`（理由、状態、試行の要約、入力の参照、`origin_key` unique）、`redrives`（誰が・いつ・なぜ・どの dead letter から・新しい invocation）、`outbox.generation` |
+| 所有 | 非同期 invocation の `dispatcher_id` は `None` のまま（guard は変えない）。run の所有は `async_dispatch` の claim。reclaim / restart reconcile は非同期 invocation を terminal にせず、attempt だけを settle する |
+| retry の予約 | NAK の delay ではなく、settle と同じトランザクションで outbox に次の generation の event（`created_at` = `next_attempt_at` = 予定時刻）。broker の crash で予定を失わない。古い generation の message は ACK して捨てる |
+| 分類 | `retry::classify`: 数える retry / 数えない先送り / dead letter（non_retryable、function_deleted、revision_unavailable）/ cancel |
+| 非同期の class | 同期と同じ admission を通る。並列は `workers`（既定 `max_concurrency` の半分）、容量待ちは `admission_wait_ms`（既定 2 s）で、空かなければ先送り |
+| dead letter | invocation を terminal にするのと同じトランザクション。入力は複製せず、`open` の間は object GC が参照 object を残す |
+| redrive | `invoke` + `redrive` role。新しい invocation（元の固定 Revision、明示したときだけ同じ function の別 Revision）・同じ入力の参照・outbox event・redrive 記録・`redriven` を 1 トランザクション |
+| at-least-once | ACK 喪失は実行しない。run 中の停止は次の試行が再実行する（副作用は 2 回起きうる）。台帳は terminal の記録を 1 つに保つ。業務冪等キーの例は `examples/idempotent-async` |
+| 停止 | graceful shutdown は worker を止め、実行中の run を `Host.GatewayShutdown`（数えない先送り）で settle してから終わる |
 | failpoint | `crates/application/src/failpoints.rs`。unit test と feature `failpoints` の build だけで動き、`TSLS_FAILPOINTS`（例 `outbox.after_publish=kill`）で E2E が SIGKILL を起こす（`scripts/queue/async-e2e.sh`） |
 | 範囲外 | queue からの取り出し・実行・retry・DLQ（PLT-4640）。`queued` の先には進まない |
 
@@ -569,7 +604,7 @@ fire = AsyncInvokeService::accept_for_trigger（§「非同期 invoke と outbox
 | 項目 | 内容 |
 |---|---|
 | 有効になる条件 | `invokeAsync` が有効（`[queue]` + `state.db`）で `role = "combined"`。webhook は `[triggers] secret_key_file`（または `secret_key_env`）も要る |
-| 台帳 | migration 007: `triggers`（spec の JSON、`status`、`generation`、`next_fire_at`、封じた `secret_sealed`）、`trigger_fires`（主キー `(trigger_id, fire_key)`、`(trigger_id, signature_digest)` の一意 index、`outcome`、`invocation_id`）、`trigger_scheduler`（lease 1 行） |
+| 台帳 | migration 008: `triggers`（spec の JSON、`status`、`generation`、`next_fire_at`、封じた `secret_sealed`）、`trigger_fires`（主キー `(trigger_id, fire_key)`、`(trigger_id, signature_digest)` の一意 index、`outcome`、`invocation_id`）、`trigger_scheduler`（lease 1 行） |
 | 重複しない根拠 | fire 行と invocation が同じトランザクション。lease は無駄を減らすだけで、2 つの scheduler が同じ時刻を処理しても主キーで 1 つだけが commit する |
 | disable / delete | trigger 行の generation を上げる。fire のトランザクションが trigger 行を読み直すので、それより後に commit する fire は無い。受付済みの invocation は outbox・dispatcher の通常の経路で続く |
 | secret | 生成して 1 回だけ返し、AES-256-GCM（AAD = trigger id + tenant id）で `state.db` に封じる。削除で消す |

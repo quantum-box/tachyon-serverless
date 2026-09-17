@@ -428,6 +428,42 @@ pub const FAMILIES: &[(&str, &str, &str)] = &[
         "counter",
         "Deliveries the usage ledger dropped because it already had the event id.",
     ),
+    // asynchronous dispatcher (PLT-4640), only on a gateway that runs it
+    (
+        "tsls_async_dispatch_deliveries_total",
+        "counter",
+        "Queue deliveries the dispatcher handled, by outcome (completed, rescheduled, dead_lettered, skipped_terminal, skipped_stale, skipped_claimed, not_due, poison, failed, lost_claim).",
+    ),
+    (
+        "tsls_async_dispatch_queue_operations_total",
+        "counter",
+        "ack / nak / term calls on the queue, by result (ok, error). An ack is only sent after the ledger commit.",
+    ),
+    (
+        "tsls_async_dispatch_runs_in_flight",
+        "gauge",
+        "Asynchronous deliveries being handled by this gateway now.",
+    ),
+    (
+        "tsls_async_retries_scheduled_total",
+        "counter",
+        "Next tries committed with the next outbox generation: retry (counted against max_attempts) or deferral (capacity, retry budget, shutdown; not counted).",
+    ),
+    (
+        "tsls_async_dead_letters_total",
+        "counter",
+        "Dead letters committed by this gateway, by reason.",
+    ),
+    (
+        "tsls_async_redrives_total",
+        "counter",
+        "Dead letters redriven into a new asynchronous invocation.",
+    ),
+    (
+        "tsls_async_reaper_actions_total",
+        "counter",
+        "What the reaper committed: abandoned (a run whose claim expired, rescheduled), republished (an event the broker lost), dead_lettered, lost (fence moved on), failed.",
+    ),
     (
         "tsls_metrics_series_truncated",
         "gauge",

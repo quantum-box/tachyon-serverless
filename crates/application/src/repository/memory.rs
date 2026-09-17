@@ -585,12 +585,13 @@ fn settle_invocation_rows(
     let Some(mut inv) = s.invocations.get(id).cloned() else {
         return;
     };
-    if restart::settle_invocation_with(&mut inv, cause, now) {
+    if !restart::survives_dispatcher(&inv) && restart::settle_invocation_with(&mut inv, cause, now)
+    {
         s.invocations.insert(inv.id.clone(), inv.clone());
         set_binding_expiry(s, &inv, retention);
         report.invocations += 1;
     }
-    let unknown = restart::is_outcome_unknown(&inv);
+    let unknown = restart::attempts_unknown(&inv);
     for att in s.attempts.values_mut() {
         if att.invocation_id == inv.id && restart::settle_attempt_with(att, unknown, cause, now) {
             report.attempts += 1;

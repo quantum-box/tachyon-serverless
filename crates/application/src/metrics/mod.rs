@@ -19,6 +19,7 @@
 //! gateway.
 
 pub mod catalog;
+pub mod dispatch;
 pub mod render;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};

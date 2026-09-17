@@ -70,6 +70,9 @@ impl utoipa::Modify for SecurityAddon {
         trigger_handlers::delete_trigger,
         trigger_handlers::list_trigger_fires,
         trigger_handlers::receive_webhook,
+        crate::dead_letters::list_dead_letters,
+        crate::dead_letters::get_dead_letter,
+        crate::dead_letters::redrive,
     ),
     components(schemas(
         api::ErrorCode,
@@ -106,6 +109,11 @@ impl utoipa::Modify for SecurityAddon {
         api::TimingsResponse,
         api::AttemptResponse,
         api::InvocationResponse,
+        api::AsyncDispatchResponse,
+        api::DeadLetterResponse,
+        api::RedriveRequestBody,
+        api::RedriveResponse,
+        api::RedriveAcceptedResponse,
         api::DeadlinesResponse,
         api::LogEntryResponse,
         api::LogsResponse,
@@ -135,7 +143,7 @@ impl utoipa::Modify for SecurityAddon {
     )),
     tags(
         (name = "meta"), (name = "provider"), (name = "artifacts"), (name = "functions"),
-        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "triggers"), (name = "internal")
+        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "triggers"), (name = "dead-letters"), (name = "internal")
     ),
     modifiers(&SecurityAddon)
 )]

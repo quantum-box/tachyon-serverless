@@ -188,6 +188,59 @@ fn cancel_error(kind: CancelKind, what: &str) -> InvocationError {
     }
 }
 
+/// `error_type` of an asynchronous run the gateway's shutdown stopped
+/// (retryable, PLT-4640).
+pub const ASYNC_GATEWAY_SHUTDOWN: &str = "Host.GatewayShutdown";
+
+/// The outcome of one run of an asynchronous invocation (PLT-4640).
+#[derive(Debug, Clone)]
+pub struct AsyncRunReport {
+    /// The ledger result the run would have written: output reference and
+    /// HTTP status on success, the classified error otherwise.
+    pub outcome: Result<(Option<PayloadRef>, Option<u16>), InvocationError>,
+    /// The full handler output, when it succeeded.
+    pub output: Option<serde_json::Value>,
+}
+
+/// Where a driver running an asynchronous invocation reports its outcome
+/// (first report wins: every path records exactly once and returns).
+#[derive(Debug, Default)]
+pub struct AsyncRunSink {
+    report: Mutex<Option<AsyncRunReport>>,
+}
+
+impl AsyncRunSink {
+    fn record(
+        &self,
+        outcome: Result<(Option<PayloadRef>, Option<u16>), InvocationError>,
+        output: Option<serde_json::Value>,
+    ) {
+        let mut slot = self.report.lock();
+        if slot.is_none() {
+            *slot = Some(AsyncRunReport { outcome, output });
+        }
+    }
+
+    fn take(&self) -> Option<AsyncRunReport> {
+        self.report.lock().take()
+    }
+}
+
+/// One run of an accepted asynchronous invocation, as the dispatcher hands it
+/// to [`InvokeService::run_async`].
+#[derive(Debug, Clone)]
+pub struct AsyncRun {
+    pub invocation: Invocation,
+    pub function: Function,
+    /// The revision pinned at acceptance.
+    pub revision: FunctionRevision,
+    pub payload: serde_json::Value,
+    /// Attempts recorded before this run.
+    pub attempt_base: u32,
+    /// How long this run may wait for admission.
+    pub admission_wait: Duration,
+}
+
 struct DriverResult {
     output: Option<serde_json::Value>,
 }
@@ -387,6 +440,8 @@ impl InvokeService {
             epoch: 1,
             warmup: true,
             meter: AttemptMeter::default(),
+            async_run: None,
+            attempt_base: 0,
         };
         let result = match AssertUnwindSafe(driver.prewarm()).catch_unwind().await {
             Ok(r) => r,
@@ -611,6 +666,8 @@ impl InvokeService {
                 unmetered: unmetered.is_some(),
                 ..AttemptMeter::default()
             },
+            async_run: None,
+            attempt_base: 0,
         };
         tokio::spawn(driver.run(done_tx));
 
@@ -620,6 +677,169 @@ impl InvokeService {
             detail,
             output: result.and_then(|r| r.output.clone()),
             replayed: false,
+        })
+    }
+
+    /// The admission of one asynchronous attempt, before anything of it
+    /// starts (PLT-4640). Today: the usage journal must be able to record it
+    /// (PLT-4642, `UsageMeter::admit`). This is the one place further
+    /// pre-attempt refusals belong (budget reservation, PLT-4643).
+    ///
+    /// `Ok(unmetered)` admits the attempt (`true` only under the dev-only
+    /// `accept_unmetered` policy). `Err((error_type, message))` refuses it:
+    /// a platform condition, never the invocation's fault. The dispatcher
+    /// classifies these error types as a deferral: the run is rescheduled
+    /// without counting an attempt, bounded by the invocation's age
+    /// (`retry::classify`, docs/adr/0013 §4).
+    pub fn admit_async_attempt(&self) -> Result<bool, (&'static str, String)> {
+        match self.meter.admit() {
+            Ok(MeteringAdmission::Metered) => Ok(false),
+            Ok(MeteringAdmission::Unmetered(_)) => Ok(true),
+            Err(e) => {
+                let error_type = match &e {
+                    AppError::UsageJournal {
+                        refusal: crate::usage::JournalRefusal::Full,
+                        ..
+                    } => crate::error::USAGE_JOURNAL_FULL,
+                    _ => crate::error::USAGE_JOURNAL_UNAVAILABLE,
+                };
+                Err((error_type, e.to_string()))
+            }
+        }
+    }
+
+    /// Run an accepted asynchronous invocation once through the same pipeline
+    /// as a synchronous invoke (admission, environment, attempt and lease,
+    /// invoke, classification, cleanup, usage), on its pinned revision and
+    /// stored input (PLT-4640). The invocation row is **not** settled here:
+    /// the outcome is returned, and the asynchronous dispatcher commits it (or
+    /// a retry) under its dispatch claim.
+    ///
+    /// A refusal before anything was admitted is returned as an error of
+    /// class `QueueTimeout` (capacity), which the dispatcher defers.
+    pub async fn run_async(self: &Arc<Self>, run: AsyncRun) -> AsyncRunReport {
+        let refused = |error_type: &str, message: String| AsyncRunReport {
+            outcome: Err(InvocationError::new(
+                ErrorClass::PlatformError,
+                error_type,
+                message,
+            )),
+            output: None,
+        };
+        if self.draining.load(Ordering::SeqCst) {
+            return refused(ASYNC_GATEWAY_SHUTDOWN, "gateway is shutting down".into());
+        }
+        if self.dispatcher.is_fenced() {
+            return refused(
+                "Host.DispatcherFenced",
+                "this gateway lost its dispatcher lease".into(),
+            );
+        }
+        let AsyncRun {
+            invocation,
+            function,
+            revision,
+            payload,
+            attempt_base,
+            admission_wait,
+        } = run;
+        let unmetered = match self.admit_async_attempt() {
+            Ok(unmetered) => unmetered,
+            Err((error_type, message)) => return refused(error_type, message),
+        };
+        let now = self.clock.now();
+        let exec = &revision.spec.execution;
+        let budget = admission_wait
+            + Duration::from_secs(
+                u64::from(exec.timeout_seconds) + u64::from(exec.initialization_timeout_seconds),
+            )
+            + self.invoke_cfg.handshake_timeout();
+        let client_deadline =
+            now + chrono::Duration::from_std(budget).unwrap_or(chrono::Duration::seconds(3600));
+        let admission_deadline = now
+            + chrono::Duration::from_std(admission_wait).unwrap_or(chrono::Duration::seconds(1));
+        let ticket = self.admission.ticket(
+            &function.tenant_id,
+            &revision,
+            invocation.input_size_bytes,
+            admission_deadline,
+        );
+        let pre = match self.admission.admit(ticket) {
+            Ok(pre) => pre,
+            Err(rejection) => {
+                return AsyncRunReport {
+                    outcome: Err(InvocationError::new(
+                        match rejection.reason {
+                            RejectReason::FunctionDeleted => ErrorClass::PlatformError,
+                            _ => ErrorClass::QueueTimeout,
+                        },
+                        error_type_for(rejection.reason),
+                        rejection.message,
+                    )),
+                    output: None,
+                };
+            }
+        };
+        let sink = Arc::new(AsyncRunSink::default());
+        let (cancel_tx, cancel_rx) = watch::channel(None);
+        let (done_tx, done_rx) = watch::channel(None);
+        {
+            let mut map = self.in_flight.lock();
+            if map.contains_key(&invocation.id) {
+                return refused(
+                    "Host.AlreadyRunning",
+                    format!("invocation {} is already running here", invocation.id),
+                );
+            }
+            map.insert(
+                invocation.id.clone(),
+                InFlight {
+                    cancel: cancel_tx,
+                    done: done_rx.clone(),
+                    revision: revision.id.clone(),
+                    accepted_at: invocation.accepted_at,
+                    prestart: false,
+                },
+            );
+        }
+        let driver = Driver {
+            svc: Arc::clone(self),
+            invocation_id: invocation.id.clone(),
+            function,
+            revision,
+            event_kind: invocation.event_kind,
+            payload: RetainedPayload::new(payload),
+            input_size: invocation.input_size_bytes,
+            trace_id: invocation.trace_id.clone(),
+            client_deadline,
+            cancel_rx,
+            accepted_at: Instant::now(),
+            pre: Some(pre),
+            grant: None,
+            env_id: None,
+            attempt_id: None,
+            lease_id: None,
+            seq: 0,
+            epoch: 1,
+            warmup: false,
+            async_run: Some(sink.clone()),
+            attempt_base,
+            meter: AttemptMeter {
+                unmetered,
+                ..AttemptMeter::default()
+            },
+        };
+        // The driver runs in its own task, like a synchronous one: a panic in
+        // it is recorded, and nothing here can abort it half-way.
+        tokio::spawn(driver.run(done_tx));
+        let _ = Self::await_done(done_rx).await;
+        sink.take().unwrap_or_else(|| AsyncRunReport {
+            outcome: Err(InvocationError::new(
+                ErrorClass::PlatformError,
+                "Host.DriverIncomplete",
+                "the run ended without recording an outcome",
+            )),
+            output: None,
         })
     }
 
@@ -1009,6 +1229,15 @@ struct Driver {
     warmup: bool,
     /// Host-measured segments of the current attempt (PLT-4642).
     meter: AttemptMeter,
+    /// One run of an asynchronous invocation (PLT-4640): the outcome goes to
+    /// this sink instead of the invocation row. The attempt rows, the lease,
+    /// the environment and usage are recorded exactly as for a synchronous
+    /// invocation; the asynchronous dispatcher decides afterwards, in one
+    /// fenced transaction, whether the invocation is terminal or retried.
+    async_run: Option<Arc<AsyncRunSink>>,
+    /// Attempts this invocation already had before this run (the ledger
+    /// numbers attempts across every run of an asynchronous invocation).
+    attempt_base: u32,
 }
 
 /// What the driver measured of the attempt it is on, for `AttemptSettled`
@@ -1242,6 +1471,10 @@ impl Driver {
     }
 
     fn fail_invocation(&self, error: InvocationError) {
+        if let Some(sink) = &self.async_run {
+            sink.record(Err(self.async_error(error)), None);
+            return;
+        }
         if let Some(mut inv) = self.load_invocation() {
             let now = self.now();
             let r = match error.class {
@@ -1260,6 +1493,21 @@ impl Driver {
             );
             self.save_invocation(inv);
         }
+    }
+
+    /// A gateway shutdown ends an asynchronous run without being the caller's
+    /// cancel: it is a retryable platform failure, not `Cancelled`.
+    fn async_error(&self, error: InvocationError) -> InvocationError {
+        if error.class == ErrorClass::Cancelled
+            && *self.cancel_rx.borrow() == Some(CancelKind::Shutdown)
+        {
+            return InvocationError::new(
+                ErrorClass::PlatformError,
+                ASYNC_GATEWAY_SHUTDOWN,
+                error.message,
+            );
+        }
+        error
     }
 
     fn save_env(&self, env: &ExecutionEnvironment) {
@@ -1817,7 +2065,7 @@ impl Driver {
             attempt_id.clone(),
             self.invocation_id.clone(),
             tenant.clone(),
-            number,
+            self.attempt_base + number,
             env_id.clone(),
             assigned.epoch,
             start_kind,
@@ -2199,7 +2447,7 @@ impl Driver {
                 "the environment reported a different guest boot id than it booted with"
             );
         }
-        let settled_invocation = self.load_invocation().map(|mut inv| {
+        let settled_invocation = self.async_run.is_none().then(|| self.load_invocation()).flatten().map(|mut inv| {
             let r = match &result {
                 Ok((output, http_status)) => inv.mark_succeeded(output.clone(), *http_status, now),
                 Err(e) => match e.class {
@@ -2213,10 +2461,12 @@ impl Driver {
             }
             inv
         });
-        let status = settled_invocation
-            .as_ref()
-            .map(|inv| inv.status.name())
-            .unwrap_or("missing");
+        let status = match (&settled_invocation, &self.async_run, &result) {
+            (Some(inv), _, _) => inv.status.name(),
+            (None, Some(_), Ok(_)) => "succeeded (async run)",
+            (None, Some(_), Err(_)) => "failed (async run)",
+            (None, None, _) => "missing",
+        };
         // The fenced callback: accepted only while this lease is still the
         // slot's current lease at this epoch.
         let completion = svc.repos.slots.complete(SlotCompletion {
@@ -2242,6 +2492,22 @@ impl Driver {
                 false
             }
         };
+        if let Some(sink) = &self.async_run {
+            match (completed, &result) {
+                (true, Ok(outcome)) => sink.record(Ok(outcome.clone()), output_value.clone()),
+                (true, Err(e)) => sink.record(Err(self.async_error(e.clone())), None),
+                // Another dispatcher reclaimed the slot: the handler may have
+                // run, and this process cannot vouch for its result.
+                (false, _) => sink.record(
+                    Err(InvocationError::new(
+                        ErrorClass::OutcomeUnknown,
+                        "Host.SlotReclaimed",
+                        "the execution slot was reclaimed before the result was recorded",
+                    )),
+                    None,
+                ),
+            }
+        }
         if completed {
             tracing::info!(
                 invocation_id = %self.invocation_id,
@@ -2340,7 +2606,7 @@ impl Driver {
                 self.emit_attempt_settled(
                     &env_id,
                     &attempt_id,
-                    number,
+                    self.attempt_base + number,
                     outcome,
                     handler,
                     Some(teardown_started.elapsed()),
@@ -2382,7 +2648,7 @@ impl Driver {
         self.emit_attempt_settled(
             &env_id,
             &attempt_id,
-            number,
+            self.attempt_base + number,
             outcome,
             handler,
             teardown,

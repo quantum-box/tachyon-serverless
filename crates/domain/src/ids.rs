@@ -12,6 +12,8 @@
 //! | `env`  | ExecutionEnvironment |
 //! | `lse`  | ExecutionLease       |
 //! | `trg`  | Trigger (cron / webhook, PLT-4641) |
+//! | `dlq`  | DeadLetter           |
+//! | `rdv`  | Redrive              |
 
 use std::fmt;
 use std::str::FromStr;
@@ -160,6 +162,20 @@ define_id!(
     /// A cron or webhook trigger of a function (PLT-4641).
     TriggerId,
     "trg"
+);
+
+define_id!(
+    /// A dead-lettered asynchronous invocation (PLT-4640): the invocation
+    /// exhausted its retries, expired, failed with a non-retryable error, or
+    /// its event could not be read at all (poison).
+    DeadLetterId,
+    "dlq"
+);
+define_id!(
+    /// One redrive of a dead letter (PLT-4640): who re-submitted it, when,
+    /// why, and the new invocation it created.
+    RedriveId,
+    "rdv"
 );
 
 /// Alias name such as `prod`. Lowercase DNS-label-like, 1..=32 chars.

@@ -61,6 +61,9 @@
 | DELETE | `/v1/functions/{function_id}/triggers/{trigger_id}` | 削除。以後の fire は commit しない。受付済みの fire は通常の非同期 invocation として続く | 200 `TriggerResponse`（`status = deleted`） | 404, 409 |
 | GET | `/v1/functions/{function_id}/triggers/{trigger_id}/fires` | fire の記録（予定時刻・event id・invocation id・refused の理由。query: `limit`） | 200 `ListResponse<TriggerFireResponse>` | 404 |
 | POST | `/v1/hooks/{trigger_id}` | 署名付き webhook の配信（bearer token なし、HMAC 署名で認証、§5.11.2） | 202 `WebhookAcceptedResponse` | 400（event id）, 401（署名・timestamp）, 404, 410（無効）, 413, 429, 503 |
+| GET | `/v1/functions/{function_id}/dead-letters` | 非同期 invocation の dead letter 一覧（PLT-4640、§5.6.2。新しい順、query: `limit`） | 200 `ListResponse<DeadLetterResponse>`（他 tenant の function は空） | 403, 503 `async_unavailable`（`not_configured`） |
+| GET | `/v1/dead-letters/{dead_letter_id}` | dead letter と redrive の記録（§5.6.2） | 200 `DeadLetterResponse` | 403, 404（他 tenant を含む） |
+| POST | `/v1/dead-letters/{dead_letter_id}:redrive`<br>`/v1/dead-letters/{dead_letter_id}/redrive` | 新しい非同期 invocation として再投入（`invoke` と `redrive` の両 role、§5.6.2）。本文 `{revision_id?, reason?}` | 202 `RedriveAcceptedResponse`（`Location: /v1/invocations/{id}`） | 400, 403, 404, 409（redrive 済み・poison・function 削除）, 429 / 503（outbox、§5.6.1 と同じ） |
 | GET | `/openapi.json` | OpenAPI 3 | 200 | — |
 | GET | `/v1/internal/config?since=<generation>` | data plane 向けの設定配信（`combined` で `internal_token` を設定した gateway だけ。§7） | 200 `ConfigDelivery` | 401（内部 credential でない）, 404（提供しない gateway）, 503 `control_plane_unavailable`（store） |
 
@@ -418,7 +421,7 @@ x-tachyon-invocation-id: inv_01j7z2k3m4n5p6q7r8s9t0v1w2
 }
 ```
 
-`GET /v1/invocations/{id}`（§5.8）は `mode = "async"` で、`status` は `accepted`（台帳に確定、queue にはまだ無い）→ `queued`（outbox publisher が queue の ACK を得た）。その先（`running` 以降）は dispatcher（PLT-4640）の範囲で、この版では `queued` で止まる。`deadlines.queue_deadline` は受付時刻 + `[invoke_async] queue_deadline_seconds`（既定 24 時間）。
+`GET /v1/invocations/{id}`（§5.8）は `mode = "async"` で、`status` は `accepted`（台帳に確定、queue にはまだ無い）→ `queued`（outbox publisher が queue の ACK を得た）→ `running`（dispatcher が実行中、§5.6.2）→ terminal。retry を待つ間は再び `queued`。`deadlines.queue_deadline` は受付時刻 + `[invoke_async] queue_deadline_seconds`（既定 24 時間）で、これと `[async_dispatch] max_event_age_seconds` の早い方を過ぎると実行を始めない（dead letter `expired`）。
 
 | 状況 | 応答 | 記録 |
 |---|---|---|
@@ -438,6 +441,120 @@ x-tachyon-invocation-id: inv_01j7z2k3m4n5p6q7r8s9t0v1w2
 | function 削除中・削除済み（PLT-4635） / revision が ready でない / 他 tenant の function | 409 `function_deleted`（`Host.FunctionDeleted`） / 409 `revision_not_ready` / 404 | なし |
 
 配送は at-least-once。publisher が queue の ACK を得た後、台帳に送信済みを記録する前に止まると、同じ event（message id = invocation id）がもう一度 publish される。broker の duplicate window（既定 120 s）内なら 1 通にまとまるが、外なら 2 通届きうる。consumer は message ではなく invocation id で台帳に照らして決着する。
+
+### 5.6.2 非同期の実行・retry・dead letter・redrive（PLT-4640）
+
+決定の詳細は `docs/adr/0013-async-dispatch-retry-dlq.md`。gateway は `[async_dispatch] workers` 本の worker で queue から 1 件ずつ取り出し、台帳の dispatch 行を claim してから同期 invoke と同じ経路（admission、環境、attempt と lease、後始末、usage）で**受付時に固定した Revision と保存した入力**を実行する。結果（terminal、次の試行の予約、dead letter）を台帳に 1 トランザクションで確定した**後に** queue の message を ACK する。
+
+**状態の遷移**
+
+| `status` | `dispatch.state` | 意味 |
+|---|---|---|
+| `accepted` / `queued` | `pending`（行なし）/ `scheduled` | 実行待ち。retry 待ちは `scheduled` と `next_attempt_at` |
+| `running` | `running` | ある gateway が claim して実行中 |
+| `succeeded` | `done` | 成功 |
+| `cancelled` | `done` | 利用者の cancel |
+| `failed` / `outcome_unknown` | `dead` | dead letter になった（`dispatch.dead_letter_id`）。`error` は最後の試行のエラー |
+
+`GET /v1/invocations/{id}` の非同期 invocation には `dispatch` が付く:
+
+```json
+"dispatch": {
+  "state": "scheduled",
+  "attempts": 1,
+  "deferrals": 0,
+  "generation": 1,
+  "next_attempt_at": "2026-09-17T07:36:37.260Z",
+  "last_error": {"class": "user_error", "error_type": "Downstream.Unavailable", "message": "..."}
+}
+```
+
+`dead_letter_id`（dead letter になったとき）と `redriven_from`（redrive で作られた invocation のとき、redrive の記録）は該当するときだけ付く。
+
+**retry policy**（`[async_dispatch]`、既定値。`[[async_dispatch.function]]` で function ごとに `max_attempts` / `max_event_age_seconds` を上書き）
+
+| 項目 | 既定 | 内容 |
+|---|---|---|
+| `max_attempts` | 3 | 数える試行の上限。超えたら dead letter `attempts_exhausted` |
+| `max_event_age_seconds` | 21600 | 受付からこの時間（と `queue_deadline` の早い方）を過ぎたら試行を始めない。dead letter `expired` |
+| `backoff_initial_ms` / `backoff_max_ms` / `backoff_floor_ms` | 1000 / 300000 / 100 | full jitter: n 回目の後の遅延は `[0, min(max, initial × 2^(n-1))]` の一様乱数（下限 floor） |
+| `retry_budget` / `retry_budget_window_seconds` | 100 / 60 | function ごと・window ごとの retry の上限（gateway ごと）。超えた retry は次の window へ先送り（数えない） |
+| `workers` | `[capacity] max_concurrency` の半分 | 非同期の同時実行数。同期 invoke の分を常に残す |
+| `admission_wait_ms` | 2000 | 非同期の試行が容量を待つ時間。空かなければ先送り（数えない） |
+| `claim_ttl_seconds` | 60 | 実行中の claim の期限（実行中は 1/3 ごとに延長）。gateway が消えると、この後に別の gateway が続ける |
+| `ack_wait_seconds` / `max_deliver` | 300 / 1000 | broker の再配送。retry の回数は broker ではなく台帳が数える |
+
+**エラーの分類**
+
+| 結果 | 扱い |
+|---|---|
+| handler のエラー（`user_error`）、`crash`、`init_error`、`timeout`、`outcome_unknown`、その他の platform エラー | retry（数える） |
+| 容量・quota・breaker・gateway 停止・設定 cache の期限切れ・入力 object の一時的な読めなさ・retry budget・usage journal の拒否（`Host.UsageJournalFull` / `Host.UsageJournalUnavailable`、PLT-4642） | 先送り（`deferrals`、数えない。期限は効く） |
+| 入力の digest 不一致（`Host.InputCorrupt`）、JSON でない入力、応答の上限超過（`Runtime.ResponseTooLarge` / `Host.ResponseTooLarge`）、secret binding の認可（`Host.SecretBindingUnavailable`）、policy 拒否、未対応 artifact | dead letter `non_retryable`（retry しない） |
+| function の削除（`Host.FunctionDeleted`） | dead letter `function_deleted` |
+| 固定 Revision が解決できない | dead letter `revision_unavailable` |
+| 利用者の cancel | `cancelled`（dead letter にしない） |
+| decode できない、台帳と合わない event | dead letter `poison`（invocation なし）。message は term し、再配送しない |
+
+**dead letter**
+
+`GET /v1/functions/{function_id}/dead-letters` → `ListResponse<DeadLetterResponse>`、`GET /v1/dead-letters/{id}` → `DeadLetterResponse`（`invoke` role、tenant 内だけ）:
+
+```json
+{
+  "id": "dlq_01m2q4s1pkr0cwp631behj5734",
+  "reason": "attempts_exhausted",
+  "status": "open",
+  "function_id": "fn_01m2q4qfry2dqnx7rer8ftg3hz",
+  "invocation_id": "inv_01m2q4qg9tw3mzxpmgjvc8xwds",
+  "revision_id": "rev_01m2q4qg2kgpb1cjnjgfrgd4n4",
+  "attempts": 3,
+  "deferrals": 0,
+  "last_error": {"class": "user_error", "error_type": "Downstream.Unavailable", "message": "..."},
+  "accepted_at": "2026-09-17T07:36:35.4Z",
+  "first_attempt_at": "2026-09-17T07:36:36.7Z",
+  "last_attempt_at": "2026-09-17T07:36:38.1Z",
+  "created_at": "2026-09-17T07:36:38.2Z",
+  "input_digest": "sha256:...",
+  "input_size_bytes": 37,
+  "input_storage": "inline",
+  "redrive_count": 0,
+  "redrives": []
+}
+```
+
+入力は複製しない（台帳の inline 本文か object store の同じ object を指す）。`open` の dead letter が参照する object は GC で消さない。poison は `invocation_id` / `function_id` が無く、`message_id` と `detail` だけを持ち、function の一覧には出ない（`GET /v1/dead-letters/{id}` で読める）。
+
+**redrive**
+
+`POST /v1/dead-letters/{id}:redrive`、本文（任意）:
+
+```json
+{"revision_id": "rev_01m2q4rz9v50trnqcrrb2nmvqt", "reason": "downstream fixed"}
+```
+
+| 状況 | 応答 |
+|---|---|
+| `invoke` と `redrive` の両 role（token の `roles = ["invoke", "redrive"]`）、自 tenant の `open` の dead letter | 202 `RedriveAcceptedResponse`（`redrive`: 記録、`invocation`: 新しい invocation の 202 本文）。`Location: /v1/invocations/{新しい id}` |
+| `redrive` role が無い | 403 `forbidden` |
+| 他 tenant の dead letter、存在しない id | 404 `not_found` |
+| `revision_id` が他 function / 他 tenant / 存在しない | 404（設定 cache で解決できない）/ 400 |
+| redrive 済み、poison | 409 `conflict` |
+| function 削除済み / revision が ready でない | 409 `function_deleted` / 409 `revision_not_ready` |
+| outbox の上限・queue 停止 | §5.6.1 と同じ 429 / 503 |
+
+redrive は**新しい非同期 invocation** を作る（元の invocation は terminal のまま）。Revision は既定で元の固定 Revision、`revision_id` を明示したときだけ同じ function の別 Revision。入力は元と同じもの（同じ tenant の同じ本文 / object）。invocation・入力の参照・outbox event・redrive 記録（`requested_by` = principal の subject、`reason`、時刻、元の invocation、dead letter）・dead letter の `redriven` を 1 トランザクションで書く。新しい invocation の `dispatch.redriven_from` に記録が付く。`Idempotency-Key` は引き継がない。
+
+### 5.6.3 非同期 invoke の at-least-once 契約（PLT-4640）
+
+非同期 invocation の**配送も実行も at-least-once** です。
+
+- queue の ACK が失われると同じ event が再配送されますが、invocation が既に terminal なら何も実行しません。
+- 実行中に gateway が止まると、その試行の handler が外部に何をしたか platform には分かりません。claim の期限（`claim_ttl_seconds`）の後、次の試行が**もう一度 handler を実行します**。handler の外部副作用（DB 書込み、外部 API 呼び出し、メール送信）の**後**、結果を台帳に確定する**前**に止まった場合、その副作用は 2 回起きえます。
+- 台帳が保証するのは、1 invocation に terminal の記録が 1 つ、dead letter が 1 件、ということだけです。exactly-once の実行は約束しません。
+- `Idempotency-Key`（§5.6.1）は受付の重複をまとめるもので、実行の重複は防ぎません。
+
+handler は**業務の冪等キー**で副作用を 1 回にしてください: 一意制約付きの insert（`INSERT ... ON CONFLICT DO NOTHING`）、条件付き書込み、処理済みキーの記録。`examples/idempotent-async` は `order_id` を冪等キーにして `effects/<order_id>.json` を排他的に作り（`create_new`）、2 回目の実行は副作用を行わずに `{"applied": false}` を返します。`scripts/queue/async-dispatch-e2e.sh` は、副作用の後・確定の前に gateway を SIGKILL し、再起動後に handler が 2 回実行され、副作用は 1 回、terminal の記録は 1 つであることを確かめます。
 
 ### 5.11 trigger（PLT-4641）
 

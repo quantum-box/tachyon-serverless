@@ -32,6 +32,13 @@ pub fn require_invoke(principal: &Principal) -> Result<(), AppError> {
     require_role(principal, Role::Invoke)
 }
 
+/// Redrive guard (PLT-4640): a redrive creates a new invocation, so it needs
+/// `Invoke` **and** the separate `Redrive` role.
+pub fn require_redrive(principal: &Principal) -> Result<(), AppError> {
+    require_role(principal, Role::Invoke)?;
+    require_role(principal, Role::Redrive)
+}
+
 /// Read guard: either `Deploy` or `Invoke` may read management resources.
 pub fn require_read(principal: &Principal) -> Result<(), AppError> {
     if principal.has(Role::Deploy) || principal.has(Role::Invoke) || principal.has(Role::Operator) {
@@ -58,6 +65,7 @@ fn role_name(role: Role) -> &'static str {
         Role::Deploy => "deploy",
         Role::Invoke => "invoke",
         Role::Operator => "operator",
+        Role::Redrive => "redrive",
     }
 }
 

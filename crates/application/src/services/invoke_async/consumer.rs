@@ -38,7 +38,9 @@ pub async fn read_delivery(
 ) -> Result<AcceptedEvent, AppError> {
     let envelope: InvokeEnvelope = serde_json::from_slice(&delivery.payload)
         .map_err(|e| AppError::InvalidRequest(format!("event envelope: {e}")))?;
-    if envelope.invocation_id.as_str() != delivery.message_id.as_str() {
+    if crate::repository::outbox::message_id_for(&envelope.invocation_id, envelope.generation)
+        != delivery.message_id.as_str()
+    {
         return Err(mismatch("message id"));
     }
     if envelope.tenant_id != delivery.tenant_id {

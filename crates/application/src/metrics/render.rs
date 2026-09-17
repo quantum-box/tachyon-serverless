@@ -73,6 +73,8 @@ pub struct MetricsInput {
     pub triggers: Option<crate::services::triggers::metrics::TriggerMetricsSnapshot>,
     /// The usage journal, collector and ledger (PLT-4642).
     pub usage: Option<UsageMetrics>,
+    /// The asynchronous dispatcher (PLT-4640), when this gateway runs one.
+    pub dispatch: Option<crate::metrics::dispatch::AsyncDispatchSnapshot>,
 }
 
 /// Usage metering pipeline state (PLT-4642, docs/adr/0012).
@@ -858,6 +860,58 @@ pub fn render(input: &MetricsInput) -> String {
         }
         if let Some(v) = u.ledger_duplicates_ignored {
             w.sample("tsls_usage_ledger_duplicates_ignored_total", &[], v as f64);
+        }
+    }
+
+    if let Some(d) = &input.dispatch {
+        use crate::metrics::dispatch::{
+            DEAD_LETTER_REASONS, DELIVERY_OUTCOMES, QUEUE_OPERATIONS, REAPER_ACTIONS, RETRY_KINDS,
+        };
+        for outcome in DELIVERY_OUTCOMES {
+            w.sample(
+                "tsls_async_dispatch_deliveries_total",
+                &[("outcome", outcome)],
+                d.deliveries.get(outcome).copied().unwrap_or(0) as f64,
+            );
+        }
+        for operation in QUEUE_OPERATIONS {
+            for result in ["ok", "error"] {
+                w.sample(
+                    "tsls_async_dispatch_queue_operations_total",
+                    &[("operation", operation), ("result", result)],
+                    d.queue_operations
+                        .get(&(operation, result))
+                        .copied()
+                        .unwrap_or(0) as f64,
+                );
+            }
+        }
+        w.sample(
+            "tsls_async_dispatch_runs_in_flight",
+            &[],
+            d.in_flight as f64,
+        );
+        for kind in RETRY_KINDS {
+            w.sample(
+                "tsls_async_retries_scheduled_total",
+                &[("kind", kind)],
+                d.retries.get(kind).copied().unwrap_or(0) as f64,
+            );
+        }
+        for reason in DEAD_LETTER_REASONS {
+            w.sample(
+                "tsls_async_dead_letters_total",
+                &[("reason", reason)],
+                d.dead_letters.get(reason).copied().unwrap_or(0) as f64,
+            );
+        }
+        w.sample("tsls_async_redrives_total", &[], d.redrives as f64);
+        for action in REAPER_ACTIONS {
+            w.sample(
+                "tsls_async_reaper_actions_total",
+                &[("action", action)],
+                d.reaper.get(action).copied().unwrap_or(0) as f64,
+            );
         }
     }
 

@@ -144,7 +144,7 @@ crash の窓と収束:
 - outbox の上限に達すると、queue が健全でも 429 になる（consumer が PLT-4640 まで無いので、E2E では publisher だけが outbox を減らす）。
 - queue の状態がプロセスローカルなので、複数 gateway では `queue_full` / `queue_unavailable` を最初に観測するまでの遅れが gateway ごとにある。
 - inline 入力の本文は invocation が terminal になっても台帳に残る（retention は未実装。PLT-4640 で terminal 化と同時に扱う）。
-- invocation の `dispatcher_id` は不変（ADR-0003 の guard）で、非同期 invocation は `None` で作られる。PLT-4640 で dispatch 時の所有を表すには、別の lease 行か guard の緩和が要る。
+- invocation の `dispatcher_id` は不変（ADR-0003 の guard）で、非同期 invocation は `None` で作られる。PLT-4640 で dispatch 時の所有を表すには、別の lease 行か guard の緩和が要る。→ ADR-0013: guard は変えず、`async_dispatch` 行の claim で所有を表し、reclaim / restart は非同期 invocation の attempt だけを settle する。`queue_deadline` もそこで強制する。
 
 ## 検証
 

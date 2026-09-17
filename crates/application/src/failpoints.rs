@@ -42,6 +42,18 @@ pub const OUTBOX_QUEUE_UNAVAILABLE: &str = "outbox.queue_unavailable";
 /// The broker acknowledged the publish, before the row is marked sent.
 pub const OUTBOX_AFTER_PUBLISH: &str = "outbox.after_publish";
 
+/// A dispatcher claimed a run of an asynchronous invocation, before the
+/// handler starts (a crash mid-run: the claim expires, the next run retries).
+pub const DISPATCH_AFTER_CLAIM: &str = "dispatch.after_claim";
+/// The run finished (its side effects happened), before its outcome or retry
+/// is committed.
+pub const DISPATCH_BEFORE_COMMIT: &str = "dispatch.before_commit";
+/// A retry was decided, before the retry schedule is committed.
+pub const DISPATCH_BEFORE_RETRY_COMMIT: &str = "dispatch.before_retry_commit";
+/// The terminal state (or the retry schedule) is committed, before the queue
+/// message is acknowledged.
+pub const DISPATCH_AFTER_COMMIT: &str = "dispatch.after_commit";
+
 pub const ALL: &[&str] = &[
     ACCEPT_AFTER_OBJECT_PUT,
     ACCEPT_BEFORE_COMMIT,
@@ -50,6 +62,10 @@ pub const ALL: &[&str] = &[
     OUTBOX_BEFORE_PUBLISH,
     OUTBOX_QUEUE_UNAVAILABLE,
     OUTBOX_AFTER_PUBLISH,
+    DISPATCH_AFTER_CLAIM,
+    DISPATCH_BEFORE_COMMIT,
+    DISPATCH_BEFORE_RETRY_COMMIT,
+    DISPATCH_AFTER_COMMIT,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

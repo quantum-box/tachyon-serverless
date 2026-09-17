@@ -97,6 +97,16 @@ curl -X POST "$TSLS_API_URL/v1/hooks/<trg_id>" -H "x-tachyon-webhook-timestamp: 
 | `usage [--from <RFC3339 or YYYY-MM-DD>] [--to ...] [--group-by function\|day\|function,day\|none] [--function <fn>]` | `GET /v1/usage`（PLT-4642）。token の tenant の**仮**利用量・仮料金。1 行目は常に `PROVISIONAL - provisional usage estimate: not an invoice, ...`。続いて tenant・範囲・価格表（version、effective_from、通貨、課金区間）・collector が運んだ時刻・journal に入らなかった event 数、行ごと（と `TOTAL`）の invocations / attempts / retries / timeouts / handler ms / billable ms / unmetered / 仮料金（通貨単位の小数）。`--json` で本文そのまま（原価・guest 申告・丸め規則を含む） |
 | `dev --binary <path> ...` | 使い捨て gateway で 1 バイナリを end-to-end 実行（§9） |
 
+### dead-letters（PLT-4640）
+
+| コマンド | API | 内容 |
+|---|---|---|
+| `tsls dead-letters list <function> [--limit 50]` | `GET /v1/functions/{id}/dead-letters` | 新しい順の表（ID、理由、状態、invocation、試行数、日時、最後のエラー） |
+| `tsls dead-letters show <dlq_id>` | `GET /v1/dead-letters/{id}` | 理由・試行の要約・最後のエラー・入力の digest / size / 置き場所・redrive の記録 |
+| `tsls dead-letters redrive <dlq_id> [--revision-id rev_...] [--reason TEXT]` | `POST /v1/dead-letters/{id}/redrive` | 新しい非同期 invocation として再投入。token に `invoke` と `redrive` の両 role が要る。`--revision-id` を省けば元の固定 Revision |
+
+`--json` はどれもサーバーの JSON をそのまま出す。redrive の 403 / 404 / 409 は終了コード 2（API エラー）。
+
 ## 4. `functions deploy`
 
 ```

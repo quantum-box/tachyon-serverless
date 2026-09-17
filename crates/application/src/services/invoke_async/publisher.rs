@@ -203,7 +203,7 @@ impl OutboxPublisher {
         let message = OutgoingMessage {
             tenant_id: event.tenant_id.clone(),
             topic: Topic::parse(&event.topic)?,
-            message_id: MessageId::parse(event.event_id.as_str())?,
+            message_id: MessageId::parse(&event.message_id())?,
             payload: event.payload.clone().into_bytes(),
         };
         self.queue.publish(message).await
