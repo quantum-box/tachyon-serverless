@@ -29,7 +29,27 @@ const TENANT_A: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzza";
 const TENANT_B: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb";
 const TENANT_C: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzc";
 
-fn config(data_dir: &std::path::Path, extra: &str) -> GatewayConfig {
+/// How long any single wait of these tests may take before the test fails
+/// with a message instead of hanging the CI job until its timeout.
+const TEST_WAIT: Duration = Duration::from_secs(60);
+
+/// `[budget] max_unsettled_age_seconds` of every harness except the one that
+/// tests the stalled collector. The integration tests run the collector by
+/// hand (`collect_usage`), so a finished run stays unsettled until the test
+/// collects: with a threshold of 1 s, any gap of a second between one run and
+/// the next invocation — a deploy on a loaded CI runner is enough — refused
+/// that invocation with `Host.BudgetUnknown`, which a test that did not
+/// expect it could wait on forever.
+const UNSETTLED_AGE_SECONDS: u64 = 3600;
+
+/// Await `fut`, failing the test after [`TEST_WAIT`] instead of hanging.
+async fn within<T>(what: &str, fut: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(TEST_WAIT, fut)
+        .await
+        .unwrap_or_else(|_| panic!("timed out after {TEST_WAIT:?} waiting for {what}"))
+}
+
+fn config(data_dir: &std::path::Path, extra: &str, unsettled_age: u64) -> GatewayConfig {
     GatewayConfig::from_toml(&format!(
         r#"
 listen = "127.0.0.1:0"
@@ -67,7 +87,7 @@ cancel_grace_ms = 100
 [budget]
 enabled = true
 file = "{data}/budgets.toml"
-max_unsettled_age_seconds = 1
+max_unsettled_age_seconds = {unsettled_age}
 expiry_grace_seconds = 1
 
 {extra}
@@ -115,12 +135,16 @@ fn budgets(a: &str, b: &str) -> String {
 }
 
 fn harness(extra: &str) -> Harness {
+    harness_with(extra, UNSETTLED_AGE_SECONDS)
+}
+
+fn harness_with(extra: &str, unsettled_age: u64) -> Harness {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("budgets.toml"), budgets("", "")).unwrap();
     let fake = Arc::new(FakeExecutionProvider::new());
     fake.set_default_script(Some(FakeGuestScript::SlowEchoForever));
     let app = Application::bootstrap_with(
-        config(dir.path(), extra),
+        config(dir.path(), extra, unsettled_age),
         fake.clone(),
         BootstrapOptions {
             persist_state: true,
@@ -260,7 +284,7 @@ async fn parallel_invocations_never_reserve_beyond_the_hard_limit_and_the_excess
     }
     let (mut ok, mut refused) = (0, 0);
     for t in tasks {
-        match t.await.unwrap() {
+        match within("a parallel invocation", t).await.unwrap() {
             Ok(out) => {
                 assert!(out.succeeded(), "{:?}", out.invocation().status);
                 ok += 1;
@@ -338,18 +362,23 @@ async fn timeout_and_cancel_settle_at_their_measured_charge() {
     let max = max_of(&h, &rev, &serde_json::json!({}));
     h.set_budgets(&budgets(&format!("hard_limit_micros = {}", 10 * max), ""));
 
-    let out = h
-        .app
-        .invoke
-        .invoke(request(&a, &f, serde_json::json!({})))
-        .await
-        .unwrap();
+    let out = within(
+        "the invocation that times out",
+        h.app.invoke.invoke(request(&a, &f, serde_json::json!({}))),
+    )
+    .await
+    .unwrap();
     assert!(!out.succeeded());
+    // What a loaded runner does between the two runs (the deploy below took
+    // longer than a second there): the timed-out run stays unsettled that
+    // long, and the next invocation must still be admitted.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
 
     let (f2, _) = deploy(&h, &a, "hang-long", 30).await;
     let app = h.app.clone();
     let req = request(&a, &f2, serde_json::json!({}));
-    let running = tokio::spawn(async move { app.invoke.invoke(req).await });
+    let mut running = tokio::spawn(async move { app.invoke.invoke(req).await });
+    let deadline = tokio::time::Instant::now() + TEST_WAIT;
     let id = loop {
         let list = h.app.history.list_invocations(&a, &f2.id, 10).unwrap();
         if let Some(d) = list.first()
@@ -357,11 +386,29 @@ async fn timeout_and_cancel_settle_at_their_measured_charge() {
         {
             break d.invocation.id.clone();
         }
+        // An invocation that ended (or was refused) before it was seen
+        // running never will be: fail with its outcome instead of polling.
+        if running.is_finished() {
+            let outcome = (&mut running)
+                .await
+                .unwrap()
+                .map(|o| o.invocation().status.name());
+            panic!("the long invocation ended before it was seen running: {outcome:?}");
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out after {TEST_WAIT:?} waiting for the long invocation to run: {list:?}"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     };
     tokio::time::sleep(Duration::from_millis(200)).await;
-    h.app.invoke.cancel(&a, &id).await.unwrap();
-    let out = running.await.unwrap().unwrap();
+    within("the cancel", h.app.invoke.cancel(&a, &id))
+        .await
+        .unwrap();
+    let out = within("the cancelled invocation", running)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(out.invocation().status.name(), "cancelled");
 
     h.app.collect_usage().unwrap();
@@ -447,7 +494,7 @@ async fn a_run_that_never_reports_back_expires_to_an_unmetered_hold() {
 /// when the collector catches up, admission resumes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_stalled_collector_fails_closed_and_admission_resumes_after_it_catches_up() {
-    let h = harness("");
+    let h = harness_with("", 1);
     let a = principal(TENANT_A);
     let (f, _) = deploy(&h, &a, "stall", 5).await;
     h.set_budgets(&budgets("hard_limit_micros = 100000000", ""));
@@ -489,7 +536,13 @@ async fn a_stalled_collector_fails_closed_and_admission_resumes_after_it_catches
         .unwrap_err();
     assert_budget(&err, ErrorCode::BudgetUnavailable, "Host.BudgetUnknown");
     // Already started work is tracked to its end.
-    assert!(running.await.unwrap().unwrap().succeeded());
+    assert!(
+        within("the running invocation", running)
+            .await
+            .unwrap()
+            .unwrap()
+            .succeeded()
+    );
 
     std::fs::remove_file(&pause).unwrap();
     h.app.collect_usage().unwrap();
@@ -540,7 +593,13 @@ async fn lowering_a_limit_stops_new_work_but_not_running_work_and_raising_resume
     assert_eq!(lowered.tenant.remaining_micros, Some(0));
     assert!(!lowered.admitting);
     // Not killed.
-    assert!(running.await.unwrap().unwrap().succeeded());
+    assert!(
+        within("the running invocation", running)
+            .await
+            .unwrap()
+            .unwrap()
+            .succeeded()
+    );
 
     h.set_budgets(&budgets(&format!("hard_limit_micros = {}", 10 * max), ""));
     let out = h
@@ -599,8 +658,14 @@ async fn a_queued_invocation_rechecks_the_budget_when_it_is_granted() {
     // generation is in the cache before the grant.
     h.app.refresh_config().await.unwrap();
 
-    assert!(first.await.unwrap().unwrap().succeeded());
-    let err = match second.await.unwrap() {
+    assert!(
+        within("the first invocation", first)
+            .await
+            .unwrap()
+            .unwrap()
+            .succeeded()
+    );
+    let err = match within("the queued invocation", second).await.unwrap() {
         Ok(out) => out.error().expect("refused"),
         Err(e) => e,
     };
@@ -859,8 +924,20 @@ async fn quota_budget_and_capacity_refusals_are_distinct_and_ordered() {
         ["queue_full", "capacity"].contains(&reason(&err).as_str()),
         "{err}"
     );
-    assert!(c_busy.await.unwrap().unwrap().succeeded());
-    assert!(b_busy.await.unwrap().unwrap().succeeded());
+    assert!(
+        within("C's running invocation", c_busy)
+            .await
+            .unwrap()
+            .unwrap()
+            .succeeded()
+    );
+    assert!(
+        within("B's running invocation", b_busy)
+            .await
+            .unwrap()
+            .unwrap()
+            .succeeded()
+    );
     for tenant in [TENANT_B, TENANT_C] {
         let rows = h
             .app
