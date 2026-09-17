@@ -4144,3 +4144,234 @@ async fn a_retry_is_metered_apart_from_the_first_attempt() {
     assert_eq!(u.outcomes.succeeded, 3);
     assert_usage_event_ids_are_unique(&h);
 }
+
+// ---------------------------------------------------------------------------
+// durable invocation logs (docs/adr/0018)
+// ---------------------------------------------------------------------------
+
+/// `logs.db` and its write-ahead log, as bytes: line text is stored as plain
+/// text, so a value that reached the log store shows up here.
+fn log_store_bytes(app: &Application) -> String {
+    let store = app.log_store.as_ref().expect("a durable log store");
+    assert!(store.flush(Duration::from_secs(10)));
+    let mut bytes = Vec::new();
+    for suffix in ["", "-wal"] {
+        if let Ok(b) = std::fs::read(format!("{}{suffix}", store.path().display())) {
+            bytes.extend(b);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// A guest that, on an `Invoke` whose payload has `"print_secret": true`,
+/// writes the `DEMO_SECRET` value it received in `HelloAck` to stdout (the
+/// user process printing its own secret), then answers.
+fn secret_printing_guest() -> FakeGuestScript {
+    FakeGuestScript::Custom(Arc::new(move |ctx: CustomScriptContext| -> ScriptFuture {
+        Box::pin(async move {
+            let (r, w) = tokio::io::split(ctx.stream);
+            let mut reader = FramedRead::new(r, FrameCodec);
+            let mut writer = FramedWrite::new(w, FrameCodec);
+            let hello = GuestMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                bridge_version: "test-guest".into(),
+                environment_id: ctx.environment_id.to_string(),
+                guest_boot_id: Some("test-boot".into()),
+                architecture: "aarch64".into(),
+            };
+            if writer.send(encode_message(&hello).unwrap()).await.is_err() {
+                return;
+            }
+            let Some(Ok(frame)) = reader.next().await else {
+                return;
+            };
+            let secret = match decode_message::<HostMessage>(&frame) {
+                Ok(HostMessage::HelloAck { env, .. }) => env
+                    .into_iter()
+                    .find(|(k, _)| k == "DEMO_SECRET")
+                    .map(|(_, v)| v)
+                    .unwrap_or_default(),
+                _ => return,
+            };
+            let ready = encode_message(&GuestMessage::Ready { init_ms: 1 }).unwrap();
+            if writer.send(ready).await.is_err() {
+                return;
+            }
+            while let Some(Ok(frame)) = reader.next().await {
+                let Ok(HostMessage::Invoke {
+                    attempt_id,
+                    epoch,
+                    payload,
+                    ..
+                }) = decode_message::<HostMessage>(&frame)
+                else {
+                    continue;
+                };
+                let print = payload
+                    .get("print_secret")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let line = if print {
+                    format!("user code printed {secret}")
+                } else {
+                    "user code kept quiet".to_string()
+                };
+                let log = GuestMessage::Log {
+                    stream: tachyon_serverless_protocol::LogStream::Stdout,
+                    phase: tachyon_serverless_protocol::LogPhase::Handler,
+                    attempt_id: Some(attempt_id.clone()),
+                    ts_ms: 1,
+                    line,
+                };
+                if writer.send(encode_message(&log).unwrap()).await.is_err() {
+                    return;
+                }
+                let answer = GuestMessage::Response {
+                    attempt_id,
+                    epoch,
+                    payload: serde_json::json!({"ok": true}),
+                    handler_ms: Some(1),
+                };
+                let _ = writer.send(encode_message(&answer).unwrap()).await;
+                // Stay connected until the host terminates the environment.
+                while let Some(Ok(_)) = reader.next().await {}
+                return;
+            }
+        })
+    }))
+}
+
+/// docs/threat-model.md T03 / docs/adr/0018: the host never writes a secret
+/// binding value into `logs.db`. The only way a value gets there is the user
+/// process printing it, which the positive control shows the scan would see.
+#[tokio::test]
+async fn secret_values_reach_the_log_store_only_when_user_code_prints_them() {
+    let h = harness(vec![secret_printing_guest(), secret_printing_guest()], "");
+    let (function, _) = deploy(&h, &h.a, "secretive").await;
+    let quiet = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(quiet.invocation().status, InvocationStatus::Succeeded);
+    let quiet_logs = h
+        .app
+        .logs
+        .for_invocation(&h.a, &quiet.invocation().id)
+        .unwrap();
+    assert!(
+        quiet_logs
+            .records
+            .iter()
+            .any(|r| r.line == "user code kept quiet")
+    );
+    let bytes = log_store_bytes(&h.app);
+    assert!(
+        bytes.contains("user code kept quiet"),
+        "the scan sees lines"
+    );
+    assert!(
+        !bytes.contains("demo-secret-value-a"),
+        "the host wrote a secret value into logs.db"
+    );
+
+    // Positive control: user code printing its own secret is stored as is.
+    let loud = h
+        .app
+        .invoke
+        .invoke(invoke_request(
+            &h.a,
+            &function,
+            serde_json::json!({"print_secret": true}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(loud.invocation().status, InvocationStatus::Succeeded);
+    assert!(log_store_bytes(&h.app).contains("user code printed demo-secret-value-a"));
+}
+
+/// docs/adr/0018: logs written by one application are served by the next one
+/// on the same data_dir.
+#[tokio::test]
+async fn invocation_logs_survive_an_application_restart() {
+    let h = harness(vec![FakeGuestScript::RespondOk(serde_json::json!({}))], "");
+    let (function, _) = deploy(&h, &h.a, "remembered").await;
+    let out = h
+        .app
+        .invoke
+        .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+        .await
+        .unwrap();
+    let id = out.invocation().id.clone();
+    let before = h.app.logs.for_invocation(&h.a, &id).unwrap();
+    assert!(
+        before
+            .records
+            .iter()
+            .any(|r| r.line.contains("fake guest: handling"))
+    );
+    h.app.log_store.as_ref().unwrap().shutdown();
+    h.app.store.flush().unwrap();
+    let fake = h.fake.clone();
+    drop(h.app);
+
+    let config = GatewayConfig::from_toml(&config_toml(h.dir.path(), "dev", "")).unwrap();
+    let restarted = Application::bootstrap_with(
+        config,
+        fake,
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let after = restarted.logs.for_invocation(&h.a, &id).unwrap();
+    let view = |q: &tachyon_serverless_application::repository::LogQuery| {
+        q.records
+            .iter()
+            .map(|r| (r.line.clone(), r.stream, r.phase, r.attempt_id.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert!(!after.records.is_empty());
+    // Every line served before the restart is served after it, in order.
+    assert_eq!(
+        view(&after)[..before.records.len()],
+        view(&before)[..],
+        "same lines, same order"
+    );
+    assert!(matches!(
+        restarted.logs.for_invocation(&h.b, &id),
+        Err(AppError::NotFound(_))
+    ));
+}
+
+/// docs/adr/0018: a locked `logs.db` never fails or blocks an invocation; the
+/// log store reports itself degraded and counts what it dropped.
+#[tokio::test]
+async fn a_locked_log_store_never_fails_an_invocation() {
+    let h = harness(
+        vec![FakeGuestScript::RespondOk(serde_json::json!({"ok": 1})); 3],
+        "[logs]\nread_flush_wait_ms = 3000\n",
+    );
+    let (function, _) = deploy(&h, &h.a, "unlogged").await;
+    let store = h.app.log_store.clone().unwrap();
+    let other = rusqlite::Connection::open(store.path()).unwrap();
+    other.execute_batch("BEGIN IMMEDIATE").unwrap();
+    for _ in 0..3 {
+        let started = Instant::now();
+        let out = h
+            .app
+            .invoke
+            .invoke(invoke_request(&h.a, &function, serde_json::json!({})))
+            .await
+            .unwrap();
+        assert_eq!(out.invocation().status, InvocationStatus::Succeeded);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+    assert!(store.flush(Duration::from_secs(10)));
+    let status = h.app.log_store_status();
+    assert!(!status.healthy, "{status:?}");
+    assert!(status.lines_dropped["store_unavailable"] > 0);
+    other.execute_batch("ROLLBACK").unwrap();
+}

@@ -96,7 +96,7 @@
 | 実請求・決済・請求書・訂正 | 無効（設定で有効化できない） | [ADR-0012](adr/0012-usage-ledger-and-rating.md)、[ADR-0016](adr/0016-budget-reservation-and-admission.md) |
 | 安定した public ingress、TLS 終端、内部通信の相互認証 | 無い（ADR-0004 は Proposed） | [ADR-0004](adr/0004-public-ingress.md) |
 | request rate limit、abuse 対応手順、WAF / DDoS 対策 | 無い | [ADR-0004](adr/0004-public-ingress.md)「demo より長く上げる前に必要なもの」、[threat-model.md](threat-model.md) §15 |
-| log の永続化・保持・検索（invocation log はメモリだけ） | 無い | [architecture.md](architecture.md) §4「永続化」 |
+| log の検索・転送（OTel）・保存時暗号化 | 無い。invocation log の永続化と保持期限・総量上限は実装済み（`<data_dir>/logs/logs.db`、process の E2E と unit / integration テストで確認、Firecracker では restart step 未実行） | [ADR-0018](adr/0018-durable-invocation-logs.md)、[architecture.md](architecture.md) §4「invocation log」 |
 | OCI image の pull・実行 | 無い（参照を受理して理由付き `Failed`） | [acceptance.md](acceptance.md) PLT-4620 |
 | Kata / Cloud Hypervisor adapter、Knative との比較 | 無い | [ADR-0001](adr/0001-execution-provider-firecracker-first.md)、[benchmark.md](benchmark.md) §6.5 |
 | tachyon-apps の secret backend・利用者認証との接続 | 無い | [acceptance.md](acceptance.md) PLT-4623 #6、[console-integration.md](console-integration.md) §3.1 |
@@ -137,8 +137,8 @@ RFC §19 の数値は RFC 自身が「設計用の仮目標であり、達成済
 | §15: 管理データは既存 TiDB を拡張、async ledger は国内配置を確認した TiDB | 埋め込み SQLite（`state.db`）。TiDB は試験専用 adapter で契約テストだけ | 差分 | [ADR-0003](adr/0003-execution-state-persistence.md)「TiDB 検証」 |
 | §15: queue は国内の JetStream | JetStream 単一 node、local disk、複製なし | 一部一致（冗長化・国内配置は未） | [ADR-0008](adr/0008-durable-queue-and-object-store.md) §6 |
 | §15: image・入出力・snapshot は国内 S3 互換 object store | gateway host の local directory（AES-256-GCM、単一鍵） | 差分 | 同上 |
-| §15: logs / metrics / traces は国内 OTel pipeline | invocation log は gateway のメモリ（再起動で消える）、gateway log は stdout、metrics は `/metrics`（メモリ） | 差分 | [architecture.md](architecture.md) §4、[metrics.md](metrics.md) |
-| §15: 保持（一般ログ 7 日、metadata 30 日、正常終了の入出力 24 時間、DLQ 7 日） | inline 出力は既定 7 日で digest に置換、invocation metadata は保持期限なし、DLQ・redrive 記録・inline 入力は保持期限なし、queue `max_age` 7 日、object TTL 7 日、invocation log は再起動で消える | 未達 | [ADR-0003](adr/0003-execution-state-persistence.md)、[acceptance.md](acceptance.md) PLT-4640「残り・制約」 |
+| §15: logs / metrics / traces は国内 OTel pipeline | invocation log は同じ host の `<data_dir>/logs/logs.db`（再起動で残る、転送なし）、gateway log は stdout、metrics は `/metrics`（メモリ） | 差分 | [architecture.md](architecture.md) §4、[metrics.md](metrics.md) |
+| §15: 保持（一般ログ 7 日、metadata 30 日、正常終了の入出力 24 時間、DLQ 7 日） | inline 出力は既定 7 日で digest に置換、invocation metadata は保持期限なし、DLQ・redrive 記録・inline 入力は保持期限なし、queue `max_age` 7 日、object TTL 7 日、invocation log は最後の行から既定 7 日（`[logs] retention_seconds`）と総量上限 1 GiB（実行中の invocation は消さない） | 未達 | [ADR-0003](adr/0003-execution-state-persistence.md)、[acceptance.md](acceptance.md) PLT-4640「残り・制約」 |
 | §16.1: UsageEvent は host / 入口の journal → durable stream → ledger | host の SQLite journal → 同じ host の SQLite ledger（stream なし、複製・署名なし） | 一部 | [ADR-0012](adr/0012-usage-ledger-and-rating.md) |
 | §16.4: hard budget は最大額の credit を事前予約し終了時に精算 | 実装済み（process 実測）。1 `data_dir` の中だけ、複数 cell の予算 token 配分は無い | 一部 | [ADR-0016](adr/0016-budget-reservation-and-admission.md) |
 | §17.1: strict profile では管理 DB・queue・image・snapshot・secret・logs・backup・crash dump・TLS 終端の拠点を確認 | 全部が 1 台の開発機の上。唯一の公開は Cloudflare quick tunnel（第三者 edge で TLS 終端） | 未達 | §4、[ADR-0004](adr/0004-public-ingress.md)「residency についての正確な言い方」 |
@@ -199,7 +199,7 @@ RFC §19 の数値は RFC 自身が「設計用の仮目標であり、達成済
 | queue（JetStream） | nats-server を動かす同じ host の local disk（lab は `<lab>/nats/jetstream`、既定 `target/queue/nats/jetstream`） | 暗号化なし、loopback 平文 | なし（`num_replicas = 1`） | `max_age` 7 日、ACK で削除 |
 | object（大きな入出力） | `<data_dir>/objects/<region>/<tenant>/` | AES-256-GCM（全 tenant 共通の 1 鍵、rotation なし）、digest 照合 | なし | TTL 既定 7 日、非 terminal の参照があれば保持 |
 | snapshot（X1、既定無効） | 封印: `<data_dir>/snapshots/`、平文: provider の `<workdir>/_snapshots/`（root 専用） | 封印側は AES-256-GCM chunk + 署名、平文 cache は host に残る | なし | GC・容量上限なし |
-| invocation log | **gateway プロセスのメモリ**（invocation ごと 2000 行 / 1 MiB） | — | なし | **gateway の再起動で消える** |
+| invocation log | `<data_dir>/logs/logs.db`（+ `-wal` / `-shm`。`[store] backend = "memory"` のときだけ gateway のメモリ）。invocation ごと 2000 行 / 1 MiB | **保存時暗号化なし**、directory 0700・file 0600。user code の出力を平文で含む（host は secret 値を書かない） | なし | 最後の行から既定 7 日、保存量 1 GiB 超で terminal の古い invocation から削除。crash で失うのは直近 1 flush 間隔（既定 200 ms）の行まで（[ADR-0018](adr/0018-durable-invocation-logs.md)） |
 | gateway の log | stdout / stderr（lab は `<lab>/logs/gateway.log`）、Firecracker の `console.log` / `fc.log` は provider workdir（各 4 MiB 上限） | 平文 | なし | rotation・保持なし |
 | metrics・admission・scale の状態 | gateway プロセスのメモリ | — | なし | 再起動で 0 |
 | backup | **無い** | — | — | — |
@@ -222,7 +222,7 @@ RFC §19 の数値は RFC 自身が「設計用の仮目標であり、達成済
 
 | 失うもの | 何が止まるか | 復旧の挙動（記録） | 失いうるデータ | 記録 |
 |---|---|---|---|---|
-| gateway プロセス（SIGKILL） | 全 API・invoke・publisher・dispatcher・scheduler・collector | 同じ `data_dir` で再起動すると、dispatch 済みの同期は `outcome_unknown` `Host.Restarted`、未 dispatch は `failed`、非同期は claim 期限後に再実行、未送信 outbox は publish、旧環境は terminate（process では recovery 0.2〜0.7 s、非同期 4〜5 s） | invocation log・metrics・admission / scale 状態（メモリ）。client は応答を受け取らない（Idempotency-Key が無ければ結果を区別できない）。dispatch 済みで kill された attempt の利用量。**Firecracker では VMM が残り handler を実行し続け、reconcile の回収経路は未試験** | `sync_gateway_kill`、`async_kill_*`、`orphan_recovery_after_crash` |
+| gateway プロセス（SIGKILL） | 全 API・invoke・publisher・dispatcher・scheduler・collector | 同じ `data_dir` で再起動すると、dispatch 済みの同期は `outcome_unknown` `Host.Restarted`、未 dispatch は `failed`、非同期は claim 期限後に再実行、未送信 outbox は publish、旧環境は terminate（process では recovery 0.2〜0.7 s、非同期 4〜5 s） | metrics・admission / scale 状態（メモリ）、invocation log のうち直近 1 flush 間隔（既定 200 ms）に届いた行（それ以前の行は `logs.db` に残る、ADR-0018）。client は応答を受け取らない（Idempotency-Key が無ければ結果を区別できない）。dispatch 済みで kill された attempt の利用量。**Firecracker では VMM が残り handler を実行し続け、reconcile の回収経路は未試験** | `sync_gateway_kill`、`async_kill_*`、`orphan_recovery_after_crash` |
 | store の一時停止（`state.db` の書込み lock） | lease 内: 管理 API は 503 `Host.StoreUnavailable`、invoke は解放後に成功または 503 | lease 内なら解放後に再起動なしで回復（約 0.2 s） | なし（受付拒否は行を作らない） | `db_locked_within_lease` |
 | store 停止が lease（既定 30 s + skew 2 s）を超える | heartbeat が書けず **gateway が自分を fence**、新規 invoke 503 | **再起動するまで 503**（他に回収する gateway がいなくても同じ）。再起動で全件収束 | なし（実測）。可用性は落ちる | `db_locked_past_lease`、[failure-matrix.md](failure-matrix.md) §6.2 |
 | `state.db` の disk 喪失・破損 | すべて（関数定義・alias・受付済み非同期・outbox・DLQ・trigger・idempotency） | **backup が無いので復旧できない**（未試験・対象外） | 台帳の全体 | [failure-matrix.md](failure-matrix.md) §9 |
@@ -336,7 +336,7 @@ RFC §19 の数値は RFC 自身が「設計用の仮目標であり、達成済
 ### 6.11 その他
 
 - 安定した public ingress（ADR-0004 の R1〜R6: ドメイン、事業者 account、credential、常時稼働 host、運用者、token 発行・失効手順）と、TLS 終端の所在地（第三者 edge を通すか）。
-- log の永続化・検索・保持（RFC §15 の OTel、payload を既定で記録しない）。
+- log の検索・転送・国内拠点（RFC §15 の OTel、payload を既定で記録しない）と、tenant ごとの log 保持期限。invocation log の永続化・保持期限・総量上限は ADR-0018 で入った。
 - 保持期限の実装（invocation metadata、DLQ、redrive 記録、inline 入力、`dispatchers` 表）。
 - OCI image の pull・署名検証、DB を使う Rust sample（RFC §22 M1）。
 - 別の人間による runbook 追試、lab.sh の firecracker 経路。

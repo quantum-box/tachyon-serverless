@@ -1,10 +1,12 @@
-//! Per-invocation log buffer, bounded by [`Limits`]. Logs are never
-//! persisted (docs/adr/0003 decision 5): both stores embed this.
+//! Per-invocation log buffer, bounded by [`Limits`]. Every store embeds
+//! this; the gateway replaces it by the durable log store
+//! (`crate::logs::DurableLogStore`, docs/adr/0018) whenever the ledger is
+//! durable, so it only serves `[store] backend = "memory"` and tests.
 
 use std::collections::HashMap;
 
 use parking_lot::RwLock;
-use tachyon_serverless_domain::{InvocationId, Limits, LogRecord};
+use tachyon_serverless_domain::{InvocationId, Limits, LogRecord, TenantId};
 
 use super::{AppendOutcome, LogQuery};
 
@@ -44,12 +46,20 @@ impl LogBuffer {
         AppendOutcome::Stored
     }
 
-    pub(crate) fn query(&self, invocation: &InvocationId) -> LogQuery {
+    /// Lines of `invocation` that belong to `tenant`; another tenant's
+    /// invocation answers like one without lines.
+    pub(crate) fn query(&self, tenant: &TenantId, invocation: &InvocationId) -> LogQuery {
         match self.buckets.read().get(&format!("inv:{invocation}")) {
-            Some(b) => LogQuery {
-                records: b.records.clone(),
-                dropped: b.dropped,
-            },
+            Some(b) => {
+                let records: Vec<LogRecord> = b
+                    .records
+                    .iter()
+                    .filter(|r| &r.tenant_id == tenant)
+                    .cloned()
+                    .collect();
+                let dropped = b.dropped && !records.is_empty();
+                LogQuery { records, dropped }
+            }
             None => LogQuery::default(),
         }
     }

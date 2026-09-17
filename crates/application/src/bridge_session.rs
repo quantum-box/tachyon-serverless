@@ -899,6 +899,10 @@ mod tests {
         }
     }
 
+    fn test_tenant() -> TenantId {
+        TenantId::parse("tn_01hzzzzzzzzzzzzzzzzzzzzzza").unwrap()
+    }
+
     fn setup(env: &EnvironmentId) -> (Arc<InMemoryStore>, LogForwarder, InvocationId) {
         let store = Arc::new(InMemoryStore::new(Limits {
             max_log_lines_per_invocation: 2,
@@ -909,7 +913,7 @@ mod tests {
             store.clone(),
             Arc::new(SystemClock),
             LogContext {
-                tenant_id: TenantId::generate(),
+                tenant_id: test_tenant(),
                 environment_id: env.clone(),
                 invocation_id: Some(inv.clone()),
                 max_line_bytes: 8,
@@ -1055,7 +1059,7 @@ mod tests {
         s.shutdown("done").await.unwrap();
         guest_task.await.unwrap();
 
-        let q = store.query(&inv);
+        let q = store.query(&test_tenant(), &inv).unwrap();
         assert_eq!(q.records.len(), 2, "bounded to 2 lines");
         assert!(q.dropped);
         assert!(q.records[0].truncated, "line cut at 8 bytes");
@@ -1344,7 +1348,7 @@ mod tests {
             "a guest that exited must never go back into the pool"
         );
         // The trailing line belongs to the invocation that produced it.
-        let q = store.query(&inv);
+        let q = store.query(&test_tenant(), &inv).unwrap();
         assert_eq!(q.records.len(), 1, "{:?}", q.records);
         assert_eq!(q.records[0].line, "trailing");
         assert_eq!(q.records[0].attempt_id, Some(att));

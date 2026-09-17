@@ -198,6 +198,13 @@ backend = "sqlite"             # sqlite（<data_dir>/state.db、既定）| memor
 output_retention_seconds = 604800  # インライン出力の保持期限。過ぎたら digest に置き換える。0 は無期限
 idempotency_retention_seconds = 86400  # Idempotency-Key の保持期限（Invocation が terminal になってから）。0 は無期限
 
+[logs]                         # invocation log（<data_dir>/logs/logs.db、docs/adr/0018）。[store] backend = "sqlite" のときだけ
+retention_seconds = 604800     # 最後の行からこれを過ぎた invocation の log を消す。0 は期限なし
+max_total_bytes = 1073741824   # 保存した行の bytes の上限。超えたら terminal の invocation を古い順に消す。0 は上限なし
+# max_lines_per_attempt = 2000 # 既定は [limits] max_log_lines_per_invocation
+# max_bytes_per_attempt = 1048576
+flush_interval_ms = 200        # writer の commit 間隔（crash で失いうる窓）
+
 [dispatcher]                   # PLT-4631。gateway プロセスごとの所有者 id と lease
 # instance = "gateway-a"       # 既定 "gateway@<listen>"。同じ data_dir を共有する gateway 同士で重複させない
 lease_ttl_seconds = 30         # dispatcher lease と slot lease の所有期限
@@ -336,11 +343,25 @@ value = "s3cr3t-a"
 | 更新の原子性 | 読んだ値を条件にした CAS。alias は `generation`、environment は `epoch` と terminal flag（claim / release / sweep は `state` も）、invocation / attempt は terminal flag、lease は released flag。0 行更新は「負け」 |
 | 行の不変条件 | `repository/guard.rs`。親と tenant が違う行、id・tenant・親 id・spec・digest など identity の変更、terminal 行の書き換え、別 epoch の environment のコピー、上限を超えるインライン出力を `RepoError::Refused` で拒否する。同一 id の insert は `Conflict` |
 | schema | `repository/sqlite/migrations/NNN_*.sql`。`schema_version` に適用済みを記録し、起動時に未適用分を 1 トランザクションで適用する。前進のみで、binary より新しい schema は起動を拒否する |
-| 本文 | 入力は digest とサイズだけ。出力は `[invoke] inline_output_max_bytes` 以下のときだけ本文を持ち（store 側でも `limits.max_response_bytes` で拒否）、`[store] output_retention_seconds` を過ぎると digest に置き換える（起動時と 10 分ごと）。secret 値は書かない。log は memory のまま |
+| 本文 | 入力は digest とサイズだけ。出力は `[invoke] inline_output_max_bytes` 以下のときだけ本文を持ち（store 側でも `limits.max_response_bytes` で拒否）、`[store] output_retention_seconds` を過ぎると digest に置き換える（起動時と 10 分ごと）。secret 値は書かない。invocation log は `state.db` には書かない（次節「invocation log」、ADR-0018） |
 | `state.json` からの移行 | `state.json` があり DB が空なら、起動時に 1 度だけ取り込み `state.json.imported-<UTC>` に rename する（削除しない）。行のある DB と `state.json` が同時にあれば両方の path を挙げて起動を拒否する。壊れた `state.json` は従来どおり拒否する。逆方向の変換は無い（戻すには rename された JSON を戻し、`state.db*` を退避する） |
 | 権限 | `state.db` は新規作成時に mode `0600`。`-wal` / `-shm` も SQLite が同じ mode で作る |
 | port の分割 | control-plane の 8 trait と、cell-local の `SlotStore`（`repository/slot.rs`: dispatcher、slot の acquire / complete / release、lease の renew / reclaim、fencing、pool membership）。両方とも同じ `state.db` に載る（ADR-0003 決定 1・2） |
 | 対象外 | 複数 host、ネットワーク FS 上の `data_dir`、TiDB、backup / PITR、保存時暗号化。同じ `data_dir` を同じ host の複数 gateway が同時に開く構成は PLT-4631 で扱えるようになった（次節）。ただし `[dispatcher] instance` と `listen` は gateway ごとに変えること |
+
+### invocation log（`logs.db`、ADR-0018）
+
+`GET /v1/invocations/{id}/logs`・`tsls functions logs`・console が読む log は、台帳が durable なとき `<data_dir>/logs/logs.db`（別の SQLite、`crates/application/src/logs/`）に置く。`[store] backend = "memory"` のときは従来の memory buffer（`repository/logs.rs`）。
+
+| 項目 | 内容 |
+|---|---|
+| 書き込み | bridge session の append は上限付き queue（`[logs] queue_max_lines` 20000 行 / `queue_max_bytes` 16 MiB）に入れて返るだけで IO を待たない。writer thread が `flush_interval_ms`（200 ms）ごと、または `flush_max_lines`（1000 行）で 1 トランザクションにまとめて commit（WAL、`synchronous = FULL`、busy timeout 1 s） |
+| crash | commit 済みは残り file は壊れない。失うのは queue にあった行（直近 1 flush 間隔ぶん）だけ。graceful shutdown は queue を commit してから止まる |
+| 読み取り | その時点までに queue に入った行の commit を `read_flush_wait_ms`（1 s）まで待って読む。`WHERE tenant_id = ? AND invocation_id = ? ORDER BY seq` |
+| 上限 | 1 行 `[limits] max_log_line_bytes`（切って `truncated`）、invocation `max_log_lines_per_invocation` / `max_log_bytes_per_invocation`、attempt `[logs] max_lines_per_attempt` / `max_bytes_per_attempt`。数は行と同じトランザクションで保存するので再起動しても増えない。超過は `[tachyon] ` で始まる platform の marker 行 1 行と `dropped: true` |
+| 保持 | 60 s ごと: 最後の行が `retention_seconds`（7 日）より古い invocation を消す。保存 bytes が `max_total_bytes`（1 GiB）を超えていれば、台帳で terminal の invocation を古い順に消す（実行中は消さない） |
+| 障害 | queue 満杯・`logs.db` の lock・disk 満杯・開けない file では行を捨てて数え（`tsls_logs_lines_dropped_total{reason}`）、次に書けた flush で invocation に marker を書く。invoke は止めない。`/readyz` の `logs.healthy = false` は readiness に入れない |
+| 権限 | `logs/` は 0700、`logs.db`（と `-wal` / `-shm`）は 0600。secret 値は host が書かない（user code が自分で出力した行は本文のまま入る） |
 
 ### dispatcher・lease・fencing（PLT-4631）
 

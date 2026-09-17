@@ -317,6 +317,14 @@ fn input(s: &mut AdmissionState, limits: SeriesLimits, events: &Metrics) -> Metr
                 ..Default::default()
             },
         }),
+        logs: Some(crate::logs::LogStoreStatus {
+            healthy: false,
+            lines_written: 42,
+            lines_dropped: std::collections::BTreeMap::from([("queue_full", 3)]),
+            last_flush_lag_ms: Some(250.0),
+            retention_deleted_lines: std::collections::BTreeMap::from([("size", 7)]),
+            ..crate::logs::LogStoreStatus::memory()
+        }),
     }
 }
 

@@ -797,6 +797,18 @@ event の `path` は `/http` より後ろの request-target path を **受け取
 
 `stream`: `stdout` | `stderr` | `platform`。`phase`: `boot` | `init` | `handler` | `shutdown`。1 行の上限を超えた行は `truncated: true`、invocation 単位の行数 / bytes 上限で捨てられた行があれば `dropped: true`。
 
+保存・上限・保持（`docs/adr/0018-durable-invocation-logs.md`）:
+
+- **保存先**: `[store] backend = "sqlite"`（既定）では `<data_dir>/logs/logs.db` に保存され、gateway の再起動後も同じ行を同じ順で返す。`memory` では gateway のメモリだけ（再起動で消える）。
+- **順序**: gateway が受け取った順（`seq`）。`timestamp` は host が受け取った時刻。
+- **1 行**: `[limits] max_log_line_bytes`（既定 16 KiB）で char boundary で切り、`truncated: true`。
+- **invocation / attempt の上限**: invocation ごと `[limits] max_log_lines_per_invocation`（2000 行）/ `max_log_bytes_per_invocation`（1 MiB）、attempt ごと `[logs] max_lines_per_attempt` / `max_bytes_per_attempt`（既定は invocation と同じ）。超えた行は保存せず `dropped: true`。上限に当たった最初の時点で `stream: "platform"` の marker 行（本文は `[tachyon] log limit of this invocation reached ...` / `[tachyon] log limit of this attempt reached ...`）が 1 行入る。上限は再起動をまたいでも数え直さない。
+- **捨てた行の marker**: gateway の log writer が追いつかない・log store が使えない間に来た行は保存されず、次に書けた時点で `[tachyon] N log line(s) (B bytes) of this invocation were dropped: the log writer queue was full` / `...: the log store was unavailable` の marker 行と `dropped: true`。marker は invocation あたり最大 16 行で、上限に数えない。`[tachyon] ` で始まる `platform` 行は常に platform が書いたもの（user code の出力は `stdout` / `stderr`）。
+- **保持**: 最後の行から `[logs] retention_seconds`（既定 7 日）を過ぎた invocation の log は丸ごと消え、保存量が `[logs] max_total_bytes`（既定 1 GiB）を超えると終わった invocation の log から古い順に消える（実行中の invocation の log は消さない）。消えた後は `items: []`、`dropped: false`（invocation 自体は `GET /v1/invocations/{id}` に残る）。SLA ではない。
+- **遅延**: 行は非同期に保存される（既定 200 ms ごと）。このエンドポイントはそれまでに届いた行の保存を最大 `[logs] read_flush_wait_ms`（1 s）待ってから答える。log store が lock されている・開けないときは待ちを打ち切って保存済みの行だけを返す。読み取り自体ができないときは 503（`Host.StoreUnavailable`）。
+- **tenant**: 他 tenant の invocation は 404（従来どおり）。store の query も tenant で絞る。
+- 上限や障害で log が欠けても、invocation の結果（`status`・`output`）は変わらない。
+
 ### 5.10 Usage
 
 `GET /v1/functions/{function_id}/usage` → `UsageSummaryResponse`:

@@ -545,6 +545,77 @@ pub const FAMILIES: &[(&str, &str, &str)] = &[
         "counter",
         "Measured charges above their reservation, settled in full.",
     ),
+    // invocation logs (docs/adr/0018)
+    (
+        "tsls_logs_store_healthy",
+        "gauge",
+        "1 when logs/logs.db is open and the last flush committed. 0 is a degraded log store: invocations still run, their log lines are dropped and counted.",
+    ),
+    (
+        "tsls_logs_lines_written_total",
+        "counter",
+        "Log lines this process committed to logs/logs.db (marker lines excluded).",
+    ),
+    (
+        "tsls_logs_bytes_written_total",
+        "counter",
+        "Line bytes this process committed to logs/logs.db.",
+    ),
+    (
+        "tsls_logs_lines_truncated_total",
+        "counter",
+        "Committed lines that were cut at [limits] max_log_line_bytes.",
+    ),
+    (
+        "tsls_logs_marker_lines_total",
+        "counter",
+        "Platform marker lines committed for a cap or a loss ([tachyon] ...).",
+    ),
+    (
+        "tsls_logs_lines_dropped_total",
+        "counter",
+        "Log lines not stored, by reason: queue_full (writer queue bound), store_unavailable (logs.db refused the batch), invocation_limit, attempt_limit, unattributed (no invocation).",
+    ),
+    (
+        "tsls_logs_queue_lines",
+        "gauge",
+        "Lines waiting in the writer queue.",
+    ),
+    (
+        "tsls_logs_queue_bytes",
+        "gauge",
+        "Line bytes waiting in the writer queue.",
+    ),
+    (
+        "tsls_logs_flush_lag_seconds",
+        "gauge",
+        "Age of the oldest line of the last committed batch when it committed (enqueue to commit).",
+    ),
+    (
+        "tsls_logs_flush_failures_total",
+        "counter",
+        "Batches logs/logs.db refused (locked, full disk, cannot open).",
+    ),
+    (
+        "tsls_logs_stored_bytes",
+        "gauge",
+        "Line bytes stored in logs/logs.db (markers included; SQLite pages and indexes not counted). Compared with [logs] max_total_bytes.",
+    ),
+    (
+        "tsls_logs_stored_lines",
+        "gauge",
+        "Rows stored in logs/logs.db (markers included).",
+    ),
+    (
+        "tsls_logs_retention_deleted_lines_total",
+        "counter",
+        "Lines the retention passes deleted, by reason (age: retention_seconds, size: max_total_bytes).",
+    ),
+    (
+        "tsls_logs_retention_skipped_non_terminal",
+        "gauge",
+        "Invocations the last size-cap pass kept because the ledger does not report them terminal.",
+    ),
     (
         "tsls_metrics_series_truncated",
         "gauge",
