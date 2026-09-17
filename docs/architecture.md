@@ -249,6 +249,18 @@ backend = "none"               # none | filesystem
 # orphan_grace_seconds = 3600
 # gc_interval_seconds = 600
 
+[invoke_async]                 # PLT-4639。[queue] があり台帳が sqlite のときだけ有効
+inline_input_max_bytes = 65536 # これ以下の入力は台帳、超えるものは [objects]（無ければ 413）
+max_pending_events = 10000     # outbox の未送信がこれ以上なら 429 backlog（queue 停止中なら 503 queue_unavailable）
+max_pending_age_seconds = 300  # 最古の未送信がこれより古くても同じ
+queue_deadline_seconds = 86400 # 受け付けた非同期 invocation の queue deadline（強制は PLT-4640）
+publish_batch = 100
+publish_interval_ms = 200      # 受付があれば即座に起こされる
+claim_ttl_seconds = 30         # publisher が落ちたとき、その行が再 publish されるまでの最大の遅れ
+retry_initial_ms = 500         # publish 失敗の backoff（2 倍ずつ、retry_max_ms まで）
+retry_max_ms = 30000
+sent_retention_seconds = 3600  # 送信済みの outbox 行を消すまで
+
 [[identity.tokens]]
 token = "dev-token-tenant-a"
 tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
@@ -267,7 +279,7 @@ value = "s3cr3t-a"
 
 前のプロセスが crash / kill で落ちた場合、台帳（`state.db`）も host の資源も中途半端に残る。gateway は次の順で収束させる。
 
-1. **台帳（所有者の無い行）**（`crates/application/src/repository/restart.rs` の規則を `SqliteStore::open` が 1 トランザクションで適用する）。対象は **owner を持たない行**（schema 2 以前の gateway が書いた行と `state.json` の import）だけ。`Running` だった Invocation は `Invoke` frame を書き終えており handler が走った可能性があるため `OutcomeUnknown{Host.Restarted}`（自動再実行しない。`docs/threat-model.md` §9）。`Accepted` / `Queued` のままだったものは一度も dispatch していないので `Failed{platform_error, Host.Restarted}`。Attempt は所属する Invocation に従い、Environment は `Lost`、未 release の Lease は release、Invocation の無い Idempotency key は削除。terminal なものは触らない。
+1. **台帳（所有者の無い行）**（`crates/application/src/repository/restart.rs` の規則を `SqliteStore::open` が 1 トランザクションで適用する）。対象は **owner を持たない行**（schema 2 以前の gateway が書いた行と `state.json` の import）だけ。`Running` だった Invocation は `Invoke` frame を書き終えており handler が走った可能性があるため `OutcomeUnknown{Host.Restarted}`（自動再実行しない。`docs/threat-model.md` §9）。`Accepted` / `Queued` のままだったものは一度も dispatch していないので `Failed{platform_error, Host.Restarted}`。**ただし非同期 invocation（`invocation_inputs` を持つ `Accepted` / `Queued`、PLT-4639）は対象外**で、入力と outbox event が永続化されているので再起動後も配送を続ける。Attempt は所属する Invocation に従い、Environment は `Lost`、未 release の Lease は release、Invocation の無い Idempotency key は削除。terminal なものは触らない。
 2. **台帳（dispatcher の reclaim）**（`Application::bootstrap` が新しい dispatcher を登録した直後に `Dispatcher::reclaim_ledger`）。**lease を失った dispatcher の行だけ**を回収する（次節「dispatcher・lease・fencing」）。生きている別 gateway の行には触らない。
 3. **host の資源**（`crates/application/src/services/reconcile.rs::ReconcileService`、`serve()` が listener を accept させる前に呼ぶ）。まず 2 で fence された環境を `terminate_environment(Reconcile)` し、成功を確認できたものだけ `Lost` にする。続いて `ExecutionProvider::list_environments` を呼び、この gateway が active として知らない環境を `terminate_environment(Reconcile)` で回収する（process / socket / drive / workdir。冪等）。台帳には active なのに provider が知らない環境は `Lost` にする。**生きている別 dispatcher が所有する環境と fenced の環境はこの判定から外す**（数だけ `foreign` に出す）。台帳の snapshot に無い id は terminate の前に台帳を読み直し、その間に別 gateway が記録していれば外す。
 4. **観測**。結果（found / adopted / terminated / failed / lost / foreign と reclaim の dispatchers / leases / invocations / fenced / terminated / pending）を構造化ログ `startup reconcile finished` に出し、`GET /readyz` の `reconcile` にも載せる。
@@ -426,7 +438,7 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 
 ### durable queue と object store（PLT-4638）
 
-非同期 invoke（PLT-4639 以降）のための配送と本文の置き場。**検証環境の用意までで、invoke pipeline はまだ使わない。** `[queue]` / `[objects]` の既定は `none` で、既定の gateway は何も接続しない。決定と実測は `docs/adr/0008-durable-queue-and-object-store.md`。
+非同期 invoke（PLT-4639 以降）のための配送と本文の置き場。PLT-4639 の `invokeAsync` が受付と outbox の配送に使う（次節）。 `[queue]` / `[objects]` の既定は `none` で、既定の gateway は何も接続しない。決定と実測は `docs/adr/0008-durable-queue-and-object-store.md`。
 
 | 項目 | 内容 |
 |---|---|
@@ -438,6 +450,40 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 | object | `FsObjectStore`: `<root>/<region>/<tenant>/<obj_id>.{data,meta}`（dir 0700、file 0600）。AES-256-GCM（鍵は key file / env、metadata に key id）、平文 SHA-256 を読むたびに検証、AAD で id・tenant・region・digest に束縛。別 tenant / region の scope からは `NotFound`。`max_object_bytes` と tenant quota は明示エラー |
 | retention / GC | 台帳の `object_refs` / `object_tombstones`（migration 005）。GC は期限切れと orphan（grace を過ぎて一度も参照されていない）を、**非 terminal の invocation が参照していない場合だけ** tombstone → 削除する。tombstone 後の attach は拒否されるので、put と invocation insert の競合で消えた object を指すことはない |
 | 保存先と複製 | queue は nats-server の 1 host の local disk、object は gateway の host の `data_dir`。**複製なし、HA ではない、region 障害に耐えない**（region は置き場所の境界であって複製先ではない） |
+
+### 非同期 invoke と outbox（PLT-4639）
+
+決定は `docs/adr/0010-invoke-async-and-outbox.md`、API は `docs/api.md` §5.6.1。
+
+```
+client ─POST :invokeAsync─▶ AsyncInvokeService::accept
+    1. 設定 cache で解決（revision をここで固定）
+    2. JSON・size・digest
+    3. Idempotency-Key が結び付いていれば 202（replayed）/ 409
+    4. outbox の上限と queue の状態で早期拒否（429 backlog / queue_full、503 queue_unavailable）
+    5. 大きな入力は ObjectStore::put（digest を照合）
+    6. state.db の 1 トランザクション:
+         invocations(mode=async, accepted) + idempotency + object_refs + invocation_inputs + outbox
+         （key と outbox の上限を同じ write lock の下で再確認）
+    7. COMMIT の後に 202 ──▶ client
+                                   │ wake
+OutboxPublisher::run_once ◀────────┘（gateway の loop、catch_unwind）
+    claim（sent=0・due・claim なし/期限切れ → claimed_by = dispatcher id, claim_ttl）
+    → EventQueue::publish(message id = invocation id, payload = envelope)
+    → ACK → mark sent（CAS on claim）+ invocation accepted → queued
+    → 失敗 → claim を外して backoff（queue 停止なら batch の残りもまとめて外す）
+```
+
+| 項目 | 内容 |
+|---|---|
+| 有効になる条件 | `[queue]` が `none` 以外、かつ台帳が `state.db`。揮発の台帳では 503 `not_configured`。`[objects]` は任意（無ければ inline 上限を超える入力は 413） |
+| 台帳 | migration 006: `invocation_inputs`（inline 本文か `(object_id, region)`、size、digest）と `outbox`（event id = invocation id、envelope、`sent`、`publish_attempts`、`next_attempt_at`、`claimed_by` / `claim_expires_at`、`last_error`、`queue_sequence`） |
+| envelope | `InvokeEnvelope` v1: invocation / tenant / function / revision の id、event kind、input の digest・size・置き場、`accepted_at`、`queue_deadline`、trace id。**入力本文は載せない**。配送された event は `read_delivery` が台帳と照合し、入力を台帳の tenant scope で読み、digest を検証する |
+| 再起動 | 非同期 invocation は dispatcher を持たず（`dispatcher_id = None`）、restart reconcile の対象外。outbox の未送信行は次の pass が送る。claim を持ったまま落ちた publisher の行は `claim_ttl_seconds` 後に取り直す |
+| 重複 | ACK 後・mark 前に落ちると再 publish。broker の duplicate window 内なら 1 通、外なら同じ message id の 2 通目が保存される（at-least-once）。consumer は台帳の invocation id で決着する |
+| 複数 gateway | 同じ `state.db` の publisher のうち 1 つだけが行を claim する（`BEGIN IMMEDIATE` と CAS）。outbox の上限もトランザクション内で判定するので、gateway の数だけ上限を越えることはない。queue の状態（満杯・停止）はプロセスローカル |
+| failpoint | `crates/application/src/failpoints.rs`。unit test と feature `failpoints` の build だけで動き、`TSLS_FAILPOINTS`（例 `outbox.after_publish=kill`）で E2E が SIGKILL を起こす（`scripts/queue/async-e2e.sh`） |
+| 範囲外 | queue からの取り出し・実行・retry・DLQ（PLT-4640）。`queued` の先には進まない |
 
 ## 5. 決め事（実装者が守ること）
 

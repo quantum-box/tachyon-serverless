@@ -22,6 +22,9 @@ providers = [
   "dep:tachyon-serverless-provider-process",
   "dep:tachyon-serverless-provider-firecracker",
 ]
+# Test-only failpoints (TSLS_FAILPOINTS) for scripts/queue/async-e2e.sh. Never
+# in a production build.
+failpoints = ["tachyon-serverless-application/failpoints"]
 
 [dependencies]
 tachyon-serverless-domain = { workspace = true }

@@ -709,6 +709,21 @@ impl InvokeService {
                 invocation_id: binding.invocation_id,
             });
         }
+        // A key bound to an asynchronous invocation (PLT-4639) is not replayed
+        // as a synchronous result: that invocation may wait in the queue far
+        // longer than any client deadline.
+        if self
+            .repos
+            .invocations
+            .get(&binding.invocation_id)?
+            .is_some_and(|inv| inv.mode != InvocationMode::Sync)
+        {
+            return Err(AppError::Conflict(format!(
+                "idempotency key `{}` is bound to asynchronous invocation {}",
+                req.idempotency_key.as_deref().unwrap_or_default(),
+                binding.invocation_id
+            )));
+        }
         self.replay(&binding.invocation_id).await
     }
 

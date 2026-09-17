@@ -18,10 +18,15 @@ use crate::error::AppError;
 use crate::local_ports::{
     InMemoryUsageSink, LocalArtifactStore, StaticIdentityProvider, StaticSecretProvider,
 };
+use crate::repository::AsyncInvocationRepository;
 use crate::repository::HeartbeatOutcome;
 use crate::repository::{InMemoryStore, Repositories, SqliteOptions, SqliteStore, StateStore};
 use crate::services::admission::{AdmissionController, AdmissionSettings, ScaleDefaults};
 use crate::services::invoke::InvokeServiceDeps;
+use crate::services::invoke_async::{
+    AcceptedEvent, AsyncInvokeService, AsyncInvokeServiceDeps, AsyncRefusal, OutboxPublisher,
+    PublishReport, QueueHealth,
+};
 use crate::services::{
     AliasService, ArtifactService, Dispatcher, EnvironmentPool, FunctionService, HistoryService,
     InvokeService, LogService, PoolPolicy, PoolSweep, ProviderService, ReclaimSummary,
@@ -83,6 +88,17 @@ pub struct Application {
     pub durable: crate::durable::DurableComponents,
     /// Scale to zero, `min_ready`, cooldown and drains (PLT-4635).
     pub scaling: Arc<ScaleController>,
+    /// The durable ledger's asynchronous side (PLT-4639). `None` when the
+    /// ledger is volatile.
+    pub async_ledger: Option<Arc<dyn AsyncInvocationRepository>>,
+    /// Asynchronous acceptance (PLT-4639). `None` without a queue or without
+    /// the durable ledger.
+    pub invoke_async: Option<Arc<AsyncInvokeService>>,
+    /// The transactional outbox publisher. The gateway runs
+    /// [`Application::publish_outbox`] in a loop; tests call it directly.
+    pub outbox: Option<Arc<OutboxPublisher>>,
+    /// Test-only failpoints (inert unless built with `failpoints`).
+    pub failpoints: Arc<crate::failpoints::Failpoints>,
 }
 
 impl std::fmt::Debug for Application {
@@ -178,6 +194,9 @@ impl Application {
                 config.data_dir.display()
             ))
         })?;
+        // The durable ledger, kept concretely as well: asynchronous acceptance
+        // and the outbox exist only on it (PLT-4639).
+        let mut durable_ledger: Option<Arc<SqliteStore>> = None;
         let store: Arc<dyn StateStore> =
             if options.persist_state && config.store.backend == StoreBackend::Sqlite {
                 let sqlite = SqliteStore::open(
@@ -204,7 +223,9 @@ impl Application {
                     outputs_purged = report.outputs_purged,
                     "state store opened"
                 );
-                Arc::new(sqlite)
+                let sqlite = Arc::new(sqlite);
+                durable_ledger = Some(sqlite.clone());
+                sqlite
             } else {
                 Arc::new(
                     InMemoryStore::new(limits.clone())
@@ -419,6 +440,57 @@ impl Application {
             drain_timeout,
             control.role == GatewayRole::Combined,
         );
+        // Asynchronous invoke (PLT-4639): only with a queue and the durable
+        // ledger. The outbox publisher claims rows as this dispatcher.
+        let failpoints = Arc::new(crate::failpoints::Failpoints::from_env());
+        let async_ledger: Option<Arc<dyn AsyncInvocationRepository>> = durable_ledger
+            .clone()
+            .map(|l| l as Arc<dyn AsyncInvocationRepository>);
+        let (invoke_async, outbox) = match (&durable.queue, &async_ledger) {
+            (Some(queue), Some(ledger)) => {
+                let health = Arc::new(QueueHealth::default());
+                let wake = Arc::new(tokio::sync::Notify::new());
+                let service = AsyncInvokeService::new(AsyncInvokeServiceDeps {
+                    ledger: ledger.clone(),
+                    invocations: store.clone(),
+                    idempotency: store.clone(),
+                    objects: durable.objects.clone(),
+                    region: config
+                        .objects
+                        .parsed_regions()
+                        .ok()
+                        .and_then(|r| r.into_iter().next()),
+                    gate: invoke_gate.clone(),
+                    clock: clock.clone(),
+                    ids: ids.clone(),
+                    limits: limits.clone(),
+                    config: config.invoke_async.clone(),
+                    failpoints: failpoints.clone(),
+                    health: health.clone(),
+                    wake: wake.clone(),
+                });
+                let publisher = Arc::new(OutboxPublisher::new(
+                    ledger.clone(),
+                    queue.clone(),
+                    dispatcher.id().to_string(),
+                    clock.clone(),
+                    config.invoke_async.clone(),
+                    failpoints.clone(),
+                    health,
+                    wake,
+                ));
+                (Some(service), Some(publisher))
+            }
+            (Some(_), None) => {
+                tracing::warn!(
+                    "[queue] is configured but the ledger is volatile: asynchronous invoke is \
+                     refused (503 not_configured) because an accepted invocation would not \
+                     survive a restart"
+                );
+                (None, None)
+            }
+            _ => (None, None),
+        };
         // Reuse is visible at startup, on or off, with the gate that decided
         // it and the two capabilities behind it (PLT-4633 acceptance 4). The
         // same facts are on `GET /v1/provider`.
@@ -441,6 +513,7 @@ impl Application {
             max_concurrency = config.capacity.max_concurrency,
             queue = config.queue.backend.as_str(),
             objects = config.objects.backend.as_str(),
+            invoke_async = invoke_async.is_some(),
             "application bootstrapped"
         );
         if policy.reuse_enabled() && !policy.idle_verified() {
@@ -482,6 +555,10 @@ impl Application {
             admission,
             durable,
             scaling,
+            async_ledger,
+            invoke_async,
+            outbox,
+            failpoints,
         }))
     }
 
@@ -527,6 +604,34 @@ impl Application {
     pub async fn collect_objects(&self) -> Option<crate::durable::GcReport> {
         let gc = self.durable.object_gc.as_ref()?;
         Some(gc.run().await)
+    }
+
+    /// One outbox publisher pass (PLT-4639). `None` without asynchronous
+    /// invoke.
+    pub async fn publish_outbox(&self) -> Option<PublishReport> {
+        let outbox = self.outbox.as_ref()?;
+        Some(outbox.run_once().await)
+    }
+
+    /// Resolve a delivered asynchronous invoke event against the ledger
+    /// (invocation, tenant, pinned revision, input and its digest).
+    pub async fn read_async_delivery(
+        &self,
+        delivery: &tachyon_serverless_durable_port::Delivery,
+    ) -> Result<AcceptedEvent, AppError> {
+        let Some(ledger) = &self.async_ledger else {
+            return Err(AppError::AsyncRefused {
+                reason: AsyncRefusal::NotConfigured,
+                message: "asynchronous invoke needs the durable ledger".into(),
+            });
+        };
+        crate::services::invoke_async::read_delivery(
+            ledger.as_ref(),
+            self.repos.invocations.as_ref(),
+            self.durable.objects.as_deref(),
+            delivery,
+        )
+        .await
     }
 
     /// Renew this dispatcher's lease and the slot leases of its in-flight

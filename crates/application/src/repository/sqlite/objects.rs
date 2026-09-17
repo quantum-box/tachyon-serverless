@@ -12,6 +12,50 @@ use super::super::objects::{
 };
 use super::{RepoError, SqliteStore, get_invocation, ts};
 
+/// The attach inside an open transaction (also used by the asynchronous
+/// acceptance, which attaches in the same transaction as the invocation
+/// insert). The caller has run [`check_attachable`].
+pub(super) fn attach_in(
+    tx: &rusqlite::Connection,
+    object: &ObjectRef,
+    invocation: &InvocationId,
+    now: Timestamp,
+) -> Result<(), RepoError> {
+    let inv = get_invocation(tx, invocation)?
+        .ok_or_else(|| RepoError::NotFound(format!("invocation {invocation}")))?;
+    if inv.tenant_id != object.scope.tenant_id {
+        return Err(RepoError::Refused(format!(
+            "object {} belongs to another tenant than invocation {invocation}",
+            object.id
+        )));
+    }
+    let tombstoned: Option<String> = tx
+        .query_row(
+            "SELECT reason FROM object_tombstones WHERE object_id = ?1",
+            [object.id.as_str()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(reason) = tombstoned {
+        return Err(RepoError::Refused(format!(
+            "object {} is being collected ({reason}); store it again",
+            object.id
+        )));
+    }
+    tx.execute(
+        "INSERT OR IGNORE INTO object_refs (object_id, tenant_id, region, invocation_id, attached_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            object.id.as_str(),
+            object.scope.tenant_id.as_str(),
+            object.scope.region.as_str(),
+            invocation.as_str(),
+            ts(&now)
+        ],
+    )?;
+    Ok(())
+}
+
 impl ObjectReferenceRepository for SqliteStore {
     fn attach_object(
         &self,
@@ -20,41 +64,7 @@ impl ObjectReferenceRepository for SqliteStore {
         now: Timestamp,
     ) -> Result<(), RepoError> {
         check_attachable(&object.id, now)?;
-        self.write(|tx| {
-            let inv = get_invocation(tx, invocation)?
-                .ok_or_else(|| RepoError::NotFound(format!("invocation {invocation}")))?;
-            if inv.tenant_id != object.scope.tenant_id {
-                return Err(RepoError::Refused(format!(
-                    "object {} belongs to another tenant than invocation {invocation}",
-                    object.id
-                )));
-            }
-            let tombstoned: Option<String> = tx
-                .query_row(
-                    "SELECT reason FROM object_tombstones WHERE object_id = ?1",
-                    [object.id.as_str()],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            if let Some(reason) = tombstoned {
-                return Err(RepoError::Refused(format!(
-                    "object {} is being collected ({reason}); store it again",
-                    object.id
-                )));
-            }
-            tx.execute(
-                "INSERT OR IGNORE INTO object_refs (object_id, tenant_id, region, invocation_id, attached_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    object.id.as_str(),
-                    object.scope.tenant_id.as_str(),
-                    object.scope.region.as_str(),
-                    invocation.as_str(),
-                    ts(&now)
-                ],
-            )?;
-            Ok(())
-        })
+        self.write(|tx| attach_in(tx, object, invocation, now))
     }
 
     fn object_references(&self, object: &ObjectId) -> Result<Vec<InvocationId>, RepoError> {

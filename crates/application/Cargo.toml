@@ -7,6 +7,13 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Application layer: configuration, repositories, local ports, host-side bridge session and the invoke pipeline."
 
+[features]
+# Test-only failpoints in the asynchronous acceptance and outbox paths
+# (src/failpoints.rs, docs/adr/0010). Always on for this crate's unit tests;
+# the feature turns them on in a built gateway for the async E2E
+# (scripts/queue/async-e2e.sh). Never enable it in a production build.
+failpoints = []
+
 [dependencies]
 tachyon-serverless-domain = { workspace = true }
 tachyon-serverless-protocol = { workspace = true }

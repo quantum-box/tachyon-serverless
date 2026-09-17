@@ -88,6 +88,10 @@ pub enum ErrorCode {
     /// The management API (the control plane or its store) is unavailable
     /// from this gateway (PLT-4636).
     ControlPlaneUnavailable,
+    /// An asynchronous invocation cannot be durably accepted right now: the
+    /// object store or the queue is unavailable, or asynchronous invoke is
+    /// not configured (PLT-4639). `reason` says which. Nothing was recorded.
+    AsyncUnavailable,
 }
 
 impl ErrorCode {
@@ -108,6 +112,7 @@ impl ErrorCode {
             Self::PlatformError => 500,
             Self::ProviderUnavailable => 503,
             Self::ConfigUnavailable | Self::ControlPlaneUnavailable => 503,
+            Self::AsyncUnavailable => 503,
         }
     }
 }
@@ -125,7 +130,10 @@ pub struct ApiError {
     pub error_type: Option<String>,
     /// Why admission refused or gave up on the request (PLT-4634):
     /// `capacity` | `quota` | `queue_full` | `queue_deadline` |
-    /// `circuit_open` | `placement`. Absent for every other error.
+    /// `circuit_open` | `placement`; or why an asynchronous invocation was
+    /// refused (PLT-4639): `backlog` | `queue_full` | `queue_unavailable` |
+    /// `object_store_unavailable` | `object_quota` | `input_too_large` |
+    /// `not_configured`. Absent for every other error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
@@ -757,6 +765,33 @@ pub struct AttemptResponse {
     #[schema(value_type = Option<String>, format = DateTime)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<Timestamp>,
+}
+
+/// `202 Accepted` of `POST /v1/functions/{id}:invokeAsync` (PLT-4639). Sent
+/// only after the invocation, its input and its outbox event committed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct InvokeAsyncResponse {
+    pub invocation_id: String,
+    pub function_id: String,
+    /// The revision fixed at acceptance. Every later delivery and retry of
+    /// this invocation runs it, whatever the alias points at by then.
+    pub revision_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    /// `accepted` (recorded, not yet in the queue) | `queued` (published) |
+    /// later states when an idempotent replay finds it further along.
+    pub status: String,
+    /// `GET` this for the invocation (also in the `Location` header).
+    pub status_url: String,
+    pub input_digest: String,
+    pub input_size_bytes: u64,
+    /// `inline` (kept in the ledger) | `object` (kept in the object store).
+    pub input_storage: String,
+    /// True when an `Idempotency-Key` matched an earlier acceptance.
+    pub replayed: bool,
+    pub trace_id: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub accepted_at: Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

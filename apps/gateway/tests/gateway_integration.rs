@@ -25,7 +25,11 @@ const TENANT_B: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb";
 const TENANT_OP: &str = "tn_01hzzzzzzzzzzzzzzzzzzzzzzc";
 
 fn config(data_dir: &std::path::Path) -> GatewayConfig {
-    let toml = format!(
+    GatewayConfig::from_toml(&config_toml(data_dir)).unwrap()
+}
+
+fn config_toml(data_dir: &std::path::Path) -> String {
+    format!(
         r#"
 listen = "127.0.0.1:0"
 profile = "dev"
@@ -71,8 +75,7 @@ binding_ref = "demo-secret"
 value = "demo-secret-value-a"
 "#,
         data = data_dir.display()
-    );
-    GatewayConfig::from_toml(&toml).unwrap()
+    )
 }
 
 struct Api {
@@ -1574,4 +1577,182 @@ async fn capacity_is_reported_per_tenant_and_a_burst_is_released() {
     assert_eq!(b["tenant"]["tenant_id"], TENANT_B);
     assert!(b["revisions"].as_array().unwrap().is_empty());
     assert!(!b.to_string().contains(&revision_id));
+}
+
+// ---------------------------------------------------------------------------
+// invokeAsync (PLT-4639)
+// ---------------------------------------------------------------------------
+
+struct AsyncApi {
+    router: Router,
+    app: Arc<Application>,
+    _dir: tempfile::TempDir,
+}
+
+/// A gateway with the durable ledger and the embedded SQLite queue.
+fn async_api(extra: &str) -> AsyncApi {
+    let dir = tempfile::tempdir().unwrap();
+    let toml = format!(
+        "{}\n[queue]\nbackend = \"sqlite\"\n\n[invoke_async]\ninline_input_max_bytes = 1024\n{extra}",
+        config_toml(dir.path())
+    );
+    let app = Application::bootstrap_with(
+        GatewayConfig::from_toml(&toml).unwrap(),
+        Arc::new(FakeExecutionProvider::new()),
+        BootstrapOptions::default(),
+    )
+    .unwrap();
+    AsyncApi {
+        router: router(app.clone()),
+        app,
+        _dir: dir,
+    }
+}
+
+async fn post_with_key(
+    router: &Router,
+    path: &str,
+    token: &str,
+    key: &str,
+    v: serde_json::Value,
+) -> Reply {
+    call(
+        router,
+        req(Method::POST, path, Some(token))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("idempotency-key", key)
+            .body(json_body(v))
+            .unwrap(),
+    )
+    .await
+}
+
+/// 202 only after commit, with the status URL; the invocation reads
+/// `accepted` until the outbox publishes it and `queued` afterwards; the same
+/// key and input answers the same invocation, another input 409.
+#[tokio::test]
+async fn invoke_async_answers_202_with_a_status_url_and_converges_idempotently() {
+    let api = async_api("");
+    let r = &api.router;
+    let (function_id, revision_id) = deploy(r, "async-http").await;
+    let path = format!("/v1/functions/{function_id}:invokeAsync");
+    let a = post_with_key(r, &path, TOKEN_A, "k-1", serde_json::json!({"n": 1})).await;
+    assert_eq!(
+        a.status,
+        StatusCode::ACCEPTED,
+        "{}",
+        String::from_utf8_lossy(&a.body)
+    );
+    let body = a.json();
+    let id = body["invocation_id"].as_str().unwrap().to_string();
+    let status_url = format!("/v1/invocations/{id}");
+    assert_eq!(body["status_url"], status_url.as_str());
+    assert_eq!(a.header("location"), Some(status_url.as_str()));
+    assert_eq!(a.header("x-tachyon-invocation-id"), Some(id.as_str()));
+    assert_eq!(body["status"], "accepted");
+    assert_eq!(body["revision_id"], revision_id.as_str());
+    assert_eq!(body["input_storage"], "inline");
+    assert_eq!(body["replayed"], false);
+
+    let s = get(r, &status_url, TOKEN_A).await;
+    assert_eq!(s.status, StatusCode::OK);
+    assert_eq!(s.json()["mode"], "async");
+    assert_eq!(s.json()["status"], "accepted");
+
+    // Slash form, same key, same input: the same invocation.
+    let again = post_with_key(
+        r,
+        &format!("/v1/functions/{function_id}/invokeAsync"),
+        TOKEN_A,
+        "k-1",
+        serde_json::json!({"n": 1}),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::ACCEPTED);
+    assert_eq!(again.json()["invocation_id"], id.as_str());
+    assert_eq!(again.json()["replayed"], true);
+    // Same key, other input.
+    let conflict = post_with_key(r, &path, TOKEN_A, "k-1", serde_json::json!({"n": 2})).await;
+    assert_eq!(conflict.status, StatusCode::CONFLICT);
+    assert_eq!(conflict.json()["error"]["invocation_id"], id.as_str());
+    // Same key on the synchronous path.
+    let sync = post_with_key(
+        r,
+        &format!("/v1/functions/{function_id}:invoke"),
+        TOKEN_A,
+        "k-1",
+        serde_json::json!({"n": 1}),
+    )
+    .await;
+    assert_eq!(sync.status, StatusCode::CONFLICT);
+
+    let report = api.app.publish_outbox().await.unwrap();
+    assert_eq!(report.marked, 1);
+    let s = get(r, &status_url, TOKEN_A).await;
+    assert_eq!(s.json()["status"], "queued");
+    assert_eq!(s.json()["revision_id"], revision_id.as_str());
+}
+
+/// Another tenant can neither accept on this tenant's function nor read its
+/// asynchronous invocation: both are 404.
+#[tokio::test]
+async fn invoke_async_status_and_acceptance_never_cross_a_tenant() {
+    let api = async_api("");
+    let r = &api.router;
+    let (function_id, _) = deploy(r, "async-tenant").await;
+    let path = format!("/v1/functions/{function_id}:invokeAsync");
+    let foreign = post_json(r, &path, TOKEN_B, serde_json::json!({})).await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+    let a = post_json(r, &path, TOKEN_A, serde_json::json!({})).await;
+    assert_eq!(a.status, StatusCode::ACCEPTED);
+    let id = a.json()["invocation_id"].as_str().unwrap().to_string();
+    let b = get(r, &format!("/v1/invocations/{id}"), TOKEN_B).await;
+    assert_eq!(b.status, StatusCode::NOT_FOUND);
+    assert!(!String::from_utf8_lossy(&b.body).contains(&function_id));
+}
+
+/// Over the inline limit without an object store: 413 with its reason. The
+/// outbox bound: 429 `backlog`.
+#[tokio::test]
+async fn invoke_async_refusals_carry_status_and_reason() {
+    let api = async_api("max_pending_events = 1\n");
+    let r = &api.router;
+    let (function_id, _) = deploy(r, "async-refuse").await;
+    let path = format!("/v1/functions/{function_id}:invokeAsync");
+    let big = post_json(
+        r,
+        &path,
+        TOKEN_A,
+        serde_json::json!({"blob": "x".repeat(4096)}),
+    )
+    .await;
+    assert_eq!(big.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(big.json()["error"]["reason"], "input_too_large");
+    assert_eq!(
+        post_json(r, &path, TOKEN_A, serde_json::json!({}))
+            .await
+            .status,
+        StatusCode::ACCEPTED
+    );
+    let full = post_json(r, &path, TOKEN_A, serde_json::json!({})).await;
+    assert_eq!(full.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(full.json()["error"]["reason"], "backlog");
+    assert_eq!(full.json()["error"]["code"], "capacity_exceeded");
+}
+
+#[tokio::test]
+async fn invoke_async_without_a_queue_is_503_not_configured() {
+    let api = api(vec![]);
+    let r = &api.router;
+    let (function_id, _) = deploy(r, "async-off").await;
+    let res = post_json(
+        r,
+        &format!("/v1/functions/{function_id}:invokeAsync"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(res.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.json()["error"]["code"], "async_unavailable");
+    assert_eq!(res.json()["error"]["reason"], "not_configured");
 }

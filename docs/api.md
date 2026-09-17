@@ -20,7 +20,7 @@
 | ヘッダ | 方向 | 意味 |
 |---|---|---|
 | `x-tachyon-tenant-id` | req | テナント id（任意、token と一致必須） |
-| `idempotency-key` | req (invoke) | 1..=256 文字。scope は `(tenant, function, key)`。同キー・同 input digest なら既存 Invocation を返す（容量が満杯でも、実行中でも、完了後でも。§5.6「Idempotency-Key」）。同キー・異なる digest → 409 `conflict`（本文は §4）。受付前に拒否された request（400 / 413 / 429）は key を消費しない。Invocation が terminal になってから `[store] idempotency_retention_seconds`（既定 24 時間）で失効する |
+| `idempotency-key` | req (invoke / invokeAsync) | 1..=256 文字。scope は `(tenant, function, key)`（同期と非同期で共通。mode をまたぐ再利用は 409、§5.6.1）。同キー・同 input digest なら既存 Invocation を返す（容量が満杯でも、実行中でも、完了後でも。§5.6「Idempotency-Key」）。同キー・異なる digest → 409 `conflict`（本文は §4）。受付前に拒否された request（400 / 413 / 429）は key を消費しない。Invocation が terminal になってから `[store] idempotency_retention_seconds`（既定 24 時間）で失効する |
 | `x-tachyon-client-timeout-ms` | req (invoke) | クライアント側の全体 deadline（相対 ms）。revision の timeout + init + queue で上限が掛かる。queue / init / execution の各 deadline はこれを超えず、handler の起動前に過ぎれば handler を起動しない（504 `timeout`、`Host.ClientDeadline`） |
 | `x-request-id` | req/res | リクエスト id（省略時は gateway が採番） |
 | `x-tachyon-invocation-id` | res (invoke/http) | 受け付けた Invocation の id |
@@ -46,6 +46,7 @@
 | GET | `/v1/functions/{function_id}/aliases/{alias}` | 取得 | 200 `AliasResponse` | 404 |
 | GET | `/v1/functions/{function_id}/aliases` | 一覧 | 200 `ListResponse<AliasResponse>` | 404 |
 | POST | `/v1/functions/{function_id}:invoke`<br>`/v1/functions/{function_id}/invoke` | 同期 JSON invoke（query: `alias`, `revision_id`） | 200 handler の出力 JSON | 下記 §6 |
+| POST | `/v1/functions/{function_id}:invokeAsync`<br>`/v1/functions/{function_id}/invokeAsync` | 非同期 JSON invoke（PLT-4639、§5.6.1）。入力・Invocation・outbox event を台帳の 1 トランザクションで確定した後に 202（query: `alias`, `revision_id`） | 202 `InvokeAsyncResponse`（`Location: /v1/invocations/{id}`） | 409 `conflict`（key 衝突）, 413 `payload_too_large`（`reason = input_too_large`）, 429 `capacity_exceeded`（`reason = backlog` / `queue_full` / `object_quota`）, 503 `async_unavailable`（`reason = queue_unavailable` / `object_store_unavailable` / `not_configured`）, 503 `control_plane_unavailable`（`Host.StoreUnavailable`） |
 | ANY | `/v1/functions/{function_id}/http/{*path}` | HTTP アダプタ。リクエストを `tachyon.http.v1` event に包んで実行し、関数の status / headers / body をそのまま返す | 関数が返した status | 下記 §6（本文が `ApiErrorBody` の時だけ platform エラー） |
 | GET | `/v1/functions/{function_id}/invocations` | 履歴（query: `limit`, `cursor`） | 200 `ListResponse<InvocationResponse>` | 404 |
 | GET | `/v1/invocations/{invocation_id}` | Invocation 詳細（attempts, timings, boot_evidence 含む） | 200 `InvocationResponse` | 404 |
@@ -134,6 +135,8 @@ admission（PLT-4634、`docs/adr/0006-autoscaling-and-admission.md`）が拒否�
 | `provider_unavailable` | 503 | provider が使えない（例: `/dev/kvm` 無し）、shutdown 中、dispatcher lease を失った gateway（別の gateway に送り直す）、または provider の制御 API が preflight に失敗していて新しい環境を起動できない（`Host.ProviderControlUnavailable`。実行中と warm 環境は継続）、配置制約を満たさない node（`reason = placement`）、revision の起動 breaker が open（`reason = circuit_open`） | 6 |
 | `config_unavailable` | 503 | 設定 cache が新しい仕事を保証できない（PLT-4636、§7）。`error_type`: `Host.ConfigNotDelivered`（未配信）、`Host.ConfigExpired`（TTL 切れ）、`Host.AuthLeaseExpired`（認可 lease 切れ）、`Host.ColdStartRestricted`（control plane 到達不能で cold start を制限中） | 6 |
 | `control_plane_unavailable` | 503 | 管理 API を提供できない。`Host.ControlPlaneUnavailable`（data plane の gateway）、`Host.StoreUnavailable`（台帳 store が応答しない） | 6 |
+
+| `async_unavailable` | 503 | 非同期 invoke を今は durable に受け付けられない（PLT-4639、§5.6.1）。`reason`: `queue_unavailable`（queue に届かず outbox も上限）、`object_store_unavailable`、`not_configured`（`[queue]` が無い、または台帳が揮発）。何も記録しない | 6 |
 
 `forbidden`（403）には PLT-4636 で `Host.UnknownTenant`（grant はあるが tenant が配信されていない / 削除された）と `Host.PolicyDenied`（revision の egress profile が配信された policy で許可されていない）が加わった。
 
@@ -376,6 +379,56 @@ rollback は「`GET` → `previous_revision_id` を `expected_generation = gener
 
 input digest は request 本文を JSON として解釈し、直列化し直した bytes の SHA-256（空白の違いは同じ digest になる）。alias / revision の違いは一致判定に含めない。
 
+### 5.6.1 invokeAsync（PLT-4639）
+
+`POST /v1/functions/{function_id}:invokeAsync?alias=prod`（`/invokeAsync` も可、`revision_id=rev_...` で版を固定可）。本文は任意の JSON（上限 `limits.max_payload_bytes`）。決定の詳細は `docs/adr/0010-invoke-async-and-outbox.md`。
+
+**202 は台帳の COMMIT の後にだけ返す。** その時点で invocation（`mode = async`、`status = accepted`、revision は受付時に固定）、入力（`[invoke_async] inline_input_max_bytes` 以下は台帳、超えるものは object store に put してから参照）、Idempotency-Key の結び付き、outbox event が 1 トランザクションで確定している。gateway が 202 の直後に止まっても、再起動後に配送が続く。request の中で queue には送らない（outbox publisher が後で送る）。
+
+```http
+HTTP/1.1 202 Accepted
+Location: /v1/invocations/inv_01j7z2k3m4n5p6q7r8s9t0v1w2
+x-tachyon-invocation-id: inv_01j7z2k3m4n5p6q7r8s9t0v1w2
+```
+
+```json
+{
+  "invocation_id": "inv_01j7z2k3m4n5p6q7r8s9t0v1w2",
+  "function_id": "fn_01j7z0a1b2c3d4e5f6g7h8j9k0",
+  "revision_id": "rev_01j7z0m1n2p3q4r5s6t7v8w9x0",
+  "alias": "prod",
+  "status": "accepted",
+  "status_url": "/v1/invocations/inv_01j7z2k3m4n5p6q7r8s9t0v1w2",
+  "input_digest": "sha256:5f3d...",
+  "input_size_bytes": 15,
+  "input_storage": "inline",
+  "replayed": false,
+  "trace_id": "inv_01j7z2k3m4n5p6q7r8s9t0v1w2",
+  "accepted_at": "2026-09-17T06:21:15.000Z"
+}
+```
+
+`GET /v1/invocations/{id}`（§5.8）は `mode = "async"` で、`status` は `accepted`（台帳に確定、queue にはまだ無い）→ `queued`（outbox publisher が queue の ACK を得た）。その先（`running` 以降）は dispatcher（PLT-4640）の範囲で、この版では `queued` で止まる。`deadlines.queue_deadline` は受付時刻 + `[invoke_async] queue_deadline_seconds`（既定 24 時間）。
+
+| 状況 | 応答 | 記録 |
+|---|---|---|
+| 受付 | 202 | invocation・入力・key・outbox event |
+| 同 key・同 input（完了・未完了を問わない） | 202、同じ `invocation_id`、`replayed = true`、その時点の `status` | 何も増えない |
+| 同 key・異なる input | 409 `conflict`（`Host.IdempotencyKeyReused`、`invocation_id` 付き） | なし |
+| 同期 invoke の invocation に結び付いた key、またはその逆 | 409 `conflict` | なし |
+| payload が `limits.max_payload_bytes` 超過 | 413 `payload_too_large` | なし |
+| inline 上限を超え、object store が無い / object の size 上限超過 | 413 `payload_too_large`、`reason = input_too_large` | なし |
+| tenant の object quota 超過 | 429 `capacity_exceeded`、`reason = object_quota` | なし |
+| object store が応答しない | 503 `async_unavailable`、`reason = object_store_unavailable` | なし |
+| outbox の未送信が `max_pending_events` 件以上、または最古が `max_pending_age_seconds` より古い（queue は健全） | 429 `capacity_exceeded`、`reason = backlog` | なし |
+| queue が直前の publish を満杯で拒否した（未送信がある） | 429 `capacity_exceeded`、`reason = queue_full` | なし |
+| queue に届かない | outbox に余裕がある間は **202**。上限に達したら 503 `async_unavailable`、`reason = queue_unavailable` | 202 の分は queue の回復後に配送 |
+| 台帳が失敗（COMMIT 前） | 503 `control_plane_unavailable`（`Host.StoreUnavailable`） | なし（put 済みの object は GC が回収） |
+| `[queue]` が無い、または台帳が揮発（`[store] backend = "memory"`） | 503 `async_unavailable`、`reason = not_configured` | なし |
+| function 削除中・削除済み（PLT-4635） / revision が ready でない / 他 tenant の function | 409 `function_deleted`（`Host.FunctionDeleted`） / 409 `revision_not_ready` / 404 | なし |
+
+配送は at-least-once。publisher が queue の ACK を得た後、台帳に送信済みを記録する前に止まると、同じ event（message id = invocation id）がもう一度 publish される。broker の duplicate window（既定 120 s）内なら 1 通にまとまるが、外なら 2 通届きうる。consumer は message ではなく invocation id で台帳に照らして決着する。
+
 ### 5.7 HTTP アダプタ
 
 `ANY /v1/functions/{function_id}/http/{*path}`。gateway はリクエストを `tachyon.http.v1` event（`HttpRequestEvent`: method / path / query / headers / body_base64）に変換して関数に渡し、`HttpResponsePayload`（status / headers / body）をそのまま HTTP 応答にする。関数が 404 を返せば 404 が返る。gateway 側のエラー（関数が無い、init 失敗など）だけが §4 の JSON 本文になる。
@@ -488,6 +541,7 @@ event の `path` は `/http` より後ろの request-target path を **受け取
 | Function 削除済み（新規、`Idempotency-Key` の再送、削除時に待機中だったもの） | 409 | `function_deleted`（`Host.FunctionDeleted`。待機中だったものは invocation に `Failed` として残り attempt なし） |
 | alias 切替・削除の drain 中に `drain_timeout_seconds` を超えて実行中 | 504 | `timeout`（`Host.DrainTimeout`） |
 | payload 上限超過 | 413 | `payload_too_large` |
+| invokeAsync: 受付を確定できない（outbox 上限、queue 停止で outbox 満杯、object store、未設定） | 429 / 503 / 413 | `capacity_exceeded` / `async_unavailable` / `payload_too_large`（`reason`、§5.6.1） |
 | queue 溢れ（件数 / bytes / tenant の持ち分）、node に収まらない環境 | 429 | `capacity_exceeded`（`reason` = `queue_full` / `quota` / `capacity`） |
 | queue deadline 超過 | 504 | `queue_timeout`（`reason` = `capacity` / `quota` / `queue_deadline`） |
 | 配置制約（jp-only など）を満たさない node | 503 | `provider_unavailable`（`reason = placement`、invocation を作らない） |

@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! tachyon-queue-probe --stream S --subject-prefix p publish --count 100 --id-prefix run1
-//! tachyon-queue-probe ... consume --max 10 --wait-ms 2000 [--no-ack]
+//! tachyon-queue-probe ... consume --max 10 --wait-ms 2000 [--no-ack] [--print-ids]
 //! tachyon-queue-probe ... stats
 //! tachyon-queue-probe --url nats://127.0.0.1:14222 anonymous
 //! ```
@@ -79,6 +79,12 @@ enum Command {
         wait_ms: u64,
         #[arg(long)]
         no_ack: bool,
+        /// Print one `message=<id> tenant=<tenant> envelope=<ok|mismatch|none>`
+        /// line per delivery. `envelope` checks that a JSON payload with an
+        /// `invocation_id` names the message id and a `tenant_id` the routing
+        /// tenant (the PLT-4639 invoke envelope).
+        #[arg(long)]
+        print_ids: bool,
     },
     Stats,
     /// Try to connect without credentials; exit 0 when the server refuses.
@@ -191,6 +197,7 @@ async fn run(args: Args) -> Result<ExitCode, QueueError> {
             max,
             wait_ms,
             no_ack,
+            print_ids,
         } => {
             let mut received = 0usize;
             let mut redelivered = 0usize;
@@ -206,6 +213,25 @@ async fn run(args: Args) -> Result<ExitCode, QueueError> {
                     received += 1;
                     if d.delivery_count > 1 {
                         redelivered += 1;
+                    }
+                    if print_ids {
+                        let envelope = serde_json::from_slice::<serde_json::Value>(&d.payload)
+                            .ok()
+                            .and_then(|v| {
+                                let id = v.get("invocation_id")?.as_str()?.to_string();
+                                let tenant = v.get("tenant_id")?.as_str()?.to_string();
+                                Some(id == d.message_id.as_str() && tenant == d.tenant_id.as_str())
+                            });
+                        println!(
+                            "message={} tenant={} envelope={}",
+                            d.message_id,
+                            d.tenant_id,
+                            match envelope {
+                                Some(true) => "ok",
+                                Some(false) => "mismatch",
+                                None => "none",
+                            }
+                        );
                     }
                     ids.push(d.message_id.to_string());
                     if !no_ack {

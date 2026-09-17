@@ -179,3 +179,15 @@ resource_limits tachyon-serverless-application lib services::admission::tests::n
 resource_limits tachyon-serverless-application lib services::admission::tests::waiting_invocations_keep_the_revisions_idle_environment
 resource_limits tachyon-serverless-application lib services::admission::tests::min_ready_pre_starts_converge_within_the_caps_and_are_kept_while_routed
 resource_limits tachyon-serverless-application lib services::admission::tests::scale_operations_keep_the_ledger_exact_under_random_interleavings
+# --- PLT-4639: invokeAsync and the transactional outbox ---------------------------------------
+# an async invocation, its status and its input object never cross a tenant
+tenant_authz tachyon-serverless-application lib services::invoke_async::tests::async_invocations_and_their_inputs_never_cross_a_tenant
+tenant_authz tachyon-serverless-gateway test:gateway_integration invoke_async_status_and_acceptance_never_cross_a_tenant
+# one key -> one invocation (409 on another input or another mode); one publisher per outbox row
+lease_epoch tachyon-serverless-application lib services::invoke_async::tests::the_same_idempotency_key_converges_on_one_invocation
+lease_epoch tachyon-serverless-application lib services::invoke_async::tests::a_key_bound_to_one_mode_is_a_conflict_in_the_other
+lease_epoch tachyon-serverless-application lib services::invoke_async::tests::two_publishers_on_one_ledger_publish_each_event_once
+# the outbox is bounded (count and age, also across gateways); object size / quota refuse cleanly
+resource_limits tachyon-serverless-application lib services::invoke_async::tests::an_outbox_over_its_bound_refuses_with_429_backlog
+resource_limits tachyon-serverless-application lib services::invoke_async::tests::the_backlog_bound_holds_across_gateways
+resource_limits tachyon-serverless-application lib services::invoke_async::tests::object_store_refusals_answer_with_their_reason_and_record_nothing
