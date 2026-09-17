@@ -1756,3 +1756,230 @@ async fn invoke_async_without_a_queue_is_503_not_configured() {
     assert_eq!(res.json()["error"]["code"], "async_unavailable");
     assert_eq!(res.json()["error"]["reason"], "not_configured");
 }
+
+// ---------------------------------------------------------------------------
+// metrics (PLT-4637)
+// ---------------------------------------------------------------------------
+
+const METRICS_TOKEN: &str = "metrics-operator-credential";
+
+fn api_with_metrics(token: Option<&str>) -> Api {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Arc::new(FakeExecutionProvider::new());
+    let mut cfg = config(dir.path());
+    cfg.metrics.bearer_token = token.map(tachyon_serverless_application::config::ConfigToken::new);
+    let app = Application::bootstrap_with(
+        cfg,
+        fake.clone(),
+        BootstrapOptions {
+            persist_state: false,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    Api {
+        router: router(app),
+        _dir: dir,
+        fake,
+    }
+}
+
+fn metric(text: &str, family: &str, labels: &[&str]) -> Option<f64> {
+    text.lines()
+        .filter(|l| !l.starts_with('#'))
+        .filter(|l| {
+            l.strip_prefix(family)
+                .is_some_and(|rest| rest.starts_with('{') || rest.starts_with(' '))
+        })
+        .find(|l| labels.iter().all(|want| l.contains(want)))
+        .and_then(|l| l.rsplit_once(' '))
+        .and_then(|(_, v)| v.parse().ok())
+}
+
+/// Security (PLT-4637): `GET /metrics` names every tenant's revisions, so it
+/// does not exist without `[metrics] bearer_token`, and with one it refuses
+/// anonymous callers, tenant tokens and operator-role tenant tokens alike;
+/// refusals leak no tenant or revision id. `GET /v1/capacity` (tenant scoped)
+/// never lists another tenant.
+#[tokio::test]
+async fn metrics_require_the_operator_credential_and_never_leak_tenants_without_it() {
+    let disabled = api_with_metrics(None);
+    for token in [None, Some(TOKEN_A), Some(METRICS_TOKEN)] {
+        let reply = call(
+            &disabled.router,
+            req(Method::GET, "/metrics", token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{token:?}");
+    }
+
+    let api = api_with_metrics(Some(METRICS_TOKEN));
+    let r = &api.router;
+    let (function_id, revision_id) = deploy(r, "metrics-secure").await;
+    let reply = post_json(
+        r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({"x": 1}),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+
+    for token in [
+        None,
+        Some(TOKEN_A),
+        Some(TOKEN_B),
+        Some(TOKEN_OP),
+        Some(TOKEN_A_OP),
+        Some("metrics-operator-credentia"),
+        Some("metrics-operator-credential-x"),
+    ] {
+        let reply = call(
+            r,
+            req(Method::GET, "/metrics", token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{token:?}");
+        let body = String::from_utf8_lossy(&reply.body);
+        assert!(!body.contains(TENANT_A), "{body}");
+        assert!(!body.contains(&revision_id), "{body}");
+        assert!(!body.contains("tsls_"), "{body}");
+    }
+
+    let ok = get(r, "/metrics", METRICS_TOKEN).await;
+    assert_eq!(ok.status, StatusCode::OK);
+    assert!(
+        ok.header("content-type")
+            .unwrap()
+            .starts_with("text/plain; version=0.0.4")
+    );
+    let text = String::from_utf8_lossy(&ok.body);
+    assert!(text.contains(&format!("tenant=\"{TENANT_A}\"")));
+
+    // Tenant B's capacity view carries the node-wide reuse report only.
+    let b = get(r, "/v1/capacity", TOKEN_B).await.json();
+    assert!(!b.to_string().contains(TENANT_A));
+    assert!(!b.to_string().contains(&revision_id));
+    assert_eq!(b["reuse"]["mode"], "every_invocation_boots");
+}
+
+/// A scripted sequence through the HTTP API, then one scrape: a burst over
+/// the revision's cap, a handler error, and the counters, histograms and the
+/// "every invocation boots" profile of a provider without a warm stage.
+#[tokio::test]
+async fn metrics_scrape_reflects_a_scripted_invoke_sequence() {
+    let api = api_with_metrics(Some(METRICS_TOKEN));
+    let r = &api.router;
+    let (function_id, revision_id) = deploy(r, "metrics-seq").await;
+    let calls: Vec<_> = (0..6)
+        .map(|i| {
+            let router = r.clone();
+            let path = format!("/v1/functions/{function_id}/invoke");
+            tokio::spawn(async move {
+                post_json(&router, &path, TOKEN_A, serde_json::json!({ "i": i })).await
+            })
+        })
+        .collect();
+    for c in calls {
+        assert_eq!(c.await.unwrap().status, StatusCode::OK);
+    }
+    api.fake.push_script(FakeGuestScript::HandlerError {
+        error_type: "Demo.Error".into(),
+        message: "boom".into(),
+    });
+    let failed = post_json(
+        r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_ne!(failed.status, StatusCode::OK);
+
+    let text = String::from_utf8_lossy(&get(r, "/metrics", METRICS_TOKEN).await.body).to_string();
+    assert_eq!(
+        metric(&text, "tsls_admission_arrivals_total", &[]),
+        Some(7.0)
+    );
+    assert_eq!(
+        metric(&text, "tsls_admission_grants_total", &["kind=\"cold\""]),
+        Some(7.0)
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_attempts_total",
+            &["start_kind=\"cold\"", "status=\"succeeded\""]
+        ),
+        Some(6.0)
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_attempts_total",
+            &["start_kind=\"cold\"", "status=\"failed\""]
+        ),
+        Some(1.0)
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_attempt_phase_seconds_count",
+            &["phase=\"total\"", "start_kind=\"cold\""]
+        ),
+        Some(7.0)
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_environment_reuse_mode",
+            &["provider=\"fake\"", "mode=\"every_invocation_boots\""]
+        ),
+        Some(1.0)
+    );
+    // Every attempt was its environment's first (and only) boot.
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_boot_identity_checks_total",
+            &["result=\"first_boot\""]
+        ),
+        Some(7.0)
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_boot_identity_checks_total",
+            &["result=\"same_boot\""]
+        ),
+        Some(0.0)
+    );
+    assert_eq!(metric(&text, "tsls_node_in_flight", &[]), Some(0.0));
+    assert_eq!(metric(&text, "tsls_queue_length", &[]), Some(0.0));
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_revision_max_environments",
+            &[&format!("revision=\"{revision_id}\"")]
+        ),
+        Some(4.0),
+        "the revision's cap (default max_concurrency 4)"
+    );
+    assert_eq!(
+        metric(
+            &text,
+            "tsls_scale_events_total",
+            &["kind=\"activation\"", "reason=\"backlog\""]
+        )
+        .map(|v| v >= 1.0),
+        Some(true)
+    );
+    let cap = get(r, "/v1/capacity", TOKEN_A).await.json();
+    assert_eq!(cap["reuse"]["mode"], "every_invocation_boots");
+    assert_eq!(cap["reuse"]["first_boots"], 7);
+    assert_eq!(cap["reuse"]["boot_id_changed"], 0);
+}

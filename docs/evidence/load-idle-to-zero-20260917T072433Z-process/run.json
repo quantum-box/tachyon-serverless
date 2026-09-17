@@ -1,0 +1,26 @@
+{
+  "scenario": "idle-to-zero",
+  "plan": "burst of 8 on 4 workers, idle until zero, 5 s idle, one re-access",
+  "commit": "facb1a9d683a153138f6052025649c4b4a7f9e40",
+  "dirty_tracked_files": 0,
+  "provider": "process",
+  "seed": 20260917,
+  "sample_interval_ms": 250,
+  "limits": {
+    "max_concurrency": 12,
+    "max_requests": 150,
+    "max_duration_seconds": 240
+  },
+  "gateway_config": "gateway.toml",
+  "gateway_config_sha256": "d85e47a6a7d9b15124c7d7ebde78e10afd38405e03d3bbb04fe2c2cebe197ee0",
+  "host": "Darwin 25.6.0 arm64",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "target": "http://127.0.0.1:63742",
+  "started_at": "2026-09-17T07:24:36Z",
+  "revision": {
+    "max_concurrency": 3,
+    "idle_ttl_seconds": 2,
+    "scale_down_cooldown_seconds": 1
+  },
+  "note": "observations of one run on one machine; not an SLA"
+}

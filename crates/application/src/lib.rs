@@ -16,6 +16,7 @@ pub mod entrypoint;
 pub mod error;
 pub mod failpoints;
 pub mod local_ports;
+pub mod metrics;
 pub mod repository;
 pub mod services;
 

@@ -47,6 +47,7 @@ apps/cli
 | `crates/sdk` | `run(handler)`, `serve_http(router)`, `Context`。実験 feature `experimental-restore` で `lifecycle`（PLT-4651） | bridge 内部 |
 | `apps/gateway` | axum。管理 API + Invoke + logs + OpenAPI。`role = "data_plane"` では invoke だけ（設定は `GET /v1/internal/config` から pull、`config_client.rs`） | — |
 | `apps/cli` | `tsls` CLI。deploy / invoke / logs / rollback / dev | application（HTTP 経由のみ） |
+| `apps/load` | `tsls-load`: 上限を宣言した local 限定の負荷シナリオ、`/metrics` の sampling、検出器、timeline（PLT-4637、`docs/metrics.md` §6） | HTTP 経由のみ（test だけ application の metric catalog を読む） |
 | `examples/*` | hello / http-axum / cpu-burn / isolation-probe / restore-aware（実験、PLT-4651） | — |
 
 ## 3. 実行の流れ（同期 Invoke, P1）
@@ -371,7 +372,17 @@ gateway 全体の semaphore を、資源で予約する admission に置き換�
 - **zero**: `min_ready = 0` の revision の最後の idle 環境が消えると環境数 0。次の invoke は cold start。環境数 0 でも gateway・`state.db`・node は動いており、host 費用は 0 にならない。pool が無い構成では環境は invocation と一緒に終わる。
 - **min_ready**: route されていて drain 中でない revision で、provisioned（`Starting + Busy + Parking + Idle`）が `min_ready` 未満なら、待機者がいない場合に限り、全 cap の内側で admission の予約（`Starting`）を取って起動し、`Ready`（epoch 0）のまま pool に渡す。台帳は一度も割り当てられていない `Ready` だけを `Idle` にする。pool の per-key 上限は `min_ready` まで引き上げ、`max_total_idle` に達していれば起動しない。失敗は `prestart_backoff_seconds` 待つ。
 - **drain**: alias 切替・関数削除の revision と、secret の値の変化で古くなった reuse key（invocation / 先行起動が計算した最新の key と違うもの）の環境は、pool に戻さず（`EnvironmentPool::release_for` が拒否）、idle は次の sweep で TTL に関係なく終える（待機者と約束は守る）。関数削除では待機中の invocation を `Host.FunctionDeleted` で終え、実行中は完了を待ち、何も残らなければ `drained_at` を記録する（`deletion_state`: `live` → `deleting` → `deleted`）。
-- **観測**: `GET /v1/capacity` の revision ごとの `min_ready` / `idle_ttl_seconds` / `scale_down_cooldown_seconds` / `route_state` / `last_scale_event` と node 全体の `scaling`（`docs/api.md` §5.1.1・§8）。metrics は PLT-4637。
+- **観測**: `GET /v1/capacity` の revision ごとの `min_ready` / `idle_ttl_seconds` / `scale_down_cooldown_seconds` / `route_state` / `last_scale_event` と node 全体の `scaling`（`docs/api.md` §5.1.1・§8）。時系列の metrics は次節。
+
+### metrics と負荷シナリオ（PLT-4637）
+
+決定は `docs/adr/0011-reuse-and-scaling-metrics.md`、catalog・認証・detector・シナリオは `docs/metrics.md`。
+
+- **`GET /metrics`**: `[metrics] bearer_token` の operator credential だけ（未設定なら 404、tenant の token は 401）。`Application::render_metrics` が 1 回の scrape で (1) `AdmissionController::metrics_view`（admission の lock 1 回で node・revision・tenant の状態・予約・queue・待ち時間・breaker と `AdmissionCounters`）、(2) pool の保持数と再利用の可否、(3) `Metrics`（attempt の start kind・phase histogram、boot identity、gate 拒否、heartbeat）、(4) この dispatcher の live 環境ごとの `ExecutionProvider::environment_stats`（idle CPU は前回の scrape との差分）、(5) 設定 cache の状態、(6) 非同期 outbox の backlog を読み、`metrics::render::render`（純関数）で exposition にする。tenant / revision / environment の label は `[metrics] max_*_series` で上限を持ち、超えた分は `_other`。
+- **counter の置き場所**: admission の状態から導けない event だけを発生箇所で数える。admission 内の counter は revision entry（0 で忘れる）ではなく状態機械の直下に置く。
+- **boot identity**: attempt の終了時に環境の `guest_boot_id` をその環境で最初に見た値と比べる（`same_boot` が再利用の証跡、`boot_changed` は不変条件の違反）。`GET /v1/capacity` の `reuse` は node 全体の mode（`warm_reuse` / `every_invocation_boots`）と件数だけで、tenant をまたぐ情報を含まない。
+- **provider**: `environment_stats` は読み取り専用で既定 `None`。Firecracker は VMM の cgroup v2、process は bridge プロセスの procfs / `proc_pid_rusage`（子プロセスを含まない）。
+- **検出と回帰**: 同じ条件を `deploy/prometheus/alerts.yml` と `apps/load/src/detect.rs` に置く。`scripts/load/scenarios.sh` が throwaway gateway を起動し、`tsls-load sample / load / report` で上限付きの負荷・250 ms ごとの sample・`summary.json` / `timeline.svg` を `docs/evidence/load-*` に残す。
 
 ### 環境 pool と再利用キー（PLT-4632）
 

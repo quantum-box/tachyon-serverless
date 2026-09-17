@@ -62,7 +62,7 @@ Accepted（2026-09-17、PLT-4635）。実装: `crates/application/src/services/s
 
 9. **振動しない。** (a) scale-down は cooldown と待機者・約束で止まる。(b) 先行起動は `min_ready` まで、待機者がいれば行わず、失敗したら backoff。(c) 設定 cache が期限切れ（control plane 停止）の間、route の集合は**前回の有効な観測のまま保持**し（`view = held`）、drain を始めない・終えない・`min_ready` の環境も route されたものとして守る。再接続の嵐（切断と接続の反復）でも、有効な観測の内容が変わらない限り何も起こらない（`tests/scaling.rs::an_outage_holds_routes_and_a_reconnect_storm_does_not_flap`）。(d) 1 回の reconcile は 1 つずつ（`tokio::sync::Mutex`）。
 
-10. **観測（PLT-4637 への hook、最小限）。** `GET /v1/capacity` の各 revision に `min_ready`・`idle_ttl_seconds`・`scale_down_cooldown_seconds`・`route_state`（`routed` / `unrouted` / `superseded` / `deleting`）・`last_scale_event`（`kind`: `activation` / `scale_up` / `prestart` / `scale_down` / `scale_to_zero` / `drain`、`reason`、`at`）を足す。環境数 0 になって admission が revision を忘れた後も最後の event は残す（revision ごとに 1 件、最大 4096）。node 全体には `scaling`（reconcile 間隔、既定の TTL・cooldown、drain timeout、`warm_pool`、`at_zero`）。「ready」は `idle`（pool にあってすぐ使える環境）に当たる。metrics と履歴は PLT-4637。
+10. **観測（PLT-4637 への hook、最小限）。** `GET /v1/capacity` の各 revision に `min_ready`・`idle_ttl_seconds`・`scale_down_cooldown_seconds`・`route_state`（`routed` / `unrouted` / `superseded` / `deleting`）・`last_scale_event`（`kind`: `activation` / `scale_up` / `prestart` / `scale_down` / `scale_to_zero` / `drain`、`reason`、`at`）を足す。環境数 0 になって admission が revision を忘れた後も最後の event は残す（revision ごとに 1 件、最大 4096）。node 全体には `scaling`（reconcile 間隔、既定の TTL・cooldown、drain timeout、`warm_pool`、`at_zero`）。「ready」は `idle`（pool にあってすぐ使える環境）に当たる。metrics と履歴は PLT-4637（`docs/adr/0011-reuse-and-scaling-metrics.md`、`docs/metrics.md`）。
 
 ## 結果（consequences）
 

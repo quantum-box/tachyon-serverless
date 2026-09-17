@@ -391,6 +391,24 @@ pub fn parse_flat_keyed(text: &str) -> Map<String, Value> {
         .collect()
 }
 
+/// CPU seconds (`cpu.stat` `usage_usec`), `memory.current` and
+/// `memory.peak` of a cgroup, for metrics (PLT-4637). `None` when the
+/// directory does not exist; a missing file leaves its field `None`
+/// (`memory.peak` needs Linux 5.19).
+pub fn usage(path: &Path) -> Option<(Option<f64>, Option<u64>, Option<u64>)> {
+    if !path.is_dir() {
+        return None;
+    }
+    let cpu = read_value(path, "cpu.stat").and_then(|text| {
+        parse_flat_keyed(&text)
+            .get("usage_usec")
+            .and_then(Value::as_u64)
+            .map(|usec| usec as f64 / 1_000_000.0)
+    });
+    let number = |file: &str| read_value(path, file).and_then(|v| v.parse::<u64>().ok());
+    Some((cpu, number("memory.current"), number("memory.peak")))
+}
+
 /// Statistics of a cgroup, for evidence and the teardown log.
 pub fn stats(path: &Path) -> Value {
     let mut out = Map::new();
@@ -458,6 +476,23 @@ async fn kill_and_remove(path: &Path, wait: Duration) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_reads_cpu_and_memory_of_a_cgroup_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(usage(&dir.path().join("missing")), None);
+        std::fs::write(
+            dir.path().join("cpu.stat"),
+            "usage_usec 2500000\nuser_usec 2000000\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("memory.current"), "1048576\n").unwrap();
+        assert_eq!(
+            usage(dir.path()),
+            Some((Some(2.5), Some(1_048_576), None)),
+            "memory.peak is optional (Linux < 5.19)"
+        );
+    }
 
     #[test]
     fn limits_follow_cpu_millis_and_memory() {

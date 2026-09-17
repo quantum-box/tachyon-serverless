@@ -423,7 +423,12 @@ impl InvokeService {
                 req.revision_id.as_ref(),
                 self.pool.policy().reuse_enabled(),
             )
-            .await?;
+            .await
+            .inspect_err(|e| {
+                if let AppError::Control { kind, .. } = e {
+                    self.admission.metrics().gate_refusal(kind.error_type());
+                }
+            })?;
 
         let payload_bytes = serde_json::to_vec(&req.payload)
             .map_err(|e| AppError::InvalidRequest(format!("payload is not JSON: {e}")))?;
@@ -1330,6 +1335,7 @@ impl Driver {
                     error_type = kind.error_type(),
                     "cold start refused"
                 );
+                self.svc.admission.metrics().gate_refusal(kind.error_type());
                 self.fail_invocation(InvokeGate::invocation_error(kind, message));
                 false
             }
@@ -1924,6 +1930,22 @@ impl Driver {
             Err(e) => {
                 let _ = attempt.fail(e.clone(), now);
             }
+        }
+        // PLT-4637: start kind, phase durations and the boot identity check
+        // (a warm attempt must report the boot id its environment booted with).
+        let boot_check = svc.admission.metrics().observe_attempt(
+            &env_id,
+            start_kind,
+            attempt.status.name(),
+            &attempt.timings,
+            env.evidence.guest_boot_id.as_deref(),
+        );
+        if boot_check == crate::metrics::BootCheck::BootChanged {
+            tracing::error!(
+                environment_id = %env_id,
+                attempt_id = %attempt_id,
+                "the environment reported a different guest boot id than it booted with"
+            );
         }
         let settled_invocation = self.load_invocation().map(|mut inv| {
             let r = match &result {

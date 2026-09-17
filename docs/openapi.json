@@ -248,6 +248,10 @@
             "$ref": "#/components/schemas/ResourceAmounts",
             "description": "Sum of every live reservation (starting, busy, parking, idle, draining)."
           },
+          "reuse": {
+            "$ref": "#/components/schemas/EnvironmentReuseReport",
+            "description": "Whether environments are reused on this node, and the boot identity\ncheck behind it (PLT-4637). Node-wide; no tenant data."
+          },
           "revisions": {
             "items": {
               "$ref": "#/components/schemas/RevisionCapacityInfo"
@@ -467,6 +471,56 @@
           "parking",
           "idle",
           "draining"
+        ],
+        "type": "object"
+      },
+      "EnvironmentReuseReport": {
+        "description": "Environment reuse on this node (PLT-4637, docs/metrics.md §boot identity).",
+        "properties": {
+          "boot_id_changed": {
+            "description": "Later attempts that reported a different boot id for the same\nenvironment. Must stay 0.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "boot_id_unreported": {
+            "description": "Attempts without a guest boot id (no guest kernel, e.g. the process\nprovider).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "first_boots": {
+            "description": "Attempts that were the first dispatch into their environment and\nreported a guest boot id.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mode": {
+            "description": "`warm_reuse`: pooled environments serve later invocations.\n`every_invocation_boots`: the provider or configuration has no warm\nstage, so every invocation boots its own environment (the process\nprovider always).",
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "reason": {
+            "description": "The gate that decided the mode.",
+            "type": "string"
+          },
+          "same_boot_reuses": {
+            "description": "Later attempts in the same environment that reported the boot id it\nbooted with: reuse of the same guest.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider",
+          "mode",
+          "reason",
+          "first_boots",
+          "same_boot_reuses",
+          "boot_id_changed",
+          "boot_id_unreported"
         ],
         "type": "object"
       },
@@ -1873,6 +1927,52 @@
             "description": "alive"
           }
         },
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Prometheus text exposition 0.0.4 (catalog: docs/metrics.md)"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "missing or wrong operator credential (tenant tokens are refused)"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": "`[metrics] bearer_token` is not configured"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "`GET /metrics` (PLT-4637, docs/metrics.md). Every tenant's revisions,\nqueues and environments are on it, so only the `[metrics] bearer_token`\noperator credential is accepted — never a tenant token — and without one\nconfigured the route does not exist (404).",
         "tags": [
           "meta"
         ]

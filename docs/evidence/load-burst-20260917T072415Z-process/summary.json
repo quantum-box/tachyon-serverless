@@ -1,0 +1,263 @@
+{
+  "checks": {
+    "all_succeeded": true,
+    "cap": true,
+    "decreased": true,
+    "every_invocation_boots": true,
+    "no_findings": true,
+    "queue": true,
+    "rose": true,
+    "zero_after": true,
+    "zero_before": true
+  },
+  "detectors": {
+    "boot_identity": [],
+    "coverage": {
+      "idle_cpu_samples": 0,
+      "overshoot_samples_with_load": 49,
+      "same_boot_reuses": 0.0,
+      "samples": 61,
+      "samples_up": 61,
+      "tenants_served": 1
+    },
+    "findings": 0,
+    "idle_cpu": [],
+    "overshoot": [],
+    "starvation": [],
+    "thresholds": {
+      "idle_cpu_ratio": 0.05,
+      "starvation_min_other_grants": 1.0,
+      "starvation_seconds": 5.0
+    }
+  },
+  "lifecycle": {
+    "active_after_restart": false,
+    "decreased": true,
+    "max_in_flight": 3.0,
+    "max_provisioned": 3.0,
+    "max_queue": 5.0,
+    "reached_cap": true,
+    "restarts": [],
+    "rose": true,
+    "zero_after_peak": true,
+    "zero_after_peak_t_ms": 12754,
+    "zero_after_restart": false,
+    "zero_before": true
+  },
+  "limits": {
+    "max_concurrency": 12,
+    "max_duration_seconds": 240,
+    "max_requests": 150
+  },
+  "limits_observed": {
+    "last_response_t_ms": 14033,
+    "max_in_flight_requests": 8,
+    "requests": 36,
+    "respected": true
+  },
+  "note": "observations of one run on one machine; not an SLA",
+  "ok": true,
+  "phases": [
+    {
+      "end_t_ms": 3387,
+      "phase": "ramp-1",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 3
+      },
+      "spec": {
+        "concurrency": 1,
+        "handler_ms": 300,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "ramp-1",
+        "requests": 3,
+        "tenant": "a"
+      },
+      "start_t_ms": 1134
+    },
+    {
+      "end_t_ms": 5380,
+      "phase": "ramp-2",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 6
+      },
+      "spec": {
+        "concurrency": 2,
+        "handler_ms": 300,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "ramp-2",
+        "requests": 6,
+        "tenant": "a"
+      },
+      "start_t_ms": 3387
+    },
+    {
+      "end_t_ms": 12096,
+      "phase": "burst",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 24
+      },
+      "spec": {
+        "concurrency": 8,
+        "handler_ms": 500,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "burst",
+        "requests": 24,
+        "tenant": "a"
+      },
+      "start_t_ms": 5380
+    },
+    {
+      "end_t_ms": 14033,
+      "phase": "down",
+      "result": {
+        "not_sent_duration_limit": 0,
+        "sent": 3
+      },
+      "spec": {
+        "concurrency": 1,
+        "handler_ms": 300,
+        "jitter_ms": 100,
+        "kind": "invoke",
+        "name": "down",
+        "requests": 3,
+        "tenant": "a"
+      },
+      "start_t_ms": 12096
+    },
+    {
+      "end_t_ms": 14034,
+      "phase": "idle",
+      "result": {
+        "reached_zero_t_ms": 14034
+      },
+      "spec": {
+        "kind": "idle_until_zero",
+        "name": "idle",
+        "tenant": "a",
+        "timeout_ms": 30000
+      },
+      "start_t_ms": 14034
+    }
+  ],
+  "requests": {
+    "count": 36,
+    "latency_ms": {
+      "max": 2427,
+      "p50": 1722,
+      "p95": 2406
+    },
+    "statuses": {
+      "200": 36
+    }
+  },
+  "requests_by_phase": {
+    "burst": {
+      "count": 24,
+      "latency_ms": {
+        "max": 2427,
+        "p50": 2253,
+        "p95": 2408
+      },
+      "statuses": {
+        "200": 24
+      }
+    },
+    "down": {
+      "count": 3,
+      "latency_ms": {
+        "max": 577,
+        "p50": 540,
+        "p95": 577
+      },
+      "statuses": {
+        "200": 3
+      }
+    },
+    "ramp-1": {
+      "count": 3,
+      "latency_ms": {
+        "max": 877,
+        "p50": 595,
+        "p95": 877
+      },
+      "statuses": {
+        "200": 3
+      }
+    },
+    "ramp-2": {
+      "count": 6,
+      "latency_ms": {
+        "max": 628,
+        "p50": 612,
+        "p95": 628
+      },
+      "statuses": {
+        "200": 6
+      }
+    }
+  },
+  "requests_by_tenant": {
+    "a": {
+      "count": 36,
+      "latency_ms": {
+        "max": 2427,
+        "p50": 1722,
+        "p95": 2406
+      },
+      "statuses": {
+        "200": 36
+      }
+    }
+  },
+  "reuse": {
+    "evidence": {
+      "attempts": 36,
+      "environments": 36,
+      "environments_whose_boot_id_changed": 0,
+      "environments_with_a_boot_id": 0,
+      "environments_with_several_attempts": 0,
+      "every_attempt_booted_its_own_environment": true,
+      "start_kinds": {
+        "cold": 36
+      }
+    },
+    "mode": "every_invocation_boots"
+  },
+  "run": {
+    "commit": "facb1a9d683a153138f6052025649c4b4a7f9e40",
+    "dirty_tracked_files": 0,
+    "gateway_config": "gateway.toml",
+    "gateway_config_sha256": "bbe0672ddb551b881b0ee870cf1e2c845396e57cf95b6211da65b5ae510444fd",
+    "host": "Darwin 25.6.0 arm64",
+    "limits": {
+      "max_concurrency": 12,
+      "max_duration_seconds": 240,
+      "max_requests": 150
+    },
+    "note": "observations of one run on one machine; not an SLA",
+    "plan": "ramp 1 -> 2 -> burst 8 workers over a revision cap of 3 -> 1 -> idle until zero",
+    "provider": "process",
+    "revision": {
+      "idle_ttl_seconds": 2,
+      "max_concurrency": 3,
+      "scale_down_cooldown_seconds": 1
+    },
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "sample_interval_ms": 250,
+    "scenario": "burst",
+    "seed": 20260917,
+    "started_at": "2026-09-17T07:24:18Z",
+    "target": "http://127.0.0.1:63525"
+  },
+  "samples": {
+    "count": 61,
+    "up": 61
+  },
+  "title": "burst: 0 -> up -> cap (3) -> down -> 0"
+}

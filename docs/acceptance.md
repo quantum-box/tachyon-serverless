@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4638、PLT-4639、PLT-4645、PLT-4647、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4645、PLT-4647、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -524,7 +524,7 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 | host 費用ゼロとは説明しない | 実装済み（文書・API） | `GET /v1/capacity` の `scaling.at_zero`、ADR-0009 決定 3、E2E step 8 |
 | 既存 E2E の回帰（process provider） | 実装済み | `docs/evidence/20260917T062120Z-process/`（`scripts/e2e/demo.sh`、28/28 PASS。設定は listen・data_dir・workdir だけを変えた `config/gateway.dev.toml` のコピー） |
 | security regression group への追加 | 実装済み | `scripts/ci/security-regression.list` に 17 テスト（削除の拒否 2、drain 2、sweep の race と先行起動の pool 入り 3、drain timeout 3（既定で長い handler を止めない・短い値の設定拒否・明示した短い値で止める）、scale-down 判定・`min_ready`・非振動 7） |
-| 観測（PLT-4637 への hook） | 実装済み（最小限） | `GET /v1/capacity` の revision ごとの `min_ready` / `idle_ttl_seconds` / `scale_down_cooldown_seconds` / `route_state` / `last_scale_event` と `scaling`、`tsls capacity`。metrics は PLT-4637 |
+| 観測（PLT-4637 への hook） | 実装済み（最小限） | `GET /v1/capacity` の revision ごとの `min_ready` / `idle_ttl_seconds` / `scale_down_cooldown_seconds` / `route_state` / `last_scale_event` と `scaling`、`tsls capacity`。metrics は PLT-4637（下の §PLT-4637、`docs/metrics.md`） |
 
 既知の制約: route の観測・drain・scale event・backoff はプロセスのメモリだけにある。alias 切替の drain は前回の有効な観測との差で始めるので、起動直後の最初の reconcile より前の切替は drain しない（その時点で環境は無い）。secret の rotate は invocation か先行起動が新しい値を解決するまで検出しない。削除の確定は、この gateway の in-flight・admission・台帳の最新 1000 件の invocation・active な環境だけを見る。`min_ready` は環境再利用が無い gateway では満たされない（検証では拒否せず `scaling.warm_pool = false` で示す）。drain timeout を最大 revision timeout + grace 以下にする設定（`allow_short_drain = true`）では、alias 切替で長い handler が止まりうる（既定ではありえない）。
 
@@ -560,6 +560,41 @@ Issue の検証は「実 Kata で」だが、本プロジェクトの実行 prov
 | dispatcher・retry・DLQ・`queue_deadline` の強制 | 未着手 | PLT-4640 |
 
 残り・制約: 実測は macOS arm64 の 1 host・1 回。inline 入力の本文は台帳に暗号化せずに置き、terminal 後の保持期限は未実装（PLT-4640）。outbox の上限は全 tenant 共通。queue の状態（満杯・停止）はプロセスローカル。非同期 invocation の `dispatcher_id` は `None` で、ADR-0003 の guard では不変なので、PLT-4640 で所有を表す方法を決める必要がある。受付と publish の throughput は未計測。2 つの gateway process を HTTP で並べた E2E は無い（2 application を同じ `data_dir` で並べた unit test だけ）。HTTP adapter 経由の非同期は非対象。
+
+## PLT-4637 再利用・スケールの metrics と負荷シナリオ試験
+
+`GET /metrics`（operator 専用）、admission の counter と状態の view、attempt の phase histogram と boot identity、provider の読み取り専用 `environment_stats`、検出器と alert rule、上限を宣言する local 限定の負荷ハーネスを実装した（`docs/adr/0011-reuse-and-scaling-metrics.md`、`docs/metrics.md`、`docs/api.md` §3・§5.1.1、`docs/architecture.md` §4「metrics と負荷シナリオ」、`docs/threat-model.md` T34）。記録日 2026-09-17、branch `feat/plt-4637-metrics`。**数値はすべて macOS arm64 1 台・各 1 回の観測値で、SLA ではない。** 負荷シナリオは process provider だけで実行した（warm の段階が無いので「毎回起動」の profile）。再現: `scripts/load/scenarios.sh`（seed 20260917、上限 12 並列・150 件・240 s）。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 0 → 負荷増 → 上限 → 減少 → 0 → 再起動をグラフ / 機械可読結果で示す | 実装済み（process provider 実測 1 回） / 未検証（Firecracker） | `docs/evidence/load-lifecycle-20260917T072540Z-process/`: `timeline.svg`・`timeline.txt`・`samples.jsonl`（250 ms ごと 122 sample）・`summary.json` の `lifecycle`（`zero_before`、in-flight 最大 3 = revision の cap、queue 最大 5、18.1 s に 0、24.4〜26.6 s に gateway 停止、再起動後に再び増えて 0。checks 12 項目すべて true、detector findings 0）。`load-burst-*`（0 → 1 → 2 → cap 3 / queue 5 → 1 → 0）、`load-restart-*`（idle 中の再起動 7.5〜10.0 s、前後とも 0 に戻る）。pipeline（fake provider、warm pool）: `crates/application/tests/scaling.rs::metrics_show_zero_to_cap_to_zero_and_boot_identity_proves_warm_reuse`（0 → burst 6 → cap 2 を超えない → idle → `scale_to_zero`） |
+| 2a | 同一環境の再利用を boot ID で確認する | 実装済み（fake provider） / 未検証（Firecracker の warm pool） | `tsls_boot_identity_checks_total{result}` と `GET /v1/capacity` の `reuse`。fake provider の warm pool で `same_boot` = warm attempt 数・`boot_changed` 0（上の scaling test）。boot id の比較規則と変化の検出: `metrics::tests::boot_identity_is_checked_per_environment_and_warm_starts_skip_boot_phases`。boot id は Hello でだけ報告されるので、比較は台帳・pool の取り違えの検出で、guest が dispatch ごとに読み直す検査ではない（`docs/metrics.md` §4） |
+| 2b | 未対応 profile は毎回起動と表示する | 実装済み（process provider 実測） | `tsls_environment_reuse_mode{mode="every_invocation_boots"} 1` と `reuse.mode = "every_invocation_boots"`（`apps/gateway/tests/gateway_integration.rs::metrics_scrape_reflects_a_scripted_invoke_sequence`）。6 シナリオすべてで `reuse.mode = every_invocation_boots` かつ attempt 数 = 環境数（計 128 attempt / 128 環境、`summary.json` の `reuse.evidence`、check `every_invocation_boots`） |
+| 3a | 起動予約超過を検出する | 実装済み（検出器の unit test・alert rule） / 超過は実測で未発生 | `apps/load/src/detect.rs::tests::overshoot_is_detected_on_resources_concurrency_revision_and_tenant_caps`（memory・in-flight・revision cap・tenant quota）、alert `Tsls*Over*`。6 シナリオの 388 sample（load あり 259）で findings 0 |
+| 3b | starvation を検出する | 実装済み（unit test・alert rule） / starvation は実測で未発生 | `detect::tests::starvation_needs_a_long_wait_while_others_are_granted`、alert `TslsTenantStarved`。`load-mixed-20260917T072741Z-process`（A: 2 s × 12 を 6 並列、B: 0.1 s × 16 を 2 並列、node 4・tenant quota 3）で 2 tenant とも処理され findings 0（B の latency p50 1868 ms / p95 2336 ms、A p50 6398 ms）。最初の mixed 実行では、自分の quota で待つ A を starvation と誤検出したため、定義を「待ちの間に in-flight も grant も無い tenant」に直した（ADR-0011 決定 7、commit 31ea62d） |
+| 3c | idle 中の想定外の resource 利用を検出する | 実装済み（fake provider） / 未検証（process provider は idle の段階が無い、Firecracker 未実行） | `metrics::tests::idle_cpu_is_measured_between_two_idle_samples_only`、scaling test で idle 環境に CPU を与えると `tsls_idle_environment_cpu_ratio_max` > 0.1、`detect::tests::idle_cpu_and_boot_identity_findings`、alert `TslsIdleEnvironmentCpu`。process provider の実行では測定対象 0（coverage `idle_cpu_samples 0`）。process provider の `environment_stats`（bridge プロセスだけ）は `process_usage_reads_this_process_where_the_host_supports_it` |
+| 4a | 宣言された検証負荷上限を越えない | 実装済み | `tsls-load` が計画を宣言値と天井（64 / 2000 / 1800 s）で検査して超えれば送らない（`plan::tests::phases_parse_and_plans_are_checked_against_the_declared_limits`、`limits::tests::declared_limits_never_exceed_the_ceilings`）。6 シナリオの `limits_observed.respected` はすべて true（最大同時 8 ≤ 12、最多 42 件 ≤ 150、最長 29.4 s ≤ 240 s） |
+| 4b | 本番 / 外部 host へ負荷を送らない | 実装済み | 送り先は `127.0.0.1` / `::1` / `localhost` と明示した `--lab-host` だけ、名前解決なし、redirect を追わない（`limits::tests::only_loopback_or_an_explicit_lab_host_is_a_load_target`）。scenarios.sh は gateway を起動する前に `tsls-load check-target` を通す |
+
+範囲の項目:
+
+| 項目 | 状態 | 証跡 |
+|---|---|---|
+| Ready / Busy / Idle / Starting 数 | 実装済み | `tsls_environments{state}`、`tsls_revision_environments`（Ready = `idle`） |
+| queue oldest age | 実装済み | `tsls_queue_oldest_age_seconds`、`tsls_tenant_queue_oldest_age_seconds` |
+| activation の集約（合流） | 実装済み | `tsls_scale_events_total{kind="activation"}`、`tsls_admission_coalesced_waits_total`、`tsls_admission_starts_avoided_total`（`admission::tests::metrics_count_coalesced_starts_and_breaker_opens`） |
+| quota 拒否 | 実装済み | `tsls_admission_rejections_total{reason}`（7 理由すべて 0 から）、`tsls_gate_refusals_total{error_type}` |
+| cold / warm 率 | 実装済み | `tsls_attempts_total{start_kind,status}`、`tsls_attempt_phase_seconds{phase,start_kind}` |
+| 起動失敗 | 実装済み | `tsls_environment_starts_total{result}`、`tsls_circuit_breaker_opens_total`、`tsls_revision_circuit_breaker_state` |
+| CPU / memory 使用 | 実装済み（process・fake） / 未検証（Firecracker の cgroup） | `tsls_environment_cpu_seconds_total` ほか。Firecracker の読み取りは `cgroup::tests::usage_reads_cpu_and_memory_of_a_cgroup_directory`（tempdir の file）だけ |
+| dispatcher lease・設定 cache・async outbox | 実装済み | `tsls_dispatcher_*`、`tsls_config_*`、`tsls_async_outbox_*`（`metrics::tests::the_exposition_is_well_formed_and_carries_admission_attempts_and_host_usage`） |
+| `/metrics` が認証なしに tenant を漏らさない | 実装済み | `gateway_integration::metrics_require_the_operator_credential_and_never_leak_tenants_without_it`、`config::tests::metrics_section_is_off_without_a_token_and_refuses_weak_or_tenant_tokens`（security regression group に追加） |
+| 固定 profile・commit・seed を記録した再現試験 | 実装済み | 各 `run.json`（commit `facb1a9` / mixed は `31ea62d`、未 commit の tracked 変更 0、seed、上限、設定の SHA-256、host、rustc） |
+| alert rule の検証 | 実装済み（YAML と参照の検査） / 未検証（promtool） | `apps/load/tests/alerts.rs`。promtool は環境に無く未実行 |
+| 同期 gateway の回帰 | 実装済み（process provider） | `scripts/e2e/demo.sh` 28/28 PASS（証跡は commit していない） |
+| Firecracker での負荷シナリオ | 未検証 | 検証 VM を benchmark 作業が使用中のため実行していない。`TSLS_GATEWAY_CONFIG` ほかで任意の provider に向けられる（`docs/metrics.md` §6） |
+
+残り・制約: metrics の counter はプロセスのメモリにあり再起動で 0 に戻る。idle CPU の窓は scrape 間隔。process provider の使用量は bridge プロセスだけ。`/metrics` は gateway と同じ listener（外部公開時は proxy で塞ぐ、T34）。boot identity は起動時に報告された boot id との比較で、guest に dispatch ごとに読ませる検査は Firecracker 実測時に追加する。
 
 ## ADR-0001 残る測定の状況
 
