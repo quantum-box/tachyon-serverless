@@ -457,6 +457,14 @@ cmd_bootstrap() {
 # ---------------------------------------------------------------------------
 
 LAB_SUDO=""
+# lab_sudo_optional: a privileged firecracker lab runs the gateway as root, so its pid (kill -0 is
+# EPERM for the lab user) and its data files (state.db, 0600) are only visible through sudo. Commands
+# that only look (status, demo) use it when passwordless sudo is there.
+lab_sudo_optional() {
+  if [ "$PROVIDER" = firecracker ] && [ "${LAB_FC_PRIVILEGED:-1}" = 1 ] && [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then
+    LAB_SUDO="sudo -n"
+  fi
+}
 lab_sudo_setup() {
   LAB_SUDO=""
   if [ "$PROVIDER" = firecracker ] && [ "${LAB_FC_PRIVILEGED:-1}" = 1 ] && [ "$(id -u)" != 0 ]; then
@@ -785,7 +793,9 @@ hrow() { # STATUS COMPONENT CHECK DETAIL
 }
 
 metric_value() { # BODY NAME_WITH_LABELS -> value
-  printf '%s\n' "$1" | awk -v m="$2" '$1 == m {print $2; exit}'
+  # awk reads the whole body: an early `exit` closes the pipe while printf is still writing a large
+  # exposition, and the SIGPIPE (141) aborted `status` under pipefail.
+  printf '%s\n' "$1" | awk -v m="$2" '$1 == m && !found {print $2; found = 1}'
 }
 
 # health_table [quiet] -> 0 when every component is healthy
@@ -862,8 +872,7 @@ cmd_status() {
   lab_require_init
   lab_provider
   lab_binaries
-  # Root-owned data of a privileged firecracker lab (state.db) is read through sudo.
-  if [ "$PROVIDER" = firecracker ] && [ "${LAB_FC_PRIVILEGED:-1}" = 1 ] && [ "$(id -u)" != 0 ] && sudo -n true 2>/dev/null; then LAB_SUDO="sudo -n"; fi
+  lab_sudo_optional
   echo "lab $LAB_ID  provider=$PROVIDER  state=$(manifest_get STATE)  dir=$LAB_DIR"
   [ "$PROVIDER" = firecracker ] || echo "(process provider: dev mode, NOT a microVM, no isolation)"
   if [ ! -f "$TOKENS_FILE" ]; then
@@ -1153,6 +1162,7 @@ cmd_demo() {
   lab_require_init
   lab_provider
   lab_binaries
+  lab_sudo_optional
   gateway_pid >/dev/null || lab_die "gateway is not running (run: scripts/lab/lab.sh up)"
   health_table quiet || { health_table || true; lab_die "health checks fail; fix them before the demo (docs/runbook.md §5)"; }
   # shellcheck source=scripts/lab/demo.sh
