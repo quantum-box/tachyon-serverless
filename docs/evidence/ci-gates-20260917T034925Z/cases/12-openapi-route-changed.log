@@ -1,0 +1,52 @@
+# case: openapi-route-changed
+# what: a documented route changes without updating docs/openapi.json
+# gate: openapi
+# known-bad change (applied to a temporary copy only):
+--- apps/gateway/src/handlers.rs.orig	2026-09-17 12:54:57
++++ apps/gateway/src/handlers.rs	2026-09-17 12:54:57
+@@ -34,7 +34,7 @@
+ // health / meta
+ // ---------------------------------------------------------------------------
+ 
+-#[utoipa::path(get, path = "/healthz", tag = "meta", responses((status = 200, description = "alive")))]
++#[utoipa::path(get, path = "/health", tag = "meta", responses((status = 200, description = "alive")))]
+ pub async fn healthz() -> &'static str {
+     "ok"
+ }
+# ---- gate output ----
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
+   Compiling tachyon-serverless-provider-process v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/process)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/firecracker)
+   Compiling tachyon-serverless-provider-fake v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/fake)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/apps/gateway)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.09s
+     Running tests/openapi_snapshot.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/openapi_snapshot-1edb08043348c51e)
+
+running 2 tests
+test openapi_document_matches_the_committed_snapshot ... FAILED
+test every_management_route_requires_the_bearer_scheme ... ok
+
+failures:
+
+---- openapi_document_matches_the_committed_snapshot stdout ----
+
+thread 'openapi_document_matches_the_committed_snapshot' (890098) panicked at apps/gateway/tests/openapi_snapshot.rs:102:5:
+the OpenAPI contract changed but docs/openapi.json was not updated.
+Differences (JSON pointer):
+  /paths/~1health: only in the generated document
+  /paths/~1healthz: only in the snapshot
+If the change is intended, run `TSLS_UPDATE_SNAPSHOTS=1 cargo test -p tachyon-serverless-gateway --test openapi_snapshot` and commit docs/openapi.json so the contract change is reviewed.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    openapi_document_matches_the_committed_snapshot
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p tachyon-serverless-gateway --test openapi_snapshot`
+# gate exit code: 101

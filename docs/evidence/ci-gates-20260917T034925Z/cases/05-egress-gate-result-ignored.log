@@ -1,0 +1,75 @@
+# case: egress-gate-result-ignored
+# what: the pre-boot egress check is not enforced, so a VM with a NIC reaches InstanceStart
+# gate: security:egress_gate
+# known-bad change (applied to a temporary copy only):
+--- crates/providers/firecracker/src/provider.rs.orig	2026-09-17 12:52:39
++++ crates/providers/firecracker/src/provider.rs	2026-09-17 12:52:39
+@@ -440,7 +440,7 @@
+                 format!("egress gate: cannot read the VM configuration before InstanceStart: {e}"),
+             )
+         })?;
+-        check_vm_config(&vm_config).map_err(|e| Self::boot_error(paths, e))?;
++        let _ = check_vm_config(&vm_config);
+         if let Err(e) = api
+             .put(
+                 "/actions",
+# ---- gate output ----
+security-regression: 6 listed tests from scripts/ci/security-regression.list
+
+::group::cargo test -p tachyon-serverless-provider-firecracker --lib (5 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/firecracker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.43s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_provider_firecracker-099260c364b52c8e)
+
+running 5 tests
+test egress_gate::tests::a_vm_config_without_nic_passes ... ok
+test egress_gate::tests::plans_without_networking_pass ... ok
+test egress_gate::tests::plans_with_networking_fail_closed ... ok
+test egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed ... ok
+test provider::tests::create_rejects_non_none_egress ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 52 filtered out; finished in 0.01s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-provider-firecracker --test fake_vmm (1 tests)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/firecracker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.29s
+     Running tests/fake_vmm.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/fake_vmm-7046324dac539d61)
+
+running 1 test
+test egress_gate_refuses_to_start_a_vm_with_a_network_interface ... FAILED
+
+failures:
+
+---- egress_gate_refuses_to_start_a_vm_with_a_network_interface stdout ----
+
+thread 'egress_gate_refuses_to_start_a_vm_with_a_network_interface' (870946) panicked at crates/providers/firecracker/tests/fake_vmm.rs:838:57:
+called `Result::unwrap_err()` on an `Ok` value: EnvironmentHandle { environment_id: EnvironmentId(env_01m2pqxycxqs6ms3h0c3xbrydw), evidence: BootEvidence { guest_boot_id: None, host_pid: Some(17246), details: {"boot_ms": Number(899), "console_log": String("/tmp/fcnrgBz5/run/env_01m2pqxycxqs6ms3h0c3xbrydw/console.log"), "console_log_max_bytes": Number(4194304), "env_dir": String("/tmp/fcnrgBz5/run/env_01m2pqxycxqs6ms3h0c3xbrydw"), "fc_log_max_bytes": Number(4194304), "firecracker_version": String("v9.9.9-fake"), "function_drive_bytes": Number(9437184), "host_disk_budget_bytes": Number(152043640), "instance_id": String("env-01m2pqxycxqs6ms3h0c3xbrydw"), "kernel_path": String("/tmp/fcnrgBz5/vmlinux"), "kernel_sha256": String("100d125cca4dd28597fbbbac418ec0091d3f121443803dc19156c766c432161e"), "mem_mib": Number(512), "network_interfaces": Number(0), "provider": String("firecracker"), "rootfs_path": String("/tmp/fcnrgBz5/rootfs.ext4"), "rootfs_sha256": String("61c7d77f1b1d5b8eff183488acb242ddbfbdbac52c5d37b78ac1d2769c7a99a8"), "scratch_drive_bytes": Number(134217728), "scratch_drive_ms": Number(26), "scratch_drive_reserved": Bool(false), "vcpus": Number(2), "vsock_port": Number(5000)} }, .. }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    egress_gate_refuses_to_start_a_vm_with_a_network_interface
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 1.38s
+
+error: test failed, to rerun pass `-p tachyon-serverless-provider-firecracker --test fake_vmm`
+::endgroup::
+
+security regression group
+STATUS   CATEGORY         TEST
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_without_networking_pass
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_with_networking_fail_closed
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_without_nic_passes
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed
+ok       egress_gate      tachyon-serverless-provider-firecracker lib provider::tests::create_rejects_non_none_egress
+FAILED   egress_gate      tachyon-serverless-provider-firecracker test:fake_vmm egress_gate_refuses_to_start_a_vm_with_a_network_interface
+
+security-regression: FAIL - 1 of 6 listed tests did not pass.
+  MISSING means the test no longer exists under that exact path (renamed, moved or removed).
+  Fix the regression, or update scripts/ci/security-regression.list in the same change.
+# gate exit code: 1

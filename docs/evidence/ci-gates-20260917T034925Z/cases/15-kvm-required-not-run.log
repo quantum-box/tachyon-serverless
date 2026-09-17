@@ -1,0 +1,7 @@
+# case: kvm-required-not-run
+# what: a firecracker path changed and the kvm job was skipped (no `kvm` label): kvm-gate must fail, not pass
+# gate: kvm-gate
+# ---- gate output ----
+classify: kvm_required=true
+kvm-gate: FAILED - KVM integration is REQUIRED but was NOT RUN: a maintainer must review the diff and add the `kvm` label to this pull request (docs/ci.md).
+# gate exit code: 1

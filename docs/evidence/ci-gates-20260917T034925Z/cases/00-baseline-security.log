@@ -1,0 +1,251 @@
+security-regression: 63 listed tests from scripts/ci/security-regression.list
+
+::group::cargo test -p tachyon-serverless-application --lib (28 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
+   Compiling tachyon-serverless-provider-fake v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/fake)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.37s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-e46bc06ffa756374)
+
+running 28 tests
+test authz::tests::foreign_tenant_is_not_found ... ok
+test authz::tests::roles ... ok
+test error::tests::tenant_mismatch_is_not_found ... ok
+test error::tests::foreign_and_missing_secret_bindings_are_indistinguishable ... ok
+test local_ports::tests::identity_and_secrets_are_tenant_scoped ... ok
+test config::tests::invalid_tenant_id_is_rejected ... ok
+test config::tests::limits_overrides_apply ... ok
+test repository::contract_tests::memory::an_environment_copy_from_another_epoch_is_refused ... ok
+test repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused ... ok
+test repository::contract_tests::memory::rows_never_cross_a_tenant ... ok
+test bridge_session::tests::rejects_wrong_environment_and_protocol_version ... ok
+test config::tests::limits_must_leave_frame_headroom ... ok
+test bridge_session::tests::full_session_with_lease_fencing_and_log_bounds ... ok
+test config::tests::environment_reuse_is_off_by_default_and_validated_when_enabled ... ok
+test repository::contract_tests::sqlite::artifact_ownership_is_per_tenant ... ok
+test repository::contract_tests::sqlite::logs_are_bounded_per_invocation ... ok
+test services::invoke::tests::secret_binding_failures_do_not_reveal_other_tenants ... ok
+test repository::contract_tests::sqlite::only_an_exactly_matching_reuse_key_is_reused ... ok
+test services::pool::tests::reuse_needs_both_idle_capabilities_supported_and_the_config_on ... ok
+test repository::contract_tests::sqlite::attempts_and_leases_are_final_once_settled ... ok
+test repository::contract_tests::sqlite::an_environment_copy_from_another_epoch_is_refused ... ok
+test repository::contract_tests::sqlite::releasing_respects_the_pool_caps_and_refuses_a_stale_copy ... ok
+test repository::contract_tests::sqlite::rows_never_cross_a_tenant ... ok
+test bridge_session::tests::init_error_timeout_and_disconnect ... ok
+test repository::sqlite::tests::cas_holds_across_separate_connections_to_the_same_file ... ok
+test repository::contract_tests::sqlite::inline_output_is_bounded ... ok
+test bridge_session::tests::oversized_invoke_is_refused_without_touching_the_session ... ok
+test services::pool::tests::a_claim_racing_a_release_never_takes_a_row_without_its_session ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 77 filtered out; finished in 0.55s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-application --test pipeline (11 tests)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.54s
+     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-d1151c96f3890c10)
+
+running 11 tests
+test client_deadline_is_checked_again_right_before_dispatch ... ok
+test cross_tenant_resources_are_not_found ... ok
+test a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one ... ok
+test a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start ... ok
+test another_revision_never_reuses_the_first_revisions_environment ... ok
+test revisions_cannot_reference_another_tenants_artifact ... ok
+test client_deadline_during_initialization_never_starts_the_handler ... ok
+test client_deadline_bounds_the_queue_wait ... ok
+test client_deadline_clamps_the_execution_deadline ... ok
+test hang_times_out_cancels_and_terminates_with_timeout ... ok
+test capacity_exceeded_and_queue_timeout ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 1.58s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-cli --test mock_gateway (2 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
+   Compiling tachyon-serverless-cli v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/apps/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.02s
+     Running tests/mock_gateway.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/mock_gateway-a2ecd3a55ef88ddd)
+
+running 2 tests
+test wrong_token_is_exit_2 ... ok
+test cross_tenant_resource_is_404_exit_2 ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.01s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-domain --lib (6 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.64s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_domain-c504a817fb9998ac)
+
+running 6 tests
+test environment::tests::lease_fencing ... ok
+test invocation::tests::rejects_elapsed_client_deadline_and_bad_key ... ok
+test invocation::tests::queue_timeout_fails_from_queued ... ok
+test invocation::tests::an_elapsed_client_deadline_alone_is_rejected ... ok
+test environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt ... ok
+test revision::tests::invalid_specs_are_rejected ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.00s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-gateway --test gateway_integration (2 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
+   Compiling tachyon-serverless-provider-process v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/process)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/firecracker)
+   Compiling tachyon-serverless-provider-fake v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/fake)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/apps/gateway)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.92s
+     Running tests/gateway_integration.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/gateway_integration-7c95be4cc8f0d427)
+
+running 2 tests
+test operator_role_is_own_tenant_read_only ... ok
+test foreign_artifact_digest_is_indistinguishable_from_a_missing_one ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.11s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-protocol --lib (2 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.55s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_protocol-adafa39441eca01e)
+
+running 2 tests
+test wire::tests::oversized_frame_rejected ... ok
+test wire::tests::response_payload_bound_leaves_room_for_the_envelope ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.91s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-provider-firecracker --lib (7 tests)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/firecracker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.57s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_provider_firecracker-099260c364b52c8e)
+
+running 7 tests
+test egress_gate::tests::plans_without_networking_pass ... ok
+test egress_gate::tests::plans_with_networking_fail_closed ... ok
+test egress_gate::tests::a_vm_config_without_nic_passes ... ok
+test drive::tests::scratch_drive_is_exactly_the_requested_size ... ok
+test egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed ... ok
+test provider::tests::create_rejects_non_none_egress ... ok
+test provider::tests::archive_is_pruned_to_keep_limit ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.02s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-provider-firecracker --test fake_vmm (1 tests)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/firecracker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.19s
+     Running tests/fake_vmm.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/fake_vmm-7046324dac539d61)
+
+running 1 test
+test egress_gate_refuses_to_start_a_vm_with_a_network_interface ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 1.06s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-runtime-bridge --lib (4 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-sdk v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/sdk)
+   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/runtime-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.98s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_runtime_bridge-04d0596ccf441d70)
+
+running 4 tests
+test session::tests::a_resumed_guest_gets_a_deadline_in_its_own_clock ... ok
+test runtime_api::tests::oversized_response_is_413_and_error_frame ... ok
+test runtime_api::tests::oversized_error_report_settles_the_attempt ... ok
+test runtime_api::tests::response_limit_is_clamped_to_frame_capacity ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.01s
+
+::endgroup::
+
+security regression group
+STATUS   CATEGORY         TEST
+ok       tenant_authz     tachyon-serverless-application lib authz::tests::foreign_tenant_is_not_found
+ok       tenant_authz     tachyon-serverless-application lib authz::tests::roles
+ok       tenant_authz     tachyon-serverless-application lib error::tests::tenant_mismatch_is_not_found
+ok       tenant_authz     tachyon-serverless-application lib error::tests::foreign_and_missing_secret_bindings_are_indistinguishable
+ok       tenant_authz     tachyon-serverless-application lib local_ports::tests::identity_and_secrets_are_tenant_scoped
+ok       tenant_authz     tachyon-serverless-application lib services::invoke::tests::secret_binding_failures_do_not_reveal_other_tenants
+ok       tenant_authz     tachyon-serverless-application lib config::tests::invalid_tenant_id_is_rejected
+ok       tenant_authz     tachyon-serverless-application lib repository::contract_tests::memory::rows_never_cross_a_tenant
+ok       tenant_authz     tachyon-serverless-application lib repository::contract_tests::sqlite::rows_never_cross_a_tenant
+ok       tenant_authz     tachyon-serverless-application lib repository::contract_tests::sqlite::artifact_ownership_is_per_tenant
+ok       tenant_authz     tachyon-serverless-application test:pipeline cross_tenant_resources_are_not_found
+ok       tenant_authz     tachyon-serverless-application test:pipeline revisions_cannot_reference_another_tenants_artifact
+ok       tenant_authz     tachyon-serverless-gateway test:gateway_integration operator_role_is_own_tenant_read_only
+ok       tenant_authz     tachyon-serverless-gateway test:gateway_integration foreign_artifact_digest_is_indistinguishable_from_a_missing_one
+ok       tenant_authz     tachyon-serverless-cli test:mock_gateway cross_tenant_resource_is_404_exit_2
+ok       tenant_authz     tachyon-serverless-cli test:mock_gateway wrong_token_is_exit_2
+ok       reuse_key        tachyon-serverless-application lib repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused
+ok       reuse_key        tachyon-serverless-application lib repository::contract_tests::sqlite::only_an_exactly_matching_reuse_key_is_reused
+ok       reuse_key        tachyon-serverless-application lib services::pool::tests::reuse_needs_both_idle_capabilities_supported_and_the_config_on
+ok       reuse_key        tachyon-serverless-application lib services::pool::tests::a_claim_racing_a_release_never_takes_a_row_without_its_session
+ok       reuse_key        tachyon-serverless-application lib config::tests::environment_reuse_is_off_by_default_and_validated_when_enabled
+ok       reuse_key        tachyon-serverless-application test:pipeline another_revision_never_reuses_the_first_revisions_environment
+ok       reuse_key        tachyon-serverless-application test:pipeline a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start
+ok       lease_epoch      tachyon-serverless-domain lib environment::tests::lease_fencing
+ok       lease_epoch      tachyon-serverless-domain lib environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt
+ok       lease_epoch      tachyon-serverless-application lib bridge_session::tests::full_session_with_lease_fencing_and_log_bounds
+ok       lease_epoch      tachyon-serverless-application lib bridge_session::tests::rejects_wrong_environment_and_protocol_version
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::memory::an_environment_copy_from_another_epoch_is_refused
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::sqlite::an_environment_copy_from_another_epoch_is_refused
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::sqlite::attempts_and_leases_are_final_once_settled
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::sqlite::releasing_respects_the_pool_caps_and_refuses_a_stale_copy
+ok       lease_epoch      tachyon-serverless-application lib repository::sqlite::tests::cas_holds_across_separate_connections_to_the_same_file
+ok       lease_epoch      tachyon-serverless-application test:pipeline a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one
+ok       deadline         tachyon-serverless-domain lib invocation::tests::queue_timeout_fails_from_queued
+ok       deadline         tachyon-serverless-domain lib invocation::tests::rejects_elapsed_client_deadline_and_bad_key
+ok       deadline         tachyon-serverless-domain lib invocation::tests::an_elapsed_client_deadline_alone_is_rejected
+ok       deadline         tachyon-serverless-application lib bridge_session::tests::init_error_timeout_and_disconnect
+ok       deadline         tachyon-serverless-application test:pipeline hang_times_out_cancels_and_terminates_with_timeout
+ok       deadline         tachyon-serverless-application test:pipeline capacity_exceeded_and_queue_timeout
+ok       deadline         tachyon-serverless-application test:pipeline client_deadline_during_initialization_never_starts_the_handler
+ok       deadline         tachyon-serverless-application test:pipeline client_deadline_is_checked_again_right_before_dispatch
+ok       deadline         tachyon-serverless-application test:pipeline client_deadline_clamps_the_execution_deadline
+ok       deadline         tachyon-serverless-application test:pipeline client_deadline_bounds_the_queue_wait
+ok       deadline         tachyon-serverless-runtime-bridge lib session::tests::a_resumed_guest_gets_a_deadline_in_its_own_clock
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_without_networking_pass
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_with_networking_fail_closed
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_without_nic_passes
+ok       egress_gate      tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed
+ok       egress_gate      tachyon-serverless-provider-firecracker lib provider::tests::create_rejects_non_none_egress
+ok       egress_gate      tachyon-serverless-provider-firecracker test:fake_vmm egress_gate_refuses_to_start_a_vm_with_a_network_interface
+ok       resource_limits  tachyon-serverless-domain lib revision::tests::invalid_specs_are_rejected
+ok       resource_limits  tachyon-serverless-application lib config::tests::limits_overrides_apply
+ok       resource_limits  tachyon-serverless-application lib config::tests::limits_must_leave_frame_headroom
+ok       resource_limits  tachyon-serverless-application lib bridge_session::tests::oversized_invoke_is_refused_without_touching_the_session
+ok       resource_limits  tachyon-serverless-application lib repository::contract_tests::sqlite::inline_output_is_bounded
+ok       resource_limits  tachyon-serverless-application lib repository::contract_tests::sqlite::logs_are_bounded_per_invocation
+ok       resource_limits  tachyon-serverless-protocol lib wire::tests::oversized_frame_rejected
+ok       resource_limits  tachyon-serverless-protocol lib wire::tests::response_payload_bound_leaves_room_for_the_envelope
+ok       resource_limits  tachyon-serverless-runtime-bridge lib runtime_api::tests::response_limit_is_clamped_to_frame_capacity
+ok       resource_limits  tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_response_is_413_and_error_frame
+ok       resource_limits  tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_error_report_settles_the_attempt
+ok       resource_limits  tachyon-serverless-provider-firecracker lib drive::tests::scratch_drive_is_exactly_the_requested_size
+ok       resource_limits  tachyon-serverless-provider-firecracker lib provider::tests::archive_is_pruned_to_keep_limit
+
+security-regression: PASS - all 63 listed tests ran and passed

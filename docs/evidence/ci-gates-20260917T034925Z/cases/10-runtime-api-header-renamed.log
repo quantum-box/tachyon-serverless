@@ -1,0 +1,49 @@
+# case: runtime-api-header-renamed
+# what: a Runtime API header name changes
+# gate: golden
+# known-bad change (applied to a temporary copy only):
+--- crates/protocol/src/runtime_api.rs.orig	2026-09-17 12:54:49
++++ crates/protocol/src/runtime_api.rs	2026-09-17 12:54:49
+@@ -45,7 +45,7 @@
+     pub const ATTEMPT_ID: &str = "tachyon-attempt-id";
+     pub const EPOCH: &str = "tachyon-epoch";
+     /// Absolute deadline, milliseconds since Unix epoch.
+-    pub const DEADLINE_MS: &str = "tachyon-deadline-ms";
++    pub const DEADLINE_MS: &str = "tachyon-deadline";
+     pub const TRACE_ID: &str = "tachyon-trace-id";
+     pub const EVENT_TYPE: &str = "tachyon-event-type";
+ }
+# ---- gate output ----
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.04s
+     Running tests/golden.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/golden-8cf1526a6f9f1260)
+
+running 7 tests
+test a_length_prefixed_frame_matches_the_golden_bytes ... ok
+test no_stale_fixture_is_left_behind ... ok
+test every_message_variant_and_error_kind_has_a_fixture ... ok
+test runtime_api_bodies_match_the_golden_fixtures ... ok
+test host_to_bridge_frames_match_the_golden_fixtures ... ok
+test runtime_api_constants_match_the_golden_fixture ... FAILED
+test bridge_to_host_frames_match_the_golden_fixtures ... ok
+
+failures:
+
+---- runtime_api_constants_match_the_golden_fixture stdout ----
+
+thread 'runtime_api_constants_match_the_golden_fixture' (886250) panicked at crates/protocol/tests/golden.rs:110:5:
+golden fixture mismatch - the runtime wire contract changed:
+  runtime_api/constants.json: paths, headers, limits or versions changed:
+    fixture: {"default_vsock_port":5000,"env":{"environment_id":"TACHYON_ENVIRONMENT_ID","runtime_api":"TACHYON_RUNTIME_API","unisolated":"TACHYON_UNISOLATED"},"event_types":{"http":"tachyon.http.v1","json":"tachyon.invoke.v1"},"frame_envelope_headroom":65536,"headers":{"attempt_id":"tachyon-attempt-id","deadline_ms":"tachyon-deadline-ms","epoch":"tachyon-epoch","event_type":"tachyon-event-type","invocation_id":"tachyon-invocation-id","trace_id":"tachyon-trace-id"},"lifecycle":{"error_types":{"after_restore_failed":"Runtime.AfterRestoreFailed","after_restore_timeout":"Runtime.AfterRestoreTimeout","checkpoint_timeout":"Runtime.CheckpointTimeout","lifecycle_violation":"Runtime.LifecycleViolation","pre_checkpoint_failed":"Runtime.PreCheckpointFailed","pre_checkpoint_timeout":"Runtime.PreCheckpointTimeout"},"header_version":"tachyon-lifecycle-version","paths":{"bootstrap":"/runtime/v1/lifecycle/bootstrap","checkpoint":"/runtime/v1/lifecycle/checkpoint","continue":"/runtime/v1/lifecycle/continue","error":"/runtime/v1/lifecycle/error"},"version":1},"max_error_report_bytes":1048576,"max_frame_bytes":8388608,"max_response_payload_bytes":8323072,"paths":{"error":"/runtime/v1/invocations/{attempt_id}/error","init_error":"/runtime/v1/init/error","next":"/runtime/v1/next","ready":"/runtime/v1/ready","response":"/runtime/v1/invocations/{attempt_id}/response"},"protocol_name":"tachyon-invoke-v1","protocol_version":2}
+    current: {"default_vsock_port":5000,"env":{"environment_id":"TACHYON_ENVIRONMENT_ID","runtime_api":"TACHYON_RUNTIME_API","unisolated":"TACHYON_UNISOLATED"},"event_types":{"http":"tachyon.http.v1","json":"tachyon.invoke.v1"},"frame_envelope_headroom":65536,"headers":{"attempt_id":"tachyon-attempt-id","deadline_ms":"tachyon-deadline","epoch":"tachyon-epoch","event_type":"tachyon-event-type","invocation_id":"tachyon-invocation-id","trace_id":"tachyon-trace-id"},"lifecycle":{"error_types":{"after_restore_failed":"Runtime.AfterRestoreFailed","after_restore_timeout":"Runtime.AfterRestoreTimeout","checkpoint_timeout":"Runtime.CheckpointTimeout","lifecycle_violation":"Runtime.LifecycleViolation","pre_checkpoint_failed":"Runtime.PreCheckpointFailed","pre_checkpoint_timeout":"Runtime.PreCheckpointTimeout"},"header_version":"tachyon-lifecycle-version","paths":{"bootstrap":"/runtime/v1/lifecycle/bootstrap","checkpoint":"/runtime/v1/lifecycle/checkpoint","continue":"/runtime/v1/lifecycle/continue","error":"/runtime/v1/lifecycle/error"},"version":1},"max_error_report_bytes":1048576,"max_frame_bytes":8388608,"max_response_payload_bytes":8323072,"paths":{"error":"/runtime/v1/invocations/{attempt_id}/error","init_error":"/runtime/v1/init/error","next":"/runtime/v1/next","ready":"/runtime/v1/ready","response":"/runtime/v1/invocations/{attempt_id}/response"},"protocol_name":"tachyon-invoke-v1","protocol_version":2}
+If the change is intended, decide on PROTOCOL_VERSION (docs/protocol.md), then run `TSLS_UPDATE_SNAPSHOTS=1 cargo test -p tachyon-serverless-protocol --test golden` and commit crates/protocol/tests/golden/.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    runtime_api_constants_match_the_golden_fixture
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tachyon-serverless-protocol --test golden`
+# gate exit code: 101

@@ -1,0 +1,130 @@
+# case: memory-lower-bound-removed
+# what: a revision below the minimum memory passes validation
+# gate: security:resource_limits
+# known-bad change (applied to a temporary copy only):
+--- crates/domain/src/revision.rs.orig	2026-09-17 12:52:56
++++ crates/domain/src/revision.rs	2026-09-17 12:52:56
+@@ -194,7 +194,7 @@
+             ));
+         }
+         let r = &self.resources;
+-        if r.memory_mib < limits.min_memory_mib || r.memory_mib > limits.max_memory_mib {
++        if r.memory_mib > limits.max_memory_mib {
+             return Err(DomainError::validation(
+                 "resources.memory_mib",
+                 format!(
+# ---- gate output ----
+security-regression: 13 listed tests from scripts/ci/security-regression.list
+
+::group::cargo test -p tachyon-serverless-application --lib (5 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
+   Compiling tachyon-serverless-provider-fake v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/fake)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.57s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-e46bc06ffa756374)
+
+running 5 tests
+test config::tests::limits_overrides_apply ... ok
+test config::tests::limits_must_leave_frame_headroom ... ok
+test repository::contract_tests::sqlite::logs_are_bounded_per_invocation ... ok
+test repository::contract_tests::sqlite::inline_output_is_bounded ... ok
+test bridge_session::tests::oversized_invoke_is_refused_without_touching_the_session ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 100 filtered out; finished in 0.58s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-domain --lib (1 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.41s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_domain-c504a817fb9998ac)
+
+running 1 test
+test revision::tests::invalid_specs_are_rejected ... FAILED
+
+failures:
+
+---- revision::tests::invalid_specs_are_rejected stdout ----
+
+thread 'revision::tests::invalid_specs_are_rejected' (873884) panicked at crates/domain/src/revision.rs:472:9:
+assertion failed: s.validate(&limits).is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    revision::tests::invalid_specs_are_rejected
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tachyon-serverless-domain --lib`
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-protocol --lib (2 tests)
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.98s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_protocol-adafa39441eca01e)
+
+running 2 tests
+test wire::tests::oversized_frame_rejected ... ok
+test wire::tests::response_payload_bound_leaves_room_for_the_envelope ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 5.54s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-provider-firecracker --lib (2 tests)
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/firecracker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.24s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_provider_firecracker-099260c364b52c8e)
+
+running 2 tests
+test drive::tests::scratch_drive_is_exactly_the_requested_size ... ok
+test provider::tests::archive_is_pruned_to_keep_limit ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 55 filtered out; finished in 0.02s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-runtime-bridge --lib (3 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-sdk v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/sdk)
+   Compiling tachyon-serverless-runtime-bridge v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/runtime-bridge)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.77s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_runtime_bridge-04d0596ccf441d70)
+
+running 3 tests
+test runtime_api::tests::oversized_response_is_413_and_error_frame ... ok
+test runtime_api::tests::oversized_error_report_settles_the_attempt ... ok
+test runtime_api::tests::response_limit_is_clamped_to_frame_capacity ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.02s
+
+::endgroup::
+
+security regression group
+STATUS   CATEGORY         TEST
+FAILED   resource_limits  tachyon-serverless-domain lib revision::tests::invalid_specs_are_rejected
+ok       resource_limits  tachyon-serverless-application lib config::tests::limits_overrides_apply
+ok       resource_limits  tachyon-serverless-application lib config::tests::limits_must_leave_frame_headroom
+ok       resource_limits  tachyon-serverless-application lib bridge_session::tests::oversized_invoke_is_refused_without_touching_the_session
+ok       resource_limits  tachyon-serverless-application lib repository::contract_tests::sqlite::inline_output_is_bounded
+ok       resource_limits  tachyon-serverless-application lib repository::contract_tests::sqlite::logs_are_bounded_per_invocation
+ok       resource_limits  tachyon-serverless-protocol lib wire::tests::oversized_frame_rejected
+ok       resource_limits  tachyon-serverless-protocol lib wire::tests::response_payload_bound_leaves_room_for_the_envelope
+ok       resource_limits  tachyon-serverless-runtime-bridge lib runtime_api::tests::response_limit_is_clamped_to_frame_capacity
+ok       resource_limits  tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_response_is_413_and_error_frame
+ok       resource_limits  tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_error_report_settles_the_attempt
+ok       resource_limits  tachyon-serverless-provider-firecracker lib drive::tests::scratch_drive_is_exactly_the_requested_size
+ok       resource_limits  tachyon-serverless-provider-firecracker lib provider::tests::archive_is_pruned_to_keep_limit
+
+security-regression: FAIL - 1 of 13 listed tests did not pass.
+  MISSING means the test no longer exists under that exact path (renamed, moved or removed).
+  Fix the regression, or update scripts/ci/security-regression.list in the same change.
+# gate exit code: 1

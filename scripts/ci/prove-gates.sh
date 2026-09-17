@@ -132,7 +132,10 @@ cleanup() { if [ "${KEEP_COPY:-0}" = 1 ]; then echo "kept copy: $COPY"; else rm 
 trap cleanup EXIT
 
 mkdir -p "$EVIDENCE_DIR/cases"
-rsync -a --exclude .git --exclude target --exclude .kvm --exclude /data --exclude docs/evidence \
+# No `-t`: the copy gets fresh mtimes. The cargo target dir is shared between runs, and cargo
+# decides freshness by mtime, so preserved (older) mtimes would let it reuse test binaries built
+# from an earlier run's mutated sources or with an earlier copy's CARGO_MANIFEST_DIR.
+rsync -rlp --exclude .git --exclude target --exclude .kvm --exclude /data --exclude docs/evidence \
   --exclude .claude "$REPO_ROOT/" "$COPY/"
 
 # run_gate GATE LOG -> exit code of the gate command, output in LOG
@@ -249,7 +252,8 @@ for idx in "${!C_NAME[@]}"; do
   cat "$log.out" >>"$log"
   rm -f "$log.out"
   echo "# gate exit code: $rc" >>"$log"
-  if [ "$file" != - ]; then mv "$COPY/$file.orig" "$COPY/$file"; fi
+  # restore and bump the mtime so cargo rebuilds the restored source for the next case
+  if [ "$file" != - ]; then mv "$COPY/$file.orig" "$COPY/$file" && touch "$COPY/$file"; fi
   # A compile error is not proof that the gate detects the regression: require the gate's own
   # failure signal (a failed / missing listed test, or a failed snapshot / golden test).
   if [ "$rc" -ne 0 ] && grep -Eq 'could not compile|BUILD_FAILED' "$log"; then

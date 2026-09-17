@@ -1,0 +1,49 @@
+# case: wire-field-renamed
+# what: HostMessage::Invoke.remaining_ms is renamed on the wire
+# gate: golden
+# known-bad change (applied to a temporary copy only):
+--- crates/protocol/src/wire.rs.orig	2026-09-17 12:54:37
++++ crates/protocol/src/wire.rs	2026-09-17 12:54:38
+@@ -171,6 +171,7 @@
+         /// host timestamp means nothing in the guest's frame and the guest
+         /// would compute a deadline that is wrong by the length of the pause
+         /// (protocol version 2, docs/protocol.md §A and §B).
++        #[serde(rename = "remaining")]
+         remaining_ms: u64,
+         trace_id: String,
+         payload: serde_json::Value,
+# ---- gate output ----
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.58s
+     Running tests/golden.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/golden-8cf1526a6f9f1260)
+
+running 7 tests
+test a_length_prefixed_frame_matches_the_golden_bytes ... ok
+test no_stale_fixture_is_left_behind ... ok
+test every_message_variant_and_error_kind_has_a_fixture ... ok
+test runtime_api_constants_match_the_golden_fixture ... ok
+test runtime_api_bodies_match_the_golden_fixtures ... ok
+test host_to_bridge_frames_match_the_golden_fixtures ... FAILED
+test bridge_to_host_frames_match_the_golden_fixtures ... ok
+
+failures:
+
+---- host_to_bridge_frames_match_the_golden_fixtures stdout ----
+
+thread 'host_to_bridge_frames_match_the_golden_fixtures' (885229) panicked at crates/protocol/tests/golden.rs:110:5:
+golden fixture mismatch - the runtime wire contract changed:
+  wire/host_invoke.json: fixture no longer decodes: malformed frame: missing field `remaining`; this build encodes a different shape:
+    fixture: {"attempt_id":"att_01j0000000000000000000000a","deadline_ms":1700000030000,"epoch":3,"event_type":"tachyon.invoke.v1","invocation_id":"inv_01j0000000000000000000000a","payload":{"name":"golden"},"remaining_ms":30000,"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","type":"invoke"}
+    encoded: {"attempt_id":"att_01j0000000000000000000000a","deadline_ms":1700000030000,"epoch":3,"event_type":"tachyon.invoke.v1","invocation_id":"inv_01j0000000000000000000000a","payload":{"name":"golden"},"remaining":30000,"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","type":"invoke"}
+If the change is intended, decide on PROTOCOL_VERSION (docs/protocol.md), then run `TSLS_UPDATE_SNAPSHOTS=1 cargo test -p tachyon-serverless-protocol --test golden` and commit crates/protocol/tests/golden/.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    host_to_bridge_frames_match_the_golden_fixtures
+
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p tachyon-serverless-protocol --test golden`
+# gate exit code: 101

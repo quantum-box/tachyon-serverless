@@ -1,0 +1,102 @@
+# case: epoch-fencing-removed
+# what: a lease accepts a completion carrying a stale epoch
+# gate: security:lease_epoch
+# known-bad change (applied to a temporary copy only):
+--- crates/domain/src/environment.rs.orig	2026-09-17 12:51:49
++++ crates/domain/src/environment.rs	2026-09-17 12:51:49
+@@ -348,7 +348,7 @@
+     /// A completion carrying `(attempt_id, epoch)` is only accepted if it matches
+     /// this lease exactly. Prevents stale results from overwriting state.
+     pub fn accepts(&self, attempt_id: &AttemptId, epoch: u64) -> bool {
+-        self.released_at.is_none() && &self.attempt_id == attempt_id && self.epoch == epoch
++        self.released_at.is_none() && &self.attempt_id == attempt_id && (self.epoch == epoch || true)
+     }
+ }
+ 
+# ---- gate output ----
+security-regression: 10 listed tests from scripts/ci/security-regression.list
+
+::group::cargo test -p tachyon-serverless-application --lib (7 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+   Compiling tachyon-serverless-provider-port v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/protocol)
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/api-types)
+   Compiling tachyon-serverless-provider-fake v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/providers/fake)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.59s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-e46bc06ffa756374)
+
+running 7 tests
+test repository::contract_tests::memory::an_environment_copy_from_another_epoch_is_refused ... ok
+test bridge_session::tests::rejects_wrong_environment_and_protocol_version ... ok
+test bridge_session::tests::full_session_with_lease_fencing_and_log_bounds ... ok
+test repository::contract_tests::sqlite::an_environment_copy_from_another_epoch_is_refused ... ok
+test repository::contract_tests::sqlite::attempts_and_leases_are_final_once_settled ... ok
+test repository::contract_tests::sqlite::releasing_respects_the_pool_caps_and_refuses_a_stale_copy ... ok
+test repository::sqlite::tests::cas_holds_across_separate_connections_to_the_same_file ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 98 filtered out; finished in 0.08s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-application --test pipeline (1 tests)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.14s
+     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-d1151c96f3890c10)
+
+running 1 test
+test a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 50 filtered out; finished in 0.06s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-domain --lib (2 tests)
+   Compiling tachyon-serverless-domain v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.R3LIEu/crates/domain)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.49s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_domain-c504a817fb9998ac)
+
+running 2 tests
+test environment::tests::lease_fencing ... FAILED
+test environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt ... FAILED
+
+failures:
+
+---- environment::tests::lease_fencing stdout ----
+
+thread 'environment::tests::lease_fencing' (863107) panicked at crates/domain/src/environment.rs:433:9:
+stale epoch rejected
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt stdout ----
+
+thread 'environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt' (863108) panicked at crates/domain/src/environment.rs:506:9:
+a frame carrying the previous epoch is stale
+
+
+failures:
+    environment::tests::lease_fencing
+    environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 26 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tachyon-serverless-domain --lib`
+::endgroup::
+
+security regression group
+STATUS   CATEGORY         TEST
+FAILED   lease_epoch      tachyon-serverless-domain lib environment::tests::lease_fencing
+FAILED   lease_epoch      tachyon-serverless-domain lib environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt
+ok       lease_epoch      tachyon-serverless-application lib bridge_session::tests::full_session_with_lease_fencing_and_log_bounds
+ok       lease_epoch      tachyon-serverless-application lib bridge_session::tests::rejects_wrong_environment_and_protocol_version
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::memory::an_environment_copy_from_another_epoch_is_refused
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::sqlite::an_environment_copy_from_another_epoch_is_refused
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::sqlite::attempts_and_leases_are_final_once_settled
+ok       lease_epoch      tachyon-serverless-application lib repository::contract_tests::sqlite::releasing_respects_the_pool_caps_and_refuses_a_stale_copy
+ok       lease_epoch      tachyon-serverless-application lib repository::sqlite::tests::cas_holds_across_separate_connections_to_the_same_file
+ok       lease_epoch      tachyon-serverless-application test:pipeline a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one
+
+security-regression: FAIL - 2 of 10 listed tests did not pass.
+  MISSING means the test no longer exists under that exact path (renamed, moved or removed).
+  Fix the regression, or update scripts/ci/security-regression.list in the same change.
+# gate exit code: 1
