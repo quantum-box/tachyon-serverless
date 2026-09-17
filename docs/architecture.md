@@ -122,6 +122,9 @@ client ─POST /v1/functions/{id}:invoke─▶ gateway
      何も書かず (stale)、結果も返さない (台帳の OutcomeUnknown{Host.LeaseExpired} が答え)。UsageEvent(host 観測)、
      provider.terminate_environment（destroy-after-invoke、冪等）。timeout/強制終了した環境は再利用しない。
      driver が panic した場合も terminate(Crashed)、Lease 解放、Attempt / 環境 Failed、EnvironmentStopped を記録する。
+     UsageEvent は計測点で usage journal に同期 append してから次へ進む。attempt の後始末の後に AttemptSettled
+     (区間・outcome・bytes)、環境の終わりに EnvironmentStopped (PLT-4642、§4「usage の計測と仮料金」)。
+     新規 invoke は受付前に journal の残量を確認し、満杯・停止なら 503 usage_journal_full で何も記録しない。
  11 client 切断は完了と見なさない。invoke タスクは spawn され、切断後も deadline まで追跡し記録する。
 ```
 
@@ -261,6 +264,18 @@ claim_ttl_seconds = 30         # publisher が落ちたとき、その行が再 
 retry_initial_ms = 500         # publish 失敗の backoff（2 倍ずつ、retry_max_ms まで）
 retry_max_ms = 30000
 sent_retention_seconds = 3600  # 送信済みの outbox 行を消すまで
+
+[usage]                        # PLT-4642。usage journal / collector / 仮料金（請求はしない）
+journal_max_events = 100000    # 未回収 event の上限（件数）。越える append は unjournaled として数える
+journal_max_bytes = 67108864   # 同（bytes）
+admission_headroom_events = 1000   # 残りがこれ以下なら新規 invoke を 503 usage_journal_full（fail closed）
+admission_headroom_bytes = 1048576
+on_journal_full = "refuse"     # refuse | accept_unmetered（dev profile だけ）
+collect_interval_ms = 1000     # collector（journal → ledger）の間隔
+collect_batch = 500
+# price_table = "config/price-table.toml"   # 省略時は組み込みの provisional-dev-2026-09-v1
+[usage.billing]
+enabled = false                # true は設定エラー（prototype では請求を無効に固定）
 
 [[identity.tokens]]
 token = "dev-token-tenant-a"
@@ -462,6 +477,32 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 | retention / GC | 台帳の `object_refs` / `object_tombstones`（migration 005）。GC は期限切れと orphan（grace を過ぎて一度も参照されていない）を、**非 terminal の invocation が参照していない場合だけ** tombstone → 削除する。tombstone 後の attach は拒否されるので、put と invocation insert の競合で消えた object を指すことはない |
 | 保存先と複製 | queue は nats-server の 1 host の local disk、object は gateway の host の `data_dir`。**複製なし、HA ではない、region 障害に耐えない**（region は置き場所の境界であって複製先ではない） |
 
+### usage の計測と仮料金（PLT-4642）
+
+決定は `docs/adr/0012-usage-ledger-and-rating.md`、API は `docs/api.md` §5.10.1。
+
+```
+driver / pool ──UsageEvent v2 (segments・outcome・resources・bytes、各量に measurement)──▶ JournalingUsageSink
+    1. usage journal に同期 append（<data_dir>/usage/journal.db、BEGIN IMMEDIATE、synchronous=FULL、hash chain）
+         上限超過 → 拒否して tenant ごとの unjournaled に数える
+    2. in-memory の view（履歴 API の UsageSummary）
+collector（gateway の loop、[usage] collect_interval_ms、shutdown 時にも 1 回）
+    cursor の後ろを batch で読む → chain を検証 → ledger に 1 トランザクション（event_id 主キー、INSERT OR IGNORE）
+    → commit の後に cursor を CAS で進め、回収済みの行を消す
+GET /v1/usage ── ledger（token の tenant だけ）──▶ rating（価格表 vN、AttemptSettled だけに価格を掛ける）
+```
+
+| 項目 | 内容 |
+|---|---|
+| 区間 | `queue_wait_ms`（受付→grant）、`vm_base_boot_ms`（create→bridge 接続。warm は resume + readiness）、`user_init_ms`（接続→Ready。warm は 0）、`handler_ms`（Invoke 送信→結果 / timeout / cancel。届かなかった attempt は 0）、`teardown_ms`（結果→terminate 完了、失敗なら unknown）、`idle_pooled_ms`。すべて host の `Instant` を ms に切り上げ |
+| measurement | `host_measured` / `provider_reported`（terminate 直前の `ExecutionProvider::environment_stats`。`scope = cgroup_v2` だけ。process provider の bridge だけの sample は `unknown`）/ `guest_reported`（`Ready.init_ms`・`Response.handler_ms`、rating は読まない）/ `unknown`（0 として扱い `unmetered` に出す） |
+| event | `AttemptSettled`（attempt ごと、課金対象、`attempt_kind = first / retry`、`outcome`）と `EnvironmentStopped`（環境ごとに 1 回、原価。dispatch 前に終わった環境にも出す）。`EnvironmentStarted` / `HandlerStarted` / `HandlerFinished` は監査用で合算しない |
+| fail closed | 残りが headroom 以下・journal が開けない / 書けないなら、新規 invoke と `min_ready` の先行起動を拒否（503 `usage_journal_full`、`reason = usage_journal_full / usage_journal_unavailable`）。受付済みの実行は止めない。`/readyz` も 503 |
+| 重複・再起動 | ledger は `event_id` で重複を捨てる。collector は ledger commit の後にだけ cursor を進めるので、crash は再配送になり二重計上にならない |
+| 時計 | 量は monotonic。wall clock は日付への振り分けと `wall_clock_skew_ms` の記録だけ。環境寿命（原価）は台帳の wall clock の差で参考値 |
+| 境界 | 利用量（`usage`）・仮料金（`provisional_charges_micros`、価格表 version 付き）・原価（`cost`）・不明（`unmetered` / `unjournaled_events`）・guest 申告を別の欄に出す。表は `function_usage_*` で、tachyon-apps の build 課金とは別 pipeline。`[usage.billing] enabled = true` は設定エラー |
+| 範囲外 | 実請求・決済、予算上限、stream（JetStream）経由の配送、regional ledger、Firecracker 実機での cgroup 値の確認 |
+
 ### 非同期 invoke と outbox（PLT-4639）
 
 決定は `docs/adr/0010-invoke-async-and-outbox.md`、API は `docs/api.md` §5.6.1。
@@ -513,6 +554,7 @@ OutboxPublisher::run_once ◀────────┘（gateway の loop、ca
 13. invoke の経路（認証・function / route / revision / policy の解決・cold start の可否）は `ConfigCache` / `InvokeGate`（`crates/application/src/control/`）だけを読み、`FunctionRepository` / `AliasRepository` / `RevisionRepository` を直接読まない。設定の有効期限切れで実行中の invocation を止めない（§4「設定配信と認可 lease」、ADR-0007）。
 14. queue の ACK を「実行した」「終わった」の根拠にしない。決定は台帳の CAS で行い、ACK はその commit の後に送る。object は必ず `ObjectScope`（tenant, region）と一緒に扱い、非 terminal の invocation が参照する object を消さない（§4「durable queue と object store」、ADR-0008）。
 15. pool の環境を終わらせる経路（sweep・drain）は admission の `Grant::try_scale_down` を通し、その後で台帳の CAS を取る。待機者・約束・cooldown・`min_ready` を見ない terminate を足さない（例外は資源不足時の `evict_idle` と shutdown の drain）。環境を起動するのは待機中の invocation か `min_ready` の先行起動（`AdmissionController::try_prestart`）だけ（§4「スケール to zero・min_ready・drain」、ADR-0009）。
+16. 実行を始める経路は `UsageMeter::admit` を通す（journal が満杯・停止なら何も記録せずに拒否）。usage の量は host の monotonic clock・gateway が数えた bytes・provider が host で読んだ値だけで作り、guest の申告は `guest_reported` に置いて rating に使わない。測れなかった量は `unknown` にして推測値を入れない。usage event は journal に同期で書いてから先へ進み、ledger は `event_id` で重複を捨てる。usage の表は `function_usage_*` で、build 課金と混ぜない（§4「usage の計測と仮料金」、ADR-0012）。
 
 ## 6. 非対象（P1）
 

@@ -92,7 +92,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/v1/invocations/{invocation_id}/logs",
             get(handlers::invocation_logs),
-        );
+        )
+        // This gateway's usage ledger (PLT-4642), tenant-scoped like
+        // invocation reads.
+        .route("/v1/usage", get(handlers::usage_report));
 
     let management = Router::new()
         .route(
@@ -338,6 +341,24 @@ pub async fn serve(
             }
         })
     };
+    // Usage collector (PLT-4642): journal → ledger, at least once, every
+    // `[usage] collect_interval_ms`. The SQLite work runs off the async
+    // workers. Holds only a weak reference.
+    let collector = {
+        let weak = Arc::downgrade(&app);
+        let every = app.config.usage.collect_interval();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(every);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                let Some(app) = weak.upgrade() else {
+                    return;
+                };
+                let _ = tokio::task::spawn_blocking(move || app.collect_usage()).await;
+            }
+        })
+    };
     let draining = app.clone();
     axum::serve(listener, service)
         .with_graceful_shutdown(async move {
@@ -363,6 +384,13 @@ pub async fn serve(
     }
     retention.abort();
     heartbeat.abort();
+    collector.abort();
+    // Everything this process metered goes to the ledger before it exits;
+    // what cannot is still in the journal for the next start.
+    match app.collect_usage() {
+        Ok(report) => tracing::info!(?report, "final usage collection"),
+        Err(e) => tracing::warn!(error = %e, "final usage collection failed; left in the journal"),
+    }
     if let Some(task) = config_refresh {
         task.abort();
     }

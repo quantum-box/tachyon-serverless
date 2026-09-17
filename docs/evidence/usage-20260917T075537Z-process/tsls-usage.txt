@@ -1,0 +1,9 @@
+PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+tenant              tn_01hzzzzzzzzzzzzzzzzzzzzzza
+range               2026-09-01T00:00:00+00:00 .. 2026-09-17T07:55:50.770174+00:00
+price table         provisional-dev-2026-09-v1 (effective 2026-09-01T00:00:00+00:00, JPY; billable: user_init_ms, handler_ms)
+collected through   2026-09-17T07:55:50.611288+00:00
+unjournaled events  0
+FUNCTION                       DAY  INVOCATIONS  ATTEMPTS  RETRIES  TIMEOUTS  HANDLER MS  BILLABLE MS  UNMETERED  CHARGE (PROVISIONAL)
+fn_01m2q5tfc8mt20qe46afg4kqn5  -    5            5         0        1         5213        6267         0          0.008616 JPY
+TOTAL                          -    5            5         0        1         5213        6267         0          0.008616 JPY

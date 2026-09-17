@@ -1983,3 +1983,130 @@ async fn metrics_scrape_reflects_a_scripted_invoke_sequence() {
     assert_eq!(cap["reuse"]["first_boots"], 7);
     assert_eq!(cap["reuse"]["boot_id_changed"], 0);
 }
+
+/// PLT-4642: `GET /v1/usage` is a provisional, tenant-scoped report that says
+/// it is not an invoice; `/readyz` shows the journal and collector; a journal
+/// that cannot be written refuses invocations with 503 `usage_journal_full`.
+#[tokio::test]
+async fn usage_report_is_provisional_tenant_scoped_and_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Arc::new(FakeExecutionProvider::new());
+    fake.set_default_script(Some(FakeGuestScript::RespondOk(
+        serde_json::json!({"ok": true}),
+    )));
+    let app = Application::bootstrap_with(
+        config(dir.path()),
+        fake.clone(),
+        BootstrapOptions {
+            persist_state: false,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let r = router(app.clone());
+    let (function_id, _) = deploy(&r, "metered").await;
+    for _ in 0..2 {
+        let out = post_json(
+            &r,
+            &format!("/v1/functions/{function_id}/invoke"),
+            TOKEN_A,
+            serde_json::json!({"hello": "usage"}),
+        )
+        .await;
+        assert_eq!(out.status, StatusCode::OK);
+    }
+    app.collect_usage().unwrap();
+
+    let report = get(&r, "/v1/usage?group_by=function", TOKEN_A).await;
+    assert_eq!(
+        report.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&report.body)
+    );
+    let j = report.json();
+    assert_eq!(j["provisional"], true);
+    assert_eq!(j["not_an_invoice"], true);
+    assert_eq!(j["billing_enabled"], false);
+    assert!(j["notice"].as_str().unwrap().contains("not an invoice"));
+    assert_eq!(j["tenant_id"], TENANT_A);
+    assert_eq!(j["totals"]["usage"]["invocations"], 2);
+    assert_eq!(j["lines"][0]["function_id"], function_id.as_str());
+    assert!(j["price_table"]["version"].as_str().is_some());
+    assert!(
+        j["totals"]["provisional_charges_micros"]["total"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+
+    // Tenant B: nothing, even when naming A's function.
+    let b = get(&r, &format!("/v1/usage?function_id={function_id}"), TOKEN_B).await;
+    assert_eq!(b.status, StatusCode::OK);
+    assert_eq!(b.json()["tenant_id"], TENANT_B);
+    assert_eq!(b.json()["totals"]["usage"]["attempts"], 0);
+    assert!(b.json()["lines"].as_array().unwrap().is_empty());
+    // The operator role reads no usage, like invocation history.
+    assert_eq!(
+        get(&r, "/v1/usage", TOKEN_A_OP).await.status,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(
+            &r,
+            req(Method::GET, "/v1/usage", None)
+                .body(Body::empty())
+                .unwrap()
+        )
+        .await
+        .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        get(&r, "/v1/usage?from=yesterday", TOKEN_A).await.status,
+        StatusCode::BAD_REQUEST
+    );
+
+    let ready = call(
+        &r,
+        req(Method::GET, "/readyz", None)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(ready.status, StatusCode::OK);
+    assert_eq!(ready.json()["usage"]["accepting"], true);
+    assert_eq!(ready.json()["usage"]["billing_enabled"], false);
+    assert!(ready.json()["usage"]["collector"]["runs"].as_u64().unwrap() >= 1);
+
+    // Fail closed.
+    app.usage_meter.journal().force_unavailable(true);
+    let refused = post_json(
+        &r,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(refused.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(refused.json()["error"]["code"], "usage_journal_full");
+    assert_eq!(
+        refused.json()["error"]["reason"],
+        "usage_journal_unavailable"
+    );
+    assert_eq!(
+        fake.created().len(),
+        2,
+        "nothing booted for the refused one"
+    );
+    let not_ready = call(
+        &r,
+        req(Method::GET, "/readyz", None)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(not_ready.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(not_ready.json()["usage"]["accepting"], false);
+    app.usage_meter.journal().force_unavailable(false);
+}

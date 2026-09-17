@@ -3957,8 +3957,8 @@ async fn the_usage_sequence_of_a_reused_environment_never_restarts() {
     let sequences: Vec<u64> = events.iter().map(|e| e.sequence).collect();
     assert_eq!(
         sequences.len(),
-        8,
-        "one boot, three handlers and one stop: {kinds:?}"
+        11,
+        "one boot, three handlers, three attempt settlements (PLT-4642) and one stop: {kinds:?}"
     );
     assert!(
         sequences.windows(2).all(|w| w[0] < w[1]),
@@ -4043,5 +4043,103 @@ async fn an_undelivered_warm_dispatch_is_classified_like_a_cold_one() {
         1,
         "the dead environment is metered once, over its whole life"
     );
+    assert_usage_event_ids_are_unique(&h);
+}
+
+/// PLT-4642: the failed warm attempt and its cold retry are two distinct
+/// `AttemptSettled` facts — `first` / `failed` with a handler that provably
+/// did not run (0 ms), then `retry` / `succeeded` — and the report counts them
+/// apart. A warm attempt reports the time it was pooled as host-measured and
+/// no initialization.
+#[tokio::test]
+async fn a_retry_is_metered_apart_from_the_first_attempt() {
+    use tachyon_serverless_domain::{AttemptKind, Measurement, UsageOutcome};
+    let fake = warm_fake();
+    let armed = Arc::new(AtomicBool::new(false));
+    let provider = Arc::new(DiesWhenArmed {
+        inner: fake.clone(),
+        armed: armed.clone(),
+        queued: Arc::new(std::sync::Mutex::new(Vec::new())),
+        created: AtomicUsize::new(0),
+    });
+    let h = harness_with(fake, provider, POOL_ON, None);
+    let (function, _) = deploy(&h, &h.a, "retry-metered").await;
+    let first = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 1})),
+    )
+    .await
+    .unwrap();
+    assert!(first.succeeded());
+    // A healthy warm reuse first: idle time and resume are host-measured.
+    let warm = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 2})),
+    )
+    .await
+    .unwrap();
+    assert!(warm.succeeded());
+    let settled = |id: &InvocationId| -> Vec<tachyon_serverless_domain::UsageEvent> {
+        h.app
+            .usage
+            .events_for_invocation(id)
+            .into_iter()
+            .filter(|e| e.event_type == UsageEventType::AttemptSettled)
+            .collect()
+    };
+    let w = settled(&warm.invocation().id);
+    assert_eq!(w.len(), 1);
+    assert_eq!(
+        w[0].segments.idle_pooled_ms.measurement,
+        Measurement::HostMeasured
+    );
+    assert_eq!(
+        w[0].segments.user_init_ms.value,
+        Some(0),
+        "nothing initialized"
+    );
+
+    armed.store(true, Ordering::SeqCst);
+    let second = invoke_pooled(
+        &h,
+        invoke_request(&h.a, &function, serde_json::json!({"n": 3})),
+    )
+    .await
+    .unwrap();
+    assert!(second.succeeded(), "{:?}", second.invocation().status);
+    let s = settled(&second.invocation().id);
+    assert_eq!(s.len(), 2, "{s:?}");
+    let (failed, retried) = if s[0].attempt_number == Some(1) {
+        (&s[0], &s[1])
+    } else {
+        (&s[1], &s[0])
+    };
+    assert_eq!(failed.attempt_kind, Some(AttemptKind::First));
+    assert_eq!(failed.outcome, Some(UsageOutcome::Failed));
+    assert_eq!(failed.segments.handler_ms.value, Some(0));
+    assert_eq!(retried.attempt_number, Some(2));
+    assert_eq!(retried.attempt_kind, Some(AttemptKind::Retry));
+    assert_eq!(retried.outcome, Some(UsageOutcome::Succeeded));
+    assert_ne!(failed.event_id, retried.event_id);
+
+    h.app.collect_usage().unwrap();
+    let now = chrono::Utc::now();
+    let report = h
+        .app
+        .usage_meter
+        .report(
+            &h.a,
+            &tachyon_serverless_application::usage::UsageQuery {
+                from: Some(now - chrono::Duration::days(1)),
+                to: Some(now + chrono::Duration::days(1)),
+                group_by: Some("none".into()),
+                function_id: None,
+            },
+        )
+        .unwrap();
+    let u = &report.totals.usage;
+    assert_eq!((u.invocations, u.attempts, u.retries), (3, 4, 1));
+    assert_eq!(u.outcomes.failed, 1);
+    assert_eq!(u.outcomes.succeeded, 3);
     assert_usage_event_ids_are_unique(&h);
 }

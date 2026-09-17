@@ -821,6 +821,9 @@ pub struct GatewayConfig {
     /// `[metrics]` (PLT-4637): `GET /metrics` for an operator credential.
     #[serde(default)]
     pub metrics: MetricsConfig,
+    /// `[usage]`: usage journal, collector and provisional rating (PLT-4642).
+    #[serde(default)]
+    pub usage: crate::usage::UsageConfig,
 }
 
 /// `[metrics]` (PLT-4637, docs/metrics.md). `GET /metrics` exposes every
@@ -1107,6 +1110,9 @@ impl GatewayConfig {
             ));
         }
         self.validate_control_plane()?;
+        self.usage
+            .validate(self.profile)
+            .map_err(ConfigError::Invalid)?;
         if self.capacity.max_concurrency == 0 {
             return Err(ConfigError::Invalid(
                 "capacity.max_concurrency must be >= 1".into(),

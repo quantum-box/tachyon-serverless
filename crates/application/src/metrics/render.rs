@@ -69,6 +69,27 @@ pub struct MetricsInput {
     pub limits: SeriesLimits,
     /// The asynchronous invoke outbox (PLT-4639), when this gateway has one.
     pub outbox: Option<OutboxMetrics>,
+    /// The usage journal, collector and ledger (PLT-4642).
+    pub usage: Option<UsageMetrics>,
+}
+
+/// Usage metering pipeline state (PLT-4642, docs/adr/0012).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageMetrics {
+    pub journal_healthy: bool,
+    /// New invocations are admitted *metered*.
+    pub journal_admitting: bool,
+    pub journal_pending_events: u64,
+    pub journal_pending_bytes: u64,
+    pub journal_max_events: u64,
+    pub journal_max_bytes: u64,
+    pub unjournaled_events: u64,
+    pub collector_runs: u64,
+    pub collector_failing: bool,
+    pub collector_last_success_at: Option<tachyon_serverless_domain::Timestamp>,
+    pub collector_delivered: u64,
+    pub ledger_events: Option<u64>,
+    pub ledger_duplicates_ignored: Option<u64>,
 }
 
 /// The transactional outbox's backlog and the queue as its publisher last saw it.
@@ -743,6 +764,69 @@ pub fn render(input: &MetricsInput) -> String {
                 &[("condition", condition)],
                 f64::from(u8::from(o.queue_condition == condition)),
             );
+        }
+    }
+
+    if let Some(u) = &input.usage {
+        let flag = |b: bool| f64::from(u8::from(b));
+        w.sample("tsls_usage_journal_healthy", &[], flag(u.journal_healthy));
+        w.sample(
+            "tsls_usage_journal_admitting",
+            &[],
+            flag(u.journal_admitting),
+        );
+        w.sample(
+            "tsls_usage_journal_pending_events",
+            &[],
+            u.journal_pending_events as f64,
+        );
+        w.sample(
+            "tsls_usage_journal_pending_bytes",
+            &[],
+            u.journal_pending_bytes as f64,
+        );
+        w.sample(
+            "tsls_usage_journal_max_events",
+            &[],
+            u.journal_max_events as f64,
+        );
+        w.sample(
+            "tsls_usage_journal_max_bytes",
+            &[],
+            u.journal_max_bytes as f64,
+        );
+        w.sample(
+            "tsls_usage_unjournaled_events_total",
+            &[],
+            u.unjournaled_events as f64,
+        );
+        w.sample(
+            "tsls_usage_collector_runs_total",
+            &[],
+            u.collector_runs as f64,
+        );
+        w.sample(
+            "tsls_usage_collector_failing",
+            &[],
+            flag(u.collector_failing),
+        );
+        if let Some(at) = u.collector_last_success_at {
+            w.sample(
+                "tsls_usage_collector_last_success_age_seconds",
+                &[],
+                ((input.now - at).num_milliseconds().max(0) as f64) / 1000.0,
+            );
+        }
+        w.sample(
+            "tsls_usage_collector_delivered_events_total",
+            &[],
+            u.collector_delivered as f64,
+        );
+        if let Some(v) = u.ledger_events {
+            w.sample("tsls_usage_ledger_events", &[], v as f64);
+        }
+        if let Some(v) = u.ledger_duplicates_ignored {
+            w.sample("tsls_usage_ledger_duplicates_ignored_total", &[], v as f64);
         }
     }
 

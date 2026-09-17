@@ -25,6 +25,7 @@
 //! POST   /v1/invocations/{invocation_id}:cancel    (also /cancel)
 //! GET    /v1/invocations/{invocation_id}/logs
 //! GET    /v1/functions/{function_id}/usage
+//! GET    /v1/usage?from&to&group_by&function_id   provisional usage report (not an invoice)
 //! GET    /openapi.json
 //! ```
 //!
@@ -92,6 +93,10 @@ pub enum ErrorCode {
     /// object store or the queue is unavailable, or asynchronous invoke is
     /// not configured (PLT-4639). `reason` says which. Nothing was recorded.
     AsyncUnavailable,
+    /// New invocations are refused because the usage journal is full or
+    /// unavailable: the gateway will not run what it cannot meter (PLT-4642).
+    /// `reason` is `usage_journal_full` or `usage_journal_unavailable`.
+    UsageJournalFull,
 }
 
 impl ErrorCode {
@@ -113,6 +118,7 @@ impl ErrorCode {
             Self::ProviderUnavailable => 503,
             Self::ConfigUnavailable | Self::ControlPlaneUnavailable => 503,
             Self::AsyncUnavailable => 503,
+            Self::UsageJournalFull => 503,
         }
     }
 }
@@ -958,6 +964,165 @@ pub struct UsageSummaryResponse {
     pub bytes_out_total: u64,
     /// Always true in the prototype: numbers are usage facts, not charges.
     pub not_billable: bool,
+}
+
+/// `GET /v1/usage` (PLT-4642): a **provisional** usage report of the caller's
+/// tenant, rated with a versioned price table. Not an invoice: nothing is
+/// charged, billing is hard-disabled in the prototype
+/// (`billing_enabled = false`, `not_an_invoice = true`).
+///
+/// Three things are kept apart: `usage` (metered quantities),
+/// `provisional_charges_micros` (usage × price table) and `cost` (what the
+/// host spent on the tenant's environments; never charged).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct UsageReportResponse {
+    /// Always true.
+    pub provisional: bool,
+    /// Always true.
+    pub not_an_invoice: bool,
+    /// Always false in the prototype.
+    pub billing_enabled: bool,
+    pub notice: String,
+    pub tenant_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_id: Option<String>,
+    /// Inclusive, by the host wall clock of each event.
+    #[schema(value_type = String, format = DateTime)]
+    pub from: Timestamp,
+    /// Exclusive.
+    #[schema(value_type = String, format = DateTime)]
+    pub to: Timestamp,
+    /// `function`, `day`, both, or empty (one line).
+    pub group_by: Vec<String>,
+    pub price_table: PriceTableInfo,
+    pub lines: Vec<UsageReportLine>,
+    /// Sum of `lines` (charges are the sum of the line charges, not re-rounded).
+    pub totals: UsageReportLine,
+    /// Events of this tenant the usage journal refused (full or unavailable).
+    /// They are not in any line: unmetered, never estimated.
+    pub unjournaled_events: u64,
+    /// Events still waiting in the journal are not in the report yet.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub collected_through: Option<Timestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PriceTableInfo {
+    pub version: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub effective_from: Timestamp,
+    pub currency: String,
+    /// Segments whose host-measured milliseconds are charged as compute.
+    pub billable_segments: Vec<String>,
+    pub unit_prices_micros: UnitPricesMicros,
+    /// The rounding rules, in the order they apply.
+    pub rounding: Vec<String>,
+}
+
+/// Unit prices in micro-units (1e-6) of `currency`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct UnitPricesMicros {
+    pub vcpu_second: u64,
+    pub gib_second: u64,
+    pub invocation: u64,
+    pub gb_transferred: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct UsageReportLine {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_id: Option<String>,
+    /// `YYYY-MM-DD` (UTC).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day: Option<String>,
+    pub usage: UsageQuantities,
+    pub unmetered: UnmeteredUsage,
+    pub cost: HostCostFacts,
+    pub provisional_charges_micros: ProvisionalCharges,
+    pub guest_reported: GuestReportedTotals,
+}
+
+/// Metered quantities (host-measured or provider-reported only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct UsageQuantities {
+    /// First attempts (one per invocation that was dispatched).
+    pub invocations: u64,
+    pub attempts: u64,
+    pub retries: u64,
+    pub outcomes: OutcomeCounts,
+    pub segments_ms: SegmentTotals,
+    /// Sum of the billable segments.
+    pub billable_ms: u64,
+    /// `billable_ms × requested cpu_millis`.
+    pub vcpu_milli_ms: u64,
+    /// `billable_ms × requested memory_mib`.
+    pub mib_ms: u64,
+    pub request_bytes: u64,
+    pub response_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct OutcomeCounts {
+    pub succeeded: u64,
+    pub failed: u64,
+    pub timeout: u64,
+    pub cancelled: u64,
+    pub outcome_unknown: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct SegmentTotals {
+    pub queue_wait_ms: u64,
+    pub vm_base_boot_ms: u64,
+    pub user_init_ms: u64,
+    pub handler_ms: u64,
+    pub teardown_ms: u64,
+    pub idle_pooled_ms: u64,
+}
+
+/// What was not measured: counted, contributes nothing to a charge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct UnmeteredUsage {
+    /// Attempts with at least one billable segment unknown or guest-reported.
+    pub attempts: u64,
+    /// Per segment: how many attempts had it unknown or guest-reported.
+    pub segments: SegmentTotals,
+    /// Attempts whose request or response bytes were not measured.
+    pub bytes: u64,
+}
+
+/// What the host spent on the tenant's environments. Never charged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct HostCostFacts {
+    pub environments_stopped: u64,
+    /// Ledger `created_at` to the end of each environment (wall clock).
+    pub environment_lifetime_ms: u64,
+    pub idle_pooled_ms: u64,
+    pub teardown_ms: u64,
+    /// Boot and initialization of environments that never served an attempt.
+    pub boot_without_attempt_ms: u64,
+    /// cgroup v2 CPU of the VMMs (provider-reported).
+    pub cgroup_cpu_usec: u64,
+    /// Stopped environments without a cgroup reading.
+    pub cgroup_cpu_unknown: u64,
+    pub cgroup_memory_peak_bytes_max: u64,
+}
+
+/// Provisional charges in micro-units of the price table's currency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct ProvisionalCharges {
+    pub vcpu: u64,
+    pub memory: u64,
+    pub invocations: u64,
+    pub transfer: u64,
+    pub total: u64,
+}
+
+/// Guest self-reports, shown for comparison only. Never rated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct GuestReportedTotals {
+    pub guest_handler_ms: u64,
+    pub guest_init_ms: u64,
 }
 
 #[cfg(test)]

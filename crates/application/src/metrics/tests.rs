@@ -265,6 +265,21 @@ fn input(s: &mut AdmissionState, limits: SeriesLimits, events: &Metrics) -> Metr
             sent_retained: 5,
             queue_condition: "full",
         }),
+        usage: Some(super::render::UsageMetrics {
+            journal_healthy: true,
+            journal_admitting: false,
+            journal_pending_events: 99_100,
+            journal_pending_bytes: 4_096,
+            journal_max_events: 100_000,
+            journal_max_bytes: 67_108_864,
+            unjournaled_events: 3,
+            collector_runs: 7,
+            collector_failing: true,
+            collector_last_success_at: Some(t(500)),
+            collector_delivered: 40,
+            ledger_events: Some(38),
+            ledger_duplicates_ignored: Some(2),
+        }),
     }
 }
 
@@ -470,6 +485,23 @@ fn the_exposition_is_well_formed_and_carries_admission_attempts_and_host_usage()
     assert_eq!(
         x.get("tsls_async_queue_condition", &[("condition", "full")]),
         Some(1.0)
+    );
+    // Usage metering (PLT-4642): journal fill, refusal and collector lag.
+    assert_eq!(x.get("tsls_usage_journal_admitting", &[]), Some(0.0));
+    assert_eq!(
+        x.get("tsls_usage_journal_pending_events", &[]),
+        Some(99_100.0)
+    );
+    assert_eq!(x.get("tsls_usage_journal_max_events", &[]), Some(100_000.0));
+    assert_eq!(x.get("tsls_usage_unjournaled_events_total", &[]), Some(3.0));
+    assert_eq!(x.get("tsls_usage_collector_failing", &[]), Some(1.0));
+    assert_eq!(
+        x.get("tsls_usage_collector_last_success_age_seconds", &[]),
+        Some(2.0)
+    );
+    assert_eq!(
+        x.get("tsls_usage_ledger_duplicates_ignored_total", &[]),
+        Some(2.0)
     );
     // Histogram buckets are cumulative and end at the count.
     let mut les: Vec<(f64, f64)> = x
