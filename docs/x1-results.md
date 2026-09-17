@@ -4,7 +4,7 @@
 
 - 対象: `examples/restore-verify`（合成データだけ）、`scripts/x1/restore-verify.sh`（KVM 計測と検査）、`scripts/x1/restore-verify-report.sh`（集計。offline で再実行可）
 - 証跡: `docs/evidence/x1-restore-verify-20260917T131439Z/`（本記録。検査 20 件 FAIL 0、exit 0）。途中で止まった 1 回目: `docs/evidence/x1-restore-verify-20260917T130328Z-aborted/`（§6）
-- host: Apple M4 上の Lima VM（vz、**nested virtualization**、aarch64、Linux 7.0.0-31、4 vCPU / 8 GiB）、Firecracker / jailer v1.17.0、guest kernel 6.1.155、jailer + cgroup `required`、gateway release build を root、profile `dev`（`[snapshots] allow_unverified` の計測 run）。commit `dd45f2e`。**値は SLA ではなく、この 1 host の参考値**。物理 host（開発用 Mac）は他の作業と共用で、1 分 load average は p50 5.0 / 最大 43.5（`physical-host-load.tsv`）。
+- host: Apple M4 上の Lima VM（vz、**nested virtualization**、aarch64、Linux 7.0.0-31、4 vCPU / 8 GiB）、Firecracker / jailer v1.17.0、guest kernel 6.1.155、jailer + cgroup `required`、gateway release build を root、profile `dev`（`[snapshots] allow_unverified` の計測 run）。commit `dd45f2e`（rebase 前。`origin/main` `093a46f` に rebase した同内容の commit は `df27e61`。rebase で入った main の変更は usage journal / ledger・SQLite queue・failpoint・`examples/idempotent-async` で、restore の経路・provider・sample には触れていない。rebase 後の再計測はしていない）。**値は SLA ではなく、この 1 host の参考値**。物理 host（開発用 Mac）は他の作業と共用で、1 分 load average は p50 5.0 / 最大 43.5（`physical-host-load.tsv`）。
 - **判定の範囲**: この sample・この host で「保存状態から正しく再開できるか」「通常起動より速いか」。一般的な任意の Rust アプリが restore-safe になるとは主張しない。
 
 ## 1. sample（`examples/restore-verify`）
