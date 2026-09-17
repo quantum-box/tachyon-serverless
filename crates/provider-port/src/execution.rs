@@ -348,4 +348,58 @@ pub trait ExecutionProvider: Send + Sync {
 
     /// Environments this provider still tracks; used for orphan reconciliation.
     async fn list_environments(&self) -> Result<Vec<EnvironmentId>, ProviderError>;
+
+    /// X1 (PLT-4653, experimental): the host facts a snapshot manifest pins
+    /// (VMM / kernel / rootfs digests, CPU and KVM identity, device model).
+    /// The default reports [`ProviderError::Unavailable`], and so does every
+    /// provider whose `snapshot_create` / `snapshot_clone` is `Unsupported`.
+    async fn restore_profile(&self) -> Result<crate::RestoreHostProfile, ProviderError> {
+        Err(ProviderError::Unavailable(format!(
+            "provider `{}` does not snapshot environments",
+            self.kind().as_str()
+        )))
+    }
+
+    /// X1: directory where the snapshot `snapshot_id`'s plaintext files are
+    /// kept on this host (for verification and clones). The directory may not
+    /// exist yet.
+    fn snapshot_dir(&self, snapshot_id: &tachyon_serverless_domain::SnapshotId) -> Option<PathBuf> {
+        let _ = snapshot_id;
+        None
+    }
+
+    /// X1: pause an environment whose guest reported `CheckpointWaiting` and
+    /// capture memory, device state, scratch drive and function drive at that
+    /// one pause point into [`Self::snapshot_dir`]. The environment stays
+    /// paused; the caller terminates it (a source is never resumed).
+    ///
+    /// **Capability rule** as for idle: `Supported` only with a measurement
+    /// under `docs/evidence/`; code without one is `Unverified`.
+    async fn snapshot_environment(
+        &self,
+        environment_id: &EnvironmentId,
+        snapshot_id: &tachyon_serverless_domain::SnapshotId,
+    ) -> Result<crate::SnapshotCapture, ProviderError> {
+        let _ = snapshot_id;
+        Err(ProviderError::Unavailable(format!(
+            "provider `{}` does not snapshot environments (environment {environment_id})",
+            self.kind().as_str()
+        )))
+    }
+
+    /// X1: create a new environment from a verified snapshot: its own jail,
+    /// cgroup, sockets and private scratch copy, the snapshot memory mapped
+    /// read-only, loaded and resumed, the doorbell rung, and the guest's
+    /// reconnection accepted. The returned stream's first frame is whatever
+    /// the guest sent: `Reconnect` for a restore, `Hello` if it booted cold.
+    async fn clone_environment(
+        &self,
+        spec: crate::CloneSpec,
+    ) -> Result<(EnvironmentHandle, crate::CloneTimings), ProviderError> {
+        Err(ProviderError::Unavailable(format!(
+            "provider `{}` does not clone environments (environment {})",
+            self.kind().as_str(),
+            spec.spec.environment_id
+        )))
+    }
 }

@@ -335,6 +335,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/functions/{function_id}/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_snapshots"];
+        put?: never;
+        post: operations["create_snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/functions/{function_id}/snapshots/{snapshot_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["revoke_snapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/functions/{function_id}/triggers": {
         parameters: {
             query?: never;
@@ -765,7 +797,13 @@ export interface components {
              *     invocation on a node with another or no region label (PLT-4634). */
             required_region?: string | null;
             resources?: components["schemas"]["ResourcesRequest"];
+            restore?: null | components["schemas"]["RestoreRequest"];
             secrets?: components["schemas"]["SecretBindingRequest"][];
+        };
+        /** @description `POST /v1/functions/{function_id}/snapshots` (X1, experimental). */
+        CreateSnapshotRequest: {
+            /** @description Revision to snapshot. Defaults to the revision alias `prod` points at. */
+            revision_id?: string | null;
         };
         /** @description `POST /v1/functions/{function_id}/triggers`. Exactly one of `cron` /
          *     `webhook`, matching `kind`. */
@@ -1214,6 +1252,39 @@ export interface components {
             }[];
             next_cursor?: string | null;
         };
+        ListResponse_SnapshotResponse: {
+            items: {
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                expires_at: string;
+                function_id: string;
+                id: string;
+                /** @description `sha256:<hex>` of the canonical manifest. */
+                manifest_digest: string;
+                /** Format: int32 */
+                manifest_version: number;
+                /** Format: int32 */
+                memory_mib: number;
+                provider: string;
+                /**
+                 * Format: int64
+                 * @description How many clones were created from it.
+                 */
+                restores: number;
+                revision_id: string;
+                source_environment_id: string;
+                /** @description `active` | `revoked` | `quarantined` | `expired` */
+                state: string;
+                state_reason?: string | null;
+                /** @description Snapshot timings of the source, milliseconds: `pause_ms`,
+                 *     `create_ms`, `copy_ms`, `seal_ms`. */
+                timings: Record<string, never>;
+                /** Format: int32 */
+                vcpus: number;
+            }[];
+            next_cursor?: string | null;
+        };
         ListResponse_TriggerFireResponse: {
             items: {
                 /** Format: date-time */
@@ -1425,6 +1496,19 @@ export interface components {
             /** Format: int32 */
             memory_mib?: number;
         };
+        /** @description Experimental restore settings of a revision (X1, PLT-4653;
+         *     docs/adr/0017-snapshot-manifest-and-clone.md). */
+        RestoreRequest: {
+            /** @description `disabled` (default) | `prefer` (restore when a compatible, verified
+             *     snapshot exists, otherwise start cold and record why) | `require`
+             *     (restore or fail with `Host.RestoreRequiredUnavailable`). */
+            policy?: string;
+            /** @description The operator states that initialization builds only synthetic sample
+             *     data. Required for `prefer` / `require` and for creating a snapshot;
+             *     such a revision may not have secret bindings and must use egress
+             *     `none`. */
+            synthetic_init_sample?: boolean;
+        };
         /** @description Whether this gateway reuses (warms) execution environments, and why.
          *
          *     The two flags answer two different questions and neither implies the other
@@ -1509,6 +1593,10 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description `POST /v1/functions/{function_id}/snapshots/{snapshot_id}/revoke`. */
+        RevokeSnapshotRequest: {
+            reason: string;
+        };
         /** @description One scale decision (PLT-4635). */
         ScaleEventInfo: {
             /** Format: date-time */
@@ -1569,6 +1657,38 @@ export interface components {
             user_init_ms: number;
             /** Format: int64 */
             vm_base_boot_ms: number;
+        };
+        /** @description A snapshot as the API shows it: identity, state and the manifest digest.
+         *     The manifest's host facts are summarized, never the artifact bytes. */
+        SnapshotResponse: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            function_id: string;
+            id: string;
+            /** @description `sha256:<hex>` of the canonical manifest. */
+            manifest_digest: string;
+            /** Format: int32 */
+            manifest_version: number;
+            /** Format: int32 */
+            memory_mib: number;
+            provider: string;
+            /**
+             * Format: int64
+             * @description How many clones were created from it.
+             */
+            restores: number;
+            revision_id: string;
+            source_environment_id: string;
+            /** @description `active` | `revoked` | `quarantined` | `expired` */
+            state: string;
+            state_reason?: string | null;
+            /** @description Snapshot timings of the source, milliseconds: `pause_ms`,
+             *     `create_ms`, `copy_ms`, `seal_ms`. */
+            timings: Record<string, never>;
+            /** Format: int32 */
+            vcpus: number;
         };
         StartRateInfo: {
             /** Format: int32 */
@@ -2870,6 +2990,138 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    list_snapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description function id */
+                function_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListResponse_SnapshotResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    create_snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description function id */
+                function_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSnapshotRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    revoke_snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description function id */
+                function_id: string;
+                /** @description snapshot id */
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeSnapshotRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

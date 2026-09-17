@@ -210,6 +210,7 @@ impl H {
             description: String::new(),
             publish_to_prod: true,
             required_region: None,
+            restore: None,
         };
         customize(&mut req);
         let rev = self
@@ -932,6 +933,7 @@ async fn an_outage_holds_routes_and_a_reconnect_storm_does_not_flap() {
         description: String::new(),
         publish_to_prod: true,
         required_region: None,
+        restore: None,
     };
     let rev = mgmt.revisions.create(&a, &function.id, &req).await.unwrap();
     mgmt.revisions

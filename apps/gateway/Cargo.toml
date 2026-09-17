@@ -25,6 +25,9 @@ providers = [
 # Test-only failpoints (TSLS_FAILPOINTS) for scripts/queue/async-e2e.sh. Never
 # in a production build.
 failpoints = ["tachyon-serverless-application/failpoints"]
+# PLT-4653 (X1, experimental): the Firecracker provider's snapshot / clone path. Off by
+# default; snapshots also need `[snapshots] enabled` at run time.
+experimental-restore = ["providers", "tachyon-serverless-provider-firecracker/experimental-restore"]
 
 [dependencies]
 tachyon-serverless-domain = { workspace = true }

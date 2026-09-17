@@ -7,6 +7,13 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Guest-side runtime bridge: connects to the host over vsock or a unix socket, serves the Runtime API to the user process and supervises it."
 
+[features]
+default = []
+# PLT-4653 (X1, experimental): announce protocol version 3 and run the session behind the
+# restore link (snapshot hold, doorbell, reconnect, restore frame, clock sync). Off by default:
+# a bridge built without it announces version 2 and behaves exactly as before.
+experimental-restore = []
+
 [dependencies]
 tachyon-serverless-protocol = { workspace = true }
 tachyon-serverless-sdk = { workspace = true }

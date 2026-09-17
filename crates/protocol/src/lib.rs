@@ -30,7 +30,42 @@ pub const PROTOCOL_NAME: &str = tachyon_serverless_domain::RUNTIME_PROTOCOL_V1;
 ///   error, so a version-1 bridge must never be sent a `Ping`; and a
 ///   version-1 bridge would compute the user process's deadline from an
 ///   absolute host timestamp, which is wrong for a guest that was paused.
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// - **3** (PLT-4653, X1 experimental): the restore frames
+///   [`GuestMessage::CheckpointWaiting`], [`GuestMessage::Reconnect`],
+///   [`HostMessage::Restore`] and `HelloAck.snapshot_hold`. Nothing else
+///   changed, so the host still accepts a version-2 guest
+///   ([`MIN_PROTOCOL_VERSION`]) and never sends it a restore frame or a
+///   snapshot hold. A bridge built without its `experimental-restore` feature
+///   keeps saying 2 (docs/protocol.md §A「version の交渉」).
+pub const PROTOCOL_VERSION: u32 = 3;
+
+/// Oldest guest protocol version the host still accepts. The session speaks
+/// the guest's version: frames introduced later are never sent to it.
+pub const MIN_PROTOCOL_VERSION: u32 = 2;
+
+/// First version that understands the experimental restore frames.
+pub const RESTORE_PROTOCOL_VERSION: u32 = 3;
+
+/// Whether a guest that said `version` in `Hello` is accepted by this host.
+pub fn host_accepts(version: u32) -> bool {
+    (MIN_PROTOCOL_VERSION..=PROTOCOL_VERSION).contains(&version)
+}
+
+/// Whether restore frames may be exchanged with a guest of `version`.
+pub fn supports_restore(version: u32) -> bool {
+    version >= RESTORE_PROTOCOL_VERSION
+}
+
+/// Guest vsock port of the restore doorbell (X1, PLT-4653): a guest held for
+/// a snapshot listens here, and the host of a restored copy connects to it
+/// right after the load so the guest drops its dead connection at once
+/// (docs/adr/0015 §「Firecracker で分かったこと」1).
+pub const DOORBELL_VSOCK_PORT: u32 = 5001;
+
+/// Lifecycle phase a guest must report in [`GuestMessage::CheckpointWaiting`]
+/// before the host may snapshot it.
+pub const CHECKPOINT_PHASE: &str = "checkpoint";
 
 /// Default vsock port the guest bridge connects to on the host (CID 2).
 pub const DEFAULT_VSOCK_PORT: u32 = 5000;

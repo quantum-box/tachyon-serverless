@@ -253,14 +253,13 @@ async fn drive(
     if let Some(ev) = summary.evidence.as_mut() {
         ev.guest_boot_id = guest_boot_id.clone();
     }
-    if *protocol_version != tachyon_serverless_protocol::PROTOCOL_VERSION
-        || environment_id != &env_id
-    {
+    if !tachyon_serverless_protocol::host_accepts(*protocol_version) || environment_id != &env_id {
         send(
             bridge,
             &HostMessage::HelloReject {
                 reason: format!(
-                    "expected protocol {} env {env_id}, got {protocol_version} {environment_id}",
+                    "expected protocol {}..={} env {env_id}, got {protocol_version} {environment_id}",
+                    tachyon_serverless_protocol::MIN_PROTOCOL_VERSION,
                     tachyon_serverless_protocol::PROTOCOL_VERSION
                 ),
             },
@@ -280,6 +279,7 @@ async fn drive(
             init_timeout_ms: args.timeout_seconds * 1000,
             max_response_bytes: 6 * 1024 * 1024,
             max_log_line_bytes: 16 * 1024,
+            snapshot_hold: false,
         },
     )
     .await?;

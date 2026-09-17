@@ -1,5 +1,7 @@
 {
+  "checkpoint_phase": "checkpoint",
   "default_vsock_port": 5000,
+  "doorbell_vsock_port": 5001,
   "env": {
     "environment_id": "TACHYON_ENVIRONMENT_ID",
     "runtime_api": "TACHYON_RUNTIME_API",
@@ -39,6 +41,7 @@
   "max_error_report_bytes": 1048576,
   "max_frame_bytes": 8388608,
   "max_response_payload_bytes": 8323072,
+  "min_protocol_version": 2,
   "paths": {
     "error": "/runtime/v1/invocations/{attempt_id}/error",
     "init_error": "/runtime/v1/init/error",
@@ -47,5 +50,6 @@
     "response": "/runtime/v1/invocations/{attempt_id}/response"
   },
   "protocol_name": "tachyon-invoke-v1",
-  "protocol_version": 2
+  "protocol_version": 3,
+  "restore_protocol_version": 3
 }

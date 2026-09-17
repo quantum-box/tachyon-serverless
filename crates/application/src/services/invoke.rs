@@ -20,6 +20,10 @@
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
+
+/// Restore instead of a cold boot (X1, PLT-4653). Used only for revisions
+/// whose restore policy is not `disabled`.
+mod restore;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -288,6 +292,10 @@ pub struct InvokeService {
     budget: Arc<BudgetService>,
     in_flight: Mutex<HashMap<InvocationId, InFlight>>,
     draining: AtomicBool,
+    /// Experimental snapshot service (X1, PLT-4653). Set only with
+    /// `[snapshots] enabled`; read only for revisions whose restore policy is
+    /// not `disabled`.
+    snapshots: std::sync::OnceLock<Arc<crate::snapshot::SnapshotService>>,
 }
 
 pub struct InvokeServiceDeps {
@@ -334,7 +342,14 @@ impl InvokeService {
             budget: deps.budget,
             in_flight: Mutex::new(HashMap::new()),
             draining: AtomicBool::new(false),
+            snapshots: std::sync::OnceLock::new(),
         })
+    }
+
+    /// Attach the experimental snapshot service (X1, PLT-4653). Only the
+    /// first call has an effect.
+    pub fn set_snapshots(&self, snapshots: Arc<crate::snapshot::SnapshotService>) {
+        let _ = self.snapshots.set(snapshots);
     }
 
     /// Invocations this process is driving (pre-starts are not counted).
@@ -3198,6 +3213,19 @@ impl Driver {
         secret_env: Vec<(String, String)>,
         init_timeout: Duration,
     ) -> Option<Prepared> {
+        // X1 (PLT-4653): a revision with a restore policy tries a verified
+        // snapshot first. `disabled` (the default) never gets here.
+        let mut restore_note = None;
+        if !self.revision.spec.restore.policy.is_disabled() {
+            match self
+                .try_restore(&reuse_key, secret_env.is_empty(), init_timeout)
+                .await
+            {
+                restore::RestoreAttempt::Restored(prepared) => return Some(*prepared),
+                restore::RestoreAttempt::Done => return None,
+                restore::RestoreAttempt::Cold(note) => restore_note = Some(note),
+            }
+        }
         let svc = self.svc.clone();
         let tenant = self.function.tenant_id.clone();
         let mut env = ExecutionEnvironment::request(
@@ -3346,6 +3374,9 @@ impl Driver {
                 .saturating_duration_since(handle.created_at),
         );
         let _ = env.mark_initializing(handle.evidence.clone(), self.now());
+        if let Some(note) = restore_note {
+            env.evidence.details.extend(note);
+        }
         self.save_env(&env);
         self.seq += 1;
         self.emit_usage(

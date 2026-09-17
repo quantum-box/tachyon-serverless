@@ -171,6 +171,7 @@ async fn deploy(
         description: "budget test".into(),
         publish_to_prod: true,
         required_region: None,
+        restore: None,
     };
     let rev = h.app.revisions.create(p, &function.id, &req).await.unwrap();
     let rev = h

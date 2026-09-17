@@ -22,6 +22,7 @@ pub mod handlers;
 pub mod middleware;
 pub mod openapi;
 pub mod providers;
+pub mod snapshot_handlers;
 pub mod trigger_handlers;
 
 use std::future::Future;
@@ -167,6 +168,15 @@ pub fn router_with_console(state: AppState, console_config: &console::ConsoleCon
         .route(
             "/v1/functions/{function_id}/triggers/{trigger_id}/fires",
             get(trigger_handlers::list_trigger_fires),
+        )
+        // Experimental snapshots (X1, PLT-4653); 503 unless enabled.
+        .route(
+            "/v1/functions/{function_id}/snapshots",
+            post(snapshot_handlers::create_snapshot).get(snapshot_handlers::list_snapshots),
+        )
+        .route(
+            "/v1/functions/{function_id}/snapshots/{snapshot_id}/revoke",
+            post(snapshot_handlers::revoke_snapshot),
         );
 
     // Layers run outermost-last: the management gate answers a data plane's

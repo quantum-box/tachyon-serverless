@@ -1,0 +1,8 @@
+{
+  "environment_id": "env_01j0000000000000000000000b",
+  "epoch": 1,
+  "generation": 1,
+  "host_now_ms": 1700000000000,
+  "instance_id": "rst_01j0000000000000000000000c",
+  "type": "restore"
+}

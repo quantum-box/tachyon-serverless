@@ -251,6 +251,7 @@ fn revision_request(digest: &str, publish: bool) -> CreateRevisionRequest {
         description: String::new(),
         publish_to_prod: publish,
         required_region: None,
+        restore: None,
     }
 }
 

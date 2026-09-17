@@ -153,10 +153,8 @@ async fn create_invoke_terminate_roundtrip() {
             ..
         }) => {
             assert_eq!(environment_id, id.as_str());
-            assert_eq!(
-                protocol_version,
-                tachyon_serverless_protocol::PROTOCOL_VERSION
-            );
+            // 2 without the bridge's experimental-restore feature, 3 with it.
+            assert!(tachyon_serverless_protocol::host_accepts(protocol_version));
         }
         other => panic!("expected hello, got {other:?}"),
     }
@@ -172,6 +170,7 @@ async fn create_invoke_terminate_roundtrip() {
             init_timeout_ms: 15_000,
             max_response_bytes: 1 << 20,
             max_log_line_bytes: 4096,
+            snapshot_hold: false,
         },
     )
     .await;

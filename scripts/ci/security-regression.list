@@ -262,3 +262,30 @@ resource_limits tachyon-serverless-application lib budget::tests::concurrent_res
 resource_limits tachyon-serverless-application lib budget::tests::property_duplicate_and_interleaved_transitions_never_break_the_balance
 resource_limits tachyon-serverless-application lib budget::tests::property_the_reservation_covers_every_rating_within_the_bounds
 resource_limits tachyon-serverless-application lib services::invoke_async::dispatch_tests::asynchronous_runs_reserve_budget_and_a_refused_run_is_deferred
+
+# --- PLT-4653 (X1, experimental): snapshot manifest, compatibility and clone refusals ----------
+# another tenant's snapshot is refused alone, even validly signed; sealed artifacts are tenant-bound
+tenant_authz tachyon-serverless-domain lib snapshot::tests::property_another_tenant_is_always_refused_alone
+tenant_authz tachyon-serverless-application test:restore another_tenants_snapshot_is_refused
+tenant_authz tachyon-serverless-application lib snapshot::store::tests::corrupted_or_foreign_artifacts_are_refused
+# a snapshot is only loaded into an exactly matching profile / revision / key / secret generation,
+# never when corrupted, tampered, revoked, expired, or taken of a non-synthetic / secret-bearing revision
+reuse_key tachyon-serverless-domain lib snapshot::tests::property_any_single_field_change_is_incompatible_with_its_reason
+reuse_key tachyon-serverless-domain lib snapshot::tests::property_expired_revoked_and_quarantined_are_refused
+reuse_key tachyon-serverless-domain lib snapshot::tests::a_tampered_or_foreign_manifest_does_not_verify
+reuse_key tachyon-serverless-domain lib snapshot::tests::a_restore_policy_needs_a_synthetic_sample_without_secrets_and_egress
+reuse_key tachyon-serverless-application test:restore a_profile_mismatch_is_refused
+reuse_key tachyon-serverless-application test:restore a_corrupted_artifact_is_refused_and_quarantined
+reuse_key tachyon-serverless-application test:restore a_corrupted_sealed_artifact_is_refused
+reuse_key tachyon-serverless-application test:restore a_new_revision_does_not_use_the_previous_revisions_snapshot
+reuse_key tachyon-serverless-application test:restore a_rotated_key_makes_the_snapshot_stale
+reuse_key tachyon-serverless-application test:restore revoked_and_expired_snapshots_are_refused
+reuse_key tachyon-serverless-application test:restore snapshots_are_refused_for_secrets_and_non_synthetic_revisions
+reuse_key tachyon-serverless-application test:restore an_unverified_capability_is_refused_without_allow_unverified
+# a cold boot is never counted as restored; only the source's reconnect gets an identity; clones never share one
+lease_epoch tachyon-serverless-application test:restore a_cold_boot_on_a_clone_is_never_counted_as_restored
+lease_epoch tachyon-serverless-application test:restore require_without_a_snapshot_fails_explicitly_and_boots_nothing
+lease_epoch tachyon-serverless-application test:restore two_clones_are_restored_with_separate_identities
+lease_epoch tachyon-serverless-application lib bridge_session::restore::tests::a_cold_boot_on_a_restore_is_refused
+lease_epoch tachyon-serverless-application lib bridge_session::restore::tests::a_reconnect_from_another_boot_is_not_the_source
+lease_epoch tachyon-serverless-application lib bridge_session::restore::tests::only_protocol_versions_2_and_3_are_accepted

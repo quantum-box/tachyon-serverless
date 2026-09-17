@@ -74,6 +74,9 @@ impl utoipa::Modify for SecurityAddon {
         crate::dead_letters::list_dead_letters,
         crate::dead_letters::get_dead_letter,
         crate::dead_letters::redrive,
+        crate::snapshot_handlers::create_snapshot,
+        crate::snapshot_handlers::list_snapshots,
+        crate::snapshot_handlers::revoke_snapshot,
     ),
     components(schemas(
         api::ErrorCode,
@@ -144,10 +147,14 @@ impl utoipa::Modify for SecurityAddon {
         api::BudgetReportResponse,
         api::BudgetScopeReport,
         api::BudgetAlert,
+        api::RestoreRequest,
+        api::CreateSnapshotRequest,
+        api::RevokeSnapshotRequest,
+        api::SnapshotResponse,
     )),
     tags(
         (name = "meta"), (name = "provider"), (name = "artifacts"), (name = "functions"),
-        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "triggers"), (name = "dead-letters"), (name = "budget"), (name = "internal")
+        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "triggers"), (name = "snapshots"), (name = "dead-letters"), (name = "budget"), (name = "internal")
     ),
     modifiers(&SecurityAddon)
 )]

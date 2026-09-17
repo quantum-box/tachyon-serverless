@@ -1,0 +1,94 @@
+# plaintext snapshot files on the host (root-only directory; memory/vmstate 0640 root:<jail gid>)
+total 268060
+drwx------ 2 root root       4096 Sep 17 20:44 .
+drwx------ 3 root root       4096 Sep 17 20:44 ..
+-rw-r--r-- 1 root root   10485760 Sep 17 20:44 function.ext4
+-rw-r----- 1 root 64000 268435456 Sep 17 20:44 memory
+-rw------- 1 root root   67108864 Sep 17 20:44 scratch.ext4
+-rw-r----- 1 root 64000      6585 Sep 17 20:44 vmstate
+b548e167c8bec9841b766349ab8dfe3a97180e8df7cee4703f7b1aec3378a808  /home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qjwjbcn0x0bxxdfrfph3tj/function.ext4
+09aa0de7b919979df49f5caca550028c2141270951b8db89f199d18bcfceebfa  /home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qjwjbcn0x0bxxdfrfph3tj/memory
+f190a7345fd724d09a16161b22d8b2726044ee0e5f1525a4ec22224edeba0425  /home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qjwjbcn0x0bxxdfrfph3tj/scratch.ext4
+4431f15014cee2f0c1a7b948da8f99ae4bae8157608c16810ca38a9eb6cb11ed  /home/takanorifukuyama.guest/tsls/.kvm/run/_snapshots/snap_01m2qjwjbcn0x0bxxdfrfph3tj/vmstate
+# sealed store (AES-256-GCM chunks) and signed manifest
+total 337956
+drwxr-xr-x 2 root root      4096 Sep 17 20:44 .
+drwx------ 3 root root      4096 Sep 17 20:44 ..
+-rw------- 1 root root  10485883 Sep 17 20:44 function.ext4.sealed
+-rw------- 1 root root      2713 Sep 17 20:44 manifest.json
+-rw------- 1 root root 268437836 Sep 17 20:44 memory.sealed
+-rw------- 1 root root       410 Sep 17 20:44 record.json
+-rw------- 1 root root  67109468 Sep 17 20:44 scratch.ext4.sealed
+-rw------- 1 root root      6634 Sep 17 20:44 vmstate.sealed
+{
+  "digest": "sha256:95da94e430445f05d13f82c6e1a77422271a141ad35ad9c1c9c3406f9d533d4e",
+  "key_id": "s1-37e1755ac7e2c8f8",
+  "manifest": {
+    "manifest_version": 1,
+    "snapshot_id": "snap_01m2qjwjbcn0x0bxxdfrfph3tj",
+    "tenant_id": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+    "function_id": "fn_01m2qjwj0ny66v9j535gw3edj4",
+    "revision_id": "rev_01m2qjwj157eg10nvqdvarwysa",
+    "revision_spec_digest": "sha256:13a268295b68854b5d92597031e94c9dcdc01cb8044405659be2d3f122c51d75",
+    "runtime": {
+      "provider_kind": "firecracker",
+      "provider_version": "v1.17.0",
+      "vmm_sha256": "sha256:fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c",
+      "kernel_sha256": "sha256:e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+      "rootfs_sha256": "sha256:507f1a0fedd3dcdcfc56bd4d2655dd0314ca1c8824eb1f8f6e0be0bf546cefb2",
+      "bridge_protocol_version": 3,
+      "jailer_mode": "jailer uid=64000 gid=64000 new_pid_ns=true",
+      "cgroup_mode": "required",
+      "host_kernel": "7.0.0-31-generic"
+    },
+    "host_cpu": {
+      "arch": "aarch64",
+      "cpu_model_hash": "sha256:ed81b07c9946d03410c312bf5619153aba1572709558c6888b64a6e493e1bf9f",
+      "kvm_capabilities_hash": "sha256:dc5ded8a9f2df29d658fa412db70a2f2526c380f12fcd989b526a144251ef7fe"
+    },
+    "devices": {
+      "drives": [
+        {
+          "drive_id": "rootfs",
+          "path_in_vmm": "/rootfs.ext4",
+          "read_only": true,
+          "root_device": true
+        },
+        {
+          "drive_id": "function",
+          "path_in_vmm": "/function.ext4",
+          "read_only": true,
+          "root_device": false
+        },
+        {
+          "drive_id": "scratch",
+          "path_in_vmm": "/scratch.ext4",
+          "read_only": false,
+          "root_device": false
+        }
+      ],
+      "vsock_guest_cid": 3,
+      "vsock_port": 5000,
+      "doorbell_port": 5001,
+      "network_interfaces": 0
+    },
+    "memory_mib": 256,
+    "vcpus": 1,
+    "storage": {
+      "scratch_mib": 64
+    },
+    "network": {
+      "egress": "none"
+    },
+    "encryption_key_generation": "k1-9d4393696d197626",
+    "secret_generation": "none",
+    "created_at": "2026-09-17T11:44:07.959824774Z",
+    "expires_at": "2026-09-17T12:44:07.959824774Z",
+    "source_environment_id": "env_01m2qjwjbgh73my6s27n998a8j",
+    "source_boot_id": "7f01e8d3-17f1-4ae3-a75c-8fc3c6cdf583",
+    "sdk_lifecycle_version": 1,
+    "checkpoint_phase": "checkpoint"
+  }
+}
+# firecracker processes after the snapshot (the source must be gone)
+none
