@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4646、PLT-4647、PLT-4651 X1、PLT-4652 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4646、PLT-4647、PLT-4648、PLT-4651 X1、PLT-4652 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -848,6 +848,42 @@ CLI 以外から状態と失敗原因を確認する最小画面を `apps/consol
 | Firecracker での同じマトリクス | 未検証 | KVM 検証 VM が別の検証（PLT-4653）で使用中。違いは `docs/failure-matrix.md` §8 |
 | 複数 host の HA、電源断、disk 破損、host 間 partition | 未着手（対象外） | `docs/failure-matrix.md` §9 |
 
+## PLT-4648 fresh 環境からの配備・デモ・rollback・削除 runbook
+
+入口 `scripts/lab/lab.sh`（`preflight` / `bootstrap` / `up` / `demo p1|p2|p3|all` / `status` / `logs` / `down` / `teardown`、helper `scripts/lab/lib.sh`・`scripts/lab/demo.sh`）、pin の一覧 `deploy/lab/versions.lock`、手順書 `docs/runbook.md`。記録日 2026-09-17、branch `docs/plt-4648-runbook`。
+
+**追試について: 下の「clean clone からの追試」は、実装した自動化 agent 自身が、作業ツリーではなく GitHub から新しく clone した別 directory で `docs/runbook.md` §4.1 のコマンドを文書どおりに順に実行したもの。別の人間による追試ではない。** Linear の検証条件「実装者以外による追試」はまだ満たしていない。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1a | 事前条件と必要権限が明記されている | 実装済み | `docs/runbook.md` §2（host、tool と版、権限の明示リスト、network egress の宛先、disk / memory）。`lab.sh preflight` が同じ項目を検査し FAIL で exit 1（OS / arch、`/dev/kvm`、nested virt、kernel、cgroup v2、disk、memory、tool と最低版、`rust-toolchain.toml` と versions.lock・`deploy/nats/versions.env` と versions.lock の一致、root / `sudo -n`、port、GitHub / S3 への到達、socket path 長） |
+| 1b | IaC と image digest を固定した bootstrap / deploy | 実装済み（process） / 未検証（firecracker） | `deploy/lab/versions.lock`: Rust 1.95.0、nats-server v2.14.7（4 platform の sha256）、Firecracker v1.17.0 tarball（aarch64 / x86_64 の sha256）、guest kernel `firecracker-ci/v1.15/<arch>/vmlinux-6.1.155`（sha256）、console の node / pnpm。取得物は pin と照合し、不一致なら削除して止まる（同じ配布元の checksum ファイルは使わない）。rootfs は checkout の bridge から build するので pin ではなく manifest に sha256 を記録。Docker・cloud IaC は使わない（local だけ） |
+| 1c | 手作業の未記載設定なしに P1 / P2 / P3 デモを再現できる | 実装済み・clean clone で追試（process、自動化 agent） / 未検証（firecracker、別の人間） | 設定・token・secret・鍵・budget file は `up` が生成（`docs/runbook.md` §3、§8）。migration は gateway 起動時に適用し、`state.db` の schema version と migration ファイル数の一致を health 表で確認。demo の check 一覧と期待出力は §4.3。追試の結果は下表 |
+| 2a | 初期化 / 配備失敗時の復旧手順 | 実装済み（一部は実際に起こして確認） | `docs/runbook.md` §6.1〜§6.9。実際に起こして lab.sh の出力と文書の記述を照合したもの: 新しい schema の拒否（§6.4）、gateway port 使用中（§6.5、preflight の FAIL と up の停止）、nats port 使用中（§6.6）、budget file の構文エラー（§6.7、直前の設定で受付継続・`file_error` 表示・修正で回復）、gateway の SIGKILL → `status` の FAIL → `up` で回復。取得失敗・checksum 不一致・KVM 権限・jailer / cgroup・disk 満杯は手順だけ（未再現） |
+| 2b | 各 component の health 確認 | 実装済み（process で確認） | `lab.sh status` / `up` の表（`docs/runbook.md` §5）: nats-server（process、`/healthz?js-enabled-only=true`）、gateway（process、`/healthz`、`/readyz`）、provider preflight、dispatcher fencing、設定 cache、usage journal、budget、台帳の migration、queue、trigger scheduler、async dispatcher、metrics（operator 200 / tenant 401）、object store、console。`demo` は表が全部 ok でなければ始めない |
+| 3a | teardown が自プロジェクトの環境 / queue / object だけを対象にする | 実装済み（process で確認） / 未検証（firecracker の jail・cgroup・tap・nft の削除） | `lab.sh teardown`: lab id の marker が無い directory は扱わない、消す path は symlink を解決して lab directory の内側か確認、process は lab directory の path を command line に含むものだけ、cgroup は `tsls-<lab id>`、tap / nft chain は台帳の環境 id から計算。`--dry-run` は何も変えずに対象を列挙。nats の stream data（`nats/`）・object root（`data/objects`）・data_dir を削除。別の agent の nats-server・gateway が同じ host で動いている中で実行し、それらに触れなかった |
+| 3b | 孤児検査 | 実装済み（process で確認） | teardown の最後に process・pid file・orphan-check（この checkout の bridge と lab の artifact から起動した process）・cgroup・tap・nft・loop device・lab directory の残り file を検査し、`orphan check: clean (lab <id>)` か `LEFTOVER ...` の一覧（exit 1）。自分の awk が自分を検出する誤検出を開発中に見つけて修正した |
+| 4 | 本番 / 顧客データを使わず、region・秘密情報・費用上限の注意点が分かる | 実装済み | `docs/runbook.md` §3。demo は合成 payload だけ。`region = "jp"` は scheduling label で data residency の証明ではない（P2 が NOTE を出す）。token・secret・鍵は `up` が生成する使い捨て値（0600、`secrets/` 0700）で、`demo` の最後に `logs/`・`demo/`・`state.db`（WAL 含む）を grep して 0 件を確認。cloud のリソースは作らず、usage / budget は仮価格表で `billing_enabled=false`、請求なし |
+| 5 | 検証: 実装者以外による追試とコマンドログ | 一部（自動化 agent による clean clone 追試とコマンドログ） / 未着手（別の人間） | 下表。コマンドログは `<lab>/logs/commands/*.log`（各行 UTC 時刻、git commit、exit code） |
+
+clean clone からの追試（macOS arm64、process provider、**自動化 agent が実行**）:
+
+| 手順 | 結果 | 備考 |
+|---|---|---|
+| clone | PENDING | |
+
+追試で見つかった文書・script の不足と修正:
+
+| 見つかったこと | 修正 |
+|---|---|
+| preflight が host の C toolchain（`cc`）を firecracker のときだけ検査していた。process でも cargo build は `cc`（ring、libsqlite3-sys）を使う | 常に必須に変更（`lab.sh`、`docs/runbook.md` §2.2） |
+
+開発中に見つけて直したもの（追試の前）: `cd && cmd &` で起動した gateway の pid が subshell のもので transcript の pipe を開いたままにし `up` が終わらない、teardown の process 検索が自分の awk を孤児として検出する、command log の file 名が同じ秒の実行で衝突する。
+
+gate: `shellcheck 0.10.0 -x -P scripts/e2e`（全 tracked `.sh`）、`scripts/ci/selftest.sh`（`scripts/lab/**`・`deploy/lab/**` は KVM 必要にしないことを固定。理由は `docs/ci.md` §3）、`cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets -- -D warnings`。Rust の変更は無いので `cargo test --workspace` は対象外。
+
+未検証・未着手: lab.sh の firecracker 経路（KVM host で通していない。Lima VM は別の計測に使われているため実行しなかった）、x86_64、bare metal、KVM CI runner（未登録）、既存 Tachyon Console への統合（未着手）、別の人間による追試。
+
 ## ADR-0001 残る測定の状況
 
 測定の定義は `docs/adr/0001-execution-provider-firecracker-first.md` §「残る測定」。値はすべて aarch64 の nested virtualization 上の参考値（§「証跡」の制約を参照）。
@@ -875,7 +911,7 @@ CLI 以外から状態と失敗原因を確認する最小画面を `apps/consol
 | x86_64 KVM host での実行（`docs/inventory-tachyon-apps.md` §6 の第一 profile） | 未検証 | 実測は Apple M4 上の aarch64 nested virtualization だけ。CI は x86_64 musl の build だけで起動しない |
 | bare metal（nested virtualization なし）での測定 | 未検証 | 同上 |
 | baseline profile どおりの測定（N ≥ 20、中央値・p95、hello / http-axum / cpu-burn） | 一部 KVM実測あり / 未検証（x86_64、bare metal） | PLT-4647 で 3 sample・N = 20・p50 / p95 / p99 を aarch64 nested で記録（`docs/evidence/bench-20260917T055450Z/`）。baseline の第一 profile（x86_64）ではない |
-| 別開発者・別 host による追試 | 未着手 | 記録は 1 人・1 host |
+| 別開発者・別 host による追試 | 未着手（別の人間） / 一部（自動化 agent の clean clone 追試、PLT-4648） | 手順は `docs/runbook.md`。記録は 1 host。自動化 agent が fresh clone から runbook どおりに process provider で通した記録は上の PLT-4648。別の人間・Linux/KVM での追試は無い |
 | self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未検証 | workflow・gate（`kvm-gate`）・runner 登録手順は PLT-4645 で用意（`docs/ci.md` §5）。runner が未登録のため `kvm` job は一度も実行されていない |
 | TiDB 永続化（PLT-4618） | 実装済み・TiDB実測あり（migration と repository 契約、試験専用） / 未着手（製品の store として使うこと） | 単一 host の製品は埋め込み SQLite のまま（ADR-0003）。TiDB 版 migration と試験専用 adapter を実 TiDB v8.5.8 で検証（ADR-0003「TiDB 検証」、`docs/evidence/tidb-20260917T103330Z/`） |
 | network と drive の帯域上限、IO の cgroup 上限 | 未着手 | VMM への host 側 cgroup（CPU / memory / pids）と 2 tenant 同居の計測は PLT-4622 で実装・実測済み（上の PLT-4622 5e・8、`docs/evidence/isolation-20260917T041930Z/`）。`io.max`、drive と NIC の `rate_limiter` は無い。実測は aarch64 nested 1 host だけ |

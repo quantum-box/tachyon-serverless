@@ -304,7 +304,7 @@ PASS  secrets.not_leaked                                         20 locations x 
 
 - 仕組み: gateway は起動時、listen の前に `state.db` へ前進のみの migration を 1 transaction で適用する。失敗すると schema は前の版のまま残り、gateway は起動しない。
 - 症状（新しい schema）: `up` が `[lab] ERROR: state.db has a newer schema than this gateway` で止まり、直前に `Error: conflict: state.db is at schema version 99, newer than this binary supports (8). Migrations are forward-only: run a newer gateway, or restore the database from before the upgrade` が出る（§9 で実際に起こして確認）。
-- 復旧: 新しい commit の gateway を build し直す（`git pull` → `bootstrap`）か、使い捨ての lab なので `teardown` → `up`。down migration は無い。台帳を残したい場合は、`down` してから `<lab>/data/state.db*` を lab の外に退避してから teardown する。
+- 復旧: 新しい commit の gateway を build し直す（`git pull` → `bootstrap`）か、使い捨ての lab なので `teardown --keep-cache` → `up`（`--keep-cache` を付けないと取得物も消えるので `teardown` → `bootstrap` → `up`）。down migration は無い。台帳を残したい場合は、`down` してから `<lab>/data/state.db*` を lab の外に退避してから teardown する。
 - 症状（migration 自体の失敗）: `migration 00N_<name> failed: ...`。disk 満杯（§6.8）か、壊れた `state.db`。disk を空けて `up`、直らなければ teardown。
 
 ### 6.5 port が使用中
@@ -318,7 +318,7 @@ PASS  secrets.not_leaked                                         20 locations x 
 - 症状: `[lab] ERROR: nats-server did not start`。直前に nats の log が出る（port 使用中なら `[FTL] Error listening on port: 127.0.0.1:<n> ... address already in use`。§9 で確認）。
 - port: §6.5 と同じ（`NATS_PORT` / `NATS_HTTP_PORT`）。
 - 設定: `<lab>/nats/nats-server.conf` は `deploy/nats/nats-server.conf` から毎回描画される。`logs nats` を見る。
-- store の破損: `down` → `<lab>/nats/jetstream` を lab の外へ退避 → `up`。stream にあった未配送の event は失われうる（lab ではこの復旧後の収束を確認していない。使い捨ての lab なら `teardown` → `up` の方が確実）。
+- store の破損: `down` → `<lab>/nats/jetstream` を lab の外へ退避 → `up`。stream にあった未配送の event は失われうる（lab ではこの復旧後の収束を確認していない。使い捨ての lab なら `teardown --keep-cache` → `up` の方が確実）。
 - 稼働中に nats だけ落ちた: `status` の nats-server 行と queue 行が FAIL になる。停止中の `invokeAsync` の受付・拒否は ADR-0010「queue 停止時の方針」のとおり（`scripts/queue/async-e2e.sh` が検査）。`up` を再実行すると、生きている gateway はそのままで nats だけ起動し直す。
 
 ### 6.7 設定が不正
@@ -364,7 +364,7 @@ teardown が対象にするのは **この lab のものだけ**:
 - 消す path はすべて、symlink を解決した上で lab directory の **内側** にあることを確認してから消す。外側なら `refusing to remove ...` で止まる。
 - `--lab-dir` に `/`、`$HOME`、リポジトリ root、`/tmp` などは指定できない。
 - 他の lab・他の gateway・`scripts/e2e` / `scripts/queue` の scratch directory・他人の nats-server には触れない（process は lab directory の path で、cgroup / tap / chain は lab id と台帳で特定するため）。
-- `manifest.env`（`STATE=torn_down`）と `logs/` は残る。
+- `manifest.env`（`STATE=torn_down`）と `logs/` は残る。同じ directory でもう一度使うときは、`--keep-cache` で消したなら `up` から、cache も消したなら `bootstrap` から（`up` は `lab not bootstrapped` で止まる）。lab id・port の割り当ては変わらず、token・鍵・台帳は新しく作られる。
 
 ### 7.2 孤児検査の読み方
 

@@ -217,6 +217,8 @@ cmd_preflight() {
   tool_row tar 1 tar --version
   tool_row git 1 git --version
   tool_row cargo 1 cargo --version
+  # The host build links with the system C toolchain (macOS: Xcode Command Line Tools).
+  tool_row cc 1 cc --version
   tool_row perl 0 perl -e 'print "perl $]"'
   tool_row mise 0 mise --version
   if have shasum || have sha256sum; then row ok tool:sha256 "$(command -v sha256sum || command -v shasum)"; else row FAIL tool:sha256 "sha256sum or shasum required"; fi
@@ -242,7 +244,6 @@ cmd_preflight() {
     ksha="$(eval "printf '%s' \"\${GUEST_KERNEL_SHA256_$arch:-}\"")"
     if [ -n "$fsha" ] && [ -n "$ksha" ]; then row ok pin:firecracker "$FIRECRACKER_VERSION + kernel pinned for $arch"; else row FAIL pin:firecracker "no pin for $arch in versions.lock"; fi
     tool_row rustup 1 rustup --version
-    tool_row cc 1 cc --version
     tool_row mkfs.ext4 1 sh -c 'mkfs.ext4 -V 2>&1'
     if have mkfs.ext4; then
       v="$(mkfs.ext4 -V 2>&1 | head -n 1 | awk '{print $2}')"
@@ -655,6 +656,11 @@ start_gateway() {
     return 0
   fi
   mkdir -p "$RUN_DIR" "$LOG_DIR"
+  # Diagnose a failed start from THIS start's lines only (the log keeps every earlier start).
+  local log_offset this_start
+  log_offset="$( { wc -c <"$GATEWAY_LOG"; } 2>/dev/null | tr -d ' ' || true)"
+  log_offset="${log_offset:-0}"
+  this_start="$RUN_DIR/gateway-start.log"
   printf '\n===== gateway start %s (lab %s) =====\n' "$(lab_now)" "$LAB_ID" >>"$GATEWAY_LOG"
   if [ -n "$LAB_SUDO" ]; then
     # root gateway (jailer + cgroup). The shell writes its own pid, then execs the gateway.
@@ -673,12 +679,13 @@ start_gateway() {
   lab_log "gateway pid ${pid:-?}, log $GATEWAY_LOG"
   for i in $(seq 1 240); do
     if ! gateway_pid >/dev/null; then
-      lab_warn "gateway exited during startup; last log lines:"
-      tail -n 25 "$GATEWAY_LOG" | sed 's/^/    | /'
-      if grep -q 'Address already in use' "$GATEWAY_LOG" 2>/dev/null; then
+      tail -c +"$((log_offset + 1))" "$GATEWAY_LOG" >"$this_start" 2>/dev/null || true
+      lab_warn "gateway exited during startup; last log lines of this start:"
+      tail -n 25 "$this_start" | sed 's/^/    | /'
+      if grep -q 'Address already in use' "$this_start" 2>/dev/null; then
         lab_die "port $(manifest_get GATEWAY_PORT) is in use (docs/runbook.md §6.5)"
       fi
-      if grep -q 'newer than this binary supports' "$GATEWAY_LOG" 2>/dev/null; then
+      if grep -q 'newer than this binary supports' "$this_start" 2>/dev/null; then
         lab_die "state.db has a newer schema than this gateway (docs/runbook.md §6.4)"
       fi
       lab_die "gateway did not start (docs/runbook.md §6: config invalid / migration / provider)"
