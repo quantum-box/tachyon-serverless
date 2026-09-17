@@ -296,3 +296,20 @@ lease_epoch tachyon-serverless-application test:restore two_clones_are_restored_
 lease_epoch tachyon-serverless-application lib bridge_session::restore::tests::a_cold_boot_on_a_restore_is_refused
 lease_epoch tachyon-serverless-application lib bridge_session::restore::tests::a_reconnect_from_another_boot_is_not_the_source
 lease_epoch tachyon-serverless-application lib bridge_session::restore::tests::only_protocol_versions_2_and_3_are_accepted
+
+# --- ADR-0018: durable invocation logs (logs/logs.db) ------------------------------------------
+# every read is tenant-scoped; the file is private; the host never writes a secret value into it
+tenant_authz tachyon-serverless-application lib logs::tests::another_tenant_never_reads_the_lines
+tenant_authz tachyon-serverless-application lib repository::contract_tests::memory::logs_are_bounded_per_invocation
+tenant_authz tachyon-serverless-application lib logs::tests::the_directory_and_the_database_are_private
+tenant_authz tachyon-serverless-application test:pipeline secret_values_reach_the_log_store_only_when_user_code_prints_them
+tenant_authz tachyon-serverless-application test:pipeline invocation_logs_survive_an_application_restart
+# log volume is bounded (line, attempt, invocation, total, queue) and a slow or locked log store never
+# blocks or fails an invocation
+resource_limits tachyon-serverless-application lib logs::tests::the_invocation_cap_drops_counts_and_marks_once
+resource_limits tachyon-serverless-application lib logs::tests::the_attempt_cap_is_applied_per_attempt
+resource_limits tachyon-serverless-application lib logs::tests::caps_hold_across_a_restart
+resource_limits tachyon-serverless-application lib logs::tests::the_size_cap_removes_the_oldest_terminal_invocations_and_keeps_running_ones
+resource_limits tachyon-serverless-application lib logs::tests::a_full_queue_drops_and_counts_without_blocking_the_caller
+resource_limits tachyon-serverless-application lib logs::tests::a_locked_database_degrades_the_store_and_recovers
+resource_limits tachyon-serverless-application test:pipeline a_locked_log_store_never_fails_an_invocation

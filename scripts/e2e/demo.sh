@@ -432,6 +432,43 @@ logs_contain_handler_lines() {
   out="$(tsls functions logs --invocation "$id")"
   printf '%s\n' "$out"
   assert_contains "$out" "/handler]" "handler phase lines present"
+  # Kept for the restart step (docs/adr/0018).
+  printf '%s\n' "$out" > "$WORK_DIR/logs-before-restart.txt"
+}
+
+logs_survive_gateway_restart() {
+  # docs/adr/0018: invocation logs live in <data_dir>/logs/logs.db, so a new
+  # gateway process on the same data_dir serves exactly the lines the stopped
+  # one served. Runs after the first gateway stopped; starts and stops its
+  # own gateway (the step runs in a subshell).
+  local id before after pid restart_log
+  id="$(state_get inv.hello.ok)"
+  [ -n "$id" ] || { echo "no invocation id from invoke_hello_ok" >&2; return 1; }
+  [ -s "$WORK_DIR/logs-before-restart.txt" ] || { echo "no logs captured before the restart" >&2; return 1; }
+  before="$(cat "$WORK_DIR/logs-before-restart.txt")"
+  restart_log="$EVIDENCE_DIR/gateway-restart.log"
+  cd "$REPO_ROOT"
+  LOG_FORMAT=json TACHYON_GATEWAY_CONFIG="$CONFIG_PATH" \
+    "$GATEWAY_BIN" "$GATEWAY_CONFIG_FLAG" "$CONFIG_PATH" >"$restart_log" 2>&1 &
+  pid=$!
+  # shellcheck disable=SC2064 # expand pid now: the trap runs in this subshell
+  trap "stop_process $pid 15" EXIT
+  GATEWAY_PID="$pid"
+  GATEWAY_LOG="$restart_log"
+  wait_gateway
+  after="$(tsls functions logs --invocation "$id")"
+  printf '%s\n' "$after"
+  assert_contains "$after" "/handler]" "handler phase lines served after the restart"
+  if [ "$before" != "$after" ]; then
+    echo "logs differ after the restart" >&2
+    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    return 1
+  fi
+  curl -fsS "$API_URL/readyz" | jq -e '.logs.durable == true and .logs.healthy == true' >/dev/null \
+    || { echo "/readyz does not report a healthy durable log store" >&2; return 1; }
+  stop_process "$pid" 15
+  trap - EXIT
+  assert_eq 0 "$STOP_RC" "restarted gateway exit status"
 }
 
 history_has_boot_evidence() {
@@ -549,7 +586,10 @@ secrets_not_leaked() {
     [ -n "$v" ] || continue
     # The ledger is state.db plus its write-ahead log (row bodies are plain
     # JSON text inside the pages); state.json only exists before its import.
-    for target in "$GATEWAY_LOG" "$EVIDENCE_DIR" "$data_dir/state.db" "$data_dir/state.db-wal" "$data_dir/state.json"; do
+    # Invocation logs are logs/logs.db plus its WAL (docs/adr/0018): the demo
+    # functions never print their secret, so the host must not have either.
+    for target in "$GATEWAY_LOG" "$EVIDENCE_DIR" "$data_dir/state.db" "$data_dir/state.db-wal" "$data_dir/state.json" \
+      "$data_dir/logs/logs.db" "$data_dir/logs/logs.db-wal"; do
       [ -e "$target" ] || continue
       checked=$((checked + 1))
       if grep -arqF -- "$v" "$target"; then
@@ -602,7 +642,8 @@ main() {
   GATEWAY_PID=""
   e2e_log "gateway exit status $gw_rc"
   step "gateway stops on SIGTERM with exit 0" assert_eq 0 "$gw_rc" "gateway exit status"
-  step "secret values absent from gateway log, evidence and state" secrets_not_leaked
+  step "invocation logs survive a gateway restart" logs_survive_gateway_restart
+  step "secret values absent from gateway log, evidence, state and logs.db" secrets_not_leaked
   step "no orphans after gateway shutdown" "$SCRIPT_DIR/orphan-check.sh" "$TSLS_PROVIDER" "${TSLS_FC_RUN_DIR:-$REPO_ROOT/.kvm/run}"
 
   steps_write_summary "$EVIDENCE_DIR/summary.json" \

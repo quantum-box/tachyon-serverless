@@ -182,6 +182,7 @@ impl LogService {
             .get(invocation_id)?
             .ok_or_else(|| AppError::not_found("invocation not found"))?;
         ensure_tenant(principal, &inv.tenant_id, "invocation")?;
-        Ok(self.repos.logs.query(invocation_id))
+        // The repository filters by tenant as well (docs/adr/0018).
+        Ok(self.repos.logs.query(&inv.tenant_id, invocation_id)?)
     }
 }

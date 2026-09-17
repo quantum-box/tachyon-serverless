@@ -1078,8 +1078,9 @@ fn logs_are_bounded_per_invocation(make: fn(Limits) -> Store) {
     };
     let s = make(limits);
     let inv = InvocationId::generate();
+    let tenant = TenantId::generate();
     let rec = |line: &str| LogRecord {
-        tenant_id: TenantId::generate(),
+        tenant_id: tenant.clone(),
         environment_id: EnvironmentId::generate(),
         invocation_id: Some(inv.clone()),
         attempt_id: None,
@@ -1092,9 +1093,13 @@ fn logs_are_bounded_per_invocation(make: fn(Limits) -> Store) {
     assert_eq!(s.append(rec("a")), AppendOutcome::Stored);
     assert_eq!(s.append(rec("b")), AppendOutcome::Stored);
     assert_eq!(s.append(rec("c")), AppendOutcome::Dropped);
-    let q = s.query(&inv);
+    let q = s.query(&tenant, &inv).unwrap();
     assert_eq!(q.records.len(), 2);
     assert!(q.dropped);
+    // Another tenant never sees the lines, nor that some were dropped.
+    let q = s.query(&TenantId::generate(), &inv).unwrap();
+    assert!(q.records.is_empty());
+    assert!(!q.dropped);
 }
 
 fn artifact_ownership_is_per_tenant(make: fn(Limits) -> Store) {

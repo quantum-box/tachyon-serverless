@@ -69,6 +69,9 @@ pub struct Application {
     pub aliases: Arc<AliasService>,
     pub invoke: Arc<InvokeService>,
     pub logs: Arc<LogService>,
+    /// `<data_dir>/logs/logs.db` (docs/adr/0018). `None` when the ledger is
+    /// volatile: logs then stay in the bounded memory buffer.
+    pub log_store: Option<Arc<crate::logs::DurableLogStore>>,
     pub history: Arc<HistoryService>,
     pub provider_service: Arc<ProviderService>,
     pub reconcile: Arc<ReconcileService>,
@@ -260,6 +263,28 @@ impl Application {
         // (PLT-4636).
         let config_signal = Arc::new(ConfigChangeSignal::default());
         let mut repos = Repositories::from_store(store.clone());
+        // Invocation logs go to their own database next to the ledger
+        // (docs/adr/0018); the memory buffer stays for a volatile ledger.
+        let log_store = durable_ledger.as_ref().map(|ledger| {
+            let logs = Arc::new(crate::logs::DurableLogStore::open(
+                &config.data_dir,
+                &config.logs,
+                &limits,
+                options.clock.clone(),
+            ));
+            logs.set_ledger(ledger.clone());
+            tracing::info!(
+                path = %logs.path().display(),
+                healthy = logs.status().healthy,
+                retention_seconds = config.logs.retention_seconds,
+                max_total_bytes = config.logs.max_total_bytes,
+                "log store opened"
+            );
+            logs
+        });
+        if let Some(logs) = &log_store {
+            repos.logs = logs.clone();
+        }
         {
             let signaling = Arc::new(SignalingConfigRepos::new(
                 store.clone(),
@@ -736,6 +761,7 @@ impl Application {
             aliases,
             invoke,
             logs,
+            log_store,
             history,
             provider_service,
             reconcile,
@@ -978,7 +1004,17 @@ impl Application {
             triggers: self.triggers.as_ref().map(|t| t.metrics().snapshot()),
             dispatch: self.dispatch_metrics.as_ref().map(|m| m.snapshot()),
             budget: Some(self.budget.metrics(m.max_tenant_series)),
+            logs: self.log_store.as_ref().map(|l| l.status()),
         })
+    }
+
+    /// The log store's operator facts (`/readyz` `logs`, docs/adr/0018): the
+    /// durable store's, or the memory buffer's when the ledger is volatile.
+    pub fn log_store_status(&self) -> crate::logs::LogStoreStatus {
+        match &self.log_store {
+            Some(store) => store.status(),
+            None => crate::logs::LogStoreStatus::memory(),
+        }
     }
 
     /// The usage pipeline's state for `GET /metrics` (PLT-4642).

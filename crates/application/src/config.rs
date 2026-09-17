@@ -802,6 +802,10 @@ pub struct GatewayConfig {
     pub scaling: ScalingConfig,
     #[serde(default)]
     pub store: StoreConfig,
+    /// `[logs]`: the durable invocation log store (docs/adr/0018). Used
+    /// whenever the ledger is durable (`[store] backend = "sqlite"`).
+    #[serde(default)]
+    pub logs: crate::logs::LogsConfig,
     #[serde(default)]
     pub dispatcher: DispatcherConfig,
     #[serde(default)]
@@ -1133,6 +1137,7 @@ impl GatewayConfig {
             .validate(self.profile)
             .map_err(ConfigError::Invalid)?;
         self.budget.validate().map_err(ConfigError::Invalid)?;
+        self.logs.validate().map_err(ConfigError::Invalid)?;
         if self.capacity.max_concurrency == 0 {
             return Err(ConfigError::Invalid(
                 "capacity.max_concurrency must be >= 1".into(),

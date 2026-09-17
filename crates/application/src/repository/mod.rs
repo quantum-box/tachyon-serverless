@@ -181,21 +181,32 @@ pub trait EnvironmentRepository: Send + Sync {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppendOutcome {
+    /// Kept (the memory buffer) or accepted by the writer queue of the
+    /// durable log store, which still applies the per-invocation and
+    /// per-attempt caps when it writes the line (docs/adr/0018).
     Stored,
-    /// Dropped because the per-invocation line or byte limit was reached.
+    /// Dropped: a per-invocation line or byte limit, a full writer queue, or
+    /// a line that belongs to no invocation (the durable store only).
     Dropped,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct LogQuery {
     pub records: Vec<LogRecord>,
-    /// True when at least one line was dropped by retention limits.
+    /// True when at least one line of the invocation was dropped (a limit, a
+    /// full writer queue or an unavailable log store).
     pub dropped: bool,
 }
 
+/// Invocation logs: the bounded memory buffer (`[store] backend = "memory"`
+/// and tests) or the durable log store (`<data_dir>/logs/logs.db`,
+/// docs/adr/0018).
+///
+/// `append` never blocks on IO: it is called from the bridge session while
+/// an attempt runs. `query` only ever returns lines of `tenant`.
 pub trait LogRepository: Send + Sync {
     fn append(&self, record: LogRecord) -> AppendOutcome;
-    fn query(&self, invocation: &InvocationId) -> LogQuery;
+    fn query(&self, tenant: &TenantId, invocation: &InvocationId) -> Result<LogQuery, RepoError>;
 }
 
 /// An idempotency key bound to an invocation that exists in the ledger.

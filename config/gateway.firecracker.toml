@@ -125,6 +125,11 @@ value = "demo-secret-value-b"
 backend = "sqlite"                 # sqlite | memory（memory は再起動で全て消える）
 output_retention_seconds = 604800  # インライン出力の保持期限（7 日）。0 は無期限
 
+# invocation log は <data_dir>/logs/logs.db（docs/adr/0018）。既定値のまま。
+# [logs]
+# retention_seconds = 604800       # 最後の行からこれを過ぎた invocation の log を消す
+# max_total_bytes = 1073741824     # 超えたら terminal の invocation を古い順に消す
+
 # 起動時の後始末。既定は true で、台帳の収束と孤児環境の回収を listener を
 # 開ける前に行う（docs/architecture.md §4「起動時の後始末」）。
 # [reconcile]
