@@ -1,0 +1,1 @@
+{"error":{"code":"init_error","message":"invocation inv_01m2pmcmjjwmdbcfswr7d7tnnx failed: Runtime.PreCheckpointFailed: Demo.BootstrapFailure: RESTORE_AWARE_FAIL=bootstrap","request_id":"01m2pmcmjhxg8tsgqbzwpjwfwd","invocation_id":"inv_01m2pmcmjjwmdbcfswr7d7tnnx","error_type":"Runtime.PreCheckpointFailed"}}
