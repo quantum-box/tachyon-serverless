@@ -1,0 +1,8 @@
+{
+  "attempt_id": "att_01j0000000000000000000000a",
+  "line": "hello golden",
+  "phase": "handler",
+  "stream": "stdout",
+  "ts_ms": 1700000000123,
+  "type": "log"
+}

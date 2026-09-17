@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4633、PLT-4651 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4633、PLT-4645、PLT-4651 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -90,7 +90,7 @@ KVM の記録に共通する制約:
 | 2 | bootstrap スクリプトで `firecracker` バイナリ・kernel（CI kernel v1.17 系列）・rootfs を取得し、digest を検証する | 実装済み・KVM実測あり（`CI_VERSION=v1.15 GUEST_KERNEL_SERIES=6.1`） / 未検証（既定の日付 prefix 自動解決、§6 の「v1.17 系列」kernel） | `scripts/kvm/bootstrap.sh`（Firecracker v1.17.0 の tgz を公開 `.sha256.txt` で検証。kernel は upstream の digest が無いため取得時の sha256 を `.kvm/manifest.json` に記録し、再実行時に照合）、`scripts/kvm/build-rootfs.sh`、`docs/evidence/kvm-20260915T080221Z/summary.txt`（kernel / rootfs の sha256）、`docs/evidence/kvm-20260915T080221Z/hello-console.txt`（`Linux version 6.1.155+`） |
 | 3 | teardown スクリプトで環境・ソケット・drive・workdir を全削除し、orphan 0 を確認する | 実装済み（スクリプト） / 未検証（KVM 上で `scripts/kvm/teardown.sh` を実行した記録が evidence に無い） | `scripts/kvm/teardown.sh`。orphan 0 そのものは fc-smoke の `leftovers`（`docs/evidence/kvm-20260915T080221Z/hello.json`、`timeout.json`）と E2E step 19・27（`scripts/e2e/orphan-check.sh`）で確認 |
 | 4 | `ExecutionProvider::preflight` が host 要件を検査し、`GET /readyz` に反映する | 実装済み・KVM実測あり | `crates/provider-port/src/execution.rs`（`PreflightReport`）、`crates/providers/firecracker/src/preflight.rs::{preflight_reports_structured_failures_on_any_host, digest_cache_hits_until_file_changes, concurrent_digests_are_deduplicated_and_survive_cancellation}`、`crates/providers/firecracker/src/provider.rs::preflight_never_fails_and_kind_is_firecracker`、`apps/gateway/tests/gateway_integration.rs::full_api_roundtrip`（`/readyz`）、`docs/evidence/20260915T125610Z-firecracker/steps/02-gateway_healthz_readyz.log` |
-| 5 | 本番 cluster・remote に触れない | 実装済み（規則） | `docs/inventory-tachyon-apps.md` §3.12、`docs/adr/0001-execution-provider-firecracker-first.md` §「決定」、`.github/workflows/kvm-integration.yml`（手動起動のみ、secret なし） |
+| 5 | 本番 cluster・remote に触れない | 実装済み（規則） | `docs/inventory-tachyon-apps.md` §3.12、`docs/adr/0001-execution-provider-firecracker-first.md` §「決定」、`.github/workflows/kvm-integration.yml`（PLT-4645 以降: fork PR では KVM job を起動しない、`permissions: contents: read`、secret なし。`docs/ci.md` §4） |
 
 ## PLT-4616 Firecracker / CH / Kata 比較と ExecutionProvider 方針
 
@@ -111,7 +111,7 @@ KVM の記録に共通する制約:
 | 2 | domain が framework / hypervisor に依存しない（boundary test） | 実装済み | `crates/domain/src/boundary.rs::domain_has_no_framework_dependencies` |
 | 3 | `ExecutionProvider` ほか port trait が定義され、`Capabilities` に `Supported / Unsupported / Unverified` がある | 実装済み | `crates/provider-port/src/execution.rs`、`artifact.rs`、`secret.rs`、`identity.rs`、`usage.rs` |
 | 4 | fake provider で pipeline を KVM なしでテストできる | 実装済み | `crates/providers/fake/src/lib.rs::{respond_ok_speaks_protocol_and_records_lifecycle, init_error_and_duplicate_id, disconnect_after_invoke_closes_stream, capabilities_are_dev_only}`、`crates/application/tests/pipeline.rs`（23 テスト）、`apps/gateway/tests/gateway_integration.rs` |
-| 5 | CI（fmt / clippy `-D warnings` / test）が PR で走る | 実装済み（workflow 定義） / 未検証（この更新では GitHub Actions 上の実行結果を確認していない） | `.github/workflows/ci.yml`（fmt / clippy / test / build、x86_64 musl の guest ビルドと static 確認、`bash -n`・shellcheck・`scripts/e2e/selftest.sh`）。`.github/workflows/kvm-integration.yml` は手動起動のみで、self-hosted KVM runner は未用意 |
+| 5 | CI（fmt / clippy `-D warnings` / test）が PR で走る | 実装済み（workflow 定義） / 未検証（この更新では GitHub Actions 上の実行結果を確認していない） | `.github/workflows/ci.yml`（fmt / clippy / test / build、x86_64 musl の guest ビルドと static 確認、`bash -n`・shellcheck・`scripts/e2e/selftest.sh`）。KVM 統合と変更範囲別 gate は PLT-4645（`docs/ci.md`）。self-hosted KVM runner は未用意 |
 | 6 | 依存の追加はルート `[workspace.dependencies]` 経由のみ | 実装済み（規約） / 未検証（自動検査なし） | `Cargo.toml`。検査するテストは存在しない |
 
 ## PLT-4618 Function・Invocation・実行環境のモデルと DB migration
@@ -377,6 +377,23 @@ gateway プロセスごとの dispatcher（owner）と lease、slot の原子的
 
 関連する修正: `pipeline.rs::concurrent_requests_with_the_same_key_run_once` が稀に ``alias `prod` not found`` で落ちた原因は、revision の検証 task が「`Ready` の書き込み」と「`prod` alias の publish」を別々の store 更新で行い、`RevisionService::wait_terminal` が `Ready` を見た時点で戻っていたこと（テストの deploy helper がその直後に alias を読む）。`wait_terminal` が同じプロセスで走っている検証 task の完了（publish を含む）まで待つようにした。publish の直前に 50 ms の遅延を入れると修正前は毎回同じ失敗になり、修正後は通ることを手元で確認した（遅延は commit していない）。HTTP で `GET revision` を poll する client からは、`Ready` と alias の移動の間の短い窓は従来どおり見えうる。
 
+## PLT-4645 API 契約・tenant 境界・KVM 統合試験を変更範囲別 CI へ接続
+
+Issue 名は「Kata 統合試験」だが、ADR-0001 により KVM 統合は Firecracker で行う。構成・信頼モデル・runner 登録・canary / rollback は `docs/ci.md`。記録日 2026-09-17、branch `ci/plt-4645-scoped-gates`。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 全 PR で unit / property / OpenAPI / runtime 契約試験を回す | 実装済み（GitHub Actions で実行確認） | `.github/workflows/ci.yml` の `rust`（`cargo test --workspace`）と `contracts`（`apps/gateway/tests/openapi_snapshot.rs` と `docs/openapi.json`、`crates/protocol/tests/golden.rs` と `crates/protocol/tests/golden/`、`scripts/ci/security-regression.sh`）。branch での `workflow_dispatch` 実行 https://github.com/quantum-box/tachyon-serverless/actions/runs/35179100905 で全 job success（security regression 63/63、rebase 前）。PR event での実行は、この記録の時点では PR を作っていないため未確認 |
+| 2 | tenant 認可・環境 key・lease・deadline・egress 準備順序・資源上限の回帰を検知する | 実装済み（hosted、fake provider / 偽 Firecracker の範囲） / 未検証（KVM 実機） | `scripts/ci/security-regression.list`（6 分類 83 テスト。PLT-4631 の lease / fencing と PLT-4622 追補の egress allowlist・nftables 規則を含む。list にあるテストが走らなければ失敗）。`docs/evidence/ci-gates-20260917T041348Z/summary.txt`: 一時コピーに既知の悪い変更を入れ、tenant 検査の除去・reuse key 比較の無視・epoch fencing の除去・経過済み client deadline の受理・pre-boot egress 検査結果の無視・memory 下限の除去・security テストの rename がそれぞれ gate で失敗した。このとき既存の `crates/domain/src/invocation.rs::rejects_elapsed_client_deadline_and_bad_key` は不正な idempotency key でも失敗するため deadline 検査の除去を検出できないと分かり、`crates/domain/src/invocation.rs::an_elapsed_client_deadline_alone_is_rejected` を追加した。KVM 上の同種の検査（`scripts/kvm/measure-isolation.sh` ほか）は runner 未登録のため CI からは未実行 |
+| 3 | runtime / network / kernel / billing 変更向けの専用 KVM integration を分ける | 実装済み（workflow 定義） / 未検証（KVM job の実行） | `.github/workflows/kvm-integration.yml`（`runs-on: [self-hosted, linux, kvm]`、smoke → measure-isolation → measure-warm → E2E firecracker → 常に cleanup + orphan check → 常に artifact）、`scripts/ci/classify-changes.sh`（分類規則は `scripts/ci/selftest.sh` で固定）。**runner が未登録のため `kvm` job は一度も実行されていない** |
+| 4 | KVM 未実行を合格と表示せず、required / optional の gate が明確 | 実装済み（GitHub Actions で pending と失敗を確認） | `docs/ci.md` §2 の gate matrix、`scripts/ci/kvm-gate.sh`。https://github.com/quantum-box/tachyon-serverless/actions/runs/35179136197（`workflow_dispatch`、runner なし）: `kvm` job は queued のまま、`kvm-gate` は開始されず pending。run を cancel すると `kvm-gate` は `FAILED - KVM integration is REQUIRED and finished with 'cancelled'` で失敗。label なし / fork の skip が失敗になることは `scripts/ci/selftest.sh` と `docs/evidence/ci-gates-20260917T041348Z/cases/*-kvm-*.log`。required check（`ci-gate`、`kvm-gate`）の branch protection への登録は未実施（owner 作業） |
+| 5 | docs / UI のみの変更に重い KVM 試験を無条件で実行しない | 実装済み（分類の自己テスト） / 未検証（docs-only PR での実行） | `scripts/ci/classify-changes.sh`（docs-only は `rust` / `contracts` / `guest-musl-build` を skip、KVM 不要）、`scripts/ci/selftest.sh`。この repository に UI は無い |
+| 6 | 未信頼 PR へ production credential・常駐 runner 権限を渡さない | 実装済み（workflow の規則） / 未検証（runner 側の設定） | fork PR は `kvm` job を起動しない（classify と job の `if:` の二重検査）、`pull_request_target` 不使用、全 job `contents: read`、`persist-credentials: false`、secret 不使用、action は SHA pin、KVM job は cache 不使用。public repository なので `if:` は多層防御にすぎず、runner group の制限・fork PR 承認・ephemeral runner（`docs/ci.md` §4.3、§5）が必要だが、runner が無いため未設定 |
+| 7 | 実行後 cleanup を確認する | 実装済み（workflow 定義） / 未検証（KVM job の実行） | `kvm` job の `Cleanup and orphan check`（`if: always()`、`scripts/kvm/teardown.sh --purge`、`scripts/e2e/orphan-check.sh firecracker` / `process`、残存 firecracker process で失敗、結果を artifact の `cleanup.txt` に保存）、開始時の残存 VM 拒否 |
+| 8 | test artifact に commit / profile を保存する | 実装済み（profile script の自己テスト） / 未検証（KVM job の artifact） | `scripts/ci/kvm-profile.sh`（commit、ref、run、Firecracker 版と sha256、guest kernel sha256 / key、rootfs sha256、gateway config sha256、host uname / CPU / memory / KVM / nested virtualization）、artifact 名 `kvm-evidence-<sha>-<run_id>-<attempt>` |
+| 9 | 検証: 意図的な fixture 破損で CI 失敗を確認 | 実装済み（ローカル） | `scripts/ci/prove-gates.sh`、`docs/evidence/ci-gates-20260917T041348Z/`（origin/main（PR #13 まで）へ rebase した commit `88c0a92` で実行。baseline 3 gate PASS、既知の悪い変更 16 件すべて検出。golden fixture の手編集、`docs/openapi.json` の手編集、wire field / tag / header の rename、API schema field の rename を含む）。破損を含む branch は push していないので、GitHub Actions 上での失敗は確認していない |
+| 10 | runtime profile 変更時の canary / rollback 手順を残す | 実装済み（文書） / 未検証（実施） | `docs/ci.md` §6、`kvm-integration.yml` の `workflow_dispatch` 入力 `firecracker_version` / `ci_version` / `guest_kernel_series` |
+
 ## ADR-0001 残る測定の状況
 
 測定の定義は `docs/adr/0001-execution-provider-firecracker-first.md` §「残る測定」。値はすべて aarch64 の nested virtualization 上の参考値（§「証跡」の制約を参照）。
@@ -405,7 +422,7 @@ gateway プロセスごとの dispatcher（owner）と lease、slot の原子的
 | bare metal（nested virtualization なし）での測定 | 未検証 | 同上 |
 | baseline profile どおりの測定（N ≥ 20、中央値・p95、hello / http-axum / cpu-burn） | 未検証 | 記録は E2E 1 回分（11 attempt）と fc-smoke 2 回 |
 | 別開発者・別 host による追試 | 未着手 | 記録は 1 人・1 host |
-| self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未着手 | runner が未用意（workflow のコメント） |
+| self-hosted KVM runner での `.github/workflows/kvm-integration.yml` | 未検証 | workflow・gate（`kvm-gate`）・runner 登録手順は PLT-4645 で用意（`docs/ci.md` §5）。runner が未登録のため `kvm` job は一度も実行されていない |
 | TiDB 永続化（PLT-4618） | 未着手 | ADR-0003 で単一 host は埋め込み SQLite（`state.db`、migration 実装済み）と決定。TiDB は将来の adapter |
 | cgroup 等による host 側の資源強制、network の帯域上限 | 未着手 | egress restricted / public-web は PLT-4622 で実装・実測済み（ADR-0005）。VMM への host 側 cgroup、drive と NIC の `rate_limiter`、2 tenant 同居時の干渉（noisy neighbor）は未着手。egress の実測も aarch64 nested 1 host だけ |
 | Kata / Cloud Hypervisor adapter | 未着手 | ADR-0001 で後続 adapter と決めた |

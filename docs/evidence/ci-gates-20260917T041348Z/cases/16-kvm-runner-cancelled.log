@@ -1,0 +1,7 @@
+# case: kvm-runner-cancelled
+# what: a scripts/kvm path changed and the kvm job was cancelled (e.g. no runner within 24 h): kvm-gate must fail
+# gate: kvm-gate-cancelled
+# ---- gate output ----
+classify: kvm_required=true
+kvm-gate: FAILED - KVM integration is REQUIRED and finished with 'cancelled' (see the kvm job log and its evidence artifact).
+# gate exit code: 1

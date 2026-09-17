@@ -1,0 +1,19 @@
+{
+  "args": [
+    "--flag"
+  ],
+  "entrypoint": "/function/app",
+  "env": [
+    [
+      "GREETING",
+      "hello"
+    ]
+  ],
+  "environment_id": "env_01j0000000000000000000000a",
+  "epoch": 3,
+  "init_timeout_ms": 10000,
+  "max_log_line_bytes": 8192,
+  "max_response_bytes": 6291456,
+  "type": "hello_ack",
+  "working_dir": "/function"
+}

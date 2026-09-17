@@ -1,0 +1,46 @@
+# case: openapi-schema-field-renamed
+# what: an API schema field is renamed on the wire without updating docs/openapi.json
+# gate: openapi
+# known-bad change (applied to a temporary copy only):
+--- crates/api-types/src/lib.rs.orig	2026-09-17 13:16:43
++++ crates/api-types/src/lib.rs	2026-09-17 13:16:43
+@@ -154,6 +154,7 @@
+     pub reason: String,
+     /// `supported` | `unsupported` | `unverified`, as the provider reports it.
+     pub idle_quiesce: String,
++    #[serde(rename = "idleResume")]
+     pub idle_resume: String,
+ }
+ 
+# ---- gate output ----
+   Compiling tachyon-serverless-api-types v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/api-types)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/apps/gateway)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.18s
+     Running tests/openapi_snapshot.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/openapi_snapshot-ce89a1cbb1d95f65)
+
+running 2 tests
+test every_management_route_requires_the_bearer_scheme ... ok
+test openapi_document_matches_the_committed_snapshot ... FAILED
+
+failures:
+
+---- openapi_document_matches_the_committed_snapshot stdout ----
+
+thread 'openapi_document_matches_the_committed_snapshot' (1044318) panicked at apps/gateway/tests/openapi_snapshot.rs:102:5:
+the OpenAPI contract changed but docs/openapi.json was not updated.
+Differences (JSON pointer):
+  /components/schemas/ReuseInfo/properties/idleResume: only in the generated document
+  /components/schemas/ReuseInfo/properties/idle_resume: only in the snapshot
+  /components/schemas/ReuseInfo/required/4: snapshot "idle_resume" != generated "idleResume"
+If the change is intended, run `TSLS_UPDATE_SNAPSHOTS=1 cargo test -p tachyon-serverless-gateway --test openapi_snapshot` and commit docs/openapi.json so the contract change is reviewed.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    openapi_document_matches_the_committed_snapshot
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tachyon-serverless-gateway --test openapi_snapshot`
+# gate exit code: 101

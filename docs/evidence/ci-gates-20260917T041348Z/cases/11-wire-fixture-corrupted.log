@@ -1,0 +1,56 @@
+# case: wire-fixture-corrupted
+# what: a committed golden fixture is edited by hand
+# gate: golden
+# known-bad change (applied to a temporary copy only):
+--- crates/protocol/tests/golden/wire/host_ping.json.orig	2026-09-17 13:16:36
++++ crates/protocol/tests/golden/wire/host_ping.json	2026-09-17 13:16:36
+@@ -1,4 +1,4 @@
+ {
+-  "nonce": 7,
++  "nonce": 8,
+   "type": "ping"
+ }
+# ---- gate output ----
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.61s
+     Running tests/golden.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/golden-8cf1526a6f9f1260)
+
+running 7 tests
+test runtime_api_constants_match_the_golden_fixture ... ok
+test a_length_prefixed_frame_matches_the_golden_bytes ... ok
+test runtime_api_bodies_match_the_golden_fixtures ... ok
+test no_stale_fixture_is_left_behind ... FAILED
+test host_to_bridge_frames_match_the_golden_fixtures ... FAILED
+test every_message_variant_and_error_kind_has_a_fixture ... ok
+test bridge_to_host_frames_match_the_golden_fixtures ... ok
+
+failures:
+
+---- no_stale_fixture_is_left_behind stdout ----
+
+thread 'no_stale_fixture_is_left_behind' (1041362) panicked at crates/protocol/tests/golden.rs:562:5:
+assertion `left == right` failed: fixtures on disk and samples differ: remove stale files or add samples
+  left: {"runtime_api/constants.json", "runtime_api/continuation_cold.json", "runtime_api/continuation_restored.json", "runtime_api/error_report_full.json", "runtime_api/error_report_minimal.json", "runtime_api/http_request_event.json", "runtime_api/http_response_payload.json", "wire/frame_ping.hex", "wire/guest_error_crash.json", "wire/guest_error_handler.json", "wire/guest_error_panic.json", "wire/guest_error_protocol.json", "wire/guest_error_response_too_large.json", "wire/guest_exited.json", "wire/guest_heartbeat.json", "wire/guest_hello.json", "wire/guest_init_error.json", "wire/guest_log.json", "wire/guest_pong.json", "wire/guest_ready.json", "wire/guest_response.json", "wire/host_cancel.json", "wire/host_hello_ack.json", "wire/host_hello_reject.json", "wire/host_invoke.json", "wire/host_ping.json", "wire/host_ping.json.orig", "wire/host_shutdown.json"}
+ right: {"runtime_api/constants.json", "runtime_api/continuation_cold.json", "runtime_api/continuation_restored.json", "runtime_api/error_report_full.json", "runtime_api/error_report_minimal.json", "runtime_api/http_request_event.json", "runtime_api/http_response_payload.json", "wire/frame_ping.hex", "wire/guest_error_crash.json", "wire/guest_error_handler.json", "wire/guest_error_panic.json", "wire/guest_error_protocol.json", "wire/guest_error_response_too_large.json", "wire/guest_exited.json", "wire/guest_heartbeat.json", "wire/guest_hello.json", "wire/guest_init_error.json", "wire/guest_log.json", "wire/guest_pong.json", "wire/guest_ready.json", "wire/guest_response.json", "wire/host_cancel.json", "wire/host_hello_ack.json", "wire/host_hello_reject.json", "wire/host_invoke.json", "wire/host_ping.json", "wire/host_shutdown.json"}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- host_to_bridge_frames_match_the_golden_fixtures stdout ----
+
+thread 'host_to_bridge_frames_match_the_golden_fixtures' (1041361) panicked at crates/protocol/tests/golden.rs:110:5:
+golden fixture mismatch - the runtime wire contract changed:
+  wire/host_ping.json: fixture decodes to a different value:
+    fixture: Ping { nonce: 8 }
+    sample:  Ping { nonce: 7 }; this build encodes a different shape:
+    fixture: {"nonce":8,"type":"ping"}
+    encoded: {"nonce":7,"type":"ping"}
+If the change is intended, decide on PROTOCOL_VERSION (docs/protocol.md), then run `TSLS_UPDATE_SNAPSHOTS=1 cargo test -p tachyon-serverless-protocol --test golden` and commit crates/protocol/tests/golden/.
+
+
+failures:
+    host_to_bridge_frames_match_the_golden_fixtures
+    no_stale_fixture_is_left_behind
+
+test result: FAILED. 5 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tachyon-serverless-protocol --test golden`
+# gate exit code: 101

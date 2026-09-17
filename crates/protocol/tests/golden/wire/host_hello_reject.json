@@ -1,0 +1,4 @@
+{
+  "reason": "protocol version mismatch",
+  "type": "hello_reject"
+}

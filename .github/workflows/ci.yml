@@ -1,18 +1,31 @@
-# Continuous integration for the prototype workspace.
+# Continuous integration for the prototype workspace (always-on, hosted runners only).
 #
-# - rust:             fmt / clippy (-D warnings) / test / build on the host toolchain
-# - guest-musl-build: static Linux (musl) build of the guest side (bridge + examples),
-#                     which is what the firecracker provider ships into the microVM
-# - scripts:          bash -n + shellcheck + helper self-test for scripts/
+# Gate matrix: docs/ci.md. Branch protection should require exactly `ci-gate` (this file) and
+# `kvm-gate` (kvm-integration.yml); both aggregate their jobs and never turn "did not run" into a
+# silent pass.
 #
-# No secrets are used. The KVM/firecracker end-to-end run lives in
-# kvm-integration.yml and is never triggered by pull requests.
+# - changes:             classify the changed paths (scripts/ci/classify-changes.sh)
+# - rust:                fmt / clippy (-D warnings) / test / build on the host toolchain
+# - contracts:           named contract gates: OpenAPI snapshot (docs/openapi.json), protocol
+#                        golden fixtures (crates/protocol/tests/golden/), security regression
+#                        group (scripts/ci/security-regression.list)
+# - guest-musl-build:    static Linux (musl) build of the guest side (bridge + examples),
+#                        which is what the firecracker provider ships into the microVM
+# - scripts:             bash -n + shellcheck + helper self-tests for scripts/
+# - ci-gate:             aggregate status
+#
+# Docs-only changes (docs/**, *.md, issue templates; NOT docs/openapi.json) skip rust,
+# contracts and guest-musl-build; ci-gate then reports success because nothing they cover
+# changed. No secrets are used and the token is read-only. The KVM / Firecracker run lives in
+# kvm-integration.yml on a self-hosted runner and is never scheduled for fork pull requests.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  # Manual full run (e.g. on a branch before opening a PR); classifies as "everything changed".
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,20 +40,59 @@ env:
   RUST_BACKTRACE: "1"
 
 jobs:
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      kvm_required: ${{ steps.classify.outputs.kvm_required }}
+      contract: ${{ steps.classify.outputs.contract }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) scripts/ci/classify-changes.sh --base "$PR_BASE" --head "$SHA" ;;
+            push)
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                scripts/ci/classify-changes.sh --all
+              else
+                scripts/ci/classify-changes.sh --base "$PUSH_BEFORE" --head "$SHA"
+              fi
+              ;;
+            *) scripts/ci/classify-changes.sh --all ;;
+          esac
+
   rust:
     name: fmt / clippy / test / build
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust 1.95.0 (rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: 1.95.0
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: host
 
@@ -50,21 +102,63 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: test
+      - name: test (unit / property / integration, all crates)
         run: cargo test --workspace
 
       - name: build
         run: cargo build --workspace
 
-  guest-musl-build:
-    name: guest musl build (x86_64-unknown-linux-musl)
+  contracts:
+    name: contracts (OpenAPI / wire golden / security regression)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.95.0
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: contracts
+
+      - name: OpenAPI snapshot (docs/openapi.json)
+        run: cargo test -p tachyon-serverless-gateway --test openapi_snapshot
+
+      - name: Protocol golden fixtures (host <-> bridge frames, Runtime API JSON)
+        run: cargo test -p tachyon-serverless-protocol --test golden
+
+      - name: Security regression group (tenant / reuse key / lease / deadline / egress / limits)
+        run: scripts/ci/security-regression.sh
+
+      - name: Snapshots are committed (no generated file differs from the tree)
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain -- docs/openapi.json crates/protocol/tests/golden)" ]; then
+            git status --porcelain -- docs/openapi.json crates/protocol/tests/golden
+            echo "::error::a contract snapshot was modified by the test run" >&2
+            exit 1
+          fi
+
+  guest-musl-build:
+    name: guest musl build (x86_64-unknown-linux-musl)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust 1.95.0 with the musl target
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: 1.95.0
           targets: x86_64-unknown-linux-musl
@@ -74,7 +168,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends musl-tools
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: musl
 
@@ -100,7 +194,7 @@ jobs:
             fi
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: guest-x86_64-musl
           if-no-files-found: error
@@ -117,7 +211,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install shellcheck and jq
         run: |
@@ -140,3 +236,48 @@ jobs:
 
       - name: e2e helper self-test
         run: scripts/e2e/selftest.sh
+
+      - name: CI helper self-test (path classification, kvm-gate, security list)
+        run: scripts/ci/selftest.sh
+
+  ci-gate:
+    name: ci-gate
+    needs: [changes, rust, contracts, guest-musl-build, scripts]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate required results
+        env:
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          R_CHANGES: ${{ needs.changes.result }}
+          R_RUST: ${{ needs.rust.result }}
+          R_CONTRACTS: ${{ needs.contracts.result }}
+          R_MUSL: ${{ needs.guest-musl-build.result }}
+          R_SCRIPTS: ${{ needs.scripts.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          check() { # name result skip_allowed
+            if [ "$2" = success ]; then
+              echo "ok      $1"
+            elif [ "$2" = skipped ] && [ "$3" = true ]; then
+              echo "skipped $1 (docs-only change)"
+            else
+              echo "FAILED  $1: $2"
+              fail=1
+            fi
+          }
+          check changes "$R_CHANGES" false
+          check scripts "$R_SCRIPTS" false
+          skip_ok=false
+          if [ "$R_CHANGES" = success ] && [ "$DOCS_ONLY" = true ]; then skip_ok=true; fi
+          check rust "$R_RUST" "$skip_ok"
+          check contracts "$R_CONTRACTS" "$skip_ok"
+          check guest-musl-build "$R_MUSL" "$skip_ok"
+          {
+            echo "### ci-gate"
+            echo
+            echo "docs_only=$DOCS_ONLY changes=$R_CHANGES rust=$R_RUST contracts=$R_CONTRACTS guest-musl-build=$R_MUSL scripts=$R_SCRIPTS"
+          } >>"$GITHUB_STEP_SUMMARY"
+          exit "$fail"

@@ -1,0 +1,9 @@
+{
+  "attempt_id": "att_01j0000000000000000000000a",
+  "epoch": 3,
+  "handler_ms": 12,
+  "payload": {
+    "message": "hello golden"
+  },
+  "type": "response"
+}

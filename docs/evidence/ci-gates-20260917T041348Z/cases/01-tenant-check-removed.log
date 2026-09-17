@@ -1,0 +1,142 @@
+# case: tenant-check-removed
+# what: ensure_tenant lets a principal reach another tenant's resource
+# gate: security:tenant_authz
+# known-bad change (applied to a temporary copy only):
+--- crates/application/src/authz.rs.orig	2026-09-17 13:15:13
++++ crates/application/src/authz.rs	2026-09-17 13:15:13
+@@ -46,7 +46,7 @@
+ /// Tenant scoping: a resource owned by a different tenant does not exist
+ /// from the caller's point of view.
+ pub fn ensure_tenant(principal: &Principal, owner: &TenantId, what: &str) -> Result<(), AppError> {
+-    if &principal.tenant_id == owner {
++    if true || &principal.tenant_id == owner {
+         Ok(())
+     } else {
+         Err(AppError::NotFound(format!("{what} not found")))
+# ---- gate output ----
+security-regression: 16 listed tests from scripts/ci/security-regression.list
+
+::group::cargo test -p tachyon-serverless-application --lib (10 tests)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.62s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-d2af85369fe83a8f)
+
+running 10 tests
+test error::tests::tenant_mismatch_is_not_found ... ok
+test services::invoke::tests::secret_binding_failures_do_not_reveal_other_tenants ... ok
+test error::tests::foreign_and_missing_secret_bindings_are_indistinguishable ... ok
+test authz::tests::roles ... ok
+test authz::tests::foreign_tenant_is_not_found ... FAILED
+test local_ports::tests::identity_and_secrets_are_tenant_scoped ... ok
+test config::tests::invalid_tenant_id_is_rejected ... ok
+test repository::contract_tests::memory::rows_never_cross_a_tenant ... ok
+test repository::contract_tests::sqlite::artifact_ownership_is_per_tenant ... ok
+test repository::contract_tests::sqlite::rows_never_cross_a_tenant ... ok
+
+failures:
+
+---- authz::tests::foreign_tenant_is_not_found stdout ----
+
+thread 'authz::tests::foreign_tenant_is_not_found' (1024759) panicked at crates/application/src/authz.rs:89:57:
+called `Result::unwrap_err()` on an `Ok` value: ()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    authz::tests::foreign_tenant_is_not_found
+
+test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 117 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p tachyon-serverless-application --lib`
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-application --test pipeline (2 tests)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.77s
+     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-46405d5f51c70707)
+
+running 2 tests
+test cross_tenant_resources_are_not_found ... FAILED
+test revisions_cannot_reference_another_tenants_artifact ... ok
+
+failures:
+
+---- cross_tenant_resources_are_not_found stdout ----
+
+thread 'cross_tenant_resources_are_not_found' (1025542) panicked at crates/application/tests/pipeline.rs:664:5:
+assertion failed: matches!(h.app.functions.get(&h.b, &function.id), Err(AppError::NotFound(_)))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    cross_tenant_resources_are_not_found
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p tachyon-serverless-application --test pipeline`
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-cli --test mock_gateway (2 tests)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running tests/mock_gateway.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/mock_gateway-a2ecd3a55ef88ddd)
+
+running 2 tests
+test wrong_token_is_exit_2 ... ok
+test cross_tenant_resource_is_404_exit_2 ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.02s
+
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-gateway --test gateway_integration (2 tests)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+   Compiling tachyon-serverless-gateway v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/apps/gateway)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.11s
+     Running tests/gateway_integration.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/gateway_integration-7580544a0192b201)
+
+running 2 tests
+test operator_role_is_own_tenant_read_only ... FAILED
+test foreign_artifact_digest_is_indistinguishable_from_a_missing_one ... ok
+
+failures:
+
+---- operator_role_is_own_tenant_read_only stdout ----
+
+thread 'operator_role_is_own_tenant_read_only' (1026769) panicked at apps/gateway/tests/gateway_integration.rs:926:9:
+assertion `left == right` failed: GET /v1/functions/fn_01m2ps73vmherdbzvh864253h0
+  left: 200
+ right: 404
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    operator_role_is_own_tenant_read_only
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.10s
+
+error: test failed, to rerun pass `-p tachyon-serverless-gateway --test gateway_integration`
+::endgroup::
+
+security regression group
+STATUS   CATEGORY         TEST
+FAILED   tenant_authz     tachyon-serverless-application lib authz::tests::foreign_tenant_is_not_found
+ok       tenant_authz     tachyon-serverless-application lib authz::tests::roles
+ok       tenant_authz     tachyon-serverless-application lib error::tests::tenant_mismatch_is_not_found
+ok       tenant_authz     tachyon-serverless-application lib error::tests::foreign_and_missing_secret_bindings_are_indistinguishable
+ok       tenant_authz     tachyon-serverless-application lib local_ports::tests::identity_and_secrets_are_tenant_scoped
+ok       tenant_authz     tachyon-serverless-application lib services::invoke::tests::secret_binding_failures_do_not_reveal_other_tenants
+ok       tenant_authz     tachyon-serverless-application lib config::tests::invalid_tenant_id_is_rejected
+ok       tenant_authz     tachyon-serverless-application lib repository::contract_tests::memory::rows_never_cross_a_tenant
+ok       tenant_authz     tachyon-serverless-application lib repository::contract_tests::sqlite::rows_never_cross_a_tenant
+ok       tenant_authz     tachyon-serverless-application lib repository::contract_tests::sqlite::artifact_ownership_is_per_tenant
+FAILED   tenant_authz     tachyon-serverless-application test:pipeline cross_tenant_resources_are_not_found
+ok       tenant_authz     tachyon-serverless-application test:pipeline revisions_cannot_reference_another_tenants_artifact
+FAILED   tenant_authz     tachyon-serverless-gateway test:gateway_integration operator_role_is_own_tenant_read_only
+ok       tenant_authz     tachyon-serverless-gateway test:gateway_integration foreign_artifact_digest_is_indistinguishable_from_a_missing_one
+ok       tenant_authz     tachyon-serverless-cli test:mock_gateway cross_tenant_resource_is_404_exit_2
+ok       tenant_authz     tachyon-serverless-cli test:mock_gateway wrong_token_is_exit_2
+
+security-regression: FAIL - 3 of 16 listed tests did not pass.
+  MISSING means the test no longer exists under that exact path (renamed, moved or removed).
+  Fix the regression, or update scripts/ci/security-regression.list in the same change.
+# gate exit code: 1

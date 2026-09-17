@@ -1,0 +1,21 @@
+{
+  "body_base64": "aGk=",
+  "headers": [
+    [
+      "x-a",
+      "1"
+    ],
+    [
+      "x-a",
+      "2"
+    ],
+    [
+      "content-type",
+      "application/json"
+    ]
+  ],
+  "method": "POST",
+  "path": "/echo/a%2Fb",
+  "query": "x=1&x=2",
+  "source_ip": "192.0.2.10"
+}

@@ -1,0 +1,2419 @@
+{
+  "components": {
+    "schemas": {
+      "AliasResponse": {
+        "properties": {
+          "function_id": {
+            "type": "string"
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "previous_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "function_id",
+          "name",
+          "revision_id",
+          "generation",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ApiError": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "error_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "invocation_id": {
+            "description": "Present for invocation failures so callers can fetch history/logs.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ApiErrorBody": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "ArtifactRequest": {
+        "oneOf": [
+          {
+            "description": "Digest returned by `POST /v1/artifacts`.",
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "binary"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "OCI reference pinned to a digest. Accepted but not executable by prototype providers.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "oci_image"
+                ],
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reference",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "ArtifactUploadResponse": {
+        "properties": {
+          "digest": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "digest",
+          "size_bytes"
+        ],
+        "type": "object"
+      },
+      "AttemptResponse": {
+        "properties": {
+          "boot_evidence": {
+            "type": "object"
+          },
+          "dispatched_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "environment_id": {
+            "type": "string"
+          },
+          "epoch": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InvocationErrorResponse"
+              }
+            ]
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start_kind": {
+            "description": "`cold` | `warm` | `restored`",
+            "type": "string"
+          },
+          "status": {
+            "description": "`dispatched` | `succeeded` | `failed` | `outcome_unknown`",
+            "type": "string"
+          },
+          "timings": {
+            "$ref": "#/components/schemas/TimingsResponse"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "environment_id",
+          "epoch",
+          "status",
+          "start_kind",
+          "timings",
+          "boot_evidence",
+          "dispatched_at"
+        ],
+        "type": "object"
+      },
+      "CreateFunctionRequest": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreateRevisionRequest": {
+        "properties": {
+          "architecture": {
+            "description": "`x86_64` or `aarch64`.",
+            "type": "string"
+          },
+          "artifact": {
+            "$ref": "#/components/schemas/ArtifactRequest"
+          },
+          "description": {
+            "type": "string"
+          },
+          "egress": {
+            "description": "`none` (default), `restricted`, `public-web`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "egress_allow": {
+            "description": "Destinations a `restricted` revision may open (required for\n`restricted`, refused for the other profiles). IPv4 CIDRs only;\nspecial-purpose ranges (private, link-local, metadata, loopback, ...)\nare refused.",
+            "items": {
+              "$ref": "#/components/schemas/EgressAllowRequest"
+            },
+            "type": "array"
+          },
+          "env_vars": {
+            "items": {
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionRequest"
+          },
+          "publish_to_prod": {
+            "description": "When true (default), also point alias `prod` at the revision once Ready.",
+            "type": "boolean"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/ResourcesRequest"
+          },
+          "secrets": {
+            "items": {
+              "$ref": "#/components/schemas/SecretBindingRequest"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact",
+          "architecture"
+        ],
+        "type": "object"
+      },
+      "DeadlinesResponse": {
+        "properties": {
+          "client_deadline": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "execution_deadline": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "init_deadline": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "queue_deadline": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue_deadline",
+          "client_deadline"
+        ],
+        "type": "object"
+      },
+      "EgressAllowRequest": {
+        "description": "One allowlist entry of a `restricted` revision.",
+        "properties": {
+          "cidr": {
+            "description": "IPv4 network, e.g. `203.0.113.7/32` (a bare address means `/32`).",
+            "type": "string"
+          },
+          "ports": {
+            "description": "Destination ports (1..=16 entries).",
+            "items": {
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "protocol": {
+            "description": "`tcp` (default) or `udp`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "cidr",
+          "ports"
+        ],
+        "type": "object"
+      },
+      "ErrorCode": {
+        "description": "Stable machine-readable error codes.",
+        "enum": [
+          "unauthorized",
+          "forbidden",
+          "not_found",
+          "conflict",
+          "invalid_request",
+          "payload_too_large",
+          "capacity_exceeded",
+          "revision_not_ready",
+          "function_deleted",
+          "user_error",
+          "crash",
+          "init_error",
+          "timeout",
+          "queue_timeout",
+          "cancelled",
+          "outcome_unknown",
+          "platform_error",
+          "provider_unavailable"
+        ],
+        "type": "string"
+      },
+      "ExecutionRequest": {
+        "properties": {
+          "initialization_timeout_seconds": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_concurrency": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FunctionResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "name",
+          "description",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "InvocationErrorResponse": {
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "error_type": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "class",
+          "error_type",
+          "message"
+        ],
+        "type": "object"
+      },
+      "InvocationResponse": {
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptResponse"
+            },
+            "type": "array"
+          },
+          "deadlines": {
+            "$ref": "#/components/schemas/DeadlinesResponse"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InvocationErrorResponse"
+              }
+            ]
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "function_id": {
+            "type": "string"
+          },
+          "http_status": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "input_size_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mode": {
+            "description": "`sync` | `async`",
+            "type": "string"
+          },
+          "output": {
+            "description": "Inline result when small enough; `null` otherwise or when not succeeded.",
+            "type": "object"
+          },
+          "revision_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "`accepted` | `queued` | `running` | `succeeded` | `failed` | `cancelled` | `outcome_unknown`",
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "function_id",
+          "revision_id",
+          "mode",
+          "status",
+          "trace_id",
+          "input_digest",
+          "input_size_bytes",
+          "accepted_at",
+          "deadlines"
+        ],
+        "type": "object"
+      },
+      "InvokeQuery": {
+        "description": "Query parameters for `POST /v1/functions/{id}:invoke`.",
+        "properties": {
+          "alias": {
+            "description": "Alias to resolve (default `prod`).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision_id": {
+            "description": "Pin a specific revision instead of resolving an alias.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ListResponse_AliasResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "function_id": {
+                  "type": "string"
+                },
+                "generation": {
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "previous_revision_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "revision_id": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "function_id",
+                "name",
+                "revision_id",
+                "generation",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListResponse_FunctionResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "deleted_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "tenant_id": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "tenant_id",
+                "name",
+                "description",
+                "created_at",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListResponse_InvocationResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "accepted_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "alias": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "attempts": {
+                  "items": {
+                    "$ref": "#/components/schemas/AttemptResponse"
+                  },
+                  "type": "array"
+                },
+                "deadlines": {
+                  "$ref": "#/components/schemas/DeadlinesResponse"
+                },
+                "error": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvocationErrorResponse"
+                    }
+                  ]
+                },
+                "finished_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "function_id": {
+                  "type": "string"
+                },
+                "http_status": {
+                  "format": "int32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "input_digest": {
+                  "type": "string"
+                },
+                "input_size_bytes": {
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "mode": {
+                  "description": "`sync` | `async`",
+                  "type": "string"
+                },
+                "output": {
+                  "description": "Inline result when small enough; `null` otherwise or when not succeeded.",
+                  "type": "object"
+                },
+                "revision_id": {
+                  "type": "string"
+                },
+                "started_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "description": "`accepted` | `queued` | `running` | `succeeded` | `failed` | `cancelled` | `outcome_unknown`",
+                  "type": "string"
+                },
+                "trace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "function_id",
+                "revision_id",
+                "mode",
+                "status",
+                "trace_id",
+                "input_digest",
+                "input_size_bytes",
+                "accepted_at",
+                "deadlines"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ListResponse_RevisionResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "failure_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "function_id": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "number": {
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "spec": {
+                  "type": "object"
+                },
+                "spec_digest": {
+                  "type": "string"
+                },
+                "status": {
+                  "description": "`pending` | `preparing` | `validating` | `ready` | `failed`",
+                  "type": "string"
+                },
+                "updated_at": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "function_id",
+                "number",
+                "status",
+                "spec",
+                "spec_digest",
+                "created_at",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "LogEntryResponse": {
+        "properties": {
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "environment_id": {
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "line": {
+            "type": "string"
+          },
+          "phase": {
+            "description": "`boot` | `init` | `handler` | `shutdown`",
+            "type": "string"
+          },
+          "stream": {
+            "description": "`stdout` | `stderr` | `platform`",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "timestamp",
+          "stream",
+          "phase",
+          "environment_id",
+          "line"
+        ],
+        "type": "object"
+      },
+      "LogsResponse": {
+        "properties": {
+          "dropped": {
+            "description": "True when lines were dropped because of retention limits.",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LogEntryResponse"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProviderInfo": {
+        "properties": {
+          "capabilities": {
+            "type": "object"
+          },
+          "dev_only": {
+            "type": "boolean"
+          },
+          "isolation": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "preflight": {
+            "type": "object"
+          },
+          "reuse": {
+            "$ref": "#/components/schemas/ReuseInfo",
+            "description": "Warm reuse: on or off, measured or not, and why."
+          }
+        },
+        "required": [
+          "kind",
+          "dev_only",
+          "isolation",
+          "capabilities",
+          "preflight"
+        ],
+        "type": "object"
+      },
+      "ResourcesRequest": {
+        "properties": {
+          "cpu_millis": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ephemeral_storage_mib": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memory_mib": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ReuseInfo": {
+        "description": "Whether this gateway reuses (warms) execution environments, and why.\n\nThe two flags answer two different questions and neither implies the other\n(PLT-4633 review F7):\n\n- `enabled` is what this gateway *does*: both gates are open, so\n  environments really are pooled and reused.\n- `verified` is a fact about the **provider**: it reports both\n  `idle_quiesce` and `idle_resume` as `supported`, which it may only do\n  once the pause/resume cycle has been measured on real hardware. It says\n  nothing about the `[pool]` configuration, so a gateway with reuse\n  switched off can still report `verified: true`.\n\nThey are separate on purpose: an operator may switch reuse on for an\n`unverified` provider in order to take the measurement\n(`[pool] allow_unverified_idle`), and such a run must never be presented as\na warm success. `enabled: true, verified: false` therefore means \"reuse is\nrunning so it can be measured\", not \"warm works here\" (PLT-4633 acceptance\n4, docs/architecture.md §4).",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "idle_quiesce": {
+            "description": "`supported` | `unsupported` | `unverified`, as the provider reports it.",
+            "type": "string"
+          },
+          "idle_resume": {
+            "type": "string"
+          },
+          "reason": {
+            "description": "One sentence naming the gate that decided `enabled`. Always present, on\nthe enabled and the disabled path alike.",
+            "type": "string"
+          },
+          "verified": {
+            "description": "The provider reports both idle capabilities as `supported`, i.e. they\nwere measured. Independent of whether reuse is switched on.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "verified",
+          "reason",
+          "idle_quiesce",
+          "idle_resume"
+        ],
+        "type": "object"
+      },
+      "RevisionResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "function_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "spec": {
+            "type": "object"
+          },
+          "spec_digest": {
+            "type": "string"
+          },
+          "status": {
+            "description": "`pending` | `preparing` | `validating` | `ready` | `failed`",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "function_id",
+          "number",
+          "status",
+          "spec",
+          "spec_digest",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "SecretBindingRequest": {
+        "properties": {
+          "binding_ref": {
+            "type": "string"
+          },
+          "env_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "env_name",
+          "binding_ref"
+        ],
+        "type": "object"
+      },
+      "TimingsResponse": {
+        "properties": {
+          "environment_boot_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "handler_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "queue_wait_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "readiness_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "response_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "resume_ms": {
+            "description": "Warm starts only: the environment resume and the readiness check that\nfollowed it. Absent on a cold start, which boots instead.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "runtime_init_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "total_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateAliasRequest": {
+        "properties": {
+          "expected_generation": {
+            "description": "When set, the update only applies if the alias is at this generation.",
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revision_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision_id"
+        ],
+        "type": "object"
+      },
+      "UsageSummaryResponse": {
+        "properties": {
+          "bytes_in_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytes_out_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "environment_ms_total": {
+            "description": "Host-observed environment lifetime milliseconds, summed.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failed": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "function_id": {
+            "type": "string"
+          },
+          "handler_ms_total": {
+            "description": "Host-observed handler milliseconds, summed.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "invocations": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "not_billable": {
+            "description": "Always true in the prototype: numbers are usage facts, not charges.",
+            "type": "boolean"
+          },
+          "succeeded": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "function_id",
+          "invocations",
+          "succeeded",
+          "failed",
+          "handler_ms_total",
+          "environment_ms_total",
+          "bytes_in_total",
+          "bytes_out_total",
+          "not_billable"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Management, invoke, logs and usage API of the Tachyon Serverless prototype. Colon-style action paths (`/v1/functions/{id}:invoke`, `/v1/invocations/{id}:cancel`) are accepted as aliases of the slash forms documented here.",
+    "license": {
+      "name": "MIT"
+    },
+    "title": "Tachyon Serverless Gateway",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "description": "alive"
+          }
+        },
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "openapi_json",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OpenAPI document"
+          }
+        },
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readyz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "provider preflight ok"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "provider not ready"
+          }
+        },
+        "tags": [
+          "meta"
+        ]
+      }
+    },
+    "/v1/artifacts": {
+      "post": {
+        "operationId": "upload_artifact",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "raw executable bytes",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "artifacts"
+        ]
+      }
+    },
+    "/v1/functions": {
+      "get": {
+        "operationId": "list_functions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_FunctionResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "functions"
+        ]
+      },
+      "post": {
+        "operationId": "create_function",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFunctionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FunctionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "functions"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}": {
+      "delete": {
+        "operationId": "delete_function",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FunctionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "functions"
+        ]
+      },
+      "get": {
+        "operationId": "get_function",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FunctionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "functions"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/aliases": {
+      "get": {
+        "operationId": "list_aliases",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_AliasResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "aliases"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/aliases/{alias}": {
+      "get": {
+        "operationId": "get_alias",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "alias name",
+            "in": "path",
+            "name": "alias",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AliasResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "aliases"
+        ]
+      },
+      "put": {
+        "operationId": "update_alias",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "alias name",
+            "in": "path",
+            "name": "alias",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAliasRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AliasResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "aliases"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/http/{path}": {
+      "get": {
+        "operationId": "http_path",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "path relative to the function root (any method is accepted)",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "alias to resolve (default prod)",
+            "in": "header",
+            "name": "x-tachyon-alias",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "pin a revision",
+            "in": "header",
+            "name": "x-tachyon-revision-id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the handler's HTTP response (status, headers and body as returned by the function); x-tachyon-invocation-id header"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invoke"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/invocations": {
+      "get": {
+        "operationId": "list_invocations",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "max items (default 50)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_InvocationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invocations"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/invoke": {
+      "post": {
+        "operationId": "invoke_json",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "alias to resolve (default prod)",
+            "in": "query",
+            "name": "alias",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "pin a revision instead of resolving an alias",
+            "in": "query",
+            "name": "revision_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "replay protection",
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "client deadline (relative ms)",
+            "in": "header",
+            "name": "x-tachyon-client-timeout-ms",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "JSON event payload",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "handler output (JSON); x-tachyon-invocation-id header"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invoke"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/revisions": {
+      "get": {
+        "operationId": "list_revisions",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_RevisionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "revisions"
+        ]
+      },
+      "post": {
+        "operationId": "create_revision",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRevisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "revisions"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_revision",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "revision id",
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "revisions"
+        ]
+      }
+    },
+    "/v1/functions/{function_id}/usage": {
+      "get": {
+        "operationId": "usage",
+        "parameters": [
+          {
+            "description": "function id",
+            "in": "path",
+            "name": "function_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/invocations/{invocation_id}": {
+      "get": {
+        "operationId": "get_invocation",
+        "parameters": [
+          {
+            "description": "invocation id",
+            "in": "path",
+            "name": "invocation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvocationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invocations"
+        ]
+      }
+    },
+    "/v1/invocations/{invocation_id}/cancel": {
+      "post": {
+        "operationId": "cancel_invocation",
+        "parameters": [
+          {
+            "description": "invocation id",
+            "in": "path",
+            "name": "invocation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvocationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invocations"
+        ]
+      }
+    },
+    "/v1/invocations/{invocation_id}/logs": {
+      "get": {
+        "operationId": "invocation_logs",
+        "parameters": [
+          {
+            "description": "invocation id",
+            "in": "path",
+            "name": "invocation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogsResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "invocations"
+        ]
+      }
+    },
+    "/v1/provider": {
+      "get": {
+        "operationId": "provider_info",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderInfo"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "provider"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "meta"
+    },
+    {
+      "name": "provider"
+    },
+    {
+      "name": "artifacts"
+    },
+    {
+      "name": "functions"
+    },
+    {
+      "name": "revisions"
+    },
+    {
+      "name": "aliases"
+    },
+    {
+      "name": "invoke"
+    },
+    {
+      "name": "invocations"
+    },
+    {
+      "name": "usage"
+    }
+  ]
+}

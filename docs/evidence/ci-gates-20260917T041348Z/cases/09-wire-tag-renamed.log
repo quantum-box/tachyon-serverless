@@ -1,0 +1,56 @@
+# case: wire-tag-renamed
+# what: the `pong` frame type tag changes
+# gate: golden
+# known-bad change (applied to a temporary copy only):
+--- crates/protocol/src/wire.rs.orig	2026-09-17 13:16:32
++++ crates/protocol/src/wire.rs	2026-09-17 13:16:32
+@@ -121,6 +121,7 @@
+     /// being scheduled and that the bridge is still reading its end of the
+     /// connection — which is exactly what the host has to know after resuming
+     /// a quiesced environment (protocol version 2, docs/protocol.md §A).
++    #[serde(rename = "pong_v2")]
+     Pong {
+         nonce: u64,
+     },
+# ---- gate output ----
+   Compiling tachyon-serverless-protocol v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/protocol)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.75s
+     Running tests/golden.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/golden-8cf1526a6f9f1260)
+
+running 7 tests
+test runtime_api_constants_match_the_golden_fixture ... ok
+test a_length_prefixed_frame_matches_the_golden_bytes ... ok
+test every_message_variant_and_error_kind_has_a_fixture ... FAILED
+test no_stale_fixture_is_left_behind ... ok
+test runtime_api_bodies_match_the_golden_fixtures ... ok
+test host_to_bridge_frames_match_the_golden_fixtures ... ok
+test bridge_to_host_frames_match_the_golden_fixtures ... FAILED
+
+failures:
+
+---- every_message_variant_and_error_kind_has_a_fixture stdout ----
+
+thread 'every_message_variant_and_error_kind_has_a_fixture' (1040769) panicked at crates/protocol/tests/golden.rs:473:9:
+assertion `left == right` failed
+  left: String("pong_v2")
+ right: "pong"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- bridge_to_host_frames_match_the_golden_fixtures stdout ----
+
+thread 'bridge_to_host_frames_match_the_golden_fixtures' (1040768) panicked at crates/protocol/tests/golden.rs:110:5:
+golden fixture mismatch - the runtime wire contract changed:
+  wire/guest_pong.json: fixture no longer decodes: malformed frame: unknown variant `pong`, expected one of `hello`, `ready`, `init_error`, `log`, `response`, `error`, `exited`, `heartbeat`, `pong_v2` at line 3 column 16; this build encodes a different shape:
+    fixture: {"nonce":7,"type":"pong"}
+    encoded: {"nonce":7,"type":"pong_v2"}
+If the change is intended, decide on PROTOCOL_VERSION (docs/protocol.md), then run `TSLS_UPDATE_SNAPSHOTS=1 cargo test -p tachyon-serverless-protocol --test golden` and commit crates/protocol/tests/golden/.
+
+
+failures:
+    bridge_to_host_frames_match_the_golden_fixtures
+    every_message_variant_and_error_kind_has_a_fixture
+
+test result: FAILED. 5 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p tachyon-serverless-protocol --test golden`
+# gate exit code: 101

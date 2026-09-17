@@ -1,0 +1,27 @@
+prove-gates run 20260917T041348Z
+commit      88c0a920a4bdb6a910cff580149f3d0c329699a3 (changed or untracked paths outside docs/evidence at run time: 0)
+host        Darwin 25.6.0 arm64
+rustc       rustc 1.95.0 (59807616e 2026-04-14)
+copy        rsync of the working tree without .git/target/.kvm/data/docs/evidence
+
+baseline                           security                 PASS (exit 0, as expected)
+baseline                           golden                   PASS (exit 0, as expected)
+baseline                           openapi                  PASS (exit 0, as expected)
+tenant-check-removed               security:tenant_authz    CAUGHT (gate exit 1)
+reuse-key-ignored                  security:reuse_key       CAUGHT (gate exit 1)
+epoch-fencing-removed              security:lease_epoch     CAUGHT (gate exit 1)
+elapsed-client-deadline-accepted   security:deadline        CAUGHT (gate exit 1)
+egress-gate-result-ignored         security:egress_gate     CAUGHT (gate exit 1)
+memory-lower-bound-removed         security:resource_limits CAUGHT (gate exit 1)
+security-test-renamed              security:lease_epoch     CAUGHT (gate exit 1)
+wire-field-renamed                 golden                   CAUGHT (gate exit 101)
+wire-tag-renamed                   golden                   CAUGHT (gate exit 101)
+runtime-api-header-renamed         golden                   CAUGHT (gate exit 101)
+wire-fixture-corrupted             golden                   CAUGHT (gate exit 101)
+openapi-route-changed              openapi                  CAUGHT (gate exit 101)
+openapi-schema-field-renamed       openapi                  CAUGHT (gate exit 101)
+openapi-snapshot-corrupted         openapi                  CAUGHT (gate exit 101)
+kvm-required-not-run               kvm-gate                 CAUGHT (gate exit 1)
+kvm-runner-cancelled               kvm-gate-cancelled       CAUGHT (gate exit 1)
+
+prove-gates: PASS - baseline green and every known-bad change was caught by its gate

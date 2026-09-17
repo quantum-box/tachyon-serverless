@@ -1,0 +1,10 @@
+{
+  "body_base64": "b2s=",
+  "headers": [
+    [
+      "x-served-by",
+      "golden"
+    ]
+  ],
+  "status": 201
+}

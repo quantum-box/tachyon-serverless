@@ -1,0 +1,74 @@
+# case: reuse-key-ignored
+# what: an idle environment is claimed without comparing its reuse key
+# gate: security:reuse_key
+# known-bad change (applied to a temporary copy only):
+--- crates/application/src/repository/memory.rs.orig	2026-09-17 13:15:24
++++ crates/application/src/repository/memory.rs	2026-09-17 13:15:24
+@@ -653,7 +653,7 @@
+         // is ordered by id (a ULID), so the oldest match wins.
+         let Some(env) = s.environments.values_mut().find(|e| {
+             matches!(e.state, EnvironmentState::Idle)
+-                && &e.reuse_key == key
++                && (&e.reuse_key == key || true)
+                 && e.owner.as_ref() == owner
+         }) else {
+             return Ok(None);
+# ---- gate output ----
+security-regression: 7 listed tests from scripts/ci/security-regression.list
+
+::group::cargo test -p tachyon-serverless-application --lib (5 tests)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.04s
+     Running unittests src/lib.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/tachyon_serverless_application-d2af85369fe83a8f)
+
+running 5 tests
+test services::pool::tests::reuse_needs_both_idle_capabilities_supported_and_the_config_on ... ok
+test repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused ... FAILED
+test config::tests::environment_reuse_is_off_by_default_and_validated_when_enabled ... ok
+test repository::contract_tests::sqlite::only_an_exactly_matching_reuse_key_is_reused ... ok
+test services::pool::tests::a_claim_racing_a_release_never_takes_a_row_without_its_session ... ok
+
+failures:
+
+---- repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused stdout ----
+
+thread 'repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused' (1027306) panicked at crates/application/src/repository/contract_tests.rs:1137:9:
+a differing tenant must never reuse the environment
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 122 filtered out; finished in 0.52s
+
+error: test failed, to rerun pass `-p tachyon-serverless-application --lib`
+::endgroup::
+
+::group::cargo test -p tachyon-serverless-application --test pipeline (2 tests)
+   Compiling tachyon-serverless-application v0.1.0 (/private/var/folders/z7/khzdjrt95cg_fcmcnh4j1b5h0000gn/T/prove-gates.vo8P6V/crates/application)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.44s
+     Running tests/pipeline.rs (/Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-acb302c921ca5d50d/target/prove-gates/debug/deps/pipeline-46405d5f51c70707)
+
+running 2 tests
+test a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start ... ok
+test another_revision_never_reuses_the_first_revisions_environment ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.03s
+
+::endgroup::
+
+security regression group
+STATUS   CATEGORY         TEST
+FAILED   reuse_key        tachyon-serverless-application lib repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused
+ok       reuse_key        tachyon-serverless-application lib repository::contract_tests::sqlite::only_an_exactly_matching_reuse_key_is_reused
+ok       reuse_key        tachyon-serverless-application lib services::pool::tests::reuse_needs_both_idle_capabilities_supported_and_the_config_on
+ok       reuse_key        tachyon-serverless-application lib services::pool::tests::a_claim_racing_a_release_never_takes_a_row_without_its_session
+ok       reuse_key        tachyon-serverless-application lib config::tests::environment_reuse_is_off_by_default_and_validated_when_enabled
+ok       reuse_key        tachyon-serverless-application test:pipeline another_revision_never_reuses_the_first_revisions_environment
+ok       reuse_key        tachyon-serverless-application test:pipeline a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start
+
+security-regression: FAIL - 1 of 7 listed tests did not pass.
+  MISSING means the test no longer exists under that exact path (renamed, moved or removed).
+  Fix the regression, or update scripts/ci/security-regression.list in the same change.
+# gate exit code: 1

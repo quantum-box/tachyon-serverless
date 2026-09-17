@@ -1,95 +1,311 @@
-# KVM / Firecracker integration run (PLT-4630 demo with the real microVM provider).
+# KVM / Firecracker integration (PLT-4645): the gate for runtime / network / kernel / billing
+# changes. Gate matrix, trust model and runner registration: docs/ci.md.
 #
-# Security posture
-# ----------------
-# - Manual trigger only (`workflow_dispatch`). This workflow is NEVER run for
-#   pull requests: untrusted PR code must not execute on a runner with /dev/kvm.
-# - Runs on a dedicated self-hosted runner labelled `linux` + `kvm` that is
-#   provisioned for this repository only (see docs/kvm.md). As of this commit the
-#   runner is NOT yet provisioned; dispatching the workflow will queue until one
-#   with matching labels comes online.
-# - No production credentials, no cloud secrets, no access to any Tachyon
-#   service: the demo talks only to a gateway started on the runner itself, with
-#   throwaway tokens from the generated dev config. Nothing here is a deployment.
-# - The runner is expected to be ephemeral (rebuilt between runs) so that leftover
-#   VM artifacts cannot leak across jobs; `teardown` runs unconditionally anyway.
+# Jobs
+# ----
+# - classify  (hosted):      is KVM required for this change, and may this event use the runner?
+# - kvm       (self-hosted): preflight -> bootstrap -> profile -> smoke -> measure-isolation ->
+#                            measure-warm -> E2E (firecracker) -> cleanup + orphan check (always)
+#                            -> evidence artifact (always, includes commit + runtime profile)
+# - kvm-gate  (hosted):      the status branch protection requires. It is
+#                              success  when KVM was not required ("NOT REQUIRED" in the summary)
+#                                       or when the kvm job passed;
+#                              failure  when KVM was required but the job was skipped (fork,
+#                                       missing `kvm` label) or failed / was cancelled;
+#                              pending  while the kvm job waits for a runner. No runner is
+#                                       registered as of PLT-4645, so a required run stays
+#                                       queued (GitHub cancels it after 24 h -> failure).
+#                            "KVM did not run" is never reported as a pass.
+#
+# Trust model
+# -----------
+# - The kvm job is scheduled only for: push to main, workflow_dispatch (write access), and
+#   pull requests whose head branch lives in THIS repository and that carry the `kvm` label
+#   (applied by a maintainer after reading the diff). Fork pull requests are never scheduled,
+#   and this workflow never uses `pull_request_target`.
+# - Because a pull request can edit this file, the `if:` conditions are defence in depth only.
+#   The runner itself must be restricted (runner group limited to this repository, fork PR
+#   workflows require approval, ephemeral runner): docs/ci.md section 4.
+# - Read-only GITHUB_TOKEN, `persist-credentials: false`, no secrets, no production credentials,
+#   no shared cargo cache between trust levels, evidence written to RUNNER_TEMP (not the repo),
+#   `.kvm/` purged after every run so a rootfs built from one change never serves another.
 name: KVM integration (firecracker)
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
     inputs:
-      provider:
-        description: Execution provider to exercise
-        type: choice
-        options:
-          - firecracker
-        default: firecracker
+      reason:
+        description: Why the KVM run is dispatched (recorded in the run summary)
+        type: string
+        required: false
+        default: manual
+      firecracker_version:
+        description: "Canary only: FIRECRACKER_VERSION for bootstrap (empty = scripts/kvm/bootstrap.sh default)"
+        type: string
+        required: false
+        default: ""
+      ci_version:
+        description: "Canary only: CI_VERSION (guest kernel S3 prefix) for bootstrap (empty = default)"
+        type: string
+        required: false
+        default: ""
+      guest_kernel_series:
+        description: "Canary only: GUEST_KERNEL_SERIES for bootstrap, e.g. 6.1 (empty = default)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: kvm-integration
+  group: kvm-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
-  TSLS_PROVIDER: ${{ inputs.provider }}
+  RUST_BACKTRACE: "1"
 
 jobs:
-  e2e:
-    name: preflight / bootstrap / smoke / e2e demo
-    runs-on: [self-hosted, linux, kvm]
-    timeout-minutes: 90
+  classify:
+    name: classify (is KVM required / allowed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      kvm_required: ${{ steps.decide.outputs.kvm_required }}
+      trusted: ${{ steps.decide.outputs.trusted }}
+      labeled: ${{ steps.decide.outputs.labeled }}
+      run_kvm: ${{ steps.decide.outputs.run_kvm }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Install Rust 1.95.0 with the musl target
-        uses: dtolnay/rust-toolchain@stable
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          HAS_KVM_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'kvm') }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          trusted=false
+          labeled=false
+          case "$EVENT" in
+            push)
+              [ "$REF" = refs/heads/main ] && trusted=true
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                scripts/ci/classify-changes.sh --all >classify.out
+              else
+                scripts/ci/classify-changes.sh --base "$PUSH_BEFORE" --head "$SHA" >classify.out
+              fi
+              ;;
+            pull_request)
+              [ "$PR_HEAD_REPO" = "$REPO" ] && trusted=true
+              [ "$HAS_KVM_LABEL" = true ] && labeled=true
+              scripts/ci/classify-changes.sh --base "$PR_BASE" --head "$SHA" >classify.out
+              ;;
+            workflow_dispatch)
+              trusted=true
+              # A manual dispatch is an explicit request: the gate requires the run.
+              printf 'kvm_required=true\nkvm_paths=<workflow_dispatch: %s>\n' "$REASON" >classify.out
+              ;;
+            *)
+              scripts/ci/classify-changes.sh --all >classify.out
+              ;;
+          esac
+          cat classify.out
+          required="$(sed -n 's/^kvm_required=//p' classify.out)"
+          run_kvm=false
+          if [ "$required" = true ] && [ "$trusted" = true ]; then
+            if [ "$EVENT" != pull_request ] || [ "$labeled" = true ]; then run_kvm=true; fi
+          fi
+          {
+            echo "kvm_required=$required"
+            echo "trusted=$trusted"
+            echo "labeled=$labeled"
+            echo "run_kvm=$run_kvm"
+          } >>"$GITHUB_OUTPUT"
+          {
+            echo "### KVM classification"
+            echo
+            echo "| event | kvm_required | trusted | labeled | run_kvm |"
+            echo "|---|---|---|---|---|"
+            echo "| $EVENT | $required | $trusted | $labeled | $run_kvm |"
+            echo
+            echo "paths: \`$(sed -n 's/^kvm_paths=//p' classify.out)\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  kvm:
+    name: KVM integration (self-hosted, firecracker)
+    needs: classify
+    # Defence in depth: the fork check is repeated here, next to the runner labels.
+    if: >-
+      needs.classify.outputs.run_kvm == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, linux, kvm]
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      TSLS_PROVIDER: firecracker
+    steps:
+      - name: Refuse a dirty runner (leftover VMs from an earlier job)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if pgrep -a firecracker; then
+            echo "::error::firecracker processes are already running on this runner; refusing to start (runner must be ephemeral or cleaned)" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          clean: true
+
+      - name: Prepare the evidence directory (outside the repository)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/kvm-evidence-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          # scripts/kvm/*.sh read EVIDENCE_ROOT, scripts/e2e/demo.sh reads TSLS_EVIDENCE_DIR
+          {
+            echo "EVIDENCE_DIR=$dir"
+            echo "EVIDENCE_ROOT=$dir"
+            echo "TSLS_EVIDENCE_DIR=$dir"
+          } >>"$GITHUB_ENV"
+          printf '%s\n' "$GITHUB_SHA" >"$dir/COMMIT"
+
+      - name: Install Rust 1.95.0 with the musl targets
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: 1.95.0
-          components: rustfmt, clippy
           targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: kvm
-
-      - name: Preflight (KVM, firecracker binary, kernel, rootfs)
+      - name: Preflight (KVM, tools, socket path length)
+        shell: bash
         run: |
           set -euo pipefail
-          test -x scripts/kvm/preflight.sh || { echo "scripts/kvm/preflight.sh missing (KVM track)" >&2; exit 1; }
-          scripts/kvm/preflight.sh
+          scripts/kvm/preflight.sh 2>&1 | tee "$EVIDENCE_DIR/preflight.txt"
 
-      - name: "Bootstrap (.kvm/: firecracker, kernel, rootfs with the bridge as /sbin/tachyon-init)"
+      - name: Bootstrap (.kvm/ firecracker, guest kernel, rootfs with the bridge from this commit)
+        shell: bash
+        env:
+          IN_FC_VERSION: ${{ inputs.firecracker_version }}
+          IN_CI_VERSION: ${{ inputs.ci_version }}
+          IN_KERNEL_SERIES: ${{ inputs.guest_kernel_series }}
         run: |
           set -euo pipefail
-          test -x scripts/kvm/bootstrap.sh || { echo "scripts/kvm/bootstrap.sh missing (KVM track)" >&2; exit 1; }
-          scripts/kvm/bootstrap.sh
+          # Runtime profile overrides are honoured only for a manual dispatch (docs/ci.md section 6).
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ -n "$IN_FC_VERSION" ]; then export FIRECRACKER_VERSION="$IN_FC_VERSION"; fi
+            if [ -n "$IN_CI_VERSION" ]; then export CI_VERSION="$IN_CI_VERSION"; fi
+            if [ -n "$IN_KERNEL_SERIES" ]; then export GUEST_KERNEL_SERIES="$IN_KERNEL_SERIES"; fi
+          fi
+          echo "profile overrides: FIRECRACKER_VERSION=${FIRECRACKER_VERSION:-<default>} CI_VERSION=${CI_VERSION:-<default>} GUEST_KERNEL_SERIES=${GUEST_KERNEL_SERIES:-<default>}" | tee "$EVIDENCE_DIR/profile-overrides.txt"
+          scripts/kvm/bootstrap.sh 2>&1 | tee "$EVIDENCE_DIR/bootstrap.txt"
 
-      - name: Smoke (boot one microVM, handshake, terminate)
-        run: |
-          set -euo pipefail
-          test -x scripts/kvm/smoke.sh || { echo "scripts/kvm/smoke.sh missing (KVM track)" >&2; exit 1; }
-          scripts/kvm/smoke.sh
+      - name: Runtime profile (commit, firecracker, kernel sha, rootfs sha, host uname)
+        shell: bash
+        run: scripts/ci/kvm-profile.sh "$EVIDENCE_DIR"
 
-      - name: E2E demo (firecracker provider)
+      - name: Smoke (boot, handshake, invoke, host-enforced timeout, terminate)
+        shell: bash
+        run: scripts/kvm/smoke.sh
+
+      - name: Isolation (egress none, vCPU / memory limits, ephemeral storage cap)
+        shell: bash
+        run: scripts/kvm/measure-isolation.sh
+
+      - name: Warm reuse (quiesce / resume, reuse key, per-invocation metering)
+        shell: bash
+        run: scripts/kvm/measure-warm.sh
+
+      - name: E2E demo (gateway + firecracker provider, cross-tenant, cancel, orphan check)
+        shell: bash
         run: scripts/e2e/demo.sh
 
-      - name: Upload evidence
+      - name: Runtime profile (final, also when an earlier step failed)
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: evidence-${{ inputs.provider }}-${{ github.run_id }}
-          if-no-files-found: warn
-          retention-days: 30
-          path: docs/evidence/
+        shell: bash
+        run: |
+          if [ -n "${EVIDENCE_DIR:-}" ]; then scripts/ci/kvm-profile.sh "$EVIDENCE_DIR" || true; fi
 
-      - name: Teardown (kill leftover VMMs, remove .kvm/run, orphan check)
+      - name: Cleanup and orphan check (always; fails the job when anything is left)
         if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          out="${EVIDENCE_DIR:-$RUNNER_TEMP}/cleanup.txt"
+          rc=0
+          {
+            echo "== teardown (kill VMMs, remove .kvm/run, purge .kvm)"
+            scripts/kvm/teardown.sh --purge || rc=1
+            echo "== orphan-check firecracker"
+            scripts/e2e/orphan-check.sh firecracker .kvm/run || rc=1
+            echo "== orphan-check process"
+            scripts/e2e/orphan-check.sh process || rc=1
+            echo "== leftover firecracker processes"
+            if pgrep -a firecracker; then rc=1; else echo "none"; fi
+            echo "== remove local gateway data"
+            rm -rf data .kvm
+            echo "cleanup rc=$rc"
+          } >"$out" 2>&1
+          cat "$out"
+          exit "$rc"
+
+      - name: Upload evidence (commit, profile, logs, cleanup result)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kvm-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: ${{ runner.temp }}/kvm-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}/
+
+      - name: Remove the evidence directory from the runner
+        if: always()
+        shell: bash
+        run: rm -rf "${EVIDENCE_DIR:?}"
+
+  kvm-gate:
+    name: kvm-gate
+    needs: [classify, kvm]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Decide the gate
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          KVM_REQUIRED: ${{ needs.classify.outputs.kvm_required }}
+          TRUSTED: ${{ needs.classify.outputs.trusted }}
+          LABELED: ${{ needs.classify.outputs.labeled }}
+          KVM_RESULT: ${{ needs.kvm.result }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ -x scripts/kvm/teardown.sh ]; then
-            scripts/kvm/teardown.sh || true
+          if [ "$CLASSIFY_RESULT" != success ]; then
+            echo "kvm-gate: FAILED - classification did not succeed ($CLASSIFY_RESULT); cannot tell whether KVM is required" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
-          scripts/e2e/orphan-check.sh "$TSLS_PROVIDER" .kvm/run || true
+          scripts/ci/kvm-gate.sh "$KVM_REQUIRED" "$KVM_RESULT" "$EVENT" "$TRUSTED" "$LABELED"

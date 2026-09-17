@@ -1,0 +1,107 @@
+# Security regression group (PLT-4645).
+#
+# Every line names ONE test that must exist and pass. scripts/ci/security-regression.sh runs
+# them with `cargo test -p <package> <target> -- --exact <name>...` and fails when a listed
+# test did not run (renamed, removed, #[ignore]d or filtered out), so a rename cannot silently
+# drop coverage. Change this file in the same PR that renames or replaces a test.
+#
+# Format: <category> <package> <target> <test path as printed by `cargo test -- --list`>
+#   category: tenant_authz | reuse_key | lease_epoch | deadline | egress_gate | resource_limits
+#   target:   lib  -> `--lib`
+#             test:<name> -> `--test <name>` (tests/<name>.rs)
+# Blank lines and lines starting with '#' are ignored.
+
+# --- tenant authorization: another tenant's resources are NotFound, roles are enforced --------
+tenant_authz tachyon-serverless-application lib authz::tests::foreign_tenant_is_not_found
+tenant_authz tachyon-serverless-application lib authz::tests::roles
+tenant_authz tachyon-serverless-application lib error::tests::tenant_mismatch_is_not_found
+tenant_authz tachyon-serverless-application lib error::tests::foreign_and_missing_secret_bindings_are_indistinguishable
+tenant_authz tachyon-serverless-application lib local_ports::tests::identity_and_secrets_are_tenant_scoped
+tenant_authz tachyon-serverless-application lib services::invoke::tests::secret_binding_failures_do_not_reveal_other_tenants
+tenant_authz tachyon-serverless-application lib config::tests::invalid_tenant_id_is_rejected
+tenant_authz tachyon-serverless-application lib repository::contract_tests::memory::rows_never_cross_a_tenant
+tenant_authz tachyon-serverless-application lib repository::contract_tests::sqlite::rows_never_cross_a_tenant
+tenant_authz tachyon-serverless-application lib repository::contract_tests::sqlite::artifact_ownership_is_per_tenant
+tenant_authz tachyon-serverless-application test:pipeline cross_tenant_resources_are_not_found
+tenant_authz tachyon-serverless-application test:pipeline revisions_cannot_reference_another_tenants_artifact
+tenant_authz tachyon-serverless-gateway test:gateway_integration operator_role_is_own_tenant_read_only
+tenant_authz tachyon-serverless-gateway test:gateway_integration foreign_artifact_digest_is_indistinguishable_from_a_missing_one
+tenant_authz tachyon-serverless-cli test:mock_gateway cross_tenant_resource_is_404_exit_2
+tenant_authz tachyon-serverless-cli test:mock_gateway wrong_token_is_exit_2
+
+# --- environment reuse key: an environment is only reused for an exactly matching key ---------
+reuse_key tachyon-serverless-application lib repository::contract_tests::memory::only_an_exactly_matching_reuse_key_is_reused
+reuse_key tachyon-serverless-application lib repository::contract_tests::sqlite::only_an_exactly_matching_reuse_key_is_reused
+reuse_key tachyon-serverless-application lib services::pool::tests::reuse_needs_both_idle_capabilities_supported_and_the_config_on
+reuse_key tachyon-serverless-application lib services::pool::tests::a_claim_racing_a_release_never_takes_a_row_without_its_session
+reuse_key tachyon-serverless-application lib config::tests::environment_reuse_is_off_by_default_and_validated_when_enabled
+reuse_key tachyon-serverless-application test:pipeline another_revision_never_reuses_the_first_revisions_environment
+reuse_key tachyon-serverless-application test:pipeline a_rotated_secret_supersedes_the_reuse_key_and_forces_a_cold_start
+
+# --- lease / epoch fencing: a stale attempt or copy can never settle or overwrite -------------
+lease_epoch tachyon-serverless-domain lib environment::tests::lease_fencing
+lease_epoch tachyon-serverless-domain lib environment::tests::reassignment_advances_the_epoch_and_fences_the_previous_attempt
+lease_epoch tachyon-serverless-application lib bridge_session::tests::full_session_with_lease_fencing_and_log_bounds
+lease_epoch tachyon-serverless-application lib bridge_session::tests::rejects_wrong_environment_and_protocol_version
+lease_epoch tachyon-serverless-application lib repository::contract_tests::memory::an_environment_copy_from_another_epoch_is_refused
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::an_environment_copy_from_another_epoch_is_refused
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::attempts_and_leases_are_final_once_settled
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::releasing_respects_the_pool_caps_and_refuses_a_stale_copy
+lease_epoch tachyon-serverless-application lib repository::sqlite::tests::cas_holds_across_separate_connections_to_the_same_file
+lease_epoch tachyon-serverless-application test:pipeline a_late_frame_from_the_previous_attempt_cannot_settle_the_reused_one
+lease_epoch tachyon-serverless-domain lib environment::tests::a_fenced_environment_is_never_reusable_and_its_old_epoch_is_stale
+lease_epoch tachyon-serverless-domain lib environment::tests::a_lease_is_renewed_only_while_unexpired_and_expires_past_the_skew
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::acquire_is_a_cas_with_exactly_one_winner_per_epoch
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::a_completion_with_a_stale_epoch_never_overwrites_state
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::a_fenced_dispatcher_can_neither_renew_nor_acquire
+lease_epoch tachyon-serverless-application lib repository::contract_tests::sqlite::reclaim_happens_once_fences_and_only_a_confirmed_terminate_settles
+lease_epoch tachyon-serverless-application lib repository::sqlite::tests::separate_processes_racing_for_one_slot_or_one_key_have_one_winner
+lease_epoch tachyon-serverless-application test:leases two_gateways_on_one_data_dir_never_settle_each_others_work
+lease_epoch tachyon-serverless-application test:leases a_completion_delayed_past_a_reclaim_is_refused_and_the_slot_is_fenced
+lease_epoch tachyon-serverless-application test:leases a_fenced_environment_stays_fenced_until_its_terminate_succeeds
+
+# --- deadline enforcement: the host enforces deadlines, clients can only shorten them ---------
+deadline tachyon-serverless-domain lib invocation::tests::queue_timeout_fails_from_queued
+deadline tachyon-serverless-domain lib invocation::tests::rejects_elapsed_client_deadline_and_bad_key
+deadline tachyon-serverless-domain lib invocation::tests::an_elapsed_client_deadline_alone_is_rejected
+deadline tachyon-serverless-application lib bridge_session::tests::init_error_timeout_and_disconnect
+deadline tachyon-serverless-application test:pipeline hang_times_out_cancels_and_terminates_with_timeout
+deadline tachyon-serverless-application test:pipeline capacity_exceeded_and_queue_timeout
+deadline tachyon-serverless-application test:pipeline client_deadline_during_initialization_never_starts_the_handler
+deadline tachyon-serverless-application test:pipeline client_deadline_is_checked_again_right_before_dispatch
+deadline tachyon-serverless-application test:pipeline client_deadline_clamps_the_execution_deadline
+deadline tachyon-serverless-application test:pipeline client_deadline_bounds_the_queue_wait
+deadline tachyon-serverless-runtime-bridge lib session::tests::a_resumed_guest_gets_a_deadline_in_its_own_clock
+
+# --- egress gate ordering: a VM with networking is refused BEFORE it boots --------------------
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_without_networking_pass
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::plans_with_networking_fail_closed_without_a_policy
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_policy_allows_exactly_its_interface_once_and_never_mmds
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_exactly_the_policed_nic_passes
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_without_nic_passes
+egress_gate tachyon-serverless-provider-firecracker lib egress_gate::tests::a_vm_config_with_a_nic_or_mmds_or_unknown_shape_fails_closed
+egress_gate tachyon-serverless-provider-firecracker lib provider::tests::create_rejects_non_none_egress_where_it_cannot_be_enforced
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::restricted_accepts_only_the_allowlist_and_ends_in_drop
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::public_web_denies_special_ranges_and_foreign_dns_before_accepting
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::read_back_fails_closed_on_any_divergence
+egress_gate tachyon-serverless-provider-firecracker lib network::tests::base_script_is_default_deny_for_taps
+egress_gate tachyon-serverless-domain lib egress::tests::allow_rules_refuse_special_ranges_empty_ports_and_ipv6
+egress_gate tachyon-serverless-domain lib egress::tests::blocked_ranges_cover_management_metadata_and_private_space
+egress_gate tachyon-serverless-domain lib revision::tests::egress_allowlists_are_validated_per_profile
+egress_gate tachyon-serverless-provider-firecracker test:fake_vmm egress_gate_refuses_to_start_a_vm_with_a_network_interface
+
+# --- resource limit validation: specs, frames, responses, logs and scratch drives are bounded --
+resource_limits tachyon-serverless-domain lib revision::tests::invalid_specs_are_rejected
+resource_limits tachyon-serverless-application lib config::tests::limits_overrides_apply
+resource_limits tachyon-serverless-application lib config::tests::limits_must_leave_frame_headroom
+resource_limits tachyon-serverless-application lib config::tests::firecracker_network_section_defaults_and_refuses_unsafe_values
+resource_limits tachyon-serverless-application lib bridge_session::tests::oversized_invoke_is_refused_without_touching_the_session
+resource_limits tachyon-serverless-application lib repository::contract_tests::sqlite::inline_output_is_bounded
+resource_limits tachyon-serverless-application lib repository::contract_tests::sqlite::logs_are_bounded_per_invocation
+resource_limits tachyon-serverless-protocol lib wire::tests::oversized_frame_rejected
+resource_limits tachyon-serverless-protocol lib wire::tests::response_payload_bound_leaves_room_for_the_envelope
+resource_limits tachyon-serverless-runtime-bridge lib runtime_api::tests::response_limit_is_clamped_to_frame_capacity
+resource_limits tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_response_is_413_and_error_frame
+resource_limits tachyon-serverless-runtime-bridge lib runtime_api::tests::oversized_error_report_settles_the_attempt
+resource_limits tachyon-serverless-provider-firecracker lib drive::tests::scratch_drive_is_exactly_the_requested_size
+resource_limits tachyon-serverless-provider-firecracker lib provider::tests::archive_is_pruned_to_keep_limit

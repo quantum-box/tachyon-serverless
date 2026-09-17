@@ -1,0 +1,6 @@
+{
+  "error_type": "Runtime.InitError",
+  "exit_code": 3,
+  "message": "missing configuration",
+  "type": "init_error"
+}

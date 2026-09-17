@@ -1,0 +1,13 @@
+{
+  "attempt_id": "att_01j0000000000000000000000a",
+  "deadline_ms": 1700000030000,
+  "epoch": 3,
+  "event_type": "tachyon.invoke.v1",
+  "invocation_id": "inv_01j0000000000000000000000a",
+  "payload": {
+    "name": "golden"
+  },
+  "remaining_ms": 30000,
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "type": "invoke"
+}
