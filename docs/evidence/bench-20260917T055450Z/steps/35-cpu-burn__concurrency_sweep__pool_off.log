@@ -1,0 +1,4 @@
+[e2e] sweep cpu-burn cold c=1: 24 requests in 181247 ms
+[e2e] sweep cpu-burn cold c=2: 24 requests in 75646 ms
+[e2e] sweep cpu-burn cold c=4: 24 requests in 55065 ms
+[e2e] sweep cpu-burn cold c=8: 24 requests in 51263 ms

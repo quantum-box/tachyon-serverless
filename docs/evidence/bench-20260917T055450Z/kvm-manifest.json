@@ -1,0 +1,12 @@
+{
+  "arch": "aarch64",
+  "firecracker_version": "v1.17.0",
+  "firecracker_url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.17.0/firecracker-v1.17.0-aarch64.tgz",
+  "firecracker_tgz_sha256": "e351ebe4f7a16b5873bbd51005d2e6767103cff4d5ebc829df2d3f95a93e2256",
+  "firecracker_binary_sha256": "fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c",
+  "ci_version": "v1.15",
+  "kernel_key": "firecracker-ci/v1.15/aarch64/vmlinux-6.1.155",
+  "kernel_url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.15/aarch64/vmlinux-6.1.155",
+  "kernel_sha256": "e3544b10603acbf3db492cb52e000d22ba202cb4b63b9add027565683e11c591",
+  "updated_at": "2026-09-16T12:02:49Z"
+}

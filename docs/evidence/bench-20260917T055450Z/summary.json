@@ -1,0 +1,4768 @@
+{
+  "run": "bench-20260917T055450Z",
+  "commit": "400bb45b0af5338ec1953a9b73a39f01bfe3b8de",
+  "host_contention": {
+    "calibration": [
+      {
+        "phase": "start",
+        "awk_loop_ms": [
+          112,
+          118,
+          119
+        ],
+        "vm_loadavg": "0.08 0.02 0.16"
+      },
+      {
+        "phase": "before-hello",
+        "awk_loop_ms": [
+          117,
+          115,
+          122
+        ],
+        "vm_loadavg": "0.08 0.02 0.16"
+      },
+      {
+        "phase": "before-http-axum",
+        "awk_loop_ms": [
+          91,
+          83,
+          82
+        ],
+        "vm_loadavg": "0.70 0.89 0.58"
+      },
+      {
+        "phase": "before-cpu-burn",
+        "awk_loop_ms": [
+          399,
+          607,
+          401
+        ],
+        "vm_loadavg": "0.56 0.97 0.83"
+      },
+      {
+        "phase": "end",
+        "awk_loop_ms": [
+          82,
+          82,
+          84
+        ],
+        "vm_loadavg": "0.94 0.93 0.88"
+      }
+    ],
+    "physical_host_load1": {
+      "n": 69,
+      "p50": 6.54,
+      "p95": 26.50,
+      "p99": 31.50,
+      "min": 4.17,
+      "max": 31.50,
+      "mean": 8.6
+    },
+    "note": "calibration = wall ms of a fixed awk loop inside the VM; physical_host_load1 = 1-minute load average of the machine running the VM, sampled outside the VM when provided (physical-host-load.tsv)"
+  },
+  "rules": "nearest-rank percentiles over all attempts of a group including failures; timing percentiles over attempts carrying the timing (n shown); nothing dropped",
+  "scenarios": [
+    {
+      "sample": "hello",
+      "scenario": "fresh-miss",
+      "n": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 5
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 5
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 5,
+        "p50": 6158,
+        "p95": 7609,
+        "p99": 7609,
+        "min": 5914,
+        "max": 7609,
+        "mean": 6424.6
+      },
+      "client_ttfb_ms": {
+        "n": 5,
+        "p50": 6158,
+        "p95": 7609,
+        "p99": 7609,
+        "min": 5914,
+        "max": 7609,
+        "mean": 6424.6
+      },
+      "total_ms": {
+        "n": 5,
+        "p50": 6065,
+        "p95": 7530,
+        "p99": 7530,
+        "min": 5770,
+        "max": 7530,
+        "mean": 6307.6
+      },
+      "queue_wait_ms": {
+        "n": 5,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 5,
+        "p50": 5438,
+        "p95": 6836,
+        "p99": 6836,
+        "min": 5148,
+        "max": 6836,
+        "mean": 5640.2
+      },
+      "runtime_init_ms": {
+        "n": 5,
+        "p50": 516,
+        "p95": 571,
+        "p99": 571,
+        "min": 496,
+        "max": 571,
+        "mean": 521.8
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 5,
+        "p50": 122,
+        "p95": 169,
+        "p99": 169,
+        "min": 105,
+        "max": 169,
+        "mean": 134.6
+      },
+      "response_ms": {
+        "n": 5,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 5,
+        "p50": 5943,
+        "p95": 7416,
+        "p99": 7416,
+        "min": 5665,
+        "max": 7416,
+        "mean": 6173
+      },
+      "client_platform_ms": {
+        "n": 5,
+        "p50": 6026,
+        "p95": 7495,
+        "p99": 7495,
+        "min": 5809,
+        "max": 7495,
+        "mean": 6290
+      },
+      "client_extra_ms": {
+        "n": 5,
+        "p50": 139,
+        "p95": 144,
+        "p99": 144,
+        "min": 79,
+        "max": 144,
+        "mean": 117
+      },
+      "unaccounted_ms": {
+        "n": 5,
+        "p50": 9,
+        "p95": 14,
+        "p99": 14,
+        "min": 9,
+        "max": 14,
+        "mean": 11
+      },
+      "function_drive_bytes": {
+        "n": 5,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 5,
+        "p50": 5,
+        "p95": 8,
+        "p99": 8,
+        "min": 4,
+        "max": 8,
+        "mean": 5.6
+      },
+      "bytes_up_body": {
+        "n": 5,
+        "p50": 16,
+        "p95": 16,
+        "p99": 16,
+        "min": 16,
+        "max": 16,
+        "mean": 16
+      },
+      "bytes_down_body": {
+        "n": 5,
+        "p50": 84,
+        "p95": 84,
+        "p99": 84,
+        "min": 84,
+        "max": 84,
+        "mean": 84
+      },
+      "bytes_down_headers": {
+        "n": 5,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "hello",
+      "scenario": "cold",
+      "n": 20,
+      "succeeded": 20,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 20
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 20
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 20,
+        "p50": 5817,
+        "p95": 6037,
+        "p99": 6071,
+        "min": 5735,
+        "max": 6071,
+        "mean": 5867.4
+      },
+      "client_ttfb_ms": {
+        "n": 20,
+        "p50": 5817,
+        "p95": 6036,
+        "p99": 6071,
+        "min": 5735,
+        "max": 6071,
+        "mean": 5867.4
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 5729,
+        "p95": 5935,
+        "p99": 5990,
+        "min": 5651,
+        "max": 5990,
+        "mean": 5775.2
+      },
+      "queue_wait_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 20,
+        "p50": 5102,
+        "p95": 5315,
+        "p99": 5374,
+        "min": 4992,
+        "max": 5374,
+        "mean": 5132
+      },
+      "runtime_init_ms": {
+        "n": 20,
+        "p50": 501,
+        "p95": 566,
+        "p99": 578,
+        "min": 438,
+        "max": 578,
+        "mean": 500.5
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 20,
+        "p50": 112,
+        "p95": 173,
+        "p99": 191,
+        "min": 100,
+        "max": 191,
+        "mean": 131.9
+      },
+      "response_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 20,
+        "p50": 5611,
+        "p95": 5835,
+        "p99": 5890,
+        "min": 5499,
+        "max": 5890,
+        "mean": 5643.3
+      },
+      "client_platform_ms": {
+        "n": 20,
+        "p50": 5701,
+        "p95": 5919,
+        "p99": 5971,
+        "min": 5583,
+        "max": 5971,
+        "mean": 5735.6
+      },
+      "client_extra_ms": {
+        "n": 20,
+        "p50": 85,
+        "p95": 133,
+        "p99": 187,
+        "min": 81,
+        "max": 187,
+        "mean": 92.3
+      },
+      "unaccounted_ms": {
+        "n": 20,
+        "p50": 10,
+        "p95": 17,
+        "p99": 17,
+        "min": 7,
+        "max": 17,
+        "mean": 10.8
+      },
+      "function_drive_bytes": {
+        "n": 20,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 20,
+        "p50": 2,
+        "p95": 4,
+        "p99": 4,
+        "min": 1,
+        "max": 4,
+        "mean": 2.4
+      },
+      "bytes_up_body": {
+        "n": 20,
+        "p50": 16,
+        "p95": 16,
+        "p99": 16,
+        "min": 16,
+        "max": 16,
+        "mean": 16
+      },
+      "bytes_down_body": {
+        "n": 20,
+        "p50": 84,
+        "p95": 84,
+        "p99": 84,
+        "min": 84,
+        "max": 84,
+        "mean": 84
+      },
+      "bytes_down_headers": {
+        "n": 20,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "hello",
+      "scenario": "warm-prime",
+      "n": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 1
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 1,
+        "p50": 5765,
+        "p95": 5765,
+        "p99": 5765,
+        "min": 5765,
+        "max": 5765,
+        "mean": 5765
+      },
+      "client_ttfb_ms": {
+        "n": 1,
+        "p50": 5765,
+        "p95": 5765,
+        "p99": 5765,
+        "min": 5765,
+        "max": 5765,
+        "mean": 5765
+      },
+      "total_ms": {
+        "n": 1,
+        "p50": 5787,
+        "p95": 5787,
+        "p99": 5787,
+        "min": 5787,
+        "max": 5787,
+        "mean": 5787
+      },
+      "queue_wait_ms": {
+        "n": 1,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 1,
+        "p50": 5180,
+        "p95": 5180,
+        "p99": 5180,
+        "min": 5180,
+        "max": 5180,
+        "mean": 5180
+      },
+      "runtime_init_ms": {
+        "n": 1,
+        "p50": 439,
+        "p95": 439,
+        "p99": 439,
+        "min": 439,
+        "max": 439,
+        "mean": 439
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 1,
+        "p50": 159,
+        "p95": 159,
+        "p99": 159,
+        "min": 159,
+        "max": 159,
+        "mean": 159
+      },
+      "response_ms": {
+        "n": 1,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 1,
+        "p50": 5628,
+        "p95": 5628,
+        "p99": 5628,
+        "min": 5628,
+        "max": 5628,
+        "mean": 5628
+      },
+      "client_platform_ms": {
+        "n": 1,
+        "p50": 5606,
+        "p95": 5606,
+        "p99": 5606,
+        "min": 5606,
+        "max": 5606,
+        "mean": 5606
+      },
+      "client_extra_ms": {
+        "n": 1,
+        "p50": -22,
+        "p95": -22,
+        "p99": -22,
+        "min": -22,
+        "max": -22,
+        "mean": -22
+      },
+      "unaccounted_ms": {
+        "n": 1,
+        "p50": 9,
+        "p95": 9,
+        "p99": 9,
+        "min": 9,
+        "max": 9,
+        "mean": 9
+      },
+      "function_drive_bytes": {
+        "n": 1,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 1,
+        "p50": 1,
+        "p95": 1,
+        "p99": 1,
+        "min": 1,
+        "max": 1,
+        "mean": 1
+      },
+      "bytes_up_body": {
+        "n": 1,
+        "p50": 16,
+        "p95": 16,
+        "p99": 16,
+        "min": 16,
+        "max": 16,
+        "mean": 16
+      },
+      "bytes_down_body": {
+        "n": 1,
+        "p50": 84,
+        "p95": 84,
+        "p99": 84,
+        "min": 84,
+        "max": 84,
+        "mean": 84
+      },
+      "bytes_down_headers": {
+        "n": 1,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "hello",
+      "scenario": "warm",
+      "n": 20,
+      "succeeded": 20,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 20
+      },
+      "error_types": {},
+      "start_kinds": {
+        "warm": 20
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 20,
+        "p50": 56,
+        "p95": 75,
+        "p99": 95,
+        "min": 38,
+        "max": 95,
+        "mean": 55.4
+      },
+      "client_ttfb_ms": {
+        "n": 20,
+        "p50": 56,
+        "p95": 75,
+        "p99": 95,
+        "min": 38,
+        "max": 95,
+        "mean": 55.4
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 49,
+        "p95": 68,
+        "p99": 89,
+        "min": 34,
+        "max": 89,
+        "mean": 49.2
+      },
+      "queue_wait_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "runtime_init_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "resume_ms": {
+        "n": 20,
+        "p50": 1,
+        "p95": 1,
+        "p99": 1,
+        "min": 1,
+        "max": 1,
+        "mean": 1
+      },
+      "readiness_ms": {
+        "n": 20,
+        "p50": 3,
+        "p95": 14,
+        "p99": 18,
+        "min": 2,
+        "max": 18,
+        "mean": 4
+      },
+      "handler_ms": {
+        "n": 20,
+        "p50": 42,
+        "p95": 48,
+        "p99": 72,
+        "min": 29,
+        "max": 72,
+        "mean": 41.6
+      },
+      "response_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 20,
+        "p50": 7,
+        "p95": 17,
+        "p99": 24,
+        "min": 4,
+        "max": 24,
+        "mean": 7.7
+      },
+      "client_platform_ms": {
+        "n": 20,
+        "p50": 13,
+        "p95": 23,
+        "p99": 31,
+        "min": 8,
+        "max": 31,
+        "mean": 13.9
+      },
+      "client_extra_ms": {
+        "n": 20,
+        "p50": 6,
+        "p95": 9,
+        "p99": 9,
+        "min": 4,
+        "max": 9,
+        "mean": 6.2
+      },
+      "unaccounted_ms": {
+        "n": 20,
+        "p50": 3,
+        "p95": 4,
+        "p99": 5,
+        "min": 0,
+        "max": 5,
+        "mean": 2.7
+      },
+      "function_drive_bytes": {
+        "n": 20,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "bytes_up_body": {
+        "n": 20,
+        "p50": 16,
+        "p95": 16,
+        "p99": 16,
+        "min": 16,
+        "max": 16,
+        "mean": 16
+      },
+      "bytes_down_body": {
+        "n": 20,
+        "p50": 84,
+        "p95": 84,
+        "p99": 84,
+        "min": 84,
+        "max": 84,
+        "mean": 84
+      },
+      "bytes_down_headers": {
+        "n": 20,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": {
+        "n": 20,
+        "client_ms": {
+          "n": 20,
+          "p50": 56,
+          "p95": 75,
+          "p99": 95,
+          "min": 38,
+          "max": 95,
+          "mean": 55.4
+        },
+        "platform_ms": {
+          "n": 20,
+          "p50": 7,
+          "p95": 17,
+          "p99": 24,
+          "min": 4,
+          "max": 24,
+          "mean": 7.7
+        },
+        "client_platform_ms": {
+          "n": 20,
+          "p50": 13,
+          "p95": 23,
+          "p99": 31,
+          "min": 8,
+          "max": 31,
+          "mean": 13.9
+        }
+      }
+    },
+    {
+      "sample": "http-axum",
+      "scenario": "fresh-miss",
+      "n": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 5
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 5
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 5,
+        "p50": 5908,
+        "p95": 6128,
+        "p99": 6128,
+        "min": 5839,
+        "max": 6128,
+        "mean": 5942
+      },
+      "client_ttfb_ms": {
+        "n": 5,
+        "p50": 5908,
+        "p95": 6128,
+        "p99": 6128,
+        "min": 5839,
+        "max": 6128,
+        "mean": 5942
+      },
+      "total_ms": {
+        "n": 5,
+        "p50": 5794,
+        "p95": 6043,
+        "p99": 6043,
+        "min": 5751,
+        "max": 6043,
+        "mean": 5835.2
+      },
+      "queue_wait_ms": {
+        "n": 5,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 5,
+        "p50": 5163,
+        "p95": 5333,
+        "p99": 5333,
+        "min": 5087,
+        "max": 5333,
+        "mean": 5179.2
+      },
+      "runtime_init_ms": {
+        "n": 5,
+        "p50": 514,
+        "p95": 587,
+        "p99": 587,
+        "min": 509,
+        "max": 587,
+        "mean": 535.2
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 5,
+        "p50": 109,
+        "p95": 114,
+        "p99": 114,
+        "min": 103,
+        "max": 114,
+        "mean": 109.4
+      },
+      "response_ms": {
+        "n": 5,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 5,
+        "p50": 5686,
+        "p95": 5929,
+        "p99": 5929,
+        "min": 5648,
+        "max": 5929,
+        "mean": 5725.8
+      },
+      "client_platform_ms": {
+        "n": 5,
+        "p50": 5795,
+        "p95": 6014,
+        "p99": 6014,
+        "min": 5736,
+        "max": 6014,
+        "mean": 5832.6
+      },
+      "client_extra_ms": {
+        "n": 5,
+        "p50": 87,
+        "p95": 191,
+        "p99": 191,
+        "min": 83,
+        "max": 191,
+        "mean": 106.8
+      },
+      "unaccounted_ms": {
+        "n": 5,
+        "p50": 11,
+        "p95": 13,
+        "p99": 13,
+        "min": 9,
+        "max": 13,
+        "mean": 11.4
+      },
+      "function_drive_bytes": {
+        "n": 5,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 5,
+        "p50": 4,
+        "p95": 5,
+        "p99": 5,
+        "min": 2,
+        "max": 5,
+        "mean": 3.6
+      },
+      "bytes_up_body": {
+        "n": 5,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "bytes_down_body": {
+        "n": 5,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2,
+        "mean": 2
+      },
+      "bytes_down_headers": {
+        "n": 5,
+        "p50": 267,
+        "p95": 267,
+        "p99": 267,
+        "min": 267,
+        "max": 267,
+        "mean": 267
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "http-axum",
+      "scenario": "cold",
+      "n": 20,
+      "succeeded": 20,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 20
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 20
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 20,
+        "p50": 6502,
+        "p95": 9430,
+        "p99": 9837,
+        "min": 5870,
+        "max": 9837,
+        "mean": 6936.2
+      },
+      "client_ttfb_ms": {
+        "n": 20,
+        "p50": 6502,
+        "p95": 9430,
+        "p99": 9837,
+        "min": 5870,
+        "max": 9837,
+        "mean": 6936.1
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 6365,
+        "p95": 9154,
+        "p99": 9711,
+        "min": 5787,
+        "max": 9711,
+        "mean": 6796.2
+      },
+      "queue_wait_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 20,
+        "p50": 5551,
+        "p95": 7776,
+        "p99": 8692,
+        "min": 5108,
+        "max": 8692,
+        "mean": 6019.4
+      },
+      "runtime_init_ms": {
+        "n": 20,
+        "p50": 555,
+        "p95": 819,
+        "p99": 1084,
+        "min": 502,
+        "max": 1084,
+        "mean": 619.5
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 20,
+        "p50": 122,
+        "p95": 215,
+        "p99": 280,
+        "min": 104,
+        "max": 280,
+        "mean": 145.4
+      },
+      "response_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 20,
+        "p50": 6184,
+        "p95": 8874,
+        "p99": 9529,
+        "min": 5625,
+        "max": 9529,
+        "mean": 6650.8
+      },
+      "client_platform_ms": {
+        "n": 20,
+        "p50": 6321,
+        "p95": 9150,
+        "p99": 9655,
+        "min": 5708,
+        "max": 9655,
+        "mean": 6790.8
+      },
+      "client_extra_ms": {
+        "n": 20,
+        "p50": 130,
+        "p95": 234,
+        "p99": 276,
+        "min": 81,
+        "max": 276,
+        "mean": 140
+      },
+      "unaccounted_ms": {
+        "n": 20,
+        "p50": 11,
+        "p95": 15,
+        "p99": 18,
+        "min": 9,
+        "max": 18,
+        "mean": 12
+      },
+      "function_drive_bytes": {
+        "n": 20,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 20,
+        "p50": 3,
+        "p95": 5,
+        "p99": 10,
+        "min": 2,
+        "max": 10,
+        "mean": 3.4
+      },
+      "bytes_up_body": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "bytes_down_body": {
+        "n": 20,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2,
+        "mean": 2
+      },
+      "bytes_down_headers": {
+        "n": 20,
+        "p50": 267,
+        "p95": 267,
+        "p99": 267,
+        "min": 267,
+        "max": 267,
+        "mean": 267
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "http-axum",
+      "scenario": "warm-prime",
+      "n": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 1
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 1,
+        "p50": 5744,
+        "p95": 5744,
+        "p99": 5744,
+        "min": 5744,
+        "max": 5744,
+        "mean": 5744
+      },
+      "client_ttfb_ms": {
+        "n": 1,
+        "p50": 5744,
+        "p95": 5744,
+        "p99": 5744,
+        "min": 5744,
+        "max": 5744,
+        "mean": 5744
+      },
+      "total_ms": {
+        "n": 1,
+        "p50": 5766,
+        "p95": 5766,
+        "p99": 5766,
+        "min": 5766,
+        "max": 5766,
+        "mean": 5766
+      },
+      "queue_wait_ms": {
+        "n": 1,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 1,
+        "p50": 5128,
+        "p95": 5128,
+        "p99": 5128,
+        "min": 5128,
+        "max": 5128,
+        "mean": 5128
+      },
+      "runtime_init_ms": {
+        "n": 1,
+        "p50": 513,
+        "p95": 513,
+        "p99": 513,
+        "min": 513,
+        "max": 513,
+        "mean": 513
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 1,
+        "p50": 116,
+        "p95": 116,
+        "p99": 116,
+        "min": 116,
+        "max": 116,
+        "mean": 116
+      },
+      "response_ms": {
+        "n": 1,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 1,
+        "p50": 5650,
+        "p95": 5650,
+        "p99": 5650,
+        "min": 5650,
+        "max": 5650,
+        "mean": 5650
+      },
+      "client_platform_ms": {
+        "n": 1,
+        "p50": 5628,
+        "p95": 5628,
+        "p99": 5628,
+        "min": 5628,
+        "max": 5628,
+        "mean": 5628
+      },
+      "client_extra_ms": {
+        "n": 1,
+        "p50": -22,
+        "p95": -22,
+        "p99": -22,
+        "min": -22,
+        "max": -22,
+        "mean": -22
+      },
+      "unaccounted_ms": {
+        "n": 1,
+        "p50": 9,
+        "p95": 9,
+        "p99": 9,
+        "min": 9,
+        "max": 9,
+        "mean": 9
+      },
+      "function_drive_bytes": {
+        "n": 1,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 1,
+        "p50": 4,
+        "p95": 4,
+        "p99": 4,
+        "min": 4,
+        "max": 4,
+        "mean": 4
+      },
+      "bytes_up_body": {
+        "n": 1,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "bytes_down_body": {
+        "n": 1,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2,
+        "mean": 2
+      },
+      "bytes_down_headers": {
+        "n": 1,
+        "p50": 267,
+        "p95": 267,
+        "p99": 267,
+        "min": 267,
+        "max": 267,
+        "mean": 267
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "http-axum",
+      "scenario": "warm",
+      "n": 20,
+      "succeeded": 20,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 20
+      },
+      "error_types": {},
+      "start_kinds": {
+        "warm": 20
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 20,
+        "p50": 70,
+        "p95": 112,
+        "p99": 267,
+        "min": 37,
+        "max": 267,
+        "mean": 80.5
+      },
+      "client_ttfb_ms": {
+        "n": 20,
+        "p50": 70,
+        "p95": 112,
+        "p99": 267,
+        "min": 36,
+        "max": 267,
+        "mean": 80.4
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 56,
+        "p95": 107,
+        "p99": 202,
+        "min": 32,
+        "max": 202,
+        "mean": 69.5
+      },
+      "queue_wait_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "runtime_init_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "resume_ms": {
+        "n": 20,
+        "p50": 1,
+        "p95": 3,
+        "p99": 5,
+        "min": 1,
+        "max": 5,
+        "mean": 1.5
+      },
+      "readiness_ms": {
+        "n": 20,
+        "p50": 3,
+        "p95": 15,
+        "p99": 18,
+        "min": 2,
+        "max": 18,
+        "mean": 4.5
+      },
+      "handler_ms": {
+        "n": 20,
+        "p50": 47,
+        "p95": 102,
+        "p99": 192,
+        "min": 28,
+        "max": 192,
+        "mean": 59.1
+      },
+      "response_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 20,
+        "p50": 8,
+        "p95": 31,
+        "p99": 40,
+        "min": 4,
+        "max": 40,
+        "mean": 10.4
+      },
+      "client_platform_ms": {
+        "n": 20,
+        "p50": 15,
+        "p95": 51,
+        "p99": 75,
+        "min": 9,
+        "max": 75,
+        "mean": 21.4
+      },
+      "client_extra_ms": {
+        "n": 20,
+        "p50": 7,
+        "p95": 21,
+        "p99": 65,
+        "min": 5,
+        "max": 65,
+        "mean": 11
+      },
+      "unaccounted_ms": {
+        "n": 20,
+        "p50": 3,
+        "p95": 13,
+        "p99": 20,
+        "min": 0,
+        "max": 20,
+        "mean": 4.4
+      },
+      "function_drive_bytes": {
+        "n": 20,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "bytes_up_body": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "bytes_down_body": {
+        "n": 20,
+        "p50": 2,
+        "p95": 2,
+        "p99": 2,
+        "min": 2,
+        "max": 2,
+        "mean": 2
+      },
+      "bytes_down_headers": {
+        "n": 20,
+        "p50": 267,
+        "p95": 267,
+        "p99": 267,
+        "min": 267,
+        "max": 267,
+        "mean": 267
+      },
+      "warm_only": {
+        "n": 20,
+        "client_ms": {
+          "n": 20,
+          "p50": 70,
+          "p95": 112,
+          "p99": 267,
+          "min": 37,
+          "max": 267,
+          "mean": 80.5
+        },
+        "platform_ms": {
+          "n": 20,
+          "p50": 8,
+          "p95": 31,
+          "p99": 40,
+          "min": 4,
+          "max": 40,
+          "mean": 10.4
+        },
+        "client_platform_ms": {
+          "n": 20,
+          "p50": 15,
+          "p95": 51,
+          "p99": 75,
+          "min": 9,
+          "max": 75,
+          "mean": 21.4
+        }
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "scenario": "fresh-miss",
+      "n": 5,
+      "succeeded": 5,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 5
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 5
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 5,
+        "p50": 6925,
+        "p95": 14106,
+        "p99": 14106,
+        "min": 6300,
+        "max": 14106,
+        "mean": 8159.4
+      },
+      "client_ttfb_ms": {
+        "n": 5,
+        "p50": 6925,
+        "p95": 14105,
+        "p99": 14105,
+        "min": 6300,
+        "max": 14105,
+        "mean": 8159.2
+      },
+      "total_ms": {
+        "n": 5,
+        "p50": 6848,
+        "p95": 13875,
+        "p99": 13875,
+        "min": 6204,
+        "max": 13875,
+        "mean": 8038.8
+      },
+      "queue_wait_ms": {
+        "n": 5,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 5,
+        "p50": 6036,
+        "p95": 12827,
+        "p99": 12827,
+        "min": 5308,
+        "max": 12827,
+        "mean": 7143
+      },
+      "runtime_init_ms": {
+        "n": 5,
+        "p50": 522,
+        "p95": 592,
+        "p99": 592,
+        "min": 495,
+        "max": 592,
+        "mean": 533.8
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 5,
+        "p50": 320,
+        "p95": 400,
+        "p99": 400,
+        "min": 307,
+        "max": 400,
+        "mean": 340.6
+      },
+      "response_ms": {
+        "n": 5,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 5,
+        "p50": 6541,
+        "p95": 13475,
+        "p99": 13475,
+        "min": 5839,
+        "max": 13475,
+        "mean": 7698.2
+      },
+      "client_platform_ms": {
+        "n": 5,
+        "p50": 6618,
+        "p95": 13706,
+        "p99": 13706,
+        "min": 5973,
+        "max": 13706,
+        "mean": 7818.8
+      },
+      "client_extra_ms": {
+        "n": 5,
+        "p50": 81,
+        "p95": 231,
+        "p99": 231,
+        "min": 77,
+        "max": 231,
+        "mean": 120.6
+      },
+      "unaccounted_ms": {
+        "n": 5,
+        "p50": 10,
+        "p95": 56,
+        "p99": 56,
+        "min": 8,
+        "max": 56,
+        "mean": 21.4
+      },
+      "function_drive_bytes": {
+        "n": 5,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 5,
+        "p50": 3,
+        "p95": 57,
+        "p99": 57,
+        "min": 2,
+        "max": 57,
+        "mean": 14.8
+      },
+      "bytes_up_body": {
+        "n": 5,
+        "p50": 15,
+        "p95": 15,
+        "p99": 15,
+        "min": 15,
+        "max": 15,
+        "mean": 15
+      },
+      "bytes_down_body": {
+        "n": 5,
+        "p50": 70,
+        "p95": 70,
+        "p99": 70,
+        "min": 70,
+        "max": 70,
+        "mean": 70
+      },
+      "bytes_down_headers": {
+        "n": 5,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "cpu-burn",
+      "scenario": "cold",
+      "n": 20,
+      "succeeded": 20,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 20
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 20
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 20,
+        "p50": 6944,
+        "p95": 12250,
+        "p99": 14200,
+        "min": 5825,
+        "max": 14200,
+        "mean": 7986
+      },
+      "client_ttfb_ms": {
+        "n": 20,
+        "p50": 6944,
+        "p95": 12250,
+        "p99": 14200,
+        "min": 5825,
+        "max": 14200,
+        "mean": 7986
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 6572,
+        "p95": 12087,
+        "p99": 14047,
+        "min": 5743,
+        "max": 14047,
+        "mean": 7847.3
+      },
+      "queue_wait_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 20,
+        "p50": 5756,
+        "p95": 10490,
+        "p99": 12840,
+        "min": 4943,
+        "max": 12840,
+        "mean": 6847
+      },
+      "runtime_init_ms": {
+        "n": 20,
+        "p50": 499,
+        "p95": 1120,
+        "p99": 1197,
+        "min": 426,
+        "max": 1197,
+        "mean": 623
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 20,
+        "p50": 319,
+        "p95": 481,
+        "p99": 533,
+        "min": 300,
+        "max": 533,
+        "mean": 363.6
+      },
+      "response_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 20,
+        "p50": 6261,
+        "p95": 11606,
+        "p99": 13649,
+        "min": 5432,
+        "max": 13649,
+        "mean": 7483.7
+      },
+      "client_platform_ms": {
+        "n": 20,
+        "p50": 6564,
+        "p95": 11769,
+        "p99": 13802,
+        "min": 5514,
+        "max": 13802,
+        "mean": 7622.4
+      },
+      "client_extra_ms": {
+        "n": 20,
+        "p50": 82,
+        "p95": 294,
+        "p99": 550,
+        "min": 61,
+        "max": 550,
+        "mean": 138.7
+      },
+      "unaccounted_ms": {
+        "n": 20,
+        "p50": 11,
+        "p95": 27,
+        "p99": 45,
+        "min": 8,
+        "max": 45,
+        "mean": 13.7
+      },
+      "function_drive_bytes": {
+        "n": 20,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 20,
+        "p50": 3,
+        "p95": 12,
+        "p99": 14,
+        "min": 1,
+        "max": 14,
+        "mean": 4.4
+      },
+      "bytes_up_body": {
+        "n": 20,
+        "p50": 15,
+        "p95": 15,
+        "p99": 15,
+        "min": 15,
+        "max": 15,
+        "mean": 15
+      },
+      "bytes_down_body": {
+        "n": 20,
+        "p50": 70,
+        "p95": 70,
+        "p99": 70,
+        "min": 68,
+        "max": 70,
+        "mean": 69.9
+      },
+      "bytes_down_headers": {
+        "n": 20,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "cpu-burn",
+      "scenario": "warm-prime",
+      "n": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 1
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 1,
+        "p50": 7225,
+        "p95": 7225,
+        "p99": 7225,
+        "min": 7225,
+        "max": 7225,
+        "mean": 7225
+      },
+      "client_ttfb_ms": {
+        "n": 1,
+        "p50": 7225,
+        "p95": 7225,
+        "p99": 7225,
+        "min": 7225,
+        "max": 7225,
+        "mean": 7225
+      },
+      "total_ms": {
+        "n": 1,
+        "p50": 7254,
+        "p95": 7254,
+        "p99": 7254,
+        "min": 7254,
+        "max": 7254,
+        "mean": 7254
+      },
+      "queue_wait_ms": {
+        "n": 1,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 1,
+        "p50": 5769,
+        "p95": 5769,
+        "p99": 5769,
+        "min": 5769,
+        "max": 5769,
+        "mean": 5769
+      },
+      "runtime_init_ms": {
+        "n": 1,
+        "p50": 1106,
+        "p95": 1106,
+        "p99": 1106,
+        "min": 1106,
+        "max": 1106,
+        "mean": 1106
+      },
+      "resume_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "readiness_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "handler_ms": {
+        "n": 1,
+        "p50": 370,
+        "p95": 370,
+        "p99": 370,
+        "min": 370,
+        "max": 370,
+        "mean": 370
+      },
+      "response_ms": {
+        "n": 1,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 1,
+        "p50": 6884,
+        "p95": 6884,
+        "p99": 6884,
+        "min": 6884,
+        "max": 6884,
+        "mean": 6884
+      },
+      "client_platform_ms": {
+        "n": 1,
+        "p50": 6855,
+        "p95": 6855,
+        "p99": 6855,
+        "min": 6855,
+        "max": 6855,
+        "mean": 6855
+      },
+      "client_extra_ms": {
+        "n": 1,
+        "p50": -29,
+        "p95": -29,
+        "p99": -29,
+        "min": -29,
+        "max": -29,
+        "mean": -29
+      },
+      "unaccounted_ms": {
+        "n": 1,
+        "p50": 9,
+        "p95": 9,
+        "p99": 9,
+        "min": 9,
+        "max": 9,
+        "mean": 9
+      },
+      "function_drive_bytes": {
+        "n": 1,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 1,
+        "p50": 3,
+        "p95": 3,
+        "p99": 3,
+        "min": 3,
+        "max": 3,
+        "mean": 3
+      },
+      "bytes_up_body": {
+        "n": 1,
+        "p50": 15,
+        "p95": 15,
+        "p99": 15,
+        "min": 15,
+        "max": 15,
+        "mean": 15
+      },
+      "bytes_down_body": {
+        "n": 1,
+        "p50": 70,
+        "p95": 70,
+        "p99": 70,
+        "min": 70,
+        "max": 70,
+        "mean": 70
+      },
+      "bytes_down_headers": {
+        "n": 1,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": null
+    },
+    {
+      "sample": "cpu-burn",
+      "scenario": "warm",
+      "n": 20,
+      "succeeded": 20,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 20
+      },
+      "error_types": {},
+      "start_kinds": {
+        "warm": 20
+      },
+      "retried_attempts": 0,
+      "client_ms": {
+        "n": 20,
+        "p50": 278,
+        "p95": 311,
+        "p99": 340,
+        "min": 236,
+        "max": 340,
+        "mean": 281.5
+      },
+      "client_ttfb_ms": {
+        "n": 20,
+        "p50": 278,
+        "p95": 311,
+        "p99": 340,
+        "min": 235,
+        "max": 340,
+        "mean": 281.4
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 274,
+        "p95": 307,
+        "p99": 323,
+        "min": 233,
+        "max": 323,
+        "mean": 275.4
+      },
+      "queue_wait_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "environment_boot_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "runtime_init_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "resume_ms": {
+        "n": 20,
+        "p50": 1,
+        "p95": 1,
+        "p99": 2,
+        "min": 1,
+        "max": 2,
+        "mean": 1.1
+      },
+      "readiness_ms": {
+        "n": 20,
+        "p50": 3,
+        "p95": 3,
+        "p99": 13,
+        "min": 1,
+        "max": 13,
+        "mean": 3.2
+      },
+      "handler_ms": {
+        "n": 20,
+        "p50": 268,
+        "p95": 301,
+        "p99": 310,
+        "min": 229,
+        "max": 310,
+        "mean": 267.8
+      },
+      "response_ms": {
+        "n": 20,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "platform_ms": {
+        "n": 20,
+        "p50": 6,
+        "p95": 17,
+        "p99": 26,
+        "min": 4,
+        "max": 26,
+        "mean": 7.6
+      },
+      "client_platform_ms": {
+        "n": 20,
+        "p50": 10,
+        "p95": 30,
+        "p99": 47,
+        "min": 7,
+        "max": 47,
+        "mean": 13.7
+      },
+      "client_extra_ms": {
+        "n": 20,
+        "p50": 4,
+        "p95": 17,
+        "p99": 21,
+        "min": 3,
+        "max": 21,
+        "mean": 6.1
+      },
+      "unaccounted_ms": {
+        "n": 20,
+        "p50": 2,
+        "p95": 9,
+        "p99": 21,
+        "min": 0,
+        "max": 21,
+        "mean": 3.4
+      },
+      "function_drive_bytes": {
+        "n": 20,
+        "p50": 10485760,
+        "p95": 10485760,
+        "p99": 10485760,
+        "min": 10485760,
+        "max": 10485760,
+        "mean": 10485760
+      },
+      "scratch_drive_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "min": null,
+        "max": null,
+        "mean": null
+      },
+      "bytes_up_body": {
+        "n": 20,
+        "p50": 15,
+        "p95": 15,
+        "p99": 15,
+        "min": 15,
+        "max": 15,
+        "mean": 15
+      },
+      "bytes_down_body": {
+        "n": 20,
+        "p50": 70,
+        "p95": 70,
+        "p99": 70,
+        "min": 69,
+        "max": 70,
+        "mean": 69.9
+      },
+      "bytes_down_headers": {
+        "n": 20,
+        "p50": 259,
+        "p95": 259,
+        "p99": 259,
+        "min": 259,
+        "max": 259,
+        "mean": 259
+      },
+      "warm_only": {
+        "n": 20,
+        "client_ms": {
+          "n": 20,
+          "p50": 278,
+          "p95": 311,
+          "p99": 340,
+          "min": 236,
+          "max": 340,
+          "mean": 281.5
+        },
+        "platform_ms": {
+          "n": 20,
+          "p50": 6,
+          "p95": 17,
+          "p99": 26,
+          "min": 4,
+          "max": 26,
+          "mean": 7.6
+        },
+        "client_platform_ms": {
+          "n": 20,
+          "p50": 10,
+          "p95": 30,
+          "p99": 47,
+          "min": 7,
+          "max": 47,
+          "mean": 13.7
+        }
+      }
+    }
+  ],
+  "sweeps": [
+    {
+      "sample": "hello",
+      "mode": "cold",
+      "concurrency": 1,
+      "requests": 24,
+      "wall_ms": 142539,
+      "throughput_ok_per_s": 0.17,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 5838,
+        "p95": 6475,
+        "p99": 8024,
+        "min": 5560,
+        "max": 8024,
+        "mean": 5924.1
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 5730,
+        "p95": 6337,
+        "p99": 7947,
+        "min": 5476,
+        "max": 7947,
+        "mean": 5832.1
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 107,
+        "p95": 167,
+        "p99": 180,
+        "min": 98,
+        "max": 180,
+        "mean": 118.1
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 5599,
+        "p95": 6170,
+        "p99": 7832,
+        "min": 5376,
+        "max": 7832,
+        "mean": 5714
+      }
+    },
+    {
+      "sample": "hello",
+      "mode": "cold",
+      "concurrency": 2,
+      "requests": 24,
+      "wall_ms": 79361,
+      "throughput_ok_per_s": 0.3,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 6381,
+        "p95": 7356,
+        "p99": 8330,
+        "min": 5866,
+        "max": 8330,
+        "mean": 6512.6
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 6250,
+        "p95": 7224,
+        "p99": 8207,
+        "min": 5727,
+        "max": 8207,
+        "mean": 6396.4
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 120,
+        "p95": 187,
+        "p99": 204,
+        "min": 100,
+        "max": 204,
+        "mean": 133.4
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 6133,
+        "p95": 7112,
+        "p99": 8020,
+        "min": 5621,
+        "max": 8020,
+        "mean": 6263
+      }
+    },
+    {
+      "sample": "hello",
+      "mode": "cold",
+      "concurrency": 4,
+      "requests": 24,
+      "wall_ms": 83810,
+      "throughput_ok_per_s": 0.29,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 11825,
+        "p95": 27970,
+        "p99": 28224,
+        "min": 7080,
+        "max": 28224,
+        "mean": 13830.2
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 11666,
+        "p95": 27888,
+        "p99": 28125,
+        "min": 6947,
+        "max": 28125,
+        "mean": 13691.6
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 197,
+        "p95": 267,
+        "p99": 309,
+        "min": 176,
+        "max": 309,
+        "mean": 215.5
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 11410,
+        "p95": 27626,
+        "p99": 27919,
+        "min": 6770,
+        "max": 27919,
+        "mean": 13476
+      }
+    },
+    {
+      "sample": "hello",
+      "mode": "cold",
+      "concurrency": 8,
+      "requests": 24,
+      "wall_ms": 47222,
+      "throughput_ok_per_s": 0.42,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 4,
+      "n": 24,
+      "succeeded": 20,
+      "failed": 4,
+      "failure_rate": 0.167,
+      "http_codes": {
+        "200": 20,
+        "504": 4
+      },
+      "error_types": {
+        "Host.QueueTimeout": 4
+      },
+      "start_kinds": {
+        "cold": 20,
+        "none": 4
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 10126,
+        "p95": 19429,
+        "p99": 19910,
+        "min": 6742,
+        "max": 19910,
+        "mean": 12485.6
+      },
+      "queue_wait_ms": {
+        "n": 20,
+        "p50": 1876,
+        "p95": 9179,
+        "p99": 9589,
+        "min": 0,
+        "max": 9589,
+        "mean": 3689.4
+      },
+      "total_ms": {
+        "n": 20,
+        "p50": 10625,
+        "p95": 19297,
+        "p99": 19834,
+        "min": 6555,
+        "max": 19834,
+        "mean": 12846.7
+      },
+      "handler_ms": {
+        "n": 20,
+        "p50": 201,
+        "p95": 299,
+        "p99": 307,
+        "min": 127,
+        "max": 307,
+        "mean": 223.3
+      },
+      "platform_ms": {
+        "n": 20,
+        "p50": 10432,
+        "p95": 19088,
+        "p99": 19665,
+        "min": 6348,
+        "max": 19665,
+        "mean": 12623.4
+      }
+    },
+    {
+      "sample": "hello",
+      "mode": "warm",
+      "concurrency": 1,
+      "requests": 24,
+      "wall_ms": 1627,
+      "throughput_ok_per_s": 14.75,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "warm": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 42,
+        "p95": 73,
+        "p99": 74,
+        "min": 37,
+        "max": 74,
+        "mean": 49.1
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 38,
+        "p95": 67,
+        "p99": 70,
+        "min": 32,
+        "max": 70,
+        "mean": 44.5
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 34,
+        "p95": 63,
+        "p99": 65,
+        "min": 29,
+        "max": 65,
+        "mean": 40.4
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 4,
+        "p95": 5,
+        "p99": 11,
+        "min": 3,
+        "max": 11,
+        "mean": 4.1
+      }
+    },
+    {
+      "sample": "hello",
+      "mode": "warm",
+      "concurrency": 2,
+      "requests": 24,
+      "wall_ms": 7213,
+      "throughput_ok_per_s": 3.33,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1,
+        "warm": 23
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 45,
+        "p95": 78,
+        "p99": 6489,
+        "min": 35,
+        "max": 6489,
+        "mean": 318
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 41,
+        "p95": 74,
+        "p99": 6514,
+        "min": 32,
+        "max": 6514,
+        "mean": 314.8
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 36,
+        "p95": 67,
+        "p99": 105,
+        "min": 28,
+        "max": 105,
+        "mean": 43.3
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 4,
+        "p95": 11,
+        "p99": 6409,
+        "min": 2,
+        "max": 6409,
+        "mean": 271.5
+      }
+    },
+    {
+      "sample": "hello",
+      "mode": "warm",
+      "concurrency": 4,
+      "requests": 24,
+      "wall_ms": 6755,
+      "throughput_ok_per_s": 3.55,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 2,
+        "warm": 22
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 50,
+        "p95": 6388,
+        "p99": 6398,
+        "min": 36,
+        "max": 6398,
+        "mean": 580.5
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 44,
+        "p95": 6411,
+        "p99": 6423,
+        "min": 32,
+        "max": 6423,
+        "mean": 578
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 38,
+        "p95": 115,
+        "p99": 162,
+        "min": 29,
+        "max": 162,
+        "mean": 49.8
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 5,
+        "p95": 6249,
+        "p99": 6308,
+        "min": 3,
+        "max": 6308,
+        "mean": 528.2
+      }
+    },
+    {
+      "sample": "hello",
+      "mode": "warm",
+      "concurrency": 8,
+      "requests": 24,
+      "wall_ms": 6796,
+      "throughput_ok_per_s": 3.53,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 2,
+        "warm": 22
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 142,
+        "p95": 6439,
+        "p99": 6467,
+        "min": 62,
+        "max": 6467,
+        "mean": 659.8
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 57,
+        "p95": 99,
+        "p99": 118,
+        "min": 0,
+        "max": 118,
+        "mean": 53.3
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 134,
+        "p95": 6464,
+        "p99": 6490,
+        "min": 57,
+        "max": 6490,
+        "mean": 654.9
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 54,
+        "p95": 123,
+        "p99": 179,
+        "min": 34,
+        "max": 179,
+        "mean": 66.6
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 77,
+        "p95": 6285,
+        "p99": 6373,
+        "min": 4,
+        "max": 6373,
+        "mean": 588.3
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "cold",
+      "concurrency": 1,
+      "requests": 24,
+      "wall_ms": 150027,
+      "throughput_ok_per_s": 0.16,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 5926,
+        "p95": 8581,
+        "p99": 8691,
+        "min": 5680,
+        "max": 8691,
+        "mean": 6233.9
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 5841,
+        "p95": 8296,
+        "p99": 8623,
+        "min": 5592,
+        "max": 8623,
+        "mean": 6134.4
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 110,
+        "p95": 203,
+        "p99": 236,
+        "min": 102,
+        "max": 236,
+        "mean": 126.9
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 5707,
+        "p95": 8060,
+        "p99": 8508,
+        "min": 5483,
+        "max": 8508,
+        "mean": 6007.5
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "cold",
+      "concurrency": 2,
+      "requests": 24,
+      "wall_ms": 77003,
+      "throughput_ok_per_s": 0.31,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 6157,
+        "p95": 8354,
+        "p99": 8619,
+        "min": 5561,
+        "max": 8619,
+        "mean": 6337.2
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 6043,
+        "p95": 8281,
+        "p99": 8544,
+        "min": 5478,
+        "max": 8544,
+        "mean": 6231.5
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 119,
+        "p95": 177,
+        "p99": 182,
+        "min": 103,
+        "max": 182,
+        "mean": 134.6
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 5882,
+        "p95": 8170,
+        "p99": 8431,
+        "min": 5368,
+        "max": 8431,
+        "mean": 6096.9
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "cold",
+      "concurrency": 4,
+      "requests": 24,
+      "wall_ms": 48440,
+      "throughput_ok_per_s": 0.5,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 7730,
+        "p95": 8966,
+        "p99": 9193,
+        "min": 5674,
+        "max": 9193,
+        "mean": 7666.2
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 7603,
+        "p95": 8845,
+        "p99": 8972,
+        "min": 5589,
+        "max": 8972,
+        "mean": 7515.9
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 183,
+        "p95": 262,
+        "p99": 269,
+        "min": 109,
+        "max": 269,
+        "mean": 181.5
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 7431,
+        "p95": 8652,
+        "p99": 8777,
+        "min": 5480,
+        "max": 8777,
+        "mean": 7334.4
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "cold",
+      "concurrency": 8,
+      "requests": 24,
+      "wall_ms": 52962,
+      "throughput_ok_per_s": 0.42,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 2,
+      "n": 24,
+      "succeeded": 22,
+      "failed": 2,
+      "failure_rate": 0.083,
+      "http_codes": {
+        "200": 22,
+        "504": 2
+      },
+      "error_types": {
+        "Host.QueueTimeout": 2
+      },
+      "start_kinds": {
+        "cold": 22,
+        "none": 2
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 14611,
+        "p95": 22369,
+        "p99": 22503,
+        "min": 7271,
+        "max": 22503,
+        "mean": 14920.9
+      },
+      "queue_wait_ms": {
+        "n": 22,
+        "p50": 7763,
+        "p95": 8945,
+        "p99": 9265,
+        "min": 0,
+        "max": 9265,
+        "mean": 6497.6
+      },
+      "total_ms": {
+        "n": 22,
+        "p50": 15149,
+        "p95": 22203,
+        "p99": 22226,
+        "min": 7084,
+        "max": 22226,
+        "mean": 15204.8
+      },
+      "handler_ms": {
+        "n": 22,
+        "p50": 187,
+        "p95": 412,
+        "p99": 624,
+        "min": 113,
+        "max": 624,
+        "mean": 227.2
+      },
+      "platform_ms": {
+        "n": 22,
+        "p50": 15025,
+        "p95": 21793,
+        "p99": 21814,
+        "min": 6957,
+        "max": 21814,
+        "mean": 14977.6
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "warm",
+      "concurrency": 1,
+      "requests": 24,
+      "wall_ms": 12989,
+      "throughput_ok_per_s": 1.85,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "warm": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 390,
+        "p95": 887,
+        "p99": 932,
+        "min": 82,
+        "max": 932,
+        "mean": 433.4
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 347,
+        "p95": 810,
+        "p99": 929,
+        "min": 75,
+        "max": 929,
+        "mean": 400.5
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 329,
+        "p95": 758,
+        "p99": 914,
+        "min": 66,
+        "max": 914,
+        "mean": 376.8
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 13,
+        "p95": 74,
+        "p99": 98,
+        "min": 7,
+        "max": 98,
+        "mean": 23.8
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "warm",
+      "concurrency": 2,
+      "requests": 24,
+      "wall_ms": 21222,
+      "throughput_ok_per_s": 1.13,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1,
+        "warm": 23
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 127,
+        "p95": 855,
+        "p99": 19710,
+        "min": 67,
+        "max": 19710,
+        "mean": 1054.1
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 119,
+        "p95": 846,
+        "p99": 19792,
+        "min": 61,
+        "max": 19792,
+        "mean": 1043
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 110,
+        "p95": 716,
+        "p99": 837,
+        "min": 55,
+        "max": 837,
+        "mean": 211.8
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 9,
+        "p95": 206,
+        "p99": 19436,
+        "min": 5,
+        "max": 19436,
+        "mean": 831.2
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "warm",
+      "concurrency": 4,
+      "requests": 24,
+      "wall_ms": 10435,
+      "throughput_ok_per_s": 2.3,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 2,
+        "warm": 22
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 92,
+        "p95": 9839,
+        "p99": 9859,
+        "min": 60,
+        "max": 9859,
+        "mean": 909.3
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 82,
+        "p95": 9875,
+        "p99": 9892,
+        "min": 55,
+        "max": 9892,
+        "mean": 906.3
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 73,
+        "p95": 214,
+        "p99": 214,
+        "min": 50,
+        "max": 214,
+        "mean": 92.9
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 7,
+        "p95": 9661,
+        "p99": 9678,
+        "min": 5,
+        "max": 9678,
+        "mean": 813.4
+      }
+    },
+    {
+      "sample": "http-axum",
+      "mode": "warm",
+      "concurrency": 8,
+      "requests": 24,
+      "wall_ms": 31302,
+      "throughput_ok_per_s": 0.7,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 22,
+      "failed": 2,
+      "failure_rate": 0.083,
+      "http_codes": {
+        "200": 22,
+        "502": 2
+      },
+      "error_types": {
+        "Host.EnvironmentBootFailed": 2
+      },
+      "start_kinds": {
+        "none": 2,
+        "warm": 22
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 167,
+        "p95": 30110,
+        "p99": 30130,
+        "min": 67,
+        "max": 30130,
+        "mean": 2662.9
+      },
+      "queue_wait_ms": {
+        "n": 22,
+        "p50": 77,
+        "p95": 115,
+        "p99": 121,
+        "min": 0,
+        "max": 121,
+        "mean": 61.4
+      },
+      "total_ms": {
+        "n": 22,
+        "p50": 156,
+        "p95": 216,
+        "p99": 410,
+        "min": 59,
+        "max": 410,
+        "mean": 157
+      },
+      "handler_ms": {
+        "n": 22,
+        "p50": 61,
+        "p95": 131,
+        "p99": 376,
+        "min": 35,
+        "max": 376,
+        "mean": 80.8
+      },
+      "platform_ms": {
+        "n": 22,
+        "p50": 86,
+        "p95": 124,
+        "p99": 129,
+        "min": 9,
+        "max": 129,
+        "mean": 76.1
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "cold",
+      "concurrency": 1,
+      "requests": 24,
+      "wall_ms": 181247,
+      "throughput_ok_per_s": 0.13,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 6053,
+        "p95": 12967,
+        "p99": 13852,
+        "min": 5817,
+        "max": 13852,
+        "mean": 7533
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 5920,
+        "p95": 12756,
+        "p99": 13748,
+        "min": 5734,
+        "max": 13748,
+        "mean": 7430.5
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 324,
+        "p95": 398,
+        "p99": 493,
+        "min": 300,
+        "max": 493,
+        "mean": 347.9
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 5544,
+        "p95": 12263,
+        "p99": 13372,
+        "min": 5425,
+        "max": 13372,
+        "mean": 7082.6
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "cold",
+      "concurrency": 2,
+      "requests": 24,
+      "wall_ms": 75646,
+      "throughput_ok_per_s": 0.32,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 6123,
+        "p95": 6820,
+        "p99": 6883,
+        "min": 5651,
+        "max": 6883,
+        "mean": 6169.1
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 6040,
+        "p95": 6692,
+        "p99": 6805,
+        "min": 5560,
+        "max": 6805,
+        "mean": 6069.4
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 315,
+        "p95": 375,
+        "p99": 381,
+        "min": 304,
+        "max": 381,
+        "mean": 327.5
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 5730,
+        "p95": 6329,
+        "p99": 6499,
+        "min": 5256,
+        "max": 6499,
+        "mean": 5741.9
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "cold",
+      "concurrency": 4,
+      "requests": 24,
+      "wall_ms": 55065,
+      "throughput_ok_per_s": 0.44,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 24
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 7575,
+        "p95": 15052,
+        "p99": 15145,
+        "min": 6522,
+        "max": 15145,
+        "mean": 8865.7
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 7416,
+        "p95": 14754,
+        "p99": 15003,
+        "min": 6340,
+        "max": 15003,
+        "mean": 8689.2
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 372,
+        "p95": 568,
+        "p99": 580,
+        "min": 309,
+        "max": 580,
+        "mean": 382
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 7013,
+        "p95": 14174,
+        "p99": 14675,
+        "min": 6021,
+        "max": 14675,
+        "mean": 8307.1
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "cold",
+      "concurrency": 8,
+      "requests": 24,
+      "wall_ms": 51263,
+      "throughput_ok_per_s": 0.41,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 3,
+      "n": 24,
+      "succeeded": 21,
+      "failed": 3,
+      "failure_rate": 0.125,
+      "http_codes": {
+        "200": 21,
+        "504": 3
+      },
+      "error_types": {
+        "Host.QueueTimeout": 3
+      },
+      "start_kinds": {
+        "cold": 21,
+        "none": 3
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 14186,
+        "p95": 23350,
+        "p99": 23746,
+        "min": 6162,
+        "max": 23746,
+        "mean": 14127.3
+      },
+      "queue_wait_ms": {
+        "n": 21,
+        "p50": 7639,
+        "p95": 9570,
+        "p99": 9716,
+        "min": 0,
+        "max": 9716,
+        "mean": 5635
+      },
+      "total_ms": {
+        "n": 21,
+        "p50": 16089,
+        "p95": 23292,
+        "p99": 23638,
+        "min": 6070,
+        "max": 23638,
+        "mean": 14596.4
+      },
+      "handler_ms": {
+        "n": 21,
+        "p50": 386,
+        "p95": 584,
+        "p99": 703,
+        "min": 303,
+        "max": 703,
+        "mean": 385.7
+      },
+      "platform_ms": {
+        "n": 21,
+        "p50": 15765,
+        "p95": 22898,
+        "p99": 23251,
+        "min": 5767,
+        "max": 23251,
+        "mean": 14210.7
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "warm",
+      "concurrency": 1,
+      "requests": 24,
+      "wall_ms": 19641,
+      "throughput_ok_per_s": 1.22,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1,
+        "warm": 23
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 331,
+        "p95": 434,
+        "p99": 10332,
+        "min": 264,
+        "max": 10332,
+        "mean": 755.4
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 321,
+        "p95": 423,
+        "p99": 10367,
+        "min": 257,
+        "max": 10367,
+        "mean": 743
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 308,
+        "p95": 401,
+        "p99": 412,
+        "min": 248,
+        "max": 412,
+        "mean": 315.6
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 11,
+        "p95": 25,
+        "p99": 9966,
+        "min": 5,
+        "max": 9966,
+        "mean": 427.4
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "warm",
+      "concurrency": 2,
+      "requests": 24,
+      "wall_ms": 9431,
+      "throughput_ok_per_s": 2.54,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1,
+        "warm": 23
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 279,
+        "p95": 295,
+        "p99": 6290,
+        "min": 237,
+        "max": 6290,
+        "mean": 526.2
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 273,
+        "p95": 290,
+        "p99": 6313,
+        "min": 234,
+        "max": 6313,
+        "mean": 522.4
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 268,
+        "p95": 286,
+        "p99": 309,
+        "min": 230,
+        "max": 309,
+        "mean": 267.2
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 4,
+        "p95": 21,
+        "p99": 6004,
+        "min": 3,
+        "max": 6004,
+        "mean": 255.2
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "warm",
+      "concurrency": 4,
+      "requests": 24,
+      "wall_ms": 7504,
+      "throughput_ok_per_s": 3.2,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 2,
+        "warm": 22
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 282,
+        "p95": 5954,
+        "p99": 5969,
+        "min": 253,
+        "max": 5969,
+        "mean": 752.7
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "min": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 278,
+        "p95": 5973,
+        "p99": 5988,
+        "min": 249,
+        "max": 5988,
+        "mean": 751.3
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 273,
+        "p95": 298,
+        "p99": 312,
+        "min": 246,
+        "max": 312,
+        "mean": 273.1
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 4,
+        "p95": 5675,
+        "p99": 5676,
+        "min": 3,
+        "max": 5676,
+        "mean": 478.2
+      }
+    },
+    {
+      "sample": "cpu-burn",
+      "mode": "warm",
+      "concurrency": 8,
+      "requests": 24,
+      "wall_ms": 6671,
+      "throughput_ok_per_s": 3.6,
+      "status_429": 0,
+      "status_503": 0,
+      "status_504": 0,
+      "n": 24,
+      "succeeded": 24,
+      "failed": 0,
+      "failure_rate": 0,
+      "http_codes": {
+        "200": 24
+      },
+      "error_types": {},
+      "start_kinds": {
+        "cold": 1,
+        "warm": 23
+      },
+      "client_ms": {
+        "n": 24,
+        "p50": 548,
+        "p95": 747,
+        "p99": 6026,
+        "min": 262,
+        "max": 6026,
+        "mean": 751.2
+      },
+      "queue_wait_ms": {
+        "n": 24,
+        "p50": 278,
+        "p95": 468,
+        "p99": 471,
+        "min": 0,
+        "max": 471,
+        "mean": 242.7
+      },
+      "total_ms": {
+        "n": 24,
+        "p50": 546,
+        "p95": 744,
+        "p99": 6042,
+        "min": 258,
+        "max": 6042,
+        "mean": 747.6
+      },
+      "handler_ms": {
+        "n": 24,
+        "p50": 259,
+        "p95": 301,
+        "p99": 302,
+        "min": 237,
+        "max": 302,
+        "mean": 263.4
+      },
+      "platform_ms": {
+        "n": 24,
+        "p50": 290,
+        "p95": 483,
+        "p99": 5745,
+        "min": 3,
+        "max": 5745,
+        "mean": 484.2
+      }
+    }
+  ],
+  "gateway_starts": {
+    "fresh_host": {
+      "n": 15,
+      "p50": 500,
+      "p95": 2080,
+      "p99": 2080,
+      "min": 236,
+      "max": 2080,
+      "mean": 633.3
+    },
+    "warm_config_page_cache_warm": {
+      "n": 3,
+      "p50": 493,
+      "p95": 499,
+      "p99": 499,
+      "min": 448,
+      "max": 499,
+      "mean": 480
+    }
+  },
+  "deploys": {
+    "create_client_ms": {
+      "n": 15,
+      "p50": 10,
+      "p95": 119,
+      "p99": 119,
+      "min": 8,
+      "max": 119,
+      "mean": 19.6
+    },
+    "deploy_client_ms": {
+      "n": 15,
+      "p50": 277,
+      "p95": 481,
+      "p99": 481,
+      "min": 145,
+      "max": 481,
+      "mean": 286.6
+    }
+  },
+  "resources": {
+    "paused_idle": [
+      {
+        "sample": "hello",
+        "window_s": 60,
+        "clk_tck": 100,
+        "environments": [
+          {
+            "env": "env_01m2pzd8cnhpmkte3garbbamr1",
+            "requested_memory_mib": 256,
+            "vmm_state": "S",
+            "vmm_rss_kib_start": 39556,
+            "vmm_rss_kib_end": 39556,
+            "vmm_hwm_kib": 39556,
+            "vmm_cpu_ticks_delta": 0,
+            "cgroup_memory_current_bytes_start": 42983424,
+            "cgroup_memory_current_bytes_end": 42749952,
+            "cgroup_memory_peak_bytes": 42987520,
+            "cgroup_memory_max": 335544320,
+            "cgroup_memory_stat_end": {
+              "anon": 38207488,
+              "file": 3436544,
+              "kernel": 720896
+            },
+            "cgroup_cpu_usage_usec_delta": 0,
+            "env_dir_bytes": 278954477,
+            "jail_dir_bytes": 366525928,
+            "env_and_jail_unique_bytes": 366552578
+          }
+        ],
+        "gateway_rss_kib_start": 22880,
+        "gateway_rss_kib_end": 22944,
+        "gateway_cpu_ticks_delta": 3,
+        "host_mem_available_kib_start": 7480800,
+        "host_mem_available_kib_end": 7486156
+      },
+      {
+        "sample": "http-axum",
+        "window_s": 60,
+        "clk_tck": 100,
+        "environments": [
+          {
+            "env": "env_01m2q00ecc7cets75awg23zfhn",
+            "requested_memory_mib": 256,
+            "vmm_state": "S",
+            "vmm_rss_kib_start": 39768,
+            "vmm_rss_kib_end": 39768,
+            "vmm_hwm_kib": 39768,
+            "vmm_cpu_ticks_delta": 0,
+            "cgroup_memory_current_bytes_start": 43212800,
+            "cgroup_memory_current_bytes_end": 43028480,
+            "cgroup_memory_peak_bytes": 43499520,
+            "cgroup_memory_max": 335544320,
+            "cgroup_memory_stat_end": {
+              "anon": 38424576,
+              "file": 3436544,
+              "kernel": 729088
+            },
+            "cgroup_cpu_usage_usec_delta": 0,
+            "env_dir_bytes": 278954477,
+            "jail_dir_bytes": 366525928,
+            "env_and_jail_unique_bytes": 366552578
+          }
+        ],
+        "gateway_rss_kib_start": 22896,
+        "gateway_rss_kib_end": 22960,
+        "gateway_cpu_ticks_delta": 3,
+        "host_mem_available_kib_start": 7484840,
+        "host_mem_available_kib_end": 7494276
+      },
+      {
+        "sample": "cpu-burn",
+        "window_s": 60,
+        "clk_tck": 100,
+        "environments": [
+          {
+            "env": "env_01m2q0qmjrxrcds35fzpnpwz1j",
+            "requested_memory_mib": 256,
+            "vmm_state": "S",
+            "vmm_rss_kib_start": 39572,
+            "vmm_rss_kib_end": 39572,
+            "vmm_hwm_kib": 39572,
+            "vmm_cpu_ticks_delta": 0,
+            "cgroup_memory_current_bytes_start": 43036672,
+            "cgroup_memory_current_bytes_end": 42389504,
+            "cgroup_memory_peak_bytes": 43036672,
+            "cgroup_memory_max": 335544320,
+            "cgroup_memory_stat_end": {
+              "anon": 38223872,
+              "file": 3436544,
+              "kernel": 724992
+            },
+            "cgroup_cpu_usage_usec_delta": 0,
+            "env_dir_bytes": 278954518,
+            "jail_dir_bytes": 366525928,
+            "env_and_jail_unique_bytes": 366552619
+          }
+        ],
+        "gateway_rss_kib_start": 24344,
+        "gateway_rss_kib_end": 24344,
+        "gateway_cpu_ticks_delta": 3,
+        "host_mem_available_kib_start": 7489008,
+        "host_mem_available_kib_end": 7498992
+      }
+    ],
+    "gateway_rss_by_pooled_environments": [
+      {
+        "sample": "hello",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19948,
+        "host_mem_available_kib": 7558348
+      },
+      {
+        "sample": "hello",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19948,
+        "host_mem_available_kib": 7557524
+      },
+      {
+        "sample": "hello",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19940,
+        "host_mem_available_kib": 7552512
+      },
+      {
+        "sample": "hello",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19940,
+        "host_mem_available_kib": 7543844
+      },
+      {
+        "sample": "hello",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 21468,
+        "host_mem_available_kib": 7551084
+      },
+      {
+        "sample": "hello",
+        "phase": "warm-gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 20052,
+        "host_mem_available_kib": 7533148
+      },
+      {
+        "sample": "hello",
+        "phase": "idle-start",
+        "pooled_environments": 1,
+        "gateway_rss_kib": 22880,
+        "host_mem_available_kib": 7480800
+      },
+      {
+        "sample": "hello",
+        "phase": "idle-end",
+        "pooled_environments": 1,
+        "gateway_rss_kib": 22944,
+        "host_mem_available_kib": 7486156
+      },
+      {
+        "sample": "hello",
+        "phase": "warm-after-sweep",
+        "pooled_environments": 6,
+        "gateway_rss_kib": 39832,
+        "host_mem_available_kib": 7282844
+      },
+      {
+        "sample": "http-axum",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19964,
+        "host_mem_available_kib": 7525576
+      },
+      {
+        "sample": "http-axum",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 21796,
+        "host_mem_available_kib": 7517304
+      },
+      {
+        "sample": "http-axum",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19964,
+        "host_mem_available_kib": 7526064
+      },
+      {
+        "sample": "http-axum",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19964,
+        "host_mem_available_kib": 7526604
+      },
+      {
+        "sample": "http-axum",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19960,
+        "host_mem_available_kib": 7526420
+      },
+      {
+        "sample": "http-axum",
+        "phase": "warm-gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 20064,
+        "host_mem_available_kib": 7535540
+      },
+      {
+        "sample": "http-axum",
+        "phase": "idle-start",
+        "pooled_environments": 1,
+        "gateway_rss_kib": 22896,
+        "host_mem_available_kib": 7484840
+      },
+      {
+        "sample": "http-axum",
+        "phase": "idle-end",
+        "pooled_environments": 1,
+        "gateway_rss_kib": 22960,
+        "host_mem_available_kib": 7494276
+      },
+      {
+        "sample": "http-axum",
+        "phase": "warm-after-sweep",
+        "pooled_environments": 4,
+        "gateway_rss_kib": 37848,
+        "host_mem_available_kib": 7366532
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19948,
+        "host_mem_available_kib": 7539292
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19952,
+        "host_mem_available_kib": 7545148
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 21868,
+        "host_mem_available_kib": 7543172
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 21988,
+        "host_mem_available_kib": 7533888
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 19964,
+        "host_mem_available_kib": 7540884
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "warm-gateway-empty",
+        "pooled_environments": 0,
+        "gateway_rss_kib": 21464,
+        "host_mem_available_kib": 7544680
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "idle-start",
+        "pooled_environments": 1,
+        "gateway_rss_kib": 24344,
+        "host_mem_available_kib": 7489008
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "idle-end",
+        "pooled_environments": 1,
+        "gateway_rss_kib": 24344,
+        "host_mem_available_kib": 7498992
+      },
+      {
+        "sample": "cpu-burn",
+        "phase": "warm-after-sweep",
+        "pooled_environments": 5,
+        "gateway_rss_kib": 35040,
+        "host_mem_available_kib": 7334180
+      }
+    ],
+    "pooled_after_sweep": [
+      {
+        "sample": "hello",
+        "environments": 6,
+        "cgroup_memory_current_bytes": {
+          "n": 6,
+          "p50": 42672128,
+          "p95": 43401216,
+          "p99": 43401216,
+          "min": 42332160,
+          "max": 43401216,
+          "mean": 42763605.3
+        },
+        "vmm_rss_kib": {
+          "n": 6,
+          "p50": 39528,
+          "p95": 39592,
+          "p99": 39592,
+          "min": 39460,
+          "max": 39592,
+          "mean": 39529.3
+        },
+        "env_and_jail_unique_bytes": {
+          "n": 6,
+          "p50": 366540822,
+          "p95": 366598612,
+          "p99": 366598612,
+          "min": 366537886,
+          "max": 366598612,
+          "mean": 366550968.3
+        }
+      },
+      {
+        "sample": "http-axum",
+        "environments": 4,
+        "cgroup_memory_current_bytes": {
+          "n": 4,
+          "p50": 42557440,
+          "p95": 43425792,
+          "p99": 43425792,
+          "min": 42553344,
+          "max": 43425792,
+          "mean": 42776576
+        },
+        "vmm_rss_kib": {
+          "n": 4,
+          "p50": 39740,
+          "p95": 39808,
+          "p99": 39808,
+          "min": 39740,
+          "max": 39808,
+          "mean": 39760
+        },
+        "env_and_jail_unique_bytes": {
+          "n": 4,
+          "p50": 366541557,
+          "p95": 366600142,
+          "p99": 366600142,
+          "min": 366541556,
+          "max": 366600142,
+          "mean": 366558085
+        }
+      },
+      {
+        "sample": "cpu-burn",
+        "environments": 5,
+        "cgroup_memory_current_bytes": {
+          "n": 5,
+          "p50": 43122688,
+          "p95": 43331584,
+          "p99": 43331584,
+          "min": 42643456,
+          "max": 43331584,
+          "mean": 43003084.8
+        },
+        "vmm_rss_kib": {
+          "n": 5,
+          "p50": 39548,
+          "p95": 39604,
+          "p99": 39604,
+          "min": 39508,
+          "max": 39604,
+          "mean": 39555.2
+        },
+        "env_and_jail_unique_bytes": {
+          "n": 5,
+          "p50": 366541567,
+          "p95": 366584862,
+          "p99": 366584862,
+          "min": 366537887,
+          "max": 366584862,
+          "mean": 366551184.2
+        }
+      }
+    ],
+    "teardown_by_sample": [
+      {
+        "sample": "hello",
+        "environments": 123,
+        "memory_peak_bytes": {
+          "n": 123,
+          "p50": 42950656,
+          "p95": 43409408,
+          "p99": 44843008,
+          "min": 42418176,
+          "max": 45457408,
+          "mean": 42979994
+        },
+        "cpu_usage_usec": {
+          "n": 123,
+          "p50": 3228724,
+          "p95": 6277282,
+          "p99": 13982028,
+          "min": 2793793,
+          "max": 14023674,
+          "mean": 4126723
+        },
+        "cpu_throttled_usec": {
+          "n": 123,
+          "p50": 3159325,
+          "p95": 6113298,
+          "p99": 13231719,
+          "min": 2718297,
+          "max": 13472888,
+          "mean": 3963598.2
+        },
+        "throttled_period_ratio": {
+          "n": 123,
+          "p50": 0.99,
+          "p95": 1,
+          "p99": 1,
+          "min": 0.54,
+          "max": 1,
+          "mean": 1
+        },
+        "oom_kills": 0
+      },
+      {
+        "sample": "http-axum",
+        "environments": 123,
+        "memory_peak_bytes": {
+          "n": 123,
+          "p50": 43122688,
+          "p95": 43589632,
+          "p99": 45256704,
+          "min": 42668032,
+          "max": 45338624,
+          "mean": 43180864.5
+        },
+        "cpu_usage_usec": {
+          "n": 123,
+          "p50": 3342077,
+          "p95": 5260280,
+          "p99": 10651166,
+          "min": 2797009,
+          "max": 13326017,
+          "mean": 3742401
+        },
+        "cpu_throttled_usec": {
+          "n": 123,
+          "p50": 3253324,
+          "p95": 4901273,
+          "p99": 9705141,
+          "min": 2722067,
+          "max": 10170471,
+          "mean": 3597733.7
+        },
+        "throttled_period_ratio": {
+          "n": 123,
+          "p50": 0.99,
+          "p95": 1,
+          "p99": 1,
+          "min": 0.57,
+          "max": 1,
+          "mean": 1
+        },
+        "oom_kills": 0
+      },
+      {
+        "sample": "cpu-burn",
+        "environments": 124,
+        "memory_peak_bytes": {
+          "n": 124,
+          "p50": 42926080,
+          "p95": 43417600,
+          "p99": 45072384,
+          "min": 42409984,
+          "max": 45080576,
+          "mean": 42974108.9
+        },
+        "cpu_usage_usec": {
+          "n": 124,
+          "p50": 3506529,
+          "p95": 7110782,
+          "p99": 7588967,
+          "min": 2836599,
+          "max": 15283527,
+          "mean": 4083041.5
+        },
+        "cpu_throttled_usec": {
+          "n": 124,
+          "p50": 3369952,
+          "p95": 6844101,
+          "p99": 7326679,
+          "min": 2756522,
+          "max": 12746116,
+          "mean": 3926875.6
+        },
+        "throttled_period_ratio": {
+          "n": 124,
+          "p50": 0.99,
+          "p95": 1,
+          "p99": 1,
+          "min": 0.72,
+          "max": 1,
+          "mean": 1
+        },
+        "oom_kills": 0
+      }
+    ]
+  },
+  "rfc_targets": [
+    {
+      "target": "cold first response: small Rust function, image cache hit, p95 <= 3 s (RFC §19)",
+      "measured": {
+        "sample": "hello",
+        "n": 20,
+        "failure_rate": 0,
+        "client_p95_ms": 6037,
+        "client_p99_ms": 6071,
+        "environment_boot_p95_ms": 5315,
+        "runtime_init_p95_ms": 566,
+        "cgroup_throttled_period_ratio_p50": 0.99
+      },
+      "verdict": "未達",
+      "reason": "p95 above 3000 ms on this host; see environment_boot_ms and the cgroup throttling ratio for where the time goes"
+    },
+    {
+      "target": "cold first response, image cache miss: reported separately (RFC §19)",
+      "measured": [
+        {
+          "sample": "hello",
+          "n": 5,
+          "client_p95_ms": 7609,
+          "client_max_ms": 7609,
+          "failure_rate": 0
+        },
+        {
+          "sample": "http-axum",
+          "n": 5,
+          "client_p95_ms": 6128,
+          "client_max_ms": 6128,
+          "failure_rate": 0
+        },
+        {
+          "sample": "cpu-burn",
+          "n": 5,
+          "client_p95_ms": 14106,
+          "client_max_ms": 14106,
+          "failure_rate": 0
+        }
+      ],
+      "verdict": "記録のみ（目標値なし）",
+      "reason": "RFC gives no number for the miss case; recorded so it is not mixed into the hit percentiles"
+    },
+    {
+      "target": "warm platform added latency p95 <= 20 ms, user handler excluded (RFC §19)",
+      "measured": [
+        {
+          "sample": "hello",
+          "n": 20,
+          "start_kinds": {
+            "warm": 20
+          },
+          "failure_rate": 0,
+          "host_platform_p95_ms": 17,
+          "client_platform_p95_ms": 23
+        },
+        {
+          "sample": "http-axum",
+          "n": 20,
+          "start_kinds": {
+            "warm": 20
+          },
+          "failure_rate": 0,
+          "host_platform_p95_ms": 31,
+          "client_platform_p95_ms": 51
+        },
+        {
+          "sample": "cpu-burn",
+          "n": 20,
+          "start_kinds": {
+            "warm": 20
+          },
+          "failure_rate": 0,
+          "host_platform_p95_ms": 17,
+          "client_platform_p95_ms": 30
+        }
+      ],
+      "verdict": "未達（hello 達成、http-axum 未達、cpu-burn 達成。host 計測）",
+      "reason": "judged per sample on host_platform p95; host_platform = total_ms - handler_ms (queue, resume, readiness, response, bookkeeping) over every attempt of the warm group including any that fell back to cold; client_platform adds loopback HTTP and curl. RFC asks for same-region under a set load; this is loopback on one nested host, sequential"
+    },
+    {
+      "target": "Fast Restore: end-to-end p95/p99 and cost better than cold (RFC §19)",
+      "measured": null,
+      "verdict": "未測定",
+      "reason": "snapshot restore is not implemented (Capabilities.snapshot_clone = unsupported); X1 adds it to this benchmark"
+    },
+    {
+      "target": "normal invoke availability 99.9% (RFC §19)",
+      "measured": [
+        {
+          "sample": "hello",
+          "scenario": "fresh-miss",
+          "n": 5,
+          "failure_rate": 0
+        },
+        {
+          "sample": "hello",
+          "scenario": "cold",
+          "n": 20,
+          "failure_rate": 0
+        },
+        {
+          "sample": "hello",
+          "scenario": "warm-prime",
+          "n": 1,
+          "failure_rate": 0
+        },
+        {
+          "sample": "hello",
+          "scenario": "warm",
+          "n": 20,
+          "failure_rate": 0
+        },
+        {
+          "sample": "http-axum",
+          "scenario": "fresh-miss",
+          "n": 5,
+          "failure_rate": 0
+        },
+        {
+          "sample": "http-axum",
+          "scenario": "cold",
+          "n": 20,
+          "failure_rate": 0
+        },
+        {
+          "sample": "http-axum",
+          "scenario": "warm-prime",
+          "n": 1,
+          "failure_rate": 0
+        },
+        {
+          "sample": "http-axum",
+          "scenario": "warm",
+          "n": 20,
+          "failure_rate": 0
+        },
+        {
+          "sample": "cpu-burn",
+          "scenario": "fresh-miss",
+          "n": 5,
+          "failure_rate": 0
+        },
+        {
+          "sample": "cpu-burn",
+          "scenario": "cold",
+          "n": 20,
+          "failure_rate": 0
+        },
+        {
+          "sample": "cpu-burn",
+          "scenario": "warm-prime",
+          "n": 1,
+          "failure_rate": 0
+        },
+        {
+          "sample": "cpu-burn",
+          "scenario": "warm",
+          "n": 20,
+          "failure_rate": 0
+        }
+      ],
+      "verdict": "未測定",
+      "reason": "a few hundred requests on one host are not an availability measurement; failure rates are listed for the record only"
+    }
+  ]
+}
