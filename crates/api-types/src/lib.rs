@@ -79,6 +79,14 @@ pub enum ErrorCode {
     OutcomeUnknown,
     PlatformError,
     ProviderUnavailable,
+    /// A data plane cannot accept new work from its configuration cache:
+    /// the needed configuration was not delivered yet, expired, the
+    /// authorization lease expired, or new cold starts are restricted while
+    /// the control plane is unreachable (PLT-4636). `error_type` names which.
+    ConfigUnavailable,
+    /// The management API (the control plane or its store) is unavailable
+    /// from this gateway (PLT-4636).
+    ControlPlaneUnavailable,
 }
 
 impl ErrorCode {
@@ -98,6 +106,7 @@ impl ErrorCode {
             Self::OutcomeUnknown => 502,
             Self::PlatformError => 500,
             Self::ProviderUnavailable => 503,
+            Self::ConfigUnavailable | Self::ControlPlaneUnavailable => 503,
         }
     }
 }

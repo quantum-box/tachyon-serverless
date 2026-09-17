@@ -25,6 +25,7 @@ use tachyon_serverless_domain::{
     RevisionId, Sha256Digest, TenantId, Timestamp,
 };
 
+pub mod config;
 pub mod guard;
 mod legacy;
 mod logs;
@@ -36,6 +37,9 @@ pub mod sqlite;
 #[cfg(test)]
 mod contract_tests;
 
+pub use config::{
+    ConfigObservation, ConfigPublicationRepository, ConfigRows, StampedConfig, StampedEntry,
+};
 pub use memory::InMemoryStore;
 pub use restart::{HOST_LEASE_EXPIRED, HOST_RESTARTED};
 pub use slot::{
@@ -243,6 +247,7 @@ pub trait StateStore:
     + IdempotencyRepository
     + ArtifactOwnerRepository
     + SlotStore
+    + ConfigPublicationRepository
     + std::fmt::Debug
 {
     /// `"sqlite"` or `"memory"`.

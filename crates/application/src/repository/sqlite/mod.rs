@@ -46,6 +46,7 @@ use super::{
     legacy,
 };
 
+mod config;
 pub mod migrations;
 mod slot;
 

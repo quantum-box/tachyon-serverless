@@ -49,6 +49,7 @@ impl utoipa::Modify for SecurityAddon {
         handlers::cancel_invocation,
         handlers::invocation_logs,
         handlers::usage,
+        handlers::internal_config,
     ),
     components(schemas(
         api::ErrorCode,
@@ -80,7 +81,7 @@ impl utoipa::Modify for SecurityAddon {
     )),
     tags(
         (name = "meta"), (name = "provider"), (name = "artifacts"), (name = "functions"),
-        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage")
+        (name = "revisions"), (name = "aliases"), (name = "invoke"), (name = "invocations"), (name = "usage"), (name = "internal")
     ),
     modifiers(&SecurityAddon)
 )]

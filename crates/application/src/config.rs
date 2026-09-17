@@ -607,6 +607,140 @@ impl Default for ReconcileConfig {
     }
 }
 
+/// Which half of the control-plane / data-plane split this gateway runs
+/// (PLT-4636, docs/adr/0007-config-distribution-and-auth-leases.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayRole {
+    /// Management API, invoke and (when `internal_token` is set) the internal
+    /// config endpoint for data planes. Invoke still reads its configuration
+    /// through the cache, fed in-process from the ledger.
+    #[default]
+    Combined,
+    /// Invoke only. Functions, routes, revisions, authorization grants and
+    /// policy come from a management gateway at `url`; the management API
+    /// answers 503.
+    DataPlane,
+}
+
+impl GatewayRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Combined => "combined",
+            Self::DataPlane => "data_plane",
+        }
+    }
+}
+
+/// `[control_plane]`: configuration distribution and authorization leases
+/// (PLT-4636).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ControlPlaneConfig {
+    pub role: GatewayRole,
+    /// Base URL of the management gateway (`data_plane` only).
+    pub url: Option<String>,
+    /// Credential of `GET /v1/internal/config`. A `combined` gateway serves
+    /// the endpoint only when this is set; a `data_plane` presents it. Also
+    /// the key under which bearer tokens are digested for distribution.
+    pub internal_token: Option<ConfigToken>,
+    /// Refresh period while the control plane answers.
+    pub refresh_interval_ms: u64,
+    /// How long a delivered function / route / revision / policy stays valid
+    /// after the refresh that last confirmed it.
+    pub config_ttl_seconds: u64,
+    /// How long a delivered authorization grant (bearer token -> tenant,
+    /// roles) stays valid after the refresh that last confirmed it: the auth
+    /// lease, and the upper bound of how long a revoked token keeps working
+    /// on a data plane that cannot reach the control plane.
+    pub auth_lease_seconds: u64,
+    /// An entry not confirmed for longer than this is reported as
+    /// stale-but-valid. Defaults to three refresh intervals.
+    pub stale_after_ms: Option<u64>,
+    /// Retry backoff after a failed refresh: doubles from `backoff_initial_ms`
+    /// up to `backoff_max_ms`.
+    pub backoff_initial_ms: u64,
+    pub backoff_max_ms: u64,
+    /// Upper bound of one fetch from the control plane.
+    pub fetch_timeout_ms: u64,
+    /// Policy published by a `combined` gateway: egress profiles a revision
+    /// may run with.
+    pub allowed_egress: Vec<tachyon_serverless_domain::EgressProfile>,
+}
+
+impl Default for ControlPlaneConfig {
+    fn default() -> Self {
+        use tachyon_serverless_domain::EgressProfile;
+        Self {
+            role: GatewayRole::Combined,
+            url: None,
+            internal_token: None,
+            refresh_interval_ms: 2_000,
+            config_ttl_seconds: 60,
+            auth_lease_seconds: 60,
+            stale_after_ms: None,
+            backoff_initial_ms: 500,
+            backoff_max_ms: 10_000,
+            fetch_timeout_ms: 2_000,
+            allowed_egress: vec![
+                EgressProfile::None,
+                EgressProfile::Restricted,
+                EgressProfile::PublicWeb,
+            ],
+        }
+    }
+}
+
+impl ControlPlaneConfig {
+    /// Shortest accepted internal credential.
+    pub const MIN_INTERNAL_TOKEN_LEN: usize = 16;
+
+    pub fn refresh_interval(&self) -> Duration {
+        Duration::from_millis(self.refresh_interval_ms)
+    }
+    pub fn config_ttl(&self) -> chrono::Duration {
+        chrono::Duration::seconds(self.config_ttl_seconds.min(i64::MAX as u64 / 1000) as i64)
+    }
+    pub fn auth_lease(&self) -> chrono::Duration {
+        chrono::Duration::seconds(self.auth_lease_seconds.min(i64::MAX as u64 / 1000) as i64)
+    }
+    pub fn stale_after(&self) -> chrono::Duration {
+        let ms = self
+            .stale_after_ms
+            .unwrap_or(self.refresh_interval_ms.saturating_mul(3));
+        chrono::Duration::milliseconds(ms.min(i64::MAX as u64 / 2) as i64)
+    }
+    pub fn backoff_initial(&self) -> Duration {
+        Duration::from_millis(self.backoff_initial_ms)
+    }
+    pub fn backoff_max(&self) -> Duration {
+        Duration::from_millis(self.backoff_max_ms)
+    }
+    pub fn fetch_timeout(&self) -> Duration {
+        Duration::from_millis(self.fetch_timeout_ms)
+    }
+}
+
+/// `[control_plane_outage]`: what a gateway still starts while its control
+/// plane is unreachable (PLT-4636).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ControlPlaneOutageConfig {
+    /// Boot new environments while the control plane is unreachable, as long
+    /// as the revision and the authorization lease are still valid. `false`
+    /// lets only already-running (pooled) environments serve during an
+    /// outage.
+    pub allow_cold_start: bool,
+}
+
+impl Default for ControlPlaneOutageConfig {
+    fn default() -> Self {
+        Self {
+            allow_cold_start: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct GatewayConfig {
     #[serde(default = "default_listen")]
@@ -634,6 +768,10 @@ pub struct GatewayConfig {
     pub store: StoreConfig,
     #[serde(default)]
     pub dispatcher: DispatcherConfig,
+    #[serde(default)]
+    pub control_plane: ControlPlaneConfig,
+    #[serde(default)]
+    pub control_plane_outage: ControlPlaneOutageConfig,
 }
 
 fn default_listen() -> String {
@@ -713,6 +851,59 @@ impl GatewayConfig {
     /// Effective platform limits (defaults + overrides).
     pub fn effective_limits(&self) -> Limits {
         self.limits.apply(Limits::default())
+    }
+
+    /// `[control_plane]` (PLT-4636).
+    fn validate_control_plane(&self) -> Result<(), ConfigError> {
+        let cp = &self.control_plane;
+        let invalid = |m: &str| Err(ConfigError::Invalid(format!("[control_plane] {m}")));
+        if cp.config_ttl_seconds == 0 || cp.auth_lease_seconds == 0 {
+            return invalid("config_ttl_seconds and auth_lease_seconds must be >= 1");
+        }
+        let shortest_ms = cp
+            .config_ttl_seconds
+            .min(cp.auth_lease_seconds)
+            .saturating_mul(1000);
+        if cp.refresh_interval_ms == 0 || cp.refresh_interval_ms >= shortest_ms {
+            return invalid(
+                "needs 0 < refresh_interval_ms < min(config_ttl_seconds, auth_lease_seconds) * 1000: \
+                 an entry must be confirmed at least once before it expires",
+            );
+        }
+        if cp.backoff_initial_ms == 0 || cp.backoff_initial_ms > cp.backoff_max_ms {
+            return invalid("needs 0 < backoff_initial_ms <= backoff_max_ms");
+        }
+        if cp.fetch_timeout_ms == 0 {
+            return invalid("fetch_timeout_ms must be >= 1");
+        }
+        if let Some(t) = &cp.internal_token
+            && t.expose().len() < ControlPlaneConfig::MIN_INTERNAL_TOKEN_LEN
+        {
+            return Err(ConfigError::Invalid(format!(
+                "[control_plane] internal_token must be at least {} bytes",
+                ControlPlaneConfig::MIN_INTERNAL_TOKEN_LEN
+            )));
+        }
+        if cp.role == GatewayRole::DataPlane {
+            match cp.url.as_deref() {
+                Some(u) if u.starts_with("http://") || u.starts_with("https://") => {}
+                _ => {
+                    return invalid(
+                        "role = \"data_plane\" needs url = \"http(s)://<management gateway>\"",
+                    );
+                }
+            }
+            if cp.internal_token.is_none() {
+                return invalid("role = \"data_plane\" needs internal_token");
+            }
+            if !self.identity.tokens.is_empty() {
+                return invalid(
+                    "role = \"data_plane\" takes its authorization grants from the control plane; \
+                     remove [[identity.tokens]]",
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Static validation. Provider-capability checks (`dev_only`) that need
@@ -801,6 +992,7 @@ impl GatewayConfig {
                 "[dispatcher] instance must be 1..=256 bytes".into(),
             ));
         }
+        self.validate_control_plane()?;
         if self.capacity.max_concurrency == 0 {
             return Err(ConfigError::Invalid(
                 "capacity.max_concurrency must be >= 1".into(),
@@ -1173,6 +1365,67 @@ value = "demo-secret-value-a"
             // The same values are accepted while the pool is off: nothing reads them.
             let off = format!("{DEV}\n[pool]\nenabled = false\n{extra}\n");
             GatewayConfig::from_toml(&off).unwrap();
+        }
+    }
+
+    /// PLT-4636: a data plane needs its control plane and an internal
+    /// credential, takes no tokens of its own, and every entry must be
+    /// confirmable before it expires.
+    #[test]
+    fn control_plane_section_is_validated() {
+        let cfg = GatewayConfig::from_toml(DEV).unwrap();
+        assert_eq!(cfg.control_plane.role, GatewayRole::Combined);
+        assert!(cfg.control_plane_outage.allow_cold_start);
+        assert!(cfg.control_plane.internal_token.is_none());
+
+        let no_tokens = DEV.split("[[identity.tokens]]").next().unwrap().to_string();
+        let dp = format!(
+            "{no_tokens}\n[control_plane]\nrole = \"data_plane\"\nurl = \"http://127.0.0.1:8080\"\n\
+             internal_token = \"0123456789abcdef\"\n"
+        );
+        let cfg = GatewayConfig::from_toml(&dp).unwrap();
+        assert_eq!(cfg.control_plane.role, GatewayRole::DataPlane);
+        assert!(!format!("{cfg:?}").contains("0123456789abcdef"));
+
+        for (text, needle) in [
+            (
+                format!(
+                    "{no_tokens}\n[control_plane]\nrole = \"data_plane\"\ninternal_token = \"0123456789abcdef\"\n"
+                ),
+                "url",
+            ),
+            (
+                format!(
+                    "{no_tokens}\n[control_plane]\nrole = \"data_plane\"\nurl = \"http://x\"\n"
+                ),
+                "internal_token",
+            ),
+            (
+                format!(
+                    "{DEV}\n[control_plane]\nrole = \"data_plane\"\nurl = \"http://x\"\ninternal_token = \"0123456789abcdef\"\n"
+                ),
+                "identity.tokens",
+            ),
+            (
+                format!("{DEV}\n[control_plane]\ninternal_token = \"short\"\n"),
+                "internal_token",
+            ),
+            (
+                format!(
+                    "{DEV}\n[control_plane]\nrefresh_interval_ms = 60000\nauth_lease_seconds = 60\n"
+                ),
+                "refresh_interval_ms",
+            ),
+            (
+                format!(
+                    "{DEV}\n[control_plane]\nbackoff_initial_ms = 5000\nbackoff_max_ms = 1000\n"
+                ),
+                "backoff",
+            ),
+            (format!("{DEV}\n[control_plane]\nunknown = 1\n"), "unknown"),
+        ] {
+            let err = GatewayConfig::from_toml(&text).unwrap_err();
+            assert!(err.to_string().contains(needle), "{needle}: {err}");
         }
     }
 

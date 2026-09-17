@@ -4,6 +4,7 @@ use tachyon_serverless_api_types::{ApiError, ApiErrorBody, ErrorCode};
 use tachyon_serverless_domain::{DomainError, ErrorClass, InvocationError, InvocationId};
 use tachyon_serverless_provider_port::{ArtifactError, ProviderError, SecretError};
 
+use crate::control::ControlError;
 use crate::repository::RepoError;
 
 #[derive(Debug, thiserror::Error)]
@@ -47,6 +48,10 @@ pub enum AppError {
     ProviderUnavailable(String),
     #[error("platform error: {0}")]
     Platform(String),
+    /// Refused because of the control plane, the configuration cache or the
+    /// store (PLT-4636). `kind` gives the `error_type`.
+    #[error("{}: {message}", kind.error_type())]
+    Control { kind: ControlError, message: String },
 }
 
 impl AppError {
@@ -56,6 +61,13 @@ impl AppError {
 
     pub fn not_found(what: impl Into<String>) -> Self {
         Self::NotFound(what.into())
+    }
+
+    pub fn control(kind: ControlError, message: impl Into<String>) -> Self {
+        Self::Control {
+            kind,
+            message: message.into(),
+        }
     }
 
     /// Stable machine-readable code for this error.
@@ -70,9 +82,13 @@ impl AppError {
             Self::CapacityExceeded(_) => ErrorCode::CapacityExceeded,
             Self::RevisionNotReady(_) => ErrorCode::RevisionNotReady,
             Self::FunctionDeleted(_) => ErrorCode::FunctionDeleted,
-            Self::Invocation { error, .. } => error_code_for_class(&error.class),
+            // A cold start refused after acceptance is recorded as a platform
+            // error, but answers with the code of its refusal (503).
+            Self::Invocation { error, .. } => ControlError::from_error_type(&error.error_type)
+                .map_or_else(|| error_code_for_class(&error.class), |k| k.code()),
             Self::ProviderUnavailable(_) => ErrorCode::ProviderUnavailable,
             Self::Platform(_) => ErrorCode::PlatformError,
+            Self::Control { kind, .. } => kind.code(),
         }
     }
 
@@ -94,6 +110,7 @@ impl AppError {
                 Some(invocation_id.to_string()),
                 Some(IDEMPOTENCY_KEY_REUSED.to_string()),
             ),
+            Self::Control { kind, .. } => (None, Some(kind.error_type().to_string())),
             _ => (None, None),
         };
         ApiErrorBody {
@@ -149,8 +166,13 @@ impl From<RepoError> for AppError {
             RepoError::NotFound(what) => Self::NotFound(what),
             RepoError::Conflict(what) => Self::Conflict(what),
             RepoError::Refused(what) => Self::Conflict(what),
-            RepoError::Store(msg) => Self::Platform(format!("storage: {msg}")),
-            RepoError::Io(err) => Self::Platform(format!("storage: {err}")),
+            // The store did not answer: retryable, 503 (PLT-4636).
+            RepoError::Store(msg) => {
+                Self::control(ControlError::StoreUnavailable, format!("storage: {msg}"))
+            }
+            RepoError::Io(err) => {
+                Self::control(ControlError::StoreUnavailable, format!("storage: {err}"))
+            }
             RepoError::Serialization(msg) => Self::Platform(format!("storage: {msg}")),
         }
     }
@@ -221,6 +243,46 @@ mod tests {
         assert_eq!(missing.code(), foreign.code());
         assert_eq!(missing.to_string(), foreign.to_string());
         assert!(!foreign.to_string().contains("tn_"));
+    }
+
+    /// PLT-4636: every control refusal has its own error_type, and a cold
+    /// start refused after acceptance answers with the refusal's code.
+    #[test]
+    fn control_refusals_are_distinct_and_retryable_ones_are_503() {
+        let mut types = std::collections::BTreeSet::new();
+        for kind in ControlError::ALL {
+            assert!(types.insert(kind.error_type()));
+            assert_eq!(ControlError::from_error_type(kind.error_type()), Some(kind));
+            let e = AppError::control(kind, "x");
+            let body = e.to_api_body(None);
+            assert_eq!(body.error.error_type.as_deref(), Some(kind.error_type()));
+        }
+        for kind in [
+            ControlError::ConfigNotDelivered,
+            ControlError::ConfigExpired,
+            ControlError::AuthLeaseExpired,
+            ControlError::ColdStartRestricted,
+            ControlError::ProviderControlUnavailable,
+            ControlError::ControlPlaneUnavailable,
+            ControlError::StoreUnavailable,
+        ] {
+            assert_eq!(AppError::control(kind, "x").http_status(), 503, "{kind:?}");
+        }
+        assert_eq!(
+            AppError::control(ControlError::UnknownTenant, "x").http_status(),
+            403
+        );
+        let refused_cold = AppError::Invocation {
+            invocation_id: InvocationId::generate(),
+            error: InvocationError::new(
+                ErrorClass::PlatformError,
+                ControlError::ColdStartRestricted.error_type(),
+                "outage",
+            ),
+        };
+        assert_eq!(refused_cold.http_status(), 503);
+        let store: AppError = RepoError::Store("database is locked".into()).into();
+        assert_eq!(store.code(), ErrorCode::ControlPlaneUnavailable);
     }
 
     #[test]

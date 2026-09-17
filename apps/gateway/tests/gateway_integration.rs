@@ -1279,3 +1279,241 @@ async fn bootstrap_converges_on_a_state_file_left_behind_by_a_crash() {
     assert_eq!(ready.json()["reconcile"]["terminated"], 1);
     assert_eq!(ready.json()["reconcile"]["error"], serde_json::Value::Null);
 }
+
+// ---------------------------------------------------------------------------
+// PLT-4636: control plane / data plane split over the HTTP surface
+// ---------------------------------------------------------------------------
+
+const INTERNAL: &str = "internal-credential-0123456789";
+
+/// A `ConfigSource` that calls `GET /v1/internal/config` on a management
+/// router in process: the same handler, credential check and JSON wire as the
+/// HTTP client, without a socket.
+struct RouterSource {
+    router: Router,
+    token: &'static str,
+    down: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl tachyon_serverless_application::control::ConfigSource for RouterSource {
+    fn describe(&self) -> String {
+        "router".into()
+    }
+    async fn fetch(
+        &self,
+        since: u64,
+    ) -> Result<
+        tachyon_serverless_application::control::ConfigDelivery,
+        tachyon_serverless_application::control::SourceError,
+    > {
+        use tachyon_serverless_application::control::SourceError;
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SourceError::Unavailable("connection refused".into()));
+        }
+        let reply = get(
+            &self.router,
+            &format!("/v1/internal/config?since={since}"),
+            self.token,
+        )
+        .await;
+        if reply.status != StatusCode::OK {
+            return Err(SourceError::Rejected(format!("{}", reply.status)));
+        }
+        serde_json::from_slice(&reply.body).map_err(|e| SourceError::Rejected(e.to_string()))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_data_plane_gateway_serves_invokes_from_delivered_configuration() {
+    use tachyon_serverless_application::GatewayRole;
+    use tachyon_serverless_application::config::ConfigToken;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut mgmt_cfg = config(dir.path());
+    mgmt_cfg.control_plane.internal_token = Some(ConfigToken::new(INTERNAL));
+    mgmt_cfg.dispatcher.instance = Some("management".into());
+    let mgmt_fake = Arc::new(FakeExecutionProvider::new());
+    let mgmt = Application::bootstrap_with(
+        mgmt_cfg,
+        mgmt_fake,
+        BootstrapOptions {
+            persist_state: true,
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let mgmt_router = router(mgmt);
+    let (function_id, revision_id) = deploy(&mgmt_router, "split").await;
+
+    // The internal endpoint takes the internal credential, never a tenant token.
+    for token in [None, Some(TOKEN_A), Some("internal-credential-wrong-00")] {
+        let r = call(
+            &mgmt_router,
+            req(Method::GET, "/v1/internal/config", token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{token:?}");
+    }
+    let delivery = get(&mgmt_router, "/v1/internal/config?since=0", INTERNAL).await;
+    assert_eq!(delivery.status, StatusCode::OK);
+    let text = String::from_utf8_lossy(&delivery.body).to_string();
+    assert!(delivery.json()["generation"].as_u64().unwrap() > 0);
+    assert!(!text.contains(TOKEN_A) && !text.contains("demo-secret-value-a"));
+
+    // The data plane: no tokens of its own, the secret binding value is local.
+    let mut dp_cfg = config(dir.path());
+    dp_cfg.identity.tokens.clear();
+    dp_cfg.dispatcher.instance = Some("data-plane".into());
+    dp_cfg.control_plane.role = GatewayRole::DataPlane;
+    dp_cfg.control_plane.url = Some("http://management.invalid".into());
+    dp_cfg.control_plane.internal_token = Some(ConfigToken::new(INTERNAL));
+    let source = Arc::new(RouterSource {
+        router: mgmt_router.clone(),
+        token: INTERNAL,
+        down: std::sync::atomic::AtomicBool::new(false),
+    });
+    let dp_fake = Arc::new(FakeExecutionProvider::new());
+    dp_fake.set_default_script(Some(FakeGuestScript::Echo));
+    let dp = Application::bootstrap_with(
+        dp_cfg,
+        dp_fake,
+        BootstrapOptions {
+            persist_state: true,
+            config_source: Some(source.clone()),
+            ..BootstrapOptions::default()
+        },
+    )
+    .unwrap();
+    let dp_router = router(dp.clone());
+
+    // Before the first delivery: not ready, and invoke says why.
+    let ready = call(
+        &dp_router,
+        Request::get("/readyz").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(ready.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        ready.json()["control_plane"]["refusal"],
+        "Host.ConfigNotDelivered"
+    );
+    let early = post_json(
+        &dp_router,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({"x": 1}),
+    )
+    .await;
+    assert_eq!(early.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(early.json()["error"]["code"], "config_unavailable");
+    assert_eq!(
+        early.json()["error"]["error_type"],
+        "Host.ConfigNotDelivered"
+    );
+
+    dp.refresh_config().await.unwrap();
+    let ready = call(
+        &dp_router,
+        Request::get("/readyz").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(ready.status, StatusCode::OK, "{}", ready.json());
+    assert_eq!(ready.json()["control_plane"]["role"], "data_plane");
+    assert_eq!(
+        ready.json()["control_plane"]["existing_executions"],
+        "continue"
+    );
+
+    let invoked = post_json(
+        &dp_router,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({"x": 1}),
+    )
+    .await;
+    assert_eq!(
+        invoked.status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&invoked.body)
+    );
+    assert_eq!(invoked.json()["x"], 1);
+    let invocation_id = invoked
+        .header("x-tachyon-invocation-id")
+        .unwrap()
+        .to_string();
+    let detail = get(
+        &dp_router,
+        &format!("/v1/invocations/{invocation_id}"),
+        TOKEN_A,
+    )
+    .await;
+    assert_eq!(detail.status, StatusCode::OK);
+    assert_eq!(detail.json()["revision_id"], revision_id);
+    // Tenant B cannot see it through the data plane either.
+    let foreign = get(
+        &dp_router,
+        &format!("/v1/invocations/{invocation_id}"),
+        TOKEN_B,
+    )
+    .await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+
+    // The management API is not served by a data plane.
+    for (method, path) in [
+        (Method::GET, "/v1/functions".to_string()),
+        (Method::POST, "/v1/artifacts".to_string()),
+        (Method::GET, format!("/v1/functions/{function_id}")),
+    ] {
+        let r = send(&dp_router, method.clone(), &path, TOKEN_A, Body::empty()).await;
+        assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{method} {path}");
+        assert_eq!(r.json()["error"]["code"], "control_plane_unavailable");
+        assert_eq!(
+            r.json()["error"]["error_type"],
+            "Host.ControlPlaneUnavailable"
+        );
+    }
+    let internal = get(&dp_router, "/v1/internal/config", INTERNAL).await;
+    assert_eq!(internal.status, StatusCode::NOT_FOUND);
+
+    // The control plane goes away: the data plane keeps serving from its
+    // cache and says so.
+    source.down.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(dp.refresh_config().await.is_err());
+    let again = post_json(
+        &dp_router,
+        &format!("/v1/functions/{function_id}/invoke"),
+        TOKEN_A,
+        serde_json::json!({"x": 2}),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::OK);
+    let ready = call(
+        &dp_router,
+        Request::get("/readyz").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(ready.status, StatusCode::OK);
+    assert_eq!(
+        ready.json()["control_plane"]["control_plane_reachable"],
+        false
+    );
+    assert_eq!(ready.json()["control_plane"]["new_cold_starts"], "allowed");
+}
+
+#[tokio::test]
+async fn the_internal_config_endpoint_is_absent_without_an_internal_credential() {
+    let api = api(vec![]);
+    let r = get(&api.router, "/v1/internal/config", "anything-at-all-000000").await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let ready = call(
+        &api.router,
+        Request::get("/readyz").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(ready.json()["control_plane"]["role"], "combined");
+    assert_eq!(ready.json()["control_plane"]["new_invocations"], "accepted");
+}

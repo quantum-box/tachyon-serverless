@@ -83,6 +83,17 @@ impl ProviderService {
         report
     }
 
+    /// The cached preflight verdict, without probing: `None` when nothing is
+    /// cached or the cache is older than the TTL. Used on the invoke path,
+    /// which must not wait for a probe (PLT-4636).
+    pub fn cached_ok(&self) -> Option<bool> {
+        self.cache
+            .lock()
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < self.ttl)
+            .map(|(_, report)| report.ok)
+    }
+
     /// Drop the cached preflight so the next call probes again.
     pub fn invalidate(&self) {
         *self.cache.lock() = None;

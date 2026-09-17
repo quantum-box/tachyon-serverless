@@ -47,7 +47,10 @@ impl ExitCode {
             | ErrorCode::Cancelled => Self::InvocationFailed,
             ErrorCode::Timeout | ErrorCode::QueueTimeout => Self::Timeout,
             ErrorCode::OutcomeUnknown => Self::OutcomeUnknown,
-            ErrorCode::PlatformError | ErrorCode::ProviderUnavailable => Self::Platform,
+            ErrorCode::PlatformError
+            | ErrorCode::ProviderUnavailable
+            | ErrorCode::ConfigUnavailable
+            | ErrorCode::ControlPlaneUnavailable => Self::Platform,
         }
     }
 
