@@ -314,7 +314,15 @@ max_total_idle = 4
 | `gateway.toml` | 実際に使った設定（`[pool]` を含む） |
 | `provider.json` / `gateway.log` / `steps/` / `orphan-check.txt` | capability と `reuse`、gateway ログ、step ログ、終了後の孤児監査 |
 
-### 3.8 teardown
+### 3.8 first response・同時実行・資源原価のベンチマーク（PLT-4647）
+
+```sh
+scripts/kvm/bench.sh                  # 手順・集計規則・注意は docs/benchmark.md
+```
+
+hello / http-axum / cpu-burn を fresh host（cache miss）、cold（cache hit）、warm（`[pool] enabled`）、並列 1 / 2 / 4 / 8 で invoke し、1 request 1 行の生データ（失敗を含む）と、環境ごとの VMM RSS・cgroup memory・休止中の CPU・disk・転送量を `docs/evidence/bench-<UTC>/` に残す。gateway は §3.5 の設定（jailer と cgroup required）を sudo で起動する。§3.5〜§3.7 と同じ port を使うので、別の gateway を動かしたまま実行しない。
+
+### 3.9 teardown
 
 ```sh
 scripts/kvm/teardown.sh           # .kvm/run を参照する firecracker を SIGKILL → .kvm/run 削除 → 孤児監査

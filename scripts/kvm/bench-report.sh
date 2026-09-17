@@ -18,24 +18,41 @@ DIR="$1"
 [ -s "$DIR/metadata.json" ] || { echo "$DIR/metadata.json missing" >&2; exit 2; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
-slurp() { if [ -s "$1" ]; then jq -s . "$1"; else echo '[]'; fi; }
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/bench-report.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+# Every input goes through a file (--slurpfile): the raw files exceed the argument size limit.
+# slurp FILE NAME: TMP/NAME.json holds the JSON lines of FILE (an empty file is no lines).
+slurp() { if [ -s "$1" ]; then cp "$1" "$TMP/$2.json"; else : > "$TMP/$2.json"; fi; }
+slurp "$DIR/attempts.jsonl" rows
+slurp "$DIR/sweeps.jsonl" sweeps
+slurp "$DIR/resources.jsonl" res
+slurp "$DIR/gateway-runs.jsonl" gw
+slurp "$DIR/deploys.jsonl" deploys
+slurp "$DIR/calibration.jsonl" calibration
 
 # Teardown cgroup stats the provider logs for every environment (all gateway runs).
-TEARDOWN="$(cat "$DIR"/gateway-logs/*.log 2>/dev/null |
-  jq -Rc 'fromjson? | select(.message == "cgroup stats at teardown") | {env: .env_id, ts: .timestamp, stats: (.stats | fromjson? // null)}' |
-  jq -s . )"
-[ -n "$TEARDOWN" ] || TEARDOWN='[]'
+cat "$DIR"/gateway-logs/*.log 2>/dev/null |
+  jq -Rc 'fromjson? | select(.message == "cgroup stats at teardown") | {env: .env_id, ts: .timestamp, stats: (.stats | fromjson? // null)}' \
+  > "$TMP/teardown.json" || true
+if [ -s "$DIR/physical-host-load.tsv" ]; then
+  jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {at: .[0], load1: (.[1] | ltrimstr("{ ") | split(" ")[0] | tonumber)})' \
+    "$DIR/physical-host-load.tsv" > "$TMP/hostload.json"
+else
+  echo null > "$TMP/hostload.json"
+fi
 
 jq -n \
-  --argjson meta "$(cat "$DIR/metadata.json")" \
-  --argjson rows "$(slurp "$DIR/attempts.jsonl")" \
-  --argjson sweeps "$(slurp "$DIR/sweeps.jsonl")" \
-  --argjson res "$(slurp "$DIR/resources.jsonl")" \
-  --argjson gw "$(slurp "$DIR/gateway-runs.jsonl")" \
-  --argjson deploys "$(slurp "$DIR/deploys.jsonl")" \
-  --argjson teardown "$TEARDOWN" \
-  --argjson calibration "$(slurp "$DIR/calibration.jsonl")" \
-  --argjson hostload "$(if [ -s "$DIR/physical-host-load.tsv" ]; then jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") | {at: .[0], load1: (.[1] | ltrimstr("{ ") | split(" ")[0] | tonumber)})' "$DIR/physical-host-load.tsv"; else echo null; fi)" '
+  --slurpfile metas "$DIR/metadata.json" \
+  --slurpfile rows "$TMP/rows.json" \
+  --slurpfile sweeps "$TMP/sweeps.json" \
+  --slurpfile res "$TMP/res.json" \
+  --slurpfile gw "$TMP/gw.json" \
+  --slurpfile deploys "$TMP/deploys.json" \
+  --slurpfile teardown "$TMP/teardown.json" \
+  --slurpfile calibration "$TMP/calibration.json" \
+  --slurpfile hostloads "$TMP/hostload.json" '
+  $metas[0] as $meta | $hostloads[0] as $hostload |
   def pct($p): sort as $s | ($s | length) as $n
     | if $n == 0 then null else $s[([((($p / 100) * $n) | ceil) - 1, 0] | max)] end;
   def dist: map(select(. != null)) as $v
@@ -159,7 +176,9 @@ jq -n \
     . + {rfc_targets: [
       (sc("hello"; "cold")) as $c
       | {target: "cold first response: small Rust function, image cache hit, p95 <= 3 s (RFC §19)",
-         measured: (if $c == null then null else {sample: "hello", n: $c.n, failure_rate: $c.failure_rate, client_p95_ms: $c.client_ms.p95, client_p99_ms: $c.client_ms.p99} end),
+         measured: (if $c == null then null else {sample: "hello", n: $c.n, failure_rate: $c.failure_rate, client_p95_ms: $c.client_ms.p95, client_p99_ms: $c.client_ms.p99,
+           environment_boot_p95_ms: $c.environment_boot_ms.p95, runtime_init_p95_ms: $c.runtime_init_ms.p95,
+           cgroup_throttled_period_ratio_p50: ([$sum.resources.teardown_by_sample[] | select(.sample == "hello")][0].throttled_period_ratio.p50)} end),
          verdict: (if $c == null then "未測定" elif $c.failed > 0 then "未達" elif $c.client_ms.p95 <= 3000 then "達成" else "未達" end),
          reason: (if $c == null then "hello cold was not run"
                   elif $c.failed > 0 then "failed attempts in the group count as misses"
@@ -173,10 +192,11 @@ jq -n \
           host_platform_p95_ms: .platform_ms.p95, client_platform_p95_ms: .client_platform_ms.p95})) as $w
       | {target: "warm platform added latency p95 <= 20 ms, user handler excluded (RFC §19)",
          measured: $w,
-         verdict: (if ($w | length) == 0 then "未測定"
-                   elif ([$w[] | select(.failure_rate > 0 or .host_platform_p95_ms == null or .host_platform_p95_ms > 20)] | length) == 0 then "達成（host 計測）"
-                   else "未達" end),
-         reason: "host_platform = total_ms - handler_ms (queue, resume, readiness, response, bookkeeping) over every attempt of the warm group including any that fell back to cold; client_platform adds loopback HTTP and curl. RFC asks for same-region under a set load; this is loopback on one nested host, sequential"},
+         verdict: (def pass: .failure_rate == 0 and .host_platform_p95_ms != null and .host_platform_p95_ms <= 20;
+                   if ($w | length) == 0 then "未測定"
+                   elif ([$w[] | select(pass | not)] | length) == 0 then "達成（host 計測、全 sample）"
+                   else "未達（" + ([$w[] | "\(.sample) \(if pass then "達成" else "未達" end)"] | join("、")) + "。host 計測）" end),
+         reason: "judged per sample on host_platform p95; host_platform = total_ms - handler_ms (queue, resume, readiness, response, bookkeeping) over every attempt of the warm group including any that fell back to cold; client_platform adds loopback HTTP and curl. RFC asks for same-region under a set load; this is loopback on one nested host, sequential"},
       {target: "Fast Restore: end-to-end p95/p99 and cost better than cold (RFC §19)", measured: null, verdict: "未測定",
        reason: "snapshot restore is not implemented (Capabilities.snapshot_clone = unsupported); X1 adds it to this benchmark"},
       {target: "normal invoke availability 99.9% (RFC §19)", measured: ([$sum.scenarios[] | {sample, scenario, n, failure_rate}]), verdict: "未測定",
@@ -213,7 +233,6 @@ jq -r --argjson meta "$(cat "$DIR/metadata.json")" '
   "| 負荷 | fresh host \($meta.load.fresh_host_trials_per_sample) 回 / cold \($meta.load.cold_n) 回 / warm \($meta.load.warm_n) 回（間隔 \($meta.load.warm_gap_ms) ms）/ sweep \($meta.load.sweep_levels | map(tostring) | join(",")) 並列 × 各 \($meta.load.sweep_requests_per_level) request（\($meta.load.sweep_modes | join(" / "))）/ idle \($meta.load.idle_seconds) s |",
   "| payload | \($meta.load.payloads | kv) |",
   "| client / seed | \($meta.load.client)。\($meta.load.seeds) |",
-  "",
   "| host の混み具合 | VM 内の固定 CPU loop（ms、3 回）: \(.host_contention.calibration | map("\(.phase) \(.awk_loop_ms | map(tostring) | join("/"))") | join("、"))。物理 host の 1 分 load average: \(if .host_contention.physical_host_load1 == null then "記録なし" else "p50 \(.host_contention.physical_host_load1.p50) / max \(.host_contention.physical_host_load1.max)（n=\(.host_contention.physical_host_load1.n)、`physical-host-load.tsv`）" end) |",
   "",
   "percentile は nearest-rank。client の分布は **失敗を含む全 attempt**、内訳の分布はその値を持つ attempt（n を併記）。外れ値は除外していない。生データは `attempts.jsonl`（1 request 1 行）と `invocations.jsonl`。",

@@ -34,12 +34,13 @@ Tachyon Serverless プロトタイプ（Linear P0〜P1、PLT-4613〜PLT-4630）�
 | 文書 | 内容 | 担当 |
 |---|---|---|
 | [kvm.md](kvm.md) | KVM 検証 host の要件、preflight / bootstrap / smoke / teardown、gateway での利用、証跡の読み方、macOS での Lima + nested virtualization 手順（確認済み）と実測値、失敗時の切り分け | PLT-4615 / PLT-4621 |
+| [benchmark.md](benchmark.md) | cold / warm の first response・同時実行・資源原価のベンチマーク（`scripts/kvm/bench.sh`）の手順・集計規則・結果・RFC 仮目標との比較。SLA・価格ではない | PLT-4647 |
 | [api.md](api.md) | 管理 API と Invoke API の使い方、認証 header、エラー応答、OpenAPI の場所 | PLT-4619 / PLT-4626 |
 | [cli.md](cli.md) | `tsls deploy / invoke / logs / rollback / dev` の使い方と設定 | PLT-4629 |
 
 ## 実行記録（evidence）
 
-`scripts/e2e/demo.sh` は `evidence/<UTC>-<provider>/`、`scripts/kvm/smoke.sh` は `evidence/kvm-<UTC>/` に書く。smoke の読み方は [kvm.md](kvm.md) §4、E2E の中身はリポジトリの [README](../README.md)「E2E デモ」。
+`scripts/e2e/demo.sh` は `evidence/<UTC>-<provider>/`、`scripts/kvm/smoke.sh` は `evidence/kvm-<UTC>/` に書く。`scripts/kvm/bench.sh` は `evidence/bench-<UTC>/`（[benchmark.md](benchmark.md) §4）。smoke の読み方は [kvm.md](kvm.md) §4、E2E の中身はリポジトリの [README](../README.md)「E2E デモ」。
 
 | ディレクトリ | 内容 | 結果 |
 |---|---|---|
