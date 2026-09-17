@@ -154,7 +154,7 @@ cold / warm 率は `tsls_attempts_total` から出す: `sum(rate(tsls_attempts_t
 
 | provider | scope | 中身 |
 |---|---|---|
-| firecracker | `cgroup_v2` | VMM の cgroup（`cpu.stat` の `usage_usec`、`memory.current`、`memory.peak`）= guest + VMM。host cgroup が無い構成（`mode = "off"` など）では取れない（`unavailable`）。**KVM 上では未検証** |
+| firecracker | `cgroup_v2` | VMM の cgroup（`cpu.stat` の `usage_usec`、`memory.current`、`memory.peak`）= guest + VMM。host cgroup が無い構成（`mode = "off"` など）では取れない（`unavailable`）。KVM 実測あり（`docs/evidence/kvm-final-metrics-load-20260917T150242Z/`: pool の全環境で `scope="cgroup_v2"` の系列が出る。起動中でまだ cgroup の無い環境は `unavailable` に数える） |
 | process（Linux） | `procfs` | bridge プロセス自身の `/proc/<pid>/stat` utime + stime、`VmRSS` / `VmHWM`。子プロセス（user の handler）は含まない（下限値） |
 | process（macOS） | `proc_pid_rusage` | bridge プロセス自身の CPU 時間と phys footprint / lifetime max。子プロセスは含まない |
 | fake | `fake` | テストが設定した値 |
@@ -290,7 +290,7 @@ dispatcher を動かす gateway（`[queue]` と durable ledger があり `[async
 
 - 未対応 profile（process provider、`[pool] enabled = false`、idle capability が `Supported` でない provider）は `mode = "every_invocation_boots"` で「毎回起動」と表示する。負荷ハーネスは invocation を読み戻し、attempt 数と環境数が一致すること（`every_attempt_booted_its_own_environment`）で確かめる。
 - 限界: boot id は起動時の Hello でだけ報告される。warm の attempt が比べるのは「その環境の記録にある boot id」で、guest が dispatch のたびに boot id を読み直しているわけではない。guest が再起動すれば bridge の接続が切れて環境は失われる（同じ環境 id で黙って別 guest に dispatch する経路は無い）ので、この比較は台帳・pool の取り違え（別環境の session に dispatch する回帰）を検出するためのもの。handler 自身が boot id を返す形の検査は未実装（Firecracker 実測の際に追加する）。
-- warm 再利用の boot identity は fake provider で証明している（`crates/application/tests/scaling.rs::metrics_show_zero_to_cap_to_zero_and_boot_identity_proves_warm_reuse`）。Firecracker（warm pool 有効）での実測は **未検証**。
+- warm 再利用の boot identity は fake provider で証明している（`crates/application/tests/scaling.rs::metrics_show_zero_to_cap_to_zero_and_boot_identity_proves_warm_reuse`）。Firecracker（warm pool 有効）でも 5 シナリオで `boot_changed` 0・`same_boot` = warm attempt 数を記録した（`docs/evidence/kvm-final-metrics-load-20260917T150242Z/`、1 host・各 1 回）。
 
 ## 5. detector と alert
 
@@ -331,5 +331,5 @@ TSLS_LOAD_SEED=42 scripts/load/scenarios.sh burst mixed
 - **送り先の制限**: `127.0.0.1`・`::1`・`localhost` だけ。ほかは `--lab-host`（`TSLS_LOAD_LAB_HOST`）で明示した host だけで、名前解決はしない。redirect は追わない。本番・外部 host には送らない（`limits::tests::only_loopback_or_an_explicit_lab_host_is_a_load_target`）。
 - **再現性の記録**: `run.json` に commit・tracked file の未 commit 変更数・provider・seed・sample 間隔・上限・gateway 設定（token は伏せる）とその SHA-256・host（`uname`）・rustc・revision の設定。jitter は seed から決まる（splitmix64 + xorshift64*）。
 - **出力**（`docs/evidence/load-<scenario>-<UTC>-<provider>/`）: `run.json`、`gateway.toml`、`samples.jsonl`（`t_ms`・`up`・`/metrics` の counter / gauge・tenant A の `/v1/capacity` の要約）、`requests.jsonl`、`invocations.jsonl`（start kind・環境・boot id）、`phases.jsonl`、`summary.json`（requests の p50 / p95 / max・lifecycle・reuse・detectors・checks・`ok`）、`timeline.svg`（環境の状態と queue の折れ線、phase の帯、gateway 停止の灰色帯）、`timeline.txt`（端末用）、`report.txt`、`gateway.log`。
-- **provider 非依存**: `TSLS_GATEWAY_CONFIG` と `TSLS_API_URL`・`TSLS_TOKEN_A`・`TSLS_TOKEN_B`・`TSLS_METRICS_TOKEN`・`TSLS_GUEST_DIR`・`TSLS_PROVIDER` を渡せば任意の provider の gateway で同じシナリオを回せる。reuse の期待は gateway の報告（`reuse.mode`）で決まり、warm pool 有効なら `warm_reuse`（boot id が変わらず、2 回以上使われた環境がある）を確認する。**Firecracker での実行は未検証**（検証 VM を benchmark 作業が使用中のため実行していない）。
+- **provider 非依存**: `TSLS_GATEWAY_CONFIG` と `TSLS_API_URL`・`TSLS_TOKEN_A`・`TSLS_TOKEN_B`・`TSLS_METRICS_TOKEN`・`TSLS_GUEST_DIR`・`TSLS_PROVIDER` を渡せば任意の provider の gateway で同じシナリオを回せる。reuse の期待は gateway の報告（`reuse.mode`）で決まり、warm pool 有効なら `warm_reuse`（boot id が変わらず、2 回以上使われた環境がある）を確認する。Firecracker では burst・idle-to-zero・mixed・restart・lifecycle を 1 回ずつ実行し 5/5 ok（`docs/evidence/kvm-final-metrics-load-20260917T150242Z/`: profile production・jailer / cgroup required・`[pool]` 有効。休止中の microVM の idle CPU ratio は常に 0、findings 0）。provider の workdir は jailer の `chroot_base`（既定 `/srv/jailer`）と同じ file system に置く（`/tmp` が別 file system の host では readiness が 503 のまま）。
 - `scripts/e2e/` ではなく `scripts/load/` に置く（`scripts/e2e/*` の変更は KVM gate を要求する。`docs/ci.md` §3）。helper は `scripts/e2e/lib.sh` を読み込むだけで変更しない。

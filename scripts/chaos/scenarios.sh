@@ -854,10 +854,11 @@ scenario_worker_user_process_oom_sync() {
     "status=$st client=$code/$etype message=$(jqb '.error.message // "-"')"
   api a GET "/v1/invocations/$inv/logs"
   printf '%s\n' "$HTTP_BODY" >"$SC_DIR/oom-logs.json"
-  console="$(find "$WORK/data/fc/_archive/$env_id" "$WORK/data/fc/$env_id" -name console.log 2>/dev/null | head -n 1)"
+  # One of the two directories does not exist (find exits 1): not a failure under pipefail.
+  console="$({ find "$WORK/data/fc/_archive/$env_id" "$WORK/data/fc/$env_id" -name console.log 2>/dev/null || true; } | head -n 1)"
   if [ -n "$console" ]; then cp "$console" "$SC_DIR/oom-console.log"; fi
   ck evidence.guest_kernel_oom_killer "$(grep -qiE 'out of memory|oom-kill|oom_reaper' "$SC_DIR/oom-console.log" 2>/dev/null && echo 0 || echo 1)" \
-    "console=$([ -n "$console" ] && echo "${console#"$WORK"/}" || echo missing) oom_lines=$(grep -ciE 'out of memory|oom-kill' "$SC_DIR/oom-console.log" 2>/dev/null || echo 0)"
+    "console=$([ -n "$console" ] && echo "${console#"$WORK"/}" || echo missing) oom_lines=$(grep -ciE 'out of memory|oom-kill' "$SC_DIR/oom-console.log" 2>/dev/null || true)"
   wait_eq 30 0 nlines procs_of_env "$env_id" || true
   wait_eq 30 1 sql "SELECT terminal FROM environments WHERE id = '$env_id'" || true
   mark_recovered

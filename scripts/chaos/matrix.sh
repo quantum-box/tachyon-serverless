@@ -98,7 +98,7 @@ nats_bin="$(QUEUE_BIN_DIR="$REPO_ROOT/target/queue/bin" bash -c '. scripts/queue
 digest_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@" | awk '{print $1}'; else shasum -a 256 "$@" | awk '{print $1}'; fi; }
 jq -n \
   --arg stamp "$STAMP" \
-  --arg commit "$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
+  --arg commit "$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "${TSLS_COMMIT:-unknown}")" \
   --arg dirty "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')" \
   --arg os "$(uname -srm)" \
   --arg os_version "$(sw_vers -productVersion 2>/dev/null || sed -n 's/^PRETTY_NAME=//p' /etc/os-release 2>/dev/null | tr -d '"')" \
