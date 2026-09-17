@@ -342,7 +342,7 @@ ADR-0003 の決定 2〜4 と移行の実装。テストは `cargo test -p tachyo
 
 ## PLT-4647 cold / warm の first response・並列性能・resource 原価
 
-計測は `scripts/kvm/bench.sh`、集計は `scripts/kvm/bench-report.sh`、手順と読み方は `docs/benchmark.md`。記録は `docs/evidence/bench-20260917T055450Z/`（commit `400bb45`。rebase 前の branch の commit で、スクリプトは rebase 後の `28aed1b` と同じ。計測スクリプトだけを足した commit で、application / provider のコードは `origin/main` `3704c80` と同じ）。**Apple M4 上の Lima VM（nested virtualization）の aarch64 だけ**の記録で、物理 host は他の作業と共用（1 分 load average p50 6.5 / 最大 31.5 を `physical-host-load.tsv` に記録）。本節の数値は SLA・販売価格の根拠にしない。application / provider の挙動は変えていない。計測した commit は `origin/main` `3704c80` を基点にしており、その後 main に入った PLT-4634（admission・autoscaler。`[capacity]` の semaphore を置き換え）、PLT-4636、PLT-4638 は含まない。とくに同時実行の拒否と queue の挙動（§6.2）はこれらで変わりうるが、**新しい main での再計測はしていない**。
+計測は `scripts/kvm/bench.sh`、集計は `scripts/kvm/bench-report.sh`、手順と読み方は `docs/benchmark.md`。記録は `docs/evidence/bench-20260917T055450Z/`（commit `400bb45`。rebase 前の branch の commit で、スクリプトは rebase 後の `cae5189`（feat(bench): record in-VM CPU calibration ...）と同じ。計測スクリプトだけを足した commit で、application / provider のコードは `origin/main` `3704c80` と同じ）。**Apple M4 上の Lima VM（nested virtualization）の aarch64 だけ**の記録で、物理 host は他の作業と共用（1 分 load average p50 6.5 / 最大 31.5 を `physical-host-load.tsv` に記録）。本節の数値は SLA・販売価格の根拠にしない。application / provider の挙動は変えていない。計測した commit は `origin/main` `3704c80` を基点にしており、その後 main に入った PLT-4634（admission・autoscaler。`[capacity]` の semaphore を置き換え）、PLT-4635、PLT-4636、PLT-4638 は含まない。とくに同時実行の拒否と queue の挙動（§6.2）はこれらで変わりうるが、**新しい main での再計測はしていない**。
 
 | # | 受入条件 | 状態 | 証跡 |
 |---|---|---|---|

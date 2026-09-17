@@ -90,7 +90,7 @@ git checkout でない tree（Lima VM に rsync したコピーなど）では `
 
 ## 6. 結果（`docs/evidence/bench-20260917T055450Z/`）
 
-条件: commit `400bb45`（rebase 前の branch の commit。計測スクリプトだけを足した commit で、スクリプトは rebase 後の `28aed1b` と同じ。application / provider のコードは `origin/main` `3704c80` と同じ）、Apple M4 上の Lima VM（vz、nested virtualization、4 vCPU / 8 GiB、Linux 7.0.0-31 aarch64）、Firecracker / jailer v1.17.0、guest kernel 6.1.155、256 MiB・500 m・jailer・cgroup required・egress none、gateway release build。全 714 request、失敗 11（すべて並列 8 の sweep）。表の全体は `summary.md`。計測した commit は `origin/main` `3704c80` を基点にしており、その後 main に入った PLT-4634（admission・autoscaler。`[capacity]` の semaphore を置き換え）、PLT-4636、PLT-4638 は含まない。とくに同時実行の拒否と queue の挙動（§6.2）はこれらで変わりうるが、**新しい main での再計測はしていない**。
+条件: commit `400bb45`（rebase 前の branch の commit。計測スクリプトだけを足した commit で、スクリプトは rebase 後の `cae5189`（feat(bench): record in-VM CPU calibration ...）と同じ。application / provider のコードは `origin/main` `3704c80` と同じ）、Apple M4 上の Lima VM（vz、nested virtualization、4 vCPU / 8 GiB、Linux 7.0.0-31 aarch64）、Firecracker / jailer v1.17.0、guest kernel 6.1.155、256 MiB・500 m・jailer・cgroup required・egress none、gateway release build。全 714 request、失敗 11（すべて並列 8 の sweep）。表の全体は `summary.md`。計測した commit は `origin/main` `3704c80` を基点にしており、その後 main に入った PLT-4634（admission・autoscaler。`[capacity]` の semaphore を置き換え）、PLT-4635、PLT-4636、PLT-4638 は含まない。とくに同時実行の拒否と queue の挙動（§6.2）はこれらで変わりうるが、**新しい main での再計測はしていない**。
 
 物理 host（開発用の Mac）は他の作業と共用で、1 分 load average は p50 6.5 / 最大 31.5 だった（`physical-host-load.tsv`）。cpu-burn の開始時の calibration は他の sample の 4〜5 倍（399〜607 ms、他は 82〜122 ms）で、cpu-burn の cold の p95 / p99 と fresh host の最大値はその影響を含む。同じ日の 1 回目の実行（load average 40〜140）は失敗が多発したため途中で止めた（§7「物理 host の共用」に内容を記録）。
 
