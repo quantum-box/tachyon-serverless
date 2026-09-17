@@ -1196,6 +1196,7 @@ async fn bootstrap_converges_on_a_state_file_left_behind_by_a_crash() {
         architecture: Architecture::Aarch64,
         resources: ResourceProfile::default(),
         egress: EgressProfile::None,
+        egress_allow: Vec::new(),
         connect_timeout: Duration::from_secs(1),
     })
     .await

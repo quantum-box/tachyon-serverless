@@ -19,7 +19,7 @@ Tachyon のサーバーレス実行基盤の **動作プロトタイプ**。sing
 **でない**
 
 - 本番サービス、マルチノード、DB サーバー（台帳は単一 host の埋め込み SQLite `data_dir/state.db`）
-- warm 再利用と idle 休止は既定では働かない（`[pool]` の既定が off。firecracker は実機計測済みで `supported`、process は `unsupported`）。snapshot/restore、非同期 invoke、cron、Console UI、egress 制御、OCI image の pull は Capability / API で明示的に `unsupported`
+- warm 再利用と idle 休止は既定では働かない（`[pool]` の既定が off。firecracker は実機計測済みで `supported`、process は `unsupported`）。snapshot/restore、非同期 invoke、cron、Console UI、OCI image の pull は Capability / API で明示的に `unsupported`。egress `restricted` / `public-web` は firecracker provider が root（`CAP_NET_ADMIN`）で動く host でだけ使え、それ以外では理由付きの `unsupported`（docs/adr/0005-egress-profiles.md）
 
 ## 状態
 
@@ -170,7 +170,7 @@ docs/evidence          実行記録（E2E デモ、KVM smoke）
 
 ## 非対象
 
-snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted / public-web、OCI image の pull。
+snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、OCI image の pull。
 warm 再利用と idle 休止は実装済みだが二重 gate の内側にあり、`[pool]` の既定が off なので既定では働かない（firecracker は実機計測済みで `supported`、process は `unsupported`。docs/architecture.md §4）。
 
 ## コントリビュート

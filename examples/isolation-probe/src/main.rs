@@ -27,6 +27,11 @@
 //!   file system before / after (`statvfs`, `/proc/mounts`) and whether `/`
 //!   and `/function` refuse writes. The file is removed afterwards unless
 //!   `keep` is true, so a reused environment gets its space back.
+//! - `{"probe":"net", ...}` and `{"probe":"listen", ...}` (PLT-4622) probe a
+//!   guest that has a policed network device (egress `restricted` /
+//!   `public-web`): TCP connects, raw UDP DNS queries to chosen servers, names
+//!   resolved and then connected to, an HTTP redirect followed, and a TCP
+//!   listener for the cross-tenant check. See `src/net.rs`.
 //! - `{"probe":"all"}` (the default) runs egress and resources; the allocation
 //!   step still only runs when `alloc_mib` is set, and the disk probe only runs
 //!   when asked for by name.
@@ -37,6 +42,8 @@
 //! Only `std` and `libc` (for `statvfs`) are used — no network crates — so the
 //! example links statically for `aarch64-unknown-linux-musl` and
 //! `x86_64-unknown-linux-musl` without extra system libraries.
+
+mod net;
 
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -112,6 +119,12 @@ fn run(request: &ProbeRequest, guest: Value) -> Value {
     if request.probe.runs_resources() {
         report.insert("resources".into(), resources_report(request));
     }
+    if request.probe == Probe::Net {
+        report.insert("net".into(), net::net_report(&request.payload));
+    }
+    if request.probe == Probe::Listen {
+        report.insert("listen".into(), net::listen_report(&request.payload));
+    }
     if request.probe == Probe::Disk {
         report.insert("disk".into(), disk_report(request));
     }
@@ -127,6 +140,8 @@ enum Probe {
     Egress,
     Resources,
     Disk,
+    Net,
+    Listen,
     All,
 }
 
@@ -136,6 +151,8 @@ impl Probe {
             Self::Egress => "egress",
             Self::Resources => "resources",
             Self::Disk => "disk",
+            Self::Net => "net",
+            Self::Listen => "listen",
             Self::All => "all",
         }
     }
@@ -145,6 +162,8 @@ impl Probe {
             "egress" => Some(Self::Egress),
             "resources" | "resource" => Some(Self::Resources),
             "disk" => Some(Self::Disk),
+            "net" => Some(Self::Net),
+            "listen" => Some(Self::Listen),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -161,6 +180,8 @@ impl Probe {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProbeRequest {
+    /// The raw payload, read by the `net` / `listen` probes.
+    payload: Value,
     probe: Probe,
     targets: Vec<String>,
     dns_name: String,
@@ -180,7 +201,7 @@ impl ProbeRequest {
             Some(Value::String(name)) => Probe::parse(name).ok_or_else(|| {
                 HandlerError::with_type(
                     "Probe.Unknown",
-                    format!("unknown probe `{name}` (expected egress, resources, disk or all)"),
+                    format!("unknown probe `{name}` (expected egress, resources, disk, net, listen or all)"),
                 )
             })?,
             Some(other) => {
@@ -213,6 +234,7 @@ impl ProbeRequest {
             }
         };
         Ok(Self {
+            payload: payload.clone(),
             probe,
             targets,
             dns_name: payload

@@ -50,6 +50,7 @@ pub(crate) mod fx {
             resources: ResourceProfile::default(),
             execution: ExecutionPolicy::default(),
             egress: EgressProfile::None,
+            egress_allow: Vec::new(),
             env_vars: vec![],
             secrets: vec![SecretBinding {
                 env_name: "DATABASE_URL".into(),

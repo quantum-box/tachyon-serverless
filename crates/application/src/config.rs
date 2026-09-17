@@ -86,6 +86,70 @@ pub struct FirecrackerProviderConfig {
     pub workdir: PathBuf,
     #[serde(default = "default_vsock_port")]
     pub vsock_port: u32,
+    /// `[provider.firecracker.network]`: host network of the egress profiles
+    /// `restricted` / `public-web` (PLT-4622). Defaults apply when omitted.
+    #[serde(default)]
+    pub network: FirecrackerNetworkConfig,
+}
+
+/// Host network settings of the Firecracker provider (docs/adr/0005-egress-profiles.md).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FirecrackerNetworkConfig {
+    /// Pool the per-environment /30s are carved from (private range).
+    #[serde(default = "default_guest_cidr")]
+    pub guest_cidr: String,
+    /// The only DNS server a `public-web` guest may query (public IPv4).
+    #[serde(default = "default_dns_resolver")]
+    pub dns_resolver: std::net::Ipv4Addr,
+    #[serde(default = "default_nft_binary")]
+    pub nft_binary: PathBuf,
+    #[serde(default = "default_ip_binary")]
+    pub ip_binary: PathBuf,
+}
+
+impl Default for FirecrackerNetworkConfig {
+    fn default() -> Self {
+        Self {
+            guest_cidr: default_guest_cidr(),
+            dns_resolver: default_dns_resolver(),
+            nft_binary: default_nft_binary(),
+            ip_binary: default_ip_binary(),
+        }
+    }
+}
+
+impl FirecrackerNetworkConfig {
+    /// Parsed pool, refusing a public or too-small range and a non-public resolver.
+    pub fn guest_network(&self) -> Result<tachyon_serverless_domain::Ipv4Cidr, String> {
+        use tachyon_serverless_domain::{BLOCKED_IPV4, Ipv4Cidr, is_public_ipv4};
+        let pool = Ipv4Cidr::parse(&self.guest_cidr).map_err(|e| e.to_string())?;
+        if pool.prefix() > 29 || !BLOCKED_IPV4.iter().any(|b| b.cidr().contains_net(&pool)) {
+            return Err(format!(
+                "guest_cidr {pool} must be a private range of at least /29 (e.g. 172.30.0.0/16)"
+            ));
+        }
+        if !is_public_ipv4(self.dns_resolver) {
+            return Err(format!(
+                "dns_resolver {} must be a public unicast address",
+                self.dns_resolver
+            ));
+        }
+        Ok(pool)
+    }
+}
+
+fn default_guest_cidr() -> String {
+    "172.30.0.0/16".into()
+}
+fn default_dns_resolver() -> std::net::Ipv4Addr {
+    std::net::Ipv4Addr::new(1, 1, 1, 1)
+}
+fn default_nft_binary() -> PathBuf {
+    PathBuf::from("nft")
+}
+fn default_ip_binary() -> PathBuf {
+    PathBuf::from("ip")
 }
 
 fn default_vsock_port() -> u32 {
@@ -557,6 +621,13 @@ impl GatewayConfig {
             }
             _ => {}
         }
+        if let Some(f) = &self.provider.firecracker
+            && let Err(e) = f.network.guest_network()
+        {
+            return Err(ConfigError::Invalid(format!(
+                "[provider.firecracker.network]: {e}"
+            )));
+        }
         if self.profile == Profile::Production && self.provider.kind.is_dev_only() {
             return Err(ConfigError::Invalid(format!(
                 "provider `{}` is dev-only and cannot be used with profile = \"production\"",
@@ -737,6 +808,34 @@ value = "demo-secret-value-a"
                  workdir = \".kvm/run\"",
             );
         format!("{base}\n{pool}")
+    }
+
+    /// PLT-4622: the egress network section has safe defaults and refuses a
+    /// public guest pool or a resolver on the management network.
+    #[test]
+    fn firecracker_network_section_defaults_and_refuses_unsafe_values() {
+        let cfg = GatewayConfig::from_toml(&production_firecracker("")).unwrap();
+        let net = &cfg.provider.firecracker.as_ref().unwrap().network;
+        assert_eq!(net, &FirecrackerNetworkConfig::default());
+        assert_eq!(net.guest_network().unwrap().to_string(), "172.30.0.0/16");
+        assert_eq!(net.dns_resolver, std::net::Ipv4Addr::new(1, 1, 1, 1));
+
+        let custom = production_firecracker(
+            "[provider.firecracker.network]\nguest_cidr = \"10.200.0.0/20\"\ndns_resolver = \"9.9.9.9\"\n",
+        );
+        let cfg = GatewayConfig::from_toml(&custom).unwrap();
+        let net = &cfg.provider.firecracker.as_ref().unwrap().network;
+        assert_eq!(net.guest_network().unwrap().to_string(), "10.200.0.0/20");
+
+        for bad in [
+            "guest_cidr = \"8.8.0.0/16\"",
+            "guest_cidr = \"172.30.0.0/30\"",
+            "dns_resolver = \"192.168.5.3\"",
+            "unknown_key = 1",
+        ] {
+            let toml = production_firecracker(&format!("[provider.firecracker.network]\n{bad}\n"));
+            assert!(GatewayConfig::from_toml(&toml).is_err(), "{bad}");
+        }
     }
 
     /// PLT-4633 (review F8): the measurement switch is refused under

@@ -55,6 +55,14 @@ fn build_from(config: &ProviderConfig) -> Result<Arc<dyn ExecutionProvider>, App
                     rootfs: f.rootfs.clone(),
                     workdir: f.workdir.clone(),
                     vsock_port: f.vsock_port,
+                    network: tachyon_serverless_provider_firecracker::network::NetworkConfig {
+                        guest_cidr: f.network.guest_network().map_err(|e| {
+                            AppError::InvalidRequest(format!("[provider.firecracker.network]: {e}"))
+                        })?,
+                        dns_resolver: f.network.dns_resolver,
+                        nft_binary: f.network.nft_binary.clone(),
+                        ip_binary: f.network.ip_binary.clone(),
+                    },
                     ..Default::default()
                 },
             );

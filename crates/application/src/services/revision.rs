@@ -11,9 +11,10 @@ use std::time::Duration;
 
 use tachyon_serverless_api_types::{ArtifactRequest, CreateRevisionRequest};
 use tachyon_serverless_domain::{
-    AliasName, Architecture, ArtifactRef, Clock, EgressProfile, ExecutionPolicy, Function,
-    FunctionId, FunctionRevision, IdGenerator, Limits, RUNTIME_PROTOCOL_V1, ResourceProfile,
-    RevisionId, RevisionSpec, RevisionStatus, RuntimeSpec, SecretBinding, Sha256Digest, TenantId,
+    AliasName, Architecture, ArtifactRef, Clock, EgressAllowRule, EgressProfile, EgressProtocol,
+    ExecutionPolicy, Function, FunctionId, FunctionRevision, IdGenerator, Limits,
+    RUNTIME_PROTOCOL_V1, ResourceProfile, RevisionId, RevisionSpec, RevisionStatus, RuntimeSpec,
+    SecretBinding, Sha256Digest, TenantId,
 };
 use tachyon_serverless_provider_port::{
     ArtifactLocation, ArtifactStore, ExecutionProvider, Principal,
@@ -110,6 +111,26 @@ impl RevisionService {
                 )));
             }
         };
+        let egress_allow = req
+            .egress_allow
+            .iter()
+            .map(|r| {
+                let protocol = match r.protocol.as_deref() {
+                    None | Some("tcp") => EgressProtocol::Tcp,
+                    Some("udp") => EgressProtocol::Udp,
+                    Some(other) => {
+                        return Err(AppError::InvalidRequest(format!(
+                            "unsupported egress_allow protocol `{other}` (tcp | udp)"
+                        )));
+                    }
+                };
+                Ok(EgressAllowRule {
+                    cidr: r.cidr.clone(),
+                    protocol,
+                    ports: r.ports.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(RevisionSpec {
             artifact,
             runtime: RuntimeSpec {
@@ -129,6 +150,7 @@ impl RevisionService {
                 min_ready: 0,
             },
             egress,
+            egress_allow,
             env_vars: req.env_vars.clone(),
             secrets: req
                 .secrets

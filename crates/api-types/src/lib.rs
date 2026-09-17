@@ -338,6 +338,18 @@ pub struct SecretBindingRequest {
     pub binding_ref: String,
 }
 
+/// One allowlist entry of a `restricted` revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EgressAllowRequest {
+    /// IPv4 network, e.g. `203.0.113.7/32` (a bare address means `/32`).
+    pub cidr: String,
+    /// `tcp` (default) or `udp`.
+    #[serde(default)]
+    pub protocol: Option<String>,
+    /// Destination ports (1..=16 entries).
+    pub ports: Vec<u16>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct CreateRevisionRequest {
     pub artifact: ArtifactRequest,
@@ -350,6 +362,12 @@ pub struct CreateRevisionRequest {
     /// `none` (default), `restricted`, `public-web`.
     #[serde(default)]
     pub egress: Option<String>,
+    /// Destinations a `restricted` revision may open (required for
+    /// `restricted`, refused for the other profiles). IPv4 CIDRs only;
+    /// special-purpose ranges (private, link-local, metadata, loopback, ...)
+    /// are refused.
+    #[serde(default)]
+    pub egress_allow: Vec<EgressAllowRequest>,
     #[serde(default)]
     pub env_vars: Vec<(String, String)>,
     #[serde(default)]

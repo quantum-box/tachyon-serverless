@@ -11,6 +11,7 @@
 
 pub mod alias;
 pub mod clock;
+pub mod egress;
 pub mod environment;
 pub mod error;
 pub mod function;
@@ -23,6 +24,7 @@ pub mod usage;
 
 pub use alias::*;
 pub use clock::*;
+pub use egress::*;
 pub use environment::*;
 pub use error::*;
 pub use function::*;

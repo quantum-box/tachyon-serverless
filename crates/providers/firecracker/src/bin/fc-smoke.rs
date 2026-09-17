@@ -522,6 +522,7 @@ async fn run(args: &Args, summary: &mut Summary) -> anyhow::Result<()> {
             ..Default::default()
         },
         egress: EgressProfile::None,
+        egress_allow: Vec::new(),
         connect_timeout: Duration::from_secs(args.timeout_seconds),
     };
     eprintln!("creating environment {env_id} ...");

@@ -18,6 +18,16 @@ rootfs = ".kvm/rootfs.ext4"    # read-only base rootfs（/sbin/tachyon-init = ru
 workdir = ".kvm/run"           # 環境ごとの API socket / vsock uds / function drive / log
 vsock_port = 5000
 
+# egress restricted / public-web（PLT-4622、docs/adr/0005-egress-profiles.md）。
+# 環境ごとに tap と nftables の chain（table inet tachyon_egress）を作るので、gateway を root
+# （または CAP_NET_ADMIN）で動かし、host の net.ipv4.ip_forward を 1 にしておく。満たさない host では
+# 2 つの capability が理由付きの unsupported になり、egress none だけが動く。省略時は下の既定値。
+# [provider.firecracker.network]
+# guest_cidr = "172.30.0.0/16"   # 環境ごとの /30 を切り出す private 範囲
+# dns_resolver = "1.1.1.1"       # public-web の guest が問い合わせてよい唯一の DNS（公開アドレスのみ）
+# nft_binary = "nft"
+# ip_binary = "ip"
+
 [capacity]
 max_concurrency = 8
 max_queue = 32

@@ -259,7 +259,7 @@ Invocation の attempt には `StartKind`（`cold` / `warm` / `restored`）が�
 
 ## 6. 非対象（P1）
 
-snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、egress restricted/public-web、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。
+snapshot/restore、非同期 invoke、cron、Console UI、TiDB 永続化、OCI image の pull。これらは Capability / API で明示的に Unsupported を返す。egress restricted / public-web は PLT-4622 で Firecracker provider に実装した（tap + nftables、`docs/adr/0005-egress-profiles.md`）。権限の無い host では Capability が理由付きの Unsupported になる。
 
 snapshot/restore に向けた**実験**として、SDK に初期化保存点と復元後 hook の API がある（PLT-4651、X1、`docs/protocol.md` §B-X1）。`tachyon-serverless-sdk` の feature `experimental-restore`（既定 off）の `lifecycle::builder().bootstrap(..).after_restore(..).run(..)` で、同期 bootstrap（Tokio・secret・接続なし）→ checkpoint → continue（`cold` / `restored`）→ after_restore（identity・RNG・時計・認証・接続）→ ready の順に進む。bridge は `continue` に答えるまで Ready を host に送らない。snapshot を取る provider は無いので bridge は常に `cold` と答え、通常起動も同じ経路を通る。host↔bridge frame は変えていない。これは任意のライブラリや multithread runtime を snapshot-safe にするものではない。例は `examples/restore-aware`。P0〜P4 はこれに依存しない。
 

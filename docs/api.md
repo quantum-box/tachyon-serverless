@@ -197,6 +197,7 @@ ID は `<prefix>_<26 文字 lowercase ULID>`（`fn_` `rev_` `inv_` `att_` `env_`
   "resources": { "memory_mib": 256, "cpu_millis": 500, "ephemeral_storage_mib": 256 },
   "execution": { "timeout_seconds": 30, "initialization_timeout_seconds": 30, "max_concurrency": 4 },
   "egress": null,
+  "egress_allow": [],
   "env_vars": [["GREETING", "v1"]],
   "secrets": [{ "env_name": "DEMO_SECRET", "binding_ref": "demo-secret" }],
   "description": "v1",
@@ -206,6 +207,7 @@ ID は `<prefix>_<26 文字 lowercase ULID>`（`fn_` `rev_` `inv_` `att_` `env_`
 
 - `artifact.kind` は `binary`（`digest` は `/v1/artifacts` の戻り値）または `oci_image`（`reference`。受け付けるが P1 provider では実行できず `failed` になる）。
 - `env_vars` は `[name, value]` の配列。`TACHYON_` で始まる名前は予約。secret の値は API を通らず、`binding_ref` が gateway 設定 `[[secrets.bindings]]` で解決され HelloAck の env にだけ載る。
+- `egress`: `none`（既定。NIC なし）/ `restricted` / `public-web`。`egress_allow` は `restricted` のときだけ必須（1..=16 件）で、各要素は `{"cidr": "1.1.1.1/32", "protocol": "tcp", "ports": [443]}`（`protocol` は `tcp` 既定 / `udp`、`ports` は 1..=16 件）。IPv4 CIDR のみで、0/8・10/8・100.64/10・127/8・169.254/16・172.16/12・192.168/16 などの special-purpose 範囲と重なるものは 400。どの profile でも管理網・node・metadata・private 範囲・IPv6 には届かない（`docs/adr/0005-egress-profiles.md`）。spec の `egress_allow` は空なら省略される。
 - `publish_to_prod`（既定 true）: `ready` になった時点で alias `prod` を向ける。
 
 Response 202 → `RevisionResponse`（`status` は `pending` → `preparing` → `validating` → `ready` | `failed`）:

@@ -1061,6 +1061,7 @@ mod tests {
             architecture: Architecture::Aarch64,
             resources: ResourceProfile::default(),
             egress: EgressProfile::None,
+            egress_allow: Vec::new(),
             connect_timeout: Duration::from_secs(1),
         }
     }

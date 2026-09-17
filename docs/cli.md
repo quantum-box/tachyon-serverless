@@ -80,6 +80,8 @@ tsls functions deploy --function <name|id> --binary <path>
     [--memory-mib 256] [--cpu-millis 500] [--ephemeral-storage-mib 256]  # /tmp の上限（32..=2048）
     [--timeout-seconds 30] [--init-timeout-seconds 30] [--max-concurrency 4]
     [--env KEY=VALUE]... [--secret ENV_NAME=binding_ref]...
+    [--egress none|restricted|public-web]  # 既定 none（NIC なし）
+    [--egress-allow [tcp|udp:]CIDR:PORT[,PORT...]]...  # restricted の許可先（必須、他 profile では不可）
     [--description <text>]
     [--no-publish]                         # alias prod を動かさない
     [--wait | --no-wait] [--wait-timeout 120]
@@ -90,6 +92,7 @@ tsls functions deploy --function <name|id> --binary <path>
 - `--json` は最終的な `RevisionResponse` を出力する（`jq -r .id` で revision id が取れる）。
 - revision が `failed` → exit 2（理由を表示）。`--wait-timeout` 超過 → exit 4。
 - `--secret` の値は CLI を通らない。`binding_ref` は gateway 設定 `[[secrets.bindings]]` で解決される。
+- `--egress restricted` は `--egress-allow` で許可先を 1 つ以上指定する（例 `--egress-allow 1.1.1.1/32:443`、`--egress-allow udp:1.1.1.1/32:53`）。IPv4 CIDR のみで、private・link-local・metadata・loopback などの範囲は 400 になる。firecracker provider で `restricted` / `public-web` を実行するには host 側の権限が要る（`docs/adr/0005-egress-profiles.md`）。
 - firecracker provider では `--binary` は static Linux (musl) バイナリでなければならない。CLI は形式を検証しない（provider の validate で `failed` になる）。
 
 ## 5. `functions invoke`

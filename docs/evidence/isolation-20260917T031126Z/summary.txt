@@ -1,0 +1,92 @@
+tachyon-serverless isolation measurement 20260917T031126Z
+host              Linux 7.0.0-31-generic aarch64 (aarch64)
+gateway config    /home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml
+provider          firecracker / micro_vm / dev_only=false
+function          isolation-probe (fn_01m2kzn27ynn09aqqp0pk54dep)
+baseline revision rev_01m2pnkdt6af36440qs3e6zs4h (256 MiB, 500 m)
+alloc revision    rev_01m2pnn17pzad26evtc8e0xyn7 (128 MiB, alloc 512 MiB)
+orphans           clean
+
+== M8 egress (expected: every target fails) ==
+  1.1.1.1:443	connected=false	error=NetworkUnreachable	1 ms
+  169.254.169.254:80	connected=false	error=NetworkUnreachable	2 ms
+  10.0.2.2:80	connected=false	error=NetworkUnreachable	0 ms
+  dns example.com	resolved=false	error=ProbeTimeout	5020 ms
+  interfaces: lo (loopback_only=true, default routes 0)
+  guest boot_id: b97ad807-4c9a-4f3f-bf1a-960b88c820e0
+
+== M9 resources (expected: the guest sees what the revision asked for) ==
+  vcpus: available_parallelism=1 cpuinfo=1
+  memory: MemTotal=232 MiB (238240 kB)
+  cgroup: available=false memory.max=- cpu.max=-
+  alloc invocation inv_01m2pnn20y47a0xmeb38teney1: status=failed class=crash type=Runtime.Crash
+  last guest progress lines:
+    2026-09-17T03:13:26.949Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+    2026-09-17T03:13:27.730Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+
+== DISK ephemeral storage (expected: ENOSPC at 64 MiB, host unaffected) ==
+  fill: /tmp/isolation-probe-fill.104.1789614820105550626 wrote 61505536 B (58 MiB) stopped_by=enospc error=No space left on device (os error 28)
+  mount: /dev/vdc on /tmp ext4 rw,nosuid,nodev,relatime
+  statvfs before: total 62869504 B avail 61505536 B; after fill avail 0 B; after cleanup avail 61505536 B
+  write into /: refused=true Read-only file system (os error 30)
+  write into /function: refused=true Read-only file system (os error 30)
+  host: avail before 29570818048 B, min 29497057280 B, after 29570756608 B; run dir max 74018816 B (45 samples)
+
+== NET egress restricted / public-web (PLT-4622) ==
+  [publicweb]
+    ok  connect 1.1.1.1:443 expect=allow (1.1.1.1:443)
+    ok  connect 1.0.0.1:443 expect=allow (1.0.0.1:443)
+    ok  connect 169.254.169.254:80 expect=deny (TimedOut)
+    ok  connect 10.0.2.2:80 expect=deny (TimedOut)
+    ok  connect 100.64.0.1:80 expect=deny (TimedOut)
+    ok  connect 192.168.0.1:80 expect=deny (TimedOut)
+    ok  connect 192.168.5.2:22 expect=deny (TimedOut)
+    ok  connect 192.168.5.2:53 expect=deny (TimedOut)
+    ok  connect 192.168.5.15:22 expect=deny (TimedOut)
+    ok  connect 192.168.5.15:8080 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.5:22 expect=deny (TimedOut)
+    ok  connect [2606:4700:4700::1111]:443 expect=deny (Uncategorized)
+    ok  connect [::ffff:169.254.169.254]:80 expect=deny (Uncategorized)
+    ok  udp_dns 1.1.1.1:53 expect=allow (104.20.23.154,172.66.147.243)
+    ok  udp_dns 8.8.8.8:53 expect=deny (WouldBlock)
+    ok  udp_dns 192.168.5.2:53 expect=deny (WouldBlock)
+    ok  resolve+connect example.com expect=allow (172.66.147.243,104.20.23.154,2606:4700:10::6814:179a,2606:4700:10::ac42:93f3)
+    ok  resolve+connect 169.254.169.254.nip.io expect=deny_connect (resolved=true to 169.254.169.254)
+    ok  http_redirect http://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F expect=deny_follow (fetched=true status=302 location=http://169.254.169.254/latest/meta-data/)
+  [restricted]
+    ok  connect 1.1.1.1:443 expect=allow (1.1.1.1:443)
+    ok  connect 1.0.0.1:443 expect=deny (TimedOut)
+    ok  connect 1.1.1.1:80 expect=deny (TimedOut)
+    ok  connect 169.254.169.254:80 expect=deny (TimedOut)
+    ok  connect 192.168.5.2:22 expect=deny (TimedOut)
+    ok  connect 192.168.5.15:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.5:22 expect=deny (TimedOut)
+    ok  connect [2606:4700:4700::1111]:443 expect=deny (Uncategorized)
+    ok  udp_dns 1.1.1.1:53 expect=deny (WouldBlock)
+    ok  udp_dns 8.8.8.8:53 expect=deny (WouldBlock)
+    ok  resolve example.com expect=deny_resolve (ProbeTimeout)
+  [cross]
+    ok  connect 1.1.1.1:443 expect=allow (1.1.1.1:443)
+    ok  connect 172.30.0.2:8080 expect=deny (TimedOut)
+    ok  connect 172.30.0.2:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:22 expect=deny (TimedOut)
+    ok  connect 172.30.0.1:8080 expect=deny (TimedOut)
+  [cross] tenant B listening=true accepted=0
+  [race] env_01m2pnp946kk7005mz2emjhvh8 public-web policy 2026-09-17T03:13:47.155653Z < start 2026-09-17T03:13:47.395791Z: true
+  [race] env_01m2pnptd2gsr74dbm99f69rt6 restricted policy 2026-09-17T03:14:04.789854Z < start 2026-09-17T03:14:05.040009Z: true
+  [race] env_01m2pnqa00jkhy7542n2qft32g public-web policy 2026-09-17T03:14:20.746574Z < start 2026-09-17T03:14:20.999210Z: true
+  [race] env_01m2pnqdvy7n6jxt8hrcek7e1r public-web policy 2026-09-17T03:14:24.848993Z < start 2026-09-17T03:14:25.171245Z: true
+  [cleanup] taps after the run: (none)
+  [cleanup] table inet tachyon_egress after the run: absent
+  [cleanup] net.json leases left under /home/takanorifukuyama.guest/tsls/.kvm/run: 0
+
+== findings ==
+  none
+
+== verdict ==
+  M8   PASS     3/3 targets attempted, none connected, dns_resolved=false
+  M9   PASS     vcpu 1/1 vs 1 requested; MemTotal 232 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash
+  DISK PASS     wrote 58 MiB of 256 MiB into 64 MiB (/dev/vdc ext4), stopped_by=enospc; read-only refused 2/2; host avail drop max 70 MiB (allowed 128 MiB)
+  NET  PASS     publicweb: 16/16 denied, 4/4 allowed; restricted: 11/11 denied, 1/1 allowed; cross: 4/4 denied, 1/1 allowed; tenant B accepted 0 connection(s); policy verified before InstanceStart in 4/4 policed boots; taps / table / leases gone after the run

@@ -28,6 +28,7 @@ pub mod drive;
 pub mod egress_gate;
 pub mod elf;
 pub mod host_guard;
+pub mod network;
 pub mod preflight;
 pub mod provider;
 pub mod vmm;
