@@ -177,6 +177,13 @@ impl RevisionService {
             placement: tachyon_serverless_domain::Placement {
                 region: req.required_region.clone(),
             },
+            restore: match &req.restore {
+                None => Default::default(),
+                Some(r) => tachyon_serverless_domain::RestoreSettings {
+                    policy: tachyon_serverless_domain::RestorePolicy::parse(&r.policy)?,
+                    synthetic_init_sample: r.synthetic_init_sample,
+                },
+            },
         })
     }
 

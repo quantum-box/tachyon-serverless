@@ -6,7 +6,8 @@
 
 - transport: Firecracker は vsock（guest → host CID 2, port 5000。host は `<vsock_uds>_5000` で listen）。process provider は unix socket（bridge が `--transport unix --path` で接続）。
 - frame: `u32 BE length` + JSON。最大 8 MiB（`MAX_FRAME_BYTES`）。`type` tag で判別。未知 type はエラー、未知 field は無視。
-- version: `PROTOCOL_VERSION` は handshake で**完全一致**が要求される。v1 → **v2**（PLT-4633）で `Ping` / `Pong` と `Invoke.remaining_ms` が入った。未知 type がエラーである以上 v1 の bridge に `Ping` を送ってはならず、v1 の bridge は絶対 deadline から guest 側 deadline を計算してしまうため、この追加は version を上げて隔離する。
+- version: v1 → **v2**（PLT-4633）で `Ping` / `Pong` と `Invoke.remaining_ms` が入った。未知 type がエラーである以上 v1 の bridge に `Ping` を送ってはならず、v1 の bridge は絶対 deadline から guest 側 deadline を計算してしまうため、この追加は version を上げて隔離した。v2 → **v3**（PLT-4653、X1 実験）は restore frame だけを足した（§A-X1）。
+- **version の交渉**（v3 から）: host は `Hello.protocol_version` が `MIN_PROTOCOL_VERSION`（2）〜`PROTOCOL_VERSION`（3）なら受け入れ、それ以外は `HelloReject`。session は **guest の version で話す**: v3 で足した frame（`CheckpointWaiting` / `Reconnect` / `Restore`）と `HelloAck.snapshot_hold` は v3 の guest にしか送らない / 期待しない（v2 の guest に hold を求める handshake は host 側で拒否）。bridge は feature `experimental-restore` 付きで build したときだけ 3 を名乗り、既定の build は 2 のまま（frame も fixture も v2 と同一）。つまり v2 の bridge と新しい host、v3 の bridge と新しい host はどちらも動く。v2 だけを知る古い host に v3 の bridge を当てると完全一致の検査で拒否されるので、host を先に上げる。golden fixture は v2 の `guest_hello.json` / `host_hello_ack.json` を変えずに残し、v3 分を別 file で持つ（`crates/protocol/tests/golden/wire/*v3*`、`*snapshot_hold*`、`guest_checkpoint_waiting.json`、`guest_reconnect.json`、`host_restore.json`）。
 - response payload の上限は canonical JSON（frame に載る再 serialize 後のバイト数）で `min(HelloAck.max_response_bytes, MAX_RESPONSE_PAYLOAD_BYTES)`。`MAX_RESPONSE_PAYLOAD_BYTES` = `MAX_FRAME_BYTES − FRAME_ENVELOPE_HEADROOM`（64 KiB）で、bridge は HelloAck の値をこれに clamp する。host は設定検証でこれを超える `max_response_bytes` を拒否すべき。
 - bridge は encode できない frame で session を止めない。過大な `Response` は同じ `(attempt_id, epoch)` の `Error{response_too_large}` に、過大な `Error` は message を落とした `Error` に置き換えて送り、それ以外は破棄して続行する。frame の書き込みが I/O で失敗したら user process を SIGKILL して exit 4。
 - `HostMessage` の `Debug` は `HelloAck.env` を `<N vars, redacted>` と表示する。それでも frame そのものはログに出さない。
@@ -39,6 +40,37 @@ bridge ──Pong{nonce}──▶ host                    (frame loop が即答�
 - host が deadline で先に判定した後に届く Response は無視される。
 - bridge の exit code: 0 正常 / 2 handshake 拒否・protocol error / 3 init error / 4 transport 失敗。
 
+### A-X1. 実験: restore frame（protocol v3、PLT-4653）
+
+設計と判断は `docs/adr/0017-snapshot-manifest-and-clone.md`。gateway の `[snapshots] enabled`、revision の `restore.policy`、provider の snapshot capability がそろったときだけ使われる。
+
+```
+snapshot source（POST /v1/functions/{id}/snapshots）
+bridge ──Hello{protocol_version: 3}──▶ host
+bridge ◀─HelloAck{..., env: secret なし, snapshot_hold: true}── host
+bridge: restore link が doorbell（guest vsock port 5001 の listen）を張る
+user: bootstrap → checkpoint → GET continue（hold されるので答えない）
+bridge ──CheckpointWaiting{lifecycle_phase: "checkpoint", lifecycle_version, after_restore_ran: false}──▶ host
+host: PATCH /vm Paused → PUT /snapshot/create → scratch を paused のまま copy → source を terminate（resume しない）
+
+clone（restore = prefer | require の invoke）
+host: 検証済み snapshot を新しい jail / cgroup / scratch copy で PUT /snapshot/load → egress gate → resume → doorbell（CONNECT 5001）
+bridge: 古い接続を捨てて再接続
+bridge ──Reconnect{protocol_version: 3, environment_id: <source>, guest_boot_id: <source と同じ>, reconnects, lost}──▶ host
+   | 最初の frame が Hello なら guest は cold boot した: host は HelloReject して restored に数えない
+   | environment_id / boot id が snapshot の source と違えば拒否
+bridge ◀─Restore{environment_id: <clone>, instance_id, generation, epoch, host_now_ms}── host
+bridge: CLOCK_REALTIME = host_now_ms → continue に {"kind":"restored","instance_id","generation",...}
+user: after_restore（identity・RNG・時計・接続）→ POST ready
+bridge ──Ready──▶ host   （以降は §A と同じ。invoke は clone の epoch で来る）
+```
+
+- restore link（`crates/runtime-bridge/src/restore_link.rs`）は session と host 接続の間の frame pump。`snapshot_hold` の無い session では透過で、接続が切れれば従来どおり exit 4。hold 中だけ再接続（最大 120 s）し、`Restore` を受けたら透過に戻る。再接続していない接続に来た `Restore` は無視する（snapshot されていない guest に identity を渡さない）。
+- restore の合図は doorbell（ADR-0015 の実測で load → 再接続 100 ms 台）と、doorbell が届かないときの次の write 失敗（heartbeat、最大 5 s）。
+- guest の `TACHYON_ENVIRONMENT_ID` と kernel cmdline の env id は source のもの。host は clone を自分の環境 id で扱い、`Invoke` の epoch で結果を照合する。
+- `Restore` は secret を運ばない。X1 は secret binding のある revision の snapshot を拒否する（restore 後に secret を渡す経路は未実装）。
+- boot identity: clone の `guest_boot_id` は全 copy で同じなので、host は evidence の boot id を `<source boot id>/<instance id>` にする（ADR-0011 の `same_boot` を clone に適用しない）。
+
 ## B. bridge ↔ user process（Runtime API, `runtime_api.rs`）
 
 `TACHYON_RUNTIME_API=http://127.0.0.1:<port>`（Firecracker guest は 9001、process provider は空きポート）。
@@ -64,7 +96,7 @@ SDK のエラー型: handler の `Err` → `Handler.Error`、panic → `Runtime.
 
 ### B-X1. 実験: 初期化保存点と復元後 hook（PLT-4651）
 
-**実験 API**。SDK は cargo feature `experimental-restore`（既定 off）の `tachyon_serverless_sdk::lifecycle` だけがこれを使う。feature を有効にしなくても bridge はこの path を提供するが、呼ばない process（P1 の `run` / `serve_http` を含む）には §B の表どおりの API しか見えない。snapshot の取得・復元そのものは実装していない（PLT-4653）。
+**実験 API**。SDK は cargo feature `experimental-restore`（既定 off）の `tachyon_serverless_sdk::lifecycle` だけがこれを使う。feature を有効にしなくても bridge はこの path を提供するが、呼ばない process（P1 の `run` / `serve_http` を含む）には §B の表どおりの API しか見えない。snapshot の取得・復元は PLT-4653 で実験経路として実装した（§A-X1、ADR-0017）。
 
 目的は、snapshot の全 copy で共有してよい**再利用可能な初期化状態**と、**instance ごとに作り直す状態**を分けること。
 
@@ -92,13 +124,13 @@ user: POST /runtime/v1/ready                  → bridge ──Ready{init_ms}─
   - `Runtime.AfterRestoreTimeout`: continue 後、ready 前に init deadline 到達。
   - lifecycle を開かなかった process の init timeout は従来どおり `Runtime.InitTimeout`。process の異常終了は従来どおり `Runtime.InitExit`。
 - **init deadline**: cold は P1 と同じ 1 本（`HelloAck.init_timeout_ms`）で bootstrap から ready までを覆い、X1 で延びない。`restored` の答えを返したときだけ bridge は deadline を張り直す（bootstrap に使った時間は snapshot 元の process が使ったもの）。host 側の init deadline（`Host.InitTimeout`）は変えていないので、restore の budget を host がどう持つかは PLT-4653 で決める。
-- **continue の答え**: bridge の `RestoreSource` が決める。同梱の provider はどれも snapshot を取らないので bridge バイナリは常に `NoSnapshot`（即座に `cold`）を使い、**通常起動も同じ API 経路を通る**。`restored` はテストの mock restore 通知（`run_session_with`）からしか出ない。
+- **continue の答え**: bridge の `RestoreSource` が決める。既定の bridge は `NoSnapshot`（即座に `cold`）、feature `experimental-restore` の bridge は restore link の `LinkRestore`（`HelloAck.snapshot_hold` が無ければ即座に `cold`、あれば `CheckpointWaiting` を送って `Restore` まで保留）。**通常起動も同じ API 経路を通る**。
 - **互換性の規則**:
-  - host↔bridge frame は変えていない。`PROTOCOL_VERSION` は 2 のまま。lifecycle は `InitError` の `error_type` の値を増やしただけで、host はこれまでどおり `init_error` として扱う（未知の `error_type` 文字列は許容されている）。
+  - lifecycle 自体は host↔bridge frame を変えていない（`InitError` の `error_type` の値を増やしただけ）。restore の frame は PLT-4653 で protocol v3 として足した（§A「version の交渉」、§A-X1）。
   - Runtime API への追加は additive。lifecycle を使わない process の挙動は変わらない。lifecycle を使う SDK が古い bridge に当たると `bootstrap` が 404 になり、SDK はその時点で（bootstrap hook を実行せずに）エラーで終了する。
-  - 本物の snapshot を扱う host は、restore を bridge に知らせる新しい frame（または `HelloAck` の field）が必要になる。未知 type は protocol error なので、**新しい frame を足すときは `PROTOCOL_VERSION` を上げる**。`HelloAck` に「snapshot 能力あり」の field を足すだけなら、未知 field は無視されるので version は上げず、field が無い host は「snapshot なし＝常に cold」と解釈する。どちらも PLT-4653 で行う。
+  - PLT-4653 は新しい frame を足したので `PROTOCOL_VERSION` を 3 に上げ、host は 2 と 3 を受け入れて guest の version で話す（§A）。`HelloAck.snapshot_hold` は省略可能な field で、無い / false なら常に cold。
 - **snapshot-safe を主張しない**: この API は function が「copy 間で共有してはいけない状態」を置く場所を用意するだけである。任意のライブラリ（乱数 seed・hostname・monotonic clock の基準・fd・thread pool・TLS session を初期化時に握るもの）や multithread runtime が透過的に snapshot-safe になるわけではない。SDK が保証するのは、SDK 自身が checkpoint 前に async runtime・thread・signal handler・永続接続を作らないこと（lifecycle の呼び出しは 1 リクエスト 1 接続の blocking HTTP）と、after_restore が成功するまで ready を送らないことだけである。hook の中身は function 作者の責任。
-- **環境変数**: process の環境は process image の一部なので、restore された copy の `std::env` は snapshot 元の値である。restore 後に新しい secret を渡す経路はまだ無い（PLT-4653）。現状で動くのは cold だけで、cold では環境は最新である。
+- **環境変数**: process の環境は process image の一部なので、restore された copy の `std::env` は snapshot 元の値である。restore 後に新しい secret を渡す経路は無いので、PLT-4653 は secret binding のある revision の snapshot と restore を拒否する（source の `HelloAck.env` にも secret は入らない）。
 
 ## C. Firecracker guest 規約（providers/firecracker と runtime-bridge の合意事項）
 

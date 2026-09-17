@@ -121,6 +121,7 @@ tsls functions deploy --function <name|id> --binary <path>
     [--egress-allow [tcp|udp:]CIDR:PORT[,PORT...]]...  # restricted の許可先（必須、他 profile では不可）
     [--description <text>]
     [--region <region>]                    # 例 jp。node の region が違えば invoke は 503 placement
+    [--restore-policy disabled|prefer|require] [--synthetic-init-sample]   # 実験 X1（PLT-4653）
     [--no-publish]                         # alias prod を動かさない
     [--wait | --no-wait] [--wait-timeout 120]
 ```
@@ -132,6 +133,7 @@ tsls functions deploy --function <name|id> --binary <path>
 - `--secret` の値は CLI を通らない。`binding_ref` は gateway 設定 `[[secrets.bindings]]` で解決される。
 - `--egress restricted` は `--egress-allow` で許可先を 1 つ以上指定する（例 `--egress-allow 1.1.1.1/32:443`、`--egress-allow udp:1.1.1.1/32:53`）。IPv4 CIDR のみで、private・link-local・metadata・loopback などの範囲は 400 になる。firecracker provider で `restricted` / `public-web` を実行するには host 側の権限が要る（`docs/adr/0005-egress-profiles.md`）。
 - `--min-ready N` は alias が route している間に用意しておく環境数（既定 0 = 無負荷なら環境 0）。gateway の環境再利用（`[pool] enabled` と provider の idle capability）が無いと満たされない（`tsls capacity` の `warm pool off`）。先行起動した環境は invocation が無くても node の容量を使う。`--idle-ttl-seconds` / `--scale-down-cooldown-seconds` は省略すると gateway の既定（`[pool] idle_ttl_seconds` / `[scaling] scale_down_cooldown_seconds`）。`docs/adr/0009-scale-to-zero-and-drain.md`。
+- `--restore-policy` / `--synthetic-init-sample`（実験 X1、PLT-4653）は revision の `restore`（`docs/api.md` §5.4、ADR-0017）。`prefer` / `require` は `--synthetic-init-sample` 付き・`--secret` なし・egress `none` でないと 400。snapshot の作成・一覧・失効は CLI に無く、`POST|GET /v1/functions/{id}/snapshots` を直接使う。
 - `--region jp` は revision の `required_region`。gateway の `[capacity.node] region` が一致しない node では、容量に関係なく invoke が 503（`error.reason = placement`、exit 6）になる（`docs/adr/0006-autoscaling-and-admission.md`）。
 - firecracker provider では `--binary` は static Linux (musl) バイナリでなければならない。CLI は形式を検証しない（provider の validate で `failed` になる）。
 

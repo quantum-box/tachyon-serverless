@@ -33,9 +33,10 @@ use tachyon_serverless_protocol::runtime_api::{
     self, HttpRequestEvent, HttpResponsePayload, RuntimeErrorReport, lifecycle,
 };
 use tachyon_serverless_protocol::{
-    DEFAULT_VSOCK_PORT, FRAME_ENVELOPE_HEADROOM, FrameCodec, GuestErrorKind, GuestMessage,
-    HostMessage, LogPhase, LogStream, MAX_FRAME_BYTES, MAX_RESPONSE_PAYLOAD_BYTES, PROTOCOL_NAME,
-    PROTOCOL_VERSION, decode_message, encode_message, env,
+    CHECKPOINT_PHASE, DEFAULT_VSOCK_PORT, DOORBELL_VSOCK_PORT, FRAME_ENVELOPE_HEADROOM, FrameCodec,
+    GuestErrorKind, GuestMessage, HostMessage, LogPhase, LogStream, MAX_FRAME_BYTES,
+    MAX_RESPONSE_PAYLOAD_BYTES, MIN_PROTOCOL_VERSION, PROTOCOL_NAME, PROTOCOL_VERSION,
+    RESTORE_PROTOCOL_VERSION, decode_message, encode_message, env,
 };
 
 fn golden_dir() -> PathBuf {
@@ -129,6 +130,7 @@ fn host_type(m: &HostMessage) -> &'static str {
         HostMessage::Ping { .. } => "ping",
         HostMessage::Cancel { .. } => "cancel",
         HostMessage::Shutdown { .. } => "shutdown",
+        HostMessage::Restore { .. } => "restore",
     }
 }
 const HOST_TYPES: &[&str] = &[
@@ -138,6 +140,7 @@ const HOST_TYPES: &[&str] = &[
     "ping",
     "cancel",
     "shutdown",
+    "restore",
 ];
 
 fn guest_type(m: &GuestMessage) -> &'static str {
@@ -151,6 +154,8 @@ fn guest_type(m: &GuestMessage) -> &'static str {
         GuestMessage::Exited { .. } => "exited",
         GuestMessage::Heartbeat { .. } => "heartbeat",
         GuestMessage::Pong { .. } => "pong",
+        GuestMessage::CheckpointWaiting { .. } => "checkpoint_waiting",
+        GuestMessage::Reconnect { .. } => "reconnect",
     }
 }
 const GUEST_TYPES: &[&str] = &[
@@ -163,6 +168,8 @@ const GUEST_TYPES: &[&str] = &[
     "exited",
     "heartbeat",
     "pong",
+    "checkpoint_waiting",
+    "reconnect",
 ];
 
 fn error_kind(k: &GuestErrorKind) -> &'static str {
@@ -194,6 +201,7 @@ fn host_samples() -> Vec<(String, HostMessage)> {
             init_timeout_ms: 10_000,
             max_response_bytes: 6 * 1024 * 1024,
             max_log_line_bytes: 8192,
+            snapshot_hold: false,
         },
         HostMessage::HelloReject {
             reason: "protocol version mismatch".into(),
@@ -216,16 +224,44 @@ fn host_samples() -> Vec<(String, HostMessage)> {
         HostMessage::Shutdown {
             reason: "terminate".into(),
         },
+        // Protocol version 3 (PLT-4653).
+        HostMessage::Restore {
+            environment_id: "env_01j0000000000000000000000b".into(),
+            instance_id: "rst_01j0000000000000000000000c".into(),
+            generation: 1,
+            epoch: 1,
+            host_now_ms: 1_700_000_000_000,
+        },
     ]
     .into_iter()
     .map(|m| (format!("wire/host_{}.json", host_type(&m)), m))
+    .chain(std::iter::once((
+        // Version 3: the same `hello_ack` asking for a snapshot hold. The
+        // version-2 fixture above stays byte-identical (the field is omitted
+        // when false).
+        "wire/host_hello_ack_snapshot_hold.json".to_string(),
+        HostMessage::HelloAck {
+            environment_id: "env_01j0000000000000000000000a".into(),
+            epoch: 1,
+            entrypoint: "/function/app".into(),
+            args: vec![],
+            env: vec![],
+            working_dir: "/function".into(),
+            init_timeout_ms: 10_000,
+            max_response_bytes: 6 * 1024 * 1024,
+            max_log_line_bytes: 8192,
+            snapshot_hold: true,
+        },
+    )))
     .collect()
 }
 
 fn guest_samples() -> Vec<(String, GuestMessage)> {
     let mut out: Vec<(String, GuestMessage)> = vec![
+        // A version-2 bridge (every bridge built without
+        // `experimental-restore`) still says exactly this.
         GuestMessage::Hello {
-            protocol_version: PROTOCOL_VERSION,
+            protocol_version: MIN_PROTOCOL_VERSION,
             bridge_version: "0.1.0".into(),
             environment_id: "env_01j0000000000000000000000a".into(),
             guest_boot_id: Some("6f1c1d0e-8d5b-4f55-9d7e-0a1b2c3d4e5f".into()),
@@ -258,10 +294,33 @@ fn guest_samples() -> Vec<(String, GuestMessage)> {
             ts_ms: 1_700_000_000_500,
         },
         GuestMessage::Pong { nonce: 7 },
+        // Protocol version 3 (PLT-4653).
+        GuestMessage::CheckpointWaiting {
+            lifecycle_phase: CHECKPOINT_PHASE.into(),
+            lifecycle_version: lifecycle::VERSION,
+            after_restore_ran: false,
+        },
+        GuestMessage::Reconnect {
+            protocol_version: RESTORE_PROTOCOL_VERSION,
+            environment_id: "env_01j0000000000000000000000a".into(),
+            guest_boot_id: Some("6f1c1d0e-8d5b-4f55-9d7e-0a1b2c3d4e5f".into()),
+            reconnects: 1,
+            lost: "vsock doorbell".into(),
+        },
     ]
     .into_iter()
     .map(|m| (format!("wire/guest_{}.json", guest_type(&m)), m))
     .collect();
+    out.push((
+        "wire/guest_hello_v3.json".into(),
+        GuestMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            bridge_version: "0.1.0".into(),
+            environment_id: "env_01j0000000000000000000000a".into(),
+            guest_boot_id: Some("6f1c1d0e-8d5b-4f55-9d7e-0a1b2c3d4e5f".into()),
+            architecture: "aarch64".into(),
+        },
+    ));
 
     for kind in [
         GuestErrorKind::Handler,
@@ -298,6 +357,10 @@ fn constants() -> Value {
     json!({
         "protocol_name": PROTOCOL_NAME,
         "protocol_version": PROTOCOL_VERSION,
+        "min_protocol_version": MIN_PROTOCOL_VERSION,
+        "restore_protocol_version": RESTORE_PROTOCOL_VERSION,
+        "doorbell_vsock_port": DOORBELL_VSOCK_PORT,
+        "checkpoint_phase": CHECKPOINT_PHASE,
         "default_vsock_port": DEFAULT_VSOCK_PORT,
         "max_frame_bytes": MAX_FRAME_BYTES,
         "frame_envelope_headroom": FRAME_ENVELOPE_HEADROOM,

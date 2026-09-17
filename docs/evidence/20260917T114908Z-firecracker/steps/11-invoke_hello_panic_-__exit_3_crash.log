@@ -1,0 +1,1 @@
+error: crash (HTTP 502): invocation inv_01m2qk6z3bmasccee24rr8vt09 failed: Runtime.Panic: panic requested [type=Runtime.Panic] [invocation=inv_01m2qk6z3bmasccee24rr8vt09] [request=01m2qk6z3bzxe7y7a4bexfg7nj]

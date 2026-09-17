@@ -1,0 +1,6 @@
+{
+  "after_restore_ran": false,
+  "lifecycle_phase": "checkpoint",
+  "lifecycle_version": 1,
+  "type": "checkpoint_waiting"
+}

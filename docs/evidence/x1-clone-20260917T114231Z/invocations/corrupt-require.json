@@ -1,0 +1,35 @@
+{
+  "id": "inv_01m2qjxjw1sx6h8rmmbxs5845f",
+  "function_id": "fn_01m2qjwj0ny66v9j535gw3edj4",
+  "revision_id": "rev_01m2qjx0bt71xjb85fbeztgthk",
+  "alias": "prod",
+  "alias_generation": 2,
+  "mode": "sync",
+  "status": "failed",
+  "error": {
+    "class": "init_error",
+    "error_type": "Host.RestoreRequiredUnavailable",
+    "message": "restore required but unavailable: artifact_corrupted: no usable snapshot: snap_01m2qjx0mq98kcp78s13t36hj1: artifact memory digest mismatch: sha256:e5dd4d25ea0c32af80351c679ef3ae23c8c19a200c1a897235b68d7750ed6000 (268435456 bytes), manifest sha256:87ceb14ecef91613b3bbddfe1b11642869982a53b9a47ade3e83e096170d0192 (268435456 bytes); snap_01m2qjwjbcn0x0bxxdfrfph3tj: incompatible: revision_mismatch"
+  },
+  "trace_id": "inv_01m2qjxjw1sx6h8rmmbxs5845f",
+  "input_digest": "sha256:67fc41ead5d18046b67727d283460eb1f754f761cfafe933c7778fd1382a1b1d",
+  "input_size_bytes": 8,
+  "accepted_at": "2026-09-17T11:44:34.689596181Z",
+  "finished_at": "2026-09-17T11:44:36.472245509Z",
+  "deadlines": {
+    "queue_deadline": "2026-09-17T11:44:44.689596181Z",
+    "client_deadline": "2026-09-17T11:45:44.689596181Z"
+  },
+  "attempts": [],
+  "client_output": {
+    "error": {
+      "code": "init_error",
+      "message": "invocation inv_01m2qjxjw1sx6h8rmmbxs5845f failed: Host.RestoreRequiredUnavailable: restore required but unavailable: artifact_corrupted: no usable snapshot: snap_01m2qjx0mq98kcp78s13t36hj1: artifact memory digest mismatch: sha256:e5dd4d25ea0c32af80351c679ef3ae23c8c19a200c1a897235b68d7750ed6000 (268435456 bytes), manifest sha256:87ceb14ecef91613b3bbddfe1b11642869982a53b9a47ade3e83e096170d0192 (268435456 bytes); snap_01m2qjwjbcn0x0bxxdfrfph3tj: incompatible: revision_mismatch",
+      "request_id": "01m2qjxjw0f0v63y8nyzj12gnc",
+      "invocation_id": "inv_01m2qjxjw1sx6h8rmmbxs5845f",
+      "error_type": "Host.RestoreRequiredUnavailable"
+    }
+  },
+  "host_invoke_ms": 1789645474665,
+  "client_ms": 1820
+}

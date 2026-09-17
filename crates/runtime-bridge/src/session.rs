@@ -12,8 +12,20 @@ use std::time::{Duration, Instant};
 use futures::{SinkExt, StreamExt};
 use tachyon_serverless_protocol::{
     FrameCodec, GuestErrorKind, GuestMessage, HostMessage, LogPhase, LogStream, MAX_FRAME_BYTES,
-    MAX_RESPONSE_PAYLOAD_BYTES, PROTOCOL_VERSION, ProtocolError, decode_message, encode_message,
+    MAX_RESPONSE_PAYLOAD_BYTES, ProtocolError, decode_message, encode_message,
 };
+
+/// Protocol version this bridge announces in `Hello`.
+///
+/// Version 3 only adds the experimental restore frames (PLT-4653), which only
+/// the restore link (feature `experimental-restore`) speaks. A bridge built
+/// without it announces 2, so a host never asks it for a snapshot hold
+/// (docs/protocol.md §A「version の交渉」).
+#[cfg(feature = "experimental-restore")]
+pub const HELLO_PROTOCOL_VERSION: u32 = tachyon_serverless_protocol::PROTOCOL_VERSION;
+/// See the feature-enabled definition.
+#[cfg(not(feature = "experimental-restore"))]
+pub const HELLO_PROTOCOL_VERSION: u32 = tachyon_serverless_protocol::MIN_PROTOCOL_VERSION;
 use tokio::io::AsyncWrite;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
@@ -70,6 +82,7 @@ fn host_message_name(m: &HostMessage) -> &'static str {
         HostMessage::Cancel { .. } => "cancel",
         HostMessage::Shutdown { .. } => "shutdown",
         HostMessage::Ping { .. } => "ping",
+        HostMessage::Restore { .. } => "restore",
     }
 }
 
@@ -99,6 +112,8 @@ fn guest_message_name(m: &GuestMessage) -> &'static str {
         GuestMessage::Exited { .. } => "exited",
         GuestMessage::Heartbeat { .. } => "heartbeat",
         GuestMessage::Pong { .. } => "pong",
+        GuestMessage::CheckpointWaiting { .. } => "checkpoint_waiting",
+        GuestMessage::Reconnect { .. } => "reconnect",
     }
 }
 
@@ -145,7 +160,7 @@ pub async fn run_session_with(
 
     // --- handshake -------------------------------------------------------
     let hello = GuestMessage::Hello {
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: HELLO_PROTOCOL_VERSION,
         bridge_version: env!("CARGO_PKG_VERSION").to_string(),
         environment_id: cfg.environment_id.clone(),
         guest_boot_id: cfg.guest_boot_id.clone(),
@@ -191,6 +206,9 @@ pub async fn run_session_with(
             init_timeout_ms,
             max_response_bytes,
             max_log_line_bytes,
+            // Consumed by the restore link (feature `experimental-restore`)
+            // before the frame gets here; the session itself never holds.
+            snapshot_hold: _,
         } => {
             if environment_id != cfg.environment_id {
                 error!(
@@ -1039,6 +1057,7 @@ mod tests {
                 init_timeout_ms,
                 max_response_bytes: 1024,
                 max_log_line_bytes: 1024,
+                snapshot_hold: false,
             };
             host.send(encode_message(&ack).unwrap()).await.unwrap();
             let mut url = None;
@@ -1232,6 +1251,7 @@ mod tests {
                 init_timeout_ms: 0,
                 max_response_bytes: 1024,
                 max_log_line_bytes: 1024,
+                snapshot_hold: false,
             };
             host.send(encode_message(&ack).unwrap()).await.unwrap();
             tokio::time::sleep(Duration::from_secs(60)).await;

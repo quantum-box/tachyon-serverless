@@ -132,6 +132,7 @@ async fn deploy(app: &Application, name: &str) -> Function {
                 description: String::new(),
                 publish_to_prod: true,
                 required_region: None,
+                restore: None,
             },
         )
         .await

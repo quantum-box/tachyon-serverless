@@ -20,6 +20,7 @@ pub mod local_ports;
 pub mod metrics;
 pub mod repository;
 pub mod services;
+pub mod snapshot;
 pub mod usage;
 
 pub use app::{Application, BootstrapOptions, ProviderFactory};

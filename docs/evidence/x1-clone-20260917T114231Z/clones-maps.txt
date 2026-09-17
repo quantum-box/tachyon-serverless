@@ -1,0 +1,70 @@
+11:44:10.623 pid 181997 f24cb5000000-f24cc5000000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               20256 kB
+  Pss:               11622 kB
+  Shared_Clean:      17252 kB
+  Private_Dirty:      2996 kB
+11:44:10.629 pid 181998 fe970f800000-fe971f800000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               20584 kB
+  Pss:               11804 kB
+  Shared_Clean:      17544 kB
+  Private_Dirty:      3028 kB
+11:44:10.741 pid 181997 f24cb5000000-f24cc5000000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               24428 kB
+  Pss:               13862 kB
+  Shared_Clean:      21116 kB
+  Private_Dirty:      3304 kB
+11:44:10.747 pid 181998 fe970f800000-fe971f800000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               24436 kB
+  Pss:               13878 kB
+  Shared_Clean:      21100 kB
+  Private_Dirty:      3324 kB
+11:44:10.861 pid 181997 f24cb5000000-f24cc5000000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               27116 kB
+  Pss:               15356 kB
+  Shared_Clean:      23504 kB
+  Private_Dirty:      3580 kB
+11:44:10.868 pid 181998 fe970f800000-fe971f800000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               27132 kB
+  Pss:               15398 kB
+  Shared_Clean:      23452 kB
+  Private_Dirty:      3672 kB
+11:44:10.983 pid 181997 f24cb5000000-f24cc5000000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               28956 kB
+  Pss:               16588 kB
+  Shared_Clean:      24720 kB
+  Private_Dirty:      4204 kB
+11:44:10.989 pid 181998 fe970f800000-fe971f800000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               29032 kB
+  Pss:               16666 kB
+  Shared_Clean:      24716 kB
+  Private_Dirty:      4248 kB
+11:44:11.105 pid 181997 f24cb5000000-f24cc5000000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               29248 kB
+  Pss:               16796 kB
+  Shared_Clean:      24888 kB
+  Private_Dirty:      4328 kB
+11:44:11.111 pid 181998 fe970f800000-fe971f800000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               29256 kB
+  Pss:               16804 kB
+  Shared_Clean:      24888 kB
+  Private_Dirty:      4352 kB
+11:44:11.226 pid 181997 f24cb5000000-f24cc5000000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               29368 kB
+  Pss:               16868 kB
+  Shared_Clean:      24984 kB
+  Private_Dirty:      4360 kB
+11:44:11.234 pid 181998 fe970f800000-fe971f800000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               29440 kB
+  Pss:               16910 kB
+  Shared_Clean:      25044 kB
+  Private_Dirty:      4388 kB
+11:44:11.348 pid 181997 f24cb5000000-f24cc5000000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               29568 kB
+  Pss:               17074 kB
+  Shared_Clean:      24972 kB
+  Private_Dirty:      4564 kB
+11:44:11.355 pid 181998 fe970f800000-fe971f800000 rw-p 00000000 fd:01 1368274                    /snapshot.mem
+  Rss:               29640 kB
+  Pss:               17164 kB
+  Shared_Clean:      24936 kB
+  Private_Dirty:      4632 kB

@@ -657,9 +657,77 @@ pub struct CreateRevisionRequest {
     /// invocation on a node with another or no region label (PLT-4634).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_region: Option<String>,
+    /// Experimental restore settings (X1, PLT-4653). Omitted means
+    /// `{"policy": "disabled"}`: the revision never restores a snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore: Option<RestoreRequest>,
 }
 fn default_true() -> bool {
     true
+}
+
+/// Experimental restore settings of a revision (X1, PLT-4653;
+/// docs/adr/0017-snapshot-manifest-and-clone.md).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RestoreRequest {
+    /// `disabled` (default) | `prefer` (restore when a compatible, verified
+    /// snapshot exists, otherwise start cold and record why) | `require`
+    /// (restore or fail with `Host.RestoreRequiredUnavailable`).
+    #[serde(default = "default_restore_policy")]
+    pub policy: String,
+    /// The operator states that initialization builds only synthetic sample
+    /// data. Required for `prefer` / `require` and for creating a snapshot;
+    /// such a revision may not have secret bindings and must use egress
+    /// `none`.
+    #[serde(default)]
+    pub synthetic_init_sample: bool,
+}
+fn default_restore_policy() -> String {
+    "disabled".into()
+}
+
+/// `POST /v1/functions/{function_id}/snapshots` (X1, experimental).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CreateSnapshotRequest {
+    /// Revision to snapshot. Defaults to the revision alias `prod` points at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision_id: Option<String>,
+}
+
+/// `POST /v1/functions/{function_id}/snapshots/{snapshot_id}/revoke`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RevokeSnapshotRequest {
+    pub reason: String,
+}
+
+/// A snapshot as the API shows it: identity, state and the manifest digest.
+/// The manifest's host facts are summarized, never the artifact bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct SnapshotResponse {
+    pub id: String,
+    pub function_id: String,
+    pub revision_id: String,
+    /// `active` | `revoked` | `quarantined` | `expired`
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_reason: Option<String>,
+    /// `sha256:<hex>` of the canonical manifest.
+    pub manifest_digest: String,
+    pub manifest_version: u32,
+    pub provider: String,
+    pub memory_mib: u32,
+    pub vcpus: u32,
+    pub source_environment_id: String,
+    /// How many clones were created from it.
+    pub restores: u64,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = String, format = DateTime)]
+    pub expires_at: Timestamp,
+    /// Snapshot timings of the source, milliseconds: `pause_ms`,
+    /// `create_ms`, `copy_ms`, `seal_ms`.
+    #[schema(value_type = Object)]
+    pub timings: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

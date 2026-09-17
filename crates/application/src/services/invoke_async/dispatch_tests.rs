@@ -211,6 +211,7 @@ async fn revision(app: &Application, function: &Function, tag: &str) -> Function
                 description: String::new(),
                 publish_to_prod: true,
                 required_region: None,
+                restore: None,
             },
         )
         .await

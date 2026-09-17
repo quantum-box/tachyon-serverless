@@ -1,0 +1,35 @@
+{
+  "id": "inv_01m2qjx0m5qgds94zbjnymcpjf",
+  "function_id": "fn_01m2qjwj0ny66v9j535gw3edj4",
+  "revision_id": "rev_01m2qjx0bt71xjb85fbeztgthk",
+  "alias": "prod",
+  "alias_generation": 2,
+  "mode": "sync",
+  "status": "failed",
+  "error": {
+    "class": "init_error",
+    "error_type": "Host.RestoreRequiredUnavailable",
+    "message": "restore required but unavailable: revision_mismatch: no usable snapshot: snap_01m2qjwjbcn0x0bxxdfrfph3tj: incompatible: revision_mismatch"
+  },
+  "trace_id": "inv_01m2qjx0m5qgds94zbjnymcpjf",
+  "input_digest": "sha256:67fc41ead5d18046b67727d283460eb1f754f761cfafe933c7778fd1382a1b1d",
+  "input_size_bytes": 8,
+  "accepted_at": "2026-09-17T11:44:16.005512393Z",
+  "finished_at": "2026-09-17T11:44:16.006786764Z",
+  "deadlines": {
+    "queue_deadline": "2026-09-17T11:44:26.005512393Z",
+    "client_deadline": "2026-09-17T11:45:26.005512393Z"
+  },
+  "attempts": [],
+  "client_output": {
+    "error": {
+      "code": "init_error",
+      "message": "invocation inv_01m2qjx0m5qgds94zbjnymcpjf failed: Host.RestoreRequiredUnavailable: restore required but unavailable: revision_mismatch: no usable snapshot: snap_01m2qjwjbcn0x0bxxdfrfph3tj: incompatible: revision_mismatch",
+      "request_id": "01m2qjx0m4p32h0egkc15arsy1",
+      "invocation_id": "inv_01m2qjx0m5qgds94zbjnymcpjf",
+      "error_type": "Host.RestoreRequiredUnavailable"
+    }
+  },
+  "host_invoke_ms": 1789645455999,
+  "client_ms": 10
+}

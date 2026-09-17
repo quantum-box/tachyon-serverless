@@ -64,6 +64,7 @@ pub(crate) mod fx {
             }],
             description: String::new(),
             placement: Default::default(),
+            restore: Default::default(),
         }
     }
 

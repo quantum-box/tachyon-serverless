@@ -14,6 +14,7 @@
 //! | `trg`  | Trigger (cron / webhook, PLT-4641) |
 //! | `dlq`  | DeadLetter           |
 //! | `rdv`  | Redrive              |
+//! | `snap` | Snapshot (X1 experimental restore, PLT-4653) |
 
 use std::fmt;
 use std::str::FromStr;
@@ -162,6 +163,12 @@ define_id!(
     /// A cron or webhook trigger of a function (PLT-4641).
     TriggerId,
     "trg"
+);
+define_id!(
+    /// A sealed snapshot of an initialized environment (X1, PLT-4653;
+    /// docs/adr/0017-snapshot-manifest-and-clone.md). Experimental.
+    SnapshotId,
+    "snap"
 );
 
 define_id!(

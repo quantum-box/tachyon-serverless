@@ -2,7 +2,7 @@
 
 ## ステータス
 
-Accepted（2026-09-17、PLT-4652、X1 実験・非ブロック）。本 ADR は**実験の記録と、PLT-4653 が満たすべき条件**を決める。provider の挙動は変えていない（`Capabilities` の `snapshot_create` / `snapshot_clone` は引き続き `Unsupported`、ADR-0001 決定 5）。
+Accepted（2026-09-17、PLT-4652、X1 実験・非ブロック）。決定 4 の patch は PLT-4653 で実験経路として実装した（`docs/adr/0017-snapshot-manifest-and-clone.md`）。本 ADR は**実験の記録と、PLT-4653 が満たすべき条件**を決める。provider の挙動は変えていない（`Capabilities` の `snapshot_create` / `snapshot_clone` は引き続き `Unsupported`、ADR-0001 決定 5）。
 
 実験の実装: `experiments/x1-restore/`（`x1-guest-init`: 実験用 rootfs の PID 1、`x1-host`: 1 VMM 分の host 側、`pump` / `control` / `uevent` / `clock`）、`scripts/x1/fc-restore.sh`、`scripts/x1/ch-restore.sh`。証跡: `docs/evidence/x1-restore-20260917T085700Z/`（読み方は同ディレクトリの `README.txt`）。
 

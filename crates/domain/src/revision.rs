@@ -235,6 +235,14 @@ pub struct RevisionSpec {
     /// form when unconstrained, so the digest of older revisions is unchanged.
     #[serde(default, skip_serializing_if = "Placement::is_unconstrained")]
     pub placement: Placement,
+    /// Experimental restore policy (X1, PLT-4653). Omitted from the serialized
+    /// form while `disabled` and not marked synthetic, so the digest of older
+    /// revisions is unchanged.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::snapshot::RestoreSettings::is_default"
+    )]
+    pub restore: crate::snapshot::RestoreSettings,
 }
 
 /// Placement constraint of a revision (docs/adr/0006-autoscaling-and-admission.md).
@@ -422,6 +430,7 @@ impl RevisionSpec {
             });
         }
         self.placement.validate()?;
+        crate::snapshot::RestoreSettings::validate(self)?;
         Ok(())
     }
 
@@ -579,6 +588,7 @@ mod tests {
             }],
             description: String::new(),
             placement: Placement::default(),
+            restore: Default::default(),
         }
     }
 

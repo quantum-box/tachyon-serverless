@@ -1,0 +1,35 @@
+{
+  "id": "inv_01m2qjwja5w8xqykm7gba4n0xz",
+  "function_id": "fn_01m2qjwj0ny66v9j535gw3edj4",
+  "revision_id": "rev_01m2qjwj157eg10nvqdvarwysa",
+  "alias": "prod",
+  "alias_generation": 1,
+  "mode": "sync",
+  "status": "failed",
+  "error": {
+    "class": "init_error",
+    "error_type": "Host.RestoreRequiredUnavailable",
+    "message": "restore required but unavailable: no_snapshot: function fn_01m2qjwj0ny66v9j535gw3edj4 has no snapshot"
+  },
+  "trace_id": "inv_01m2qjwja5w8xqykm7gba4n0xz",
+  "input_digest": "sha256:67fc41ead5d18046b67727d283460eb1f754f761cfafe933c7778fd1382a1b1d",
+  "input_size_bytes": 8,
+  "accepted_at": "2026-09-17T11:44:01.349983229Z",
+  "finished_at": "2026-09-17T11:44:01.366483364Z",
+  "deadlines": {
+    "queue_deadline": "2026-09-17T11:44:11.349983229Z",
+    "client_deadline": "2026-09-17T11:45:11.349983229Z"
+  },
+  "attempts": [],
+  "client_output": {
+    "error": {
+      "code": "init_error",
+      "message": "invocation inv_01m2qjwja5w8xqykm7gba4n0xz failed: Host.RestoreRequiredUnavailable: restore required but unavailable: no_snapshot: function fn_01m2qjwj0ny66v9j535gw3edj4 has no snapshot",
+      "request_id": "01m2qjwja5c6qxawzf4kt510ft",
+      "invocation_id": "inv_01m2qjwja5w8xqykm7gba4n0xz",
+      "error_type": "Host.RestoreRequiredUnavailable"
+    }
+  },
+  "host_invoke_ms": 1789645441338,
+  "client_ms": 34
+}

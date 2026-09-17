@@ -176,6 +176,7 @@ fn revision_request(
         description: "test".into(),
         publish_to_prod: true,
         required_region: None,
+        restore: None,
     }
 }
 

@@ -289,6 +289,8 @@ async fn run_inner(
         egress: None,
         egress_allow: Vec::new(),
         region: None,
+        restore_policy: None,
+        synthetic_init_sample: false,
         no_publish: false,
         wait: true,
         no_wait: false,

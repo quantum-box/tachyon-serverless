@@ -75,6 +75,10 @@ use crate::vmm::{
     spawn_vmm, tail_of_file, wait_pid_gone, write_pid_file,
 };
 
+/// Snapshot and clone (X1, PLT-4653).
+#[cfg(feature = "experimental-restore")]
+mod restore;
+
 /// Name of the directory under `workdir` that keeps logs of terminated environments.
 pub const ARCHIVE_DIR: &str = "_archive";
 /// Number of archived environments kept (oldest are pruned).
@@ -299,8 +303,14 @@ impl FirecrackerProvider {
             // tests rather than by that measurement (docs/adr/0001 §5).
             idle_quiesce: Support::Supported,
             idle_resume: Support::Supported,
-            snapshot_create: Support::unsupported("not implemented in P1"),
-            snapshot_clone: Support::unsupported("not implemented in P1"),
+            // X1 (PLT-4653): code exists behind the `experimental-restore`
+            // feature and is `Unverified` there (`capabilities`).
+            snapshot_create: Support::unsupported(
+                "not built: the provider was compiled without experimental-restore",
+            ),
+            snapshot_clone: Support::unsupported(
+                "not built: the provider was compiled without experimental-restore",
+            ),
             dev_only: false,
         }
     }
@@ -426,6 +436,157 @@ impl FirecrackerProvider {
             tail_of_file(&paths.console_log, CONSOLE_TAIL_BYTES),
             tail_of_file(&paths.fc_log, FC_LOG_TAIL_BYTES)
         ))
+    }
+
+    /// Spawn the VMM (directly or through the jailer, into `cgroup`), record
+    /// its pid and wait until its API socket accepts connections. The VMM is
+    /// left in `slot` whatever happens, so the caller can kill it on error.
+    /// Returns the console capture, the VMM pid and the instance id.
+    async fn spawn_and_wait_api(
+        &self,
+        env_id: &str,
+        paths: &EnvPaths,
+        cgroup: Option<&EnvCgroup>,
+        slot: &mut Option<Tracked>,
+    ) -> Result<(ConsoleCapture, u32, String), ProviderError> {
+        // 4. Spawn the VMM in its own process group (and cgroup).
+        let instance_id = instance_id_for(env_id);
+        let launcher = match &self.cfg.jailer {
+            Some(jailer) => Launcher::Jailer {
+                jailer,
+                firecracker: &self.cfg.firecracker_binary,
+            },
+            None => Launcher::Direct {
+                binary: &self.cfg.firecracker_binary,
+            },
+        };
+        let (child, console) = spawn_vmm(
+            launcher,
+            paths,
+            &instance_id,
+            self.cfg.console_log_max_bytes,
+            cgroup.map(EnvCgroup::procs_fd),
+        )
+        .map_err(|e| {
+            let what = match &self.cfg.jailer {
+                Some(j) => j.binary.display().to_string(),
+                None => self.cfg.firecracker_binary.display().to_string(),
+            };
+            ProviderError::Boot(format!("spawn {what}: {e}"))
+        })?;
+        // fc.log is written by Firecracker itself; a watchdog keeps it bounded
+        // until the environment directory is removed.
+        spawn_log_watchdog(
+            paths.fc_log.clone(),
+            paths.dir.clone(),
+            self.cfg.fc_log_max_bytes,
+            env_id.to_owned(),
+        );
+        let spawned = child
+            .id()
+            .ok_or_else(|| ProviderError::Internal("spawned child has no pid".into()))?;
+        *slot = Some(Tracked {
+            pid: spawned,
+            pgid: spawned,
+            child: Some(child),
+            instance_id: instance_id.clone(),
+        });
+        let vmm = slot.as_mut().expect("tracked stored above");
+        if let (Some(jailer), Some(jail)) = (&self.cfg.jailer, &paths.jail)
+            && jailer.new_pid_ns
+        {
+            // The jailer clones the VMM into a new PID namespace, records its
+            // pid in the chroot and exits.
+            let start = Instant::now();
+            loop {
+                let exited = vmm.child.as_mut().and_then(|c| c.try_wait().ok().flatten());
+                if let Some(status) = exited {
+                    if !status.success() {
+                        return Err(Self::boot_error_after_exit(
+                            paths,
+                            &console,
+                            format!("jailer exited with {status} before starting the VMM"),
+                        )
+                        .await);
+                    }
+                    break;
+                }
+                if start.elapsed() > API_SOCKET_WAIT {
+                    return Err(Self::boot_error(
+                        paths,
+                        format!(
+                            "the jailer did not hand over to the VMM within {API_SOCKET_WAIT:?}"
+                        ),
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            vmm.child = None;
+            vmm.pid = crate::jail::read_vmm_pid(jail).ok_or_else(|| {
+                Self::boot_error(
+                    paths,
+                    format!(
+                        "the jailer exited without recording the VMM pid in {}",
+                        jail.pid_file().display()
+                    ),
+                )
+            })?;
+        }
+        let pid = vmm.pid;
+        write_pid_file(&paths.pid_file, pid)?;
+        // Placement proof: the VMM (not only its launcher) is in the cgroup.
+        if let Some(cg) = cgroup {
+            match verify_member(&self.cfg.cgroup.root, &cg.path, pid) {
+                Ok(()) => {}
+                Err(e) if self.cfg.cgroup.mode == CgroupMode::Required => {
+                    return Err(Self::boot_error(paths, format!("host cgroup: {e}")));
+                }
+                Err(e) => tracing::warn!(env_id, error = %e, "VMM cgroup placement not verified"),
+            }
+        }
+        tracing::info!(
+            env_id,
+            pid,
+            instance_id,
+            jailed = self.cfg.jailer.is_some(),
+            cgroup = cgroup.map(|c| c.path.display().to_string()),
+            "firecracker spawned"
+        );
+
+        // 5. Wait for the API socket.
+        let start = Instant::now();
+        loop {
+            // The socket file exists as soon as Firecracker binds it, a moment
+            // before it listens; a connect in that window is refused (seen on
+            // KVM with two environments booting at once). Wait for a connect.
+            if paths.api_sock.exists()
+                && tokio::net::UnixStream::connect(&paths.api_sock)
+                    .await
+                    .is_ok()
+            {
+                break;
+            }
+            if let Some(status) = vmm.exited() {
+                return Err(Self::boot_error_after_exit(
+                    paths,
+                    &console,
+                    format!("firecracker exited before creating the API socket ({status})"),
+                )
+                .await);
+            }
+            if start.elapsed() > API_SOCKET_WAIT {
+                return Err(Self::boot_error(
+                    paths,
+                    format!(
+                        "API socket {} did not appear within {API_SOCKET_WAIT:?}",
+                        paths.api_sock.display()
+                    ),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        Ok((console, pid, instance_id))
     }
 
     /// Everything after the environment directory exists. On error the caller
@@ -598,142 +759,12 @@ impl FirecrackerProvider {
                 .map_err(ProviderError::Boot)?;
         }
 
-        // 4. Spawn the VMM in its own process group (and cgroup).
-        let instance_id = instance_id_for(env_id);
-        let launcher = match &self.cfg.jailer {
-            Some(jailer) => Launcher::Jailer {
-                jailer,
-                firecracker: &self.cfg.firecracker_binary,
-            },
-            None => Launcher::Direct {
-                binary: &self.cfg.firecracker_binary,
-            },
-        };
-        let (child, console) = spawn_vmm(
-            launcher,
-            paths,
-            &instance_id,
-            self.cfg.console_log_max_bytes,
-            cgroup.as_ref().map(EnvCgroup::procs_fd),
-        )
-        .map_err(|e| {
-            let what = match &self.cfg.jailer {
-                Some(j) => j.binary.display().to_string(),
-                None => self.cfg.firecracker_binary.display().to_string(),
-            };
-            ProviderError::Boot(format!("spawn {what}: {e}"))
-        })?;
-        // fc.log is written by Firecracker itself; a watchdog keeps it bounded
-        // until the environment directory is removed.
-        spawn_log_watchdog(
-            paths.fc_log.clone(),
-            paths.dir.clone(),
-            self.cfg.fc_log_max_bytes,
-            env_id.to_owned(),
-        );
-        let spawned = child
-            .id()
-            .ok_or_else(|| ProviderError::Internal("spawned child has no pid".into()))?;
-        *slot = Some(Tracked {
-            pid: spawned,
-            pgid: spawned,
-            child: Some(child),
-            instance_id: instance_id.clone(),
-        });
-        let vmm = slot.as_mut().expect("tracked stored above");
-        if let (Some(jailer), Some(jail)) = (&self.cfg.jailer, &paths.jail)
-            && jailer.new_pid_ns
-        {
-            // The jailer clones the VMM into a new PID namespace, records its
-            // pid in the chroot and exits.
-            let start = Instant::now();
-            loop {
-                let exited = vmm.child.as_mut().and_then(|c| c.try_wait().ok().flatten());
-                if let Some(status) = exited {
-                    if !status.success() {
-                        return Err(Self::boot_error_after_exit(
-                            paths,
-                            &console,
-                            format!("jailer exited with {status} before starting the VMM"),
-                        )
-                        .await);
-                    }
-                    break;
-                }
-                if start.elapsed() > API_SOCKET_WAIT {
-                    return Err(Self::boot_error(
-                        paths,
-                        format!(
-                            "the jailer did not hand over to the VMM within {API_SOCKET_WAIT:?}"
-                        ),
-                    ));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            vmm.child = None;
-            vmm.pid = crate::jail::read_vmm_pid(jail).ok_or_else(|| {
-                Self::boot_error(
-                    paths,
-                    format!(
-                        "the jailer exited without recording the VMM pid in {}",
-                        jail.pid_file().display()
-                    ),
-                )
-            })?;
-        }
-        let pid = vmm.pid;
-        write_pid_file(&paths.pid_file, pid)?;
-        // Placement proof: the VMM (not only its launcher) is in the cgroup.
-        if let Some(cg) = &cgroup {
-            match verify_member(&self.cfg.cgroup.root, &cg.path, pid) {
-                Ok(()) => {}
-                Err(e) if self.cfg.cgroup.mode == CgroupMode::Required => {
-                    return Err(Self::boot_error(paths, format!("host cgroup: {e}")));
-                }
-                Err(e) => tracing::warn!(env_id, error = %e, "VMM cgroup placement not verified"),
-            }
-        }
-        tracing::info!(
-            env_id,
-            pid,
-            instance_id,
-            jailed = self.cfg.jailer.is_some(),
-            cgroup = cgroup.as_ref().map(|c| c.path.display().to_string()),
-            "firecracker spawned"
-        );
-
-        // 5. Wait for the API socket.
-        let start = Instant::now();
-        loop {
-            // The socket file exists as soon as Firecracker binds it, a moment
-            // before it listens; a connect in that window is refused (seen on
-            // KVM with two environments booting at once). Wait for a connect.
-            if paths.api_sock.exists()
-                && tokio::net::UnixStream::connect(&paths.api_sock)
-                    .await
-                    .is_ok()
-            {
-                break;
-            }
-            if let Some(status) = vmm.exited() {
-                return Err(Self::boot_error_after_exit(
-                    paths,
-                    &console,
-                    format!("firecracker exited before creating the API socket ({status})"),
-                )
-                .await);
-            }
-            if start.elapsed() > API_SOCKET_WAIT {
-                return Err(Self::boot_error(
-                    paths,
-                    format!(
-                        "API socket {} did not appear within {API_SOCKET_WAIT:?}",
-                        paths.api_sock.display()
-                    ),
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        // 4-5. Spawn the VMM in its own process group (and cgroup) and wait
+        //      for its API socket.
+        let (console, pid, instance_id) = self
+            .spawn_and_wait_api(env_id, paths, cgroup.as_ref(), slot)
+            .await?;
+        let vmm = slot.as_mut().expect("spawned above");
 
         // 6. Configure and start the microVM (order fixed by docs/protocol.md §C).
         let api = ApiClient::new(&paths.api_sock, API_TIMEOUT);
@@ -1346,6 +1377,11 @@ impl ExecutionProvider for FirecrackerProvider {
             &self.cgroup_support,
             caps.enforce_resource_limits,
         );
+        #[cfg(feature = "experimental-restore")]
+        {
+            caps.snapshot_create = self.snapshot_support();
+            caps.snapshot_clone = self.snapshot_support();
+        }
         caps
     }
 
@@ -1705,6 +1741,45 @@ impl ExecutionProvider for FirecrackerProvider {
             tracing::warn!(?removed, "removed orphaned cgroups / jails");
         }
         Ok(ids)
+    }
+
+    #[cfg(feature = "experimental-restore")]
+    async fn restore_profile(
+        &self,
+    ) -> Result<tachyon_serverless_provider_port::RestoreHostProfile, ProviderError> {
+        self.restore_profile_impl().await
+    }
+
+    #[cfg(feature = "experimental-restore")]
+    fn snapshot_dir(
+        &self,
+        snapshot_id: &tachyon_serverless_domain::SnapshotId,
+    ) -> Option<std::path::PathBuf> {
+        self.cfg.jailer.as_ref()?;
+        Some(self.snapshot_root().join(snapshot_id.as_str()))
+    }
+
+    #[cfg(feature = "experimental-restore")]
+    async fn snapshot_environment(
+        &self,
+        environment_id: &EnvironmentId,
+        snapshot_id: &tachyon_serverless_domain::SnapshotId,
+    ) -> Result<tachyon_serverless_provider_port::SnapshotCapture, ProviderError> {
+        self.snapshot_impl(environment_id, snapshot_id).await
+    }
+
+    #[cfg(feature = "experimental-restore")]
+    async fn clone_environment(
+        &self,
+        spec: tachyon_serverless_provider_port::CloneSpec,
+    ) -> Result<
+        (
+            EnvironmentHandle,
+            tachyon_serverless_provider_port::CloneTimings,
+        ),
+        ProviderError,
+    > {
+        self.clone_impl(spec).await
     }
 }
 
