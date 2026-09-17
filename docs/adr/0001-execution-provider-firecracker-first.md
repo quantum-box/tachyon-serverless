@@ -73,7 +73,7 @@ Accepted（2026-09-15）。測定結果により「Cloud Hypervisor へ fallback
 
 - `crates/providers/firecracker` は `firecracker` バイナリ、`vmlinux`、`rootfs.ext4` を外部から受け取る（`config/gateway.{dev,firecracker}.toml` の `[provider.firecracker]`）。取得と検証は PLT-4615 のスクリプト。
 - egress `none` の環境には tap を作らない。`Restricted` / `PublicWeb` の環境には provider が tap と nftables chain を作り、読み戻してから起動する（ADR-0005）。host が強制できない場合は環境作成が `Unavailable` になる。
-- jailer は P1 で使わない（`docs/threat-model.md` §14-2）。使う場合は provider の cleanup 対象に chroot / cgroup が増える。
+- jailer は PLT-4622 で `[provider.firecracker.jailer]` として導入した（production の設定例で有効、dev では任意。`docs/threat-model.md` §14-2）。VMM ごとの host cgroup v2（`cpu.max` / `memory.max` / `pids.max`）は jailer の有無と独立に provider が作り、`profile = "production"` では必須。provider の cleanup 対象に jail（chroot）と cgroup が加わり、terminate と起動時 reconcile が消す。
 - aarch64 は第二対象。kernel cmdline に `keep_bootcon` を追加する以外の差分は測定で洗い出す。
 - Kata adapter を書く場合、`docs/protocol.md` §A の transport を「vsock または unix socket」から拡張する必要がある。protocol crate の frame 定義は変えない。
 

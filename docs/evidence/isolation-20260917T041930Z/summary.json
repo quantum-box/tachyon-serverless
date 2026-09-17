@@ -1,0 +1,184 @@
+{
+  "run_id": "isolation-20260917T041930Z",
+  "architecture": "aarch64",
+  "host": "Linux 7.0.0-31-generic aarch64",
+  "gateway_config": "/home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml",
+  "function": "isolation-probe",
+  "baseline_revision": "rev_01m2pseqn2qkhth23zxh4xm29e",
+  "alloc_revision": "rev_01m2psf82knqn9tg8ms47dwdz3",
+  "disk_revision": "rev_01m2psfmc775pcafhxp4eqc7hg",
+  "net_revisions": {
+    "public_web": "rev_01m2psfykp64s3dn3rx5gre2v6",
+    "restricted": "rev_01m2psfz17te78vjq5f752zwsd",
+    "tenant_b_public_web": "rev_01m2psfzf4468397x8rqh8kndn"
+  },
+  "requested": {
+    "memory_mib": 256,
+    "cpu_millis": 500,
+    "alloc_memory_mib": 128,
+    "alloc_mib": 512,
+    "disk_storage_mib": 64,
+    "disk_fill_mib": 256
+  },
+  "measurements": {
+    "M8": {
+      "status": "PASS",
+      "detail": "3/3 targets attempted, none connected, dns_resolved=false"
+    },
+    "M9": {
+      "status": "PASS",
+      "detail": "vcpu 1/1 vs 1 requested; MemTotal 232 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash"
+    },
+    "DISK": {
+      "status": "PASS",
+      "detail": "wrote 58 MiB of 256 MiB into 64 MiB (/dev/vdc ext4), stopped_by=enospc; read-only refused 2/2; host avail drop max 73 MiB (allowed 128 MiB)"
+    },
+    "NET": {
+      "status": "PASS",
+      "detail": "publicweb: 16/16 denied, 4/4 allowed; restricted: 11/11 denied, 1/1 allowed; cross: 4/4 denied, 1/1 allowed; tenant B accepted 0 connection(s); policy verified before InstanceStart in 4/4 policed boots; taps / table / leases gone after the run"
+    },
+    "HOST": {
+      "status": "PASS",
+      "detail": "30/30 VMMs observed; in own cgroup with cpu.max/memory.max/pids.max: 30/30; jailed (uid 64000, CapEff 0, chroot, new PID+mount ns, seccomp 2 on vCPU/API threads): 30/30; no cgroup / jail / VMM left"
+    },
+    "NOISY": {
+      "status": "PASS",
+      "detail": "A cpu 0.5167 cores max/5s, 0.501208 mean (quota 0.5000, ≤ ×1.10); A io fill enospc at 58 MiB; A oom runs 7 crash=7, host oom_kill 0; B 13/13 ok, slowdown cpu ×1.245 (≤ ×1.30), write ×1.051 (≤ ×3.00), handler ×1.279"
+    }
+  },
+  "orphans": "clean",
+  "findings": [],
+  "generated_at": "2026-09-17T04:23:48Z",
+  "steps": [
+    {
+      "name": "build gateway, cli and the guest probe",
+      "status": "PASS",
+      "duration_ms": 123,
+      "message": ""
+    },
+    {
+      "name": "gateway healthz/readyz",
+      "status": "PASS",
+      "duration_ms": 3298,
+      "message": ""
+    },
+    {
+      "name": "provider is firecracker / micro_vm",
+      "status": "PASS",
+      "duration_ms": 12,
+      "message": ""
+    },
+    {
+      "name": "function isolation-probe (idempotent)",
+      "status": "PASS",
+      "duration_ms": 12,
+      "message": ""
+    },
+    {
+      "name": "deploy baseline revision (256 MiB)",
+      "status": "PASS",
+      "duration_ms": 420,
+      "message": ""
+    },
+    {
+      "name": "M8: egress probe",
+      "status": "PASS",
+      "duration_ms": 10693,
+      "message": ""
+    },
+    {
+      "name": "M9: resource probe",
+      "status": "PASS",
+      "duration_ms": 5694,
+      "message": ""
+    },
+    {
+      "name": "deploy allocation revision (128 MiB)",
+      "status": "PASS",
+      "duration_ms": 418,
+      "message": ""
+    },
+    {
+      "name": "M9: allocate 512 MiB past the limit",
+      "status": "PASS",
+      "duration_ms": 12173,
+      "message": ""
+    },
+    {
+      "name": "deploy disk revision (64 MiB ephemeral storage)",
+      "status": "PASS",
+      "duration_ms": 428,
+      "message": ""
+    },
+    {
+      "name": "DISK: fill /tmp with 256 MiB",
+      "status": "PASS",
+      "duration_ms": 9862,
+      "message": ""
+    },
+    {
+      "name": "NET: host addresses and capabilities",
+      "status": "PASS",
+      "duration_ms": 157,
+      "message": ""
+    },
+    {
+      "name": "NET: tenant B function isolation-probe",
+      "status": "PASS",
+      "duration_ms": 18,
+      "message": ""
+    },
+    {
+      "name": "NET: deploy public-web, restricted and tenant B revisions",
+      "status": "PASS",
+      "duration_ms": 1314,
+      "message": ""
+    },
+    {
+      "name": "NET: expectations",
+      "status": "PASS",
+      "duration_ms": 13,
+      "message": ""
+    },
+    {
+      "name": "NET: public-web probe",
+      "status": "PASS",
+      "duration_ms": 19082,
+      "message": ""
+    },
+    {
+      "name": "NET: restricted probe",
+      "status": "PASS",
+      "duration_ms": 10986,
+      "message": ""
+    },
+    {
+      "name": "NET: two tenants at once (A -> B)",
+      "status": "PASS",
+      "duration_ms": 30671,
+      "message": ""
+    },
+    {
+      "name": "NOISY: deploy tenant A (cpu / io / oom) and tenant B revisions",
+      "status": "PASS",
+      "duration_ms": 1659,
+      "message": ""
+    },
+    {
+      "name": "NOISY: tenant B alone (5 runs)",
+      "status": "PASS",
+      "duration_ms": 23523,
+      "message": ""
+    },
+    {
+      "name": "NOISY: tenant B next to tenant A (5 runs, then 3 after)",
+      "status": "PASS",
+      "duration_ms": 126552,
+      "message": ""
+    }
+  ],
+  "passed": 21,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

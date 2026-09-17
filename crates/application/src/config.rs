@@ -90,7 +90,43 @@ pub struct FirecrackerProviderConfig {
     /// `restricted` / `public-web` (PLT-4622). Defaults apply when omitted.
     #[serde(default)]
     pub network: FirecrackerNetworkConfig,
+    /// `[provider.firecracker.cgroup]`: host cgroup v2 limits per VMM (PLT-4622).
+    #[serde(default)]
+    pub cgroup: FirecrackerCgroupConfig,
+    /// `[provider.firecracker.jailer]`: launch the VMM through the jailer (PLT-4622).
+    #[serde(default)]
+    pub jailer: FirecrackerJailerConfig,
 }
+
+/// Host cgroup v2 limits of the Firecracker provider. `mode` defaults to
+/// `required` under `profile = "production"` and `best-effort` otherwise;
+/// production refuses anything but `required`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FirecrackerCgroupConfig {
+    /// `required` | `best-effort` | `off`.
+    pub mode: Option<String>,
+    pub root: Option<PathBuf>,
+    pub parent: Option<String>,
+    pub memory_overhead_mib: Option<u64>,
+    pub pids_max: Option<u64>,
+}
+
+/// Firecracker jailer settings (off unless `enabled = true`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FirecrackerJailerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub binary: Option<PathBuf>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub chroot_base: Option<PathBuf>,
+    pub new_pid_ns: Option<bool>,
+}
+
+/// Accepted values of `[provider.firecracker.cgroup] mode`.
+pub const CGROUP_MODES: [&str; 3] = ["required", "best-effort", "off"];
 
 /// Host network settings of the Firecracker provider (docs/adr/0005-egress-profiles.md).
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -610,6 +646,16 @@ fn default_data_dir() -> PathBuf {
 impl GatewayConfig {
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
         let mut cfg: Self = toml::from_str(text)?;
+        if let Some(f) = cfg.provider.firecracker.as_mut()
+            && f.cgroup.mode.is_none()
+        {
+            let mode = if cfg.profile == Profile::Production {
+                "required"
+            } else {
+                "best-effort"
+            };
+            f.cgroup.mode = Some(mode.into());
+        }
         cfg.validate()?;
         let base = std::env::current_dir().map_err(|source| ConfigError::Read {
             path: PathBuf::from("."),
@@ -646,6 +692,12 @@ impl GatewayConfig {
             abs(base, &mut f.kernel);
             abs(base, &mut f.rootfs);
             abs(base, &mut f.workdir);
+            if let Some(b) = f.jailer.binary.as_mut() {
+                abs_binary(base, b);
+            }
+            if let Some(c) = f.jailer.chroot_base.as_mut() {
+                abs(base, c);
+            }
         }
     }
 
@@ -686,6 +738,29 @@ impl GatewayConfig {
             return Err(ConfigError::Invalid(format!(
                 "[provider.firecracker.network]: {e}"
             )));
+        }
+        if let Some(f) = &self.provider.firecracker {
+            // PLT-4622: production never runs a VMM without host limits.
+            match f.cgroup.mode.as_deref() {
+                None => {}
+                Some(m) if !CGROUP_MODES.contains(&m) => {
+                    return Err(ConfigError::Invalid(format!(
+                        "[provider.firecracker.cgroup] mode `{m}` must be one of {CGROUP_MODES:?}"
+                    )));
+                }
+                Some(m) if m != "required" && self.profile == Profile::Production => {
+                    return Err(ConfigError::Invalid(format!(
+                        "[provider.firecracker.cgroup] mode `{m}` is not allowed with profile = \
+                         \"production\": host cgroup limits must be `required`"
+                    )));
+                }
+                Some(_) => {}
+            }
+            if f.jailer.enabled && (f.jailer.uid == Some(0) || f.jailer.gid == Some(0)) {
+                return Err(ConfigError::Invalid(
+                    "[provider.firecracker.jailer] uid / gid must not be 0".into(),
+                ));
+            }
         }
         if self.profile == Profile::Production && self.provider.kind.is_dev_only() {
             return Err(ConfigError::Invalid(format!(
@@ -885,6 +960,53 @@ value = "demo-secret-value-a"
                  workdir = \".kvm/run\"",
             );
         format!("{base}\n{pool}")
+    }
+
+    /// PLT-4622: host cgroup limits default to required in production, which
+    /// refuses weaker modes; dev defaults to best-effort. The jailer is opt-in.
+    #[test]
+    fn firecracker_cgroup_and_jailer_sections() {
+        let prod = GatewayConfig::from_toml(&production_firecracker("")).unwrap();
+        let f = prod.provider.firecracker.as_ref().unwrap();
+        assert_eq!(f.cgroup.mode.as_deref(), Some("required"));
+        assert!(!f.jailer.enabled);
+        for weak in ["best-effort", "off"] {
+            let toml = production_firecracker(&format!(
+                "[provider.firecracker.cgroup]\nmode = \"{weak}\"\n"
+            ));
+            assert!(GatewayConfig::from_toml(&toml).is_err(), "{weak}");
+        }
+        let dev =
+            production_firecracker("").replace("profile = \"production\"", "profile = \"dev\"");
+        let cfg = GatewayConfig::from_toml(&dev).unwrap();
+        assert_eq!(
+            cfg.provider
+                .firecracker
+                .as_ref()
+                .unwrap()
+                .cgroup
+                .mode
+                .as_deref(),
+            Some("best-effort")
+        );
+        assert!(
+            GatewayConfig::from_toml(&format!(
+                "{dev}\n[provider.firecracker.cgroup]\nmode = \"sometimes\"\n"
+            ))
+            .is_err()
+        );
+        let jailed = GatewayConfig::from_toml(&production_firecracker(
+            "[provider.firecracker.jailer]\nenabled = true\nbinary = \".kvm/bin/jailer\"\nuid = 64000\ngid = 64000\n",
+        ))
+        .unwrap();
+        let j = &jailed.provider.firecracker.as_ref().unwrap().jailer;
+        assert!(j.enabled && j.binary.as_ref().unwrap().is_absolute());
+        assert!(
+            GatewayConfig::from_toml(&production_firecracker(
+                "[provider.firecracker.jailer]\nenabled = true\nuid = 0\n"
+            ))
+            .is_err()
+        );
     }
 
     /// PLT-4622: the egress network section has safe defaults and refuses a

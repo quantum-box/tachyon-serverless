@@ -1,0 +1,124 @@
+{
+  "bounds": {
+    "quota_tolerance": 1.10,
+    "cpu_slowdown_max": 1.30,
+    "io_slowdown_max": 3.00
+  },
+  "tenant_a": {
+    "cpu": {
+      "env": "env_01m2psjkptjxjvvpxk1vxzznnb",
+      "quota_cores": 0.5000,
+      "cgroup": {
+        "samples": 170,
+        "span_ms": 96092,
+        "mean_cores_after_warmup": 0.501208,
+        "max_cores_5s": 0.5167,
+        "windows_5s": 161,
+        "usage_usec": 48760748
+      },
+      "guest": {
+        "threads": 4,
+        "elapsed_ms": 90036,
+        "iterations_per_sec": 147279497.0,
+        "proc_stat_delta": {
+          "idle": 0,
+          "iowait": 0,
+          "irq": 0,
+          "nice": 0,
+          "softirq": 6,
+          "steal": 4492,
+          "steal_pct": 50.7,
+          "system": 37,
+          "total": 8864,
+          "user": 4329
+        }
+      },
+      "teardown": {
+        "cpu.max": "50000 100000",
+        "cpu.stat": {
+          "burst_usec": 0,
+          "core_sched.force_idle_usec": 0,
+          "nice_usec": 0,
+          "nr_bursts": 0,
+          "nr_periods": 980,
+          "nr_throttled": 974,
+          "system_usec": 2700154,
+          "throttled_usec": 48028464,
+          "usage_usec": 48890238,
+          "user_usec": 46190084
+        },
+        "memory.current": 4059136,
+        "memory.events": {
+          "high": 0,
+          "low": 0,
+          "max": 0,
+          "oom": 0,
+          "oom_group_kill": 0,
+          "oom_kill": 0,
+          "sock_throttled": 0
+        },
+        "memory.max": 201326592,
+        "memory.peak": 40693760,
+        "pids.max": 64,
+        "pids.peak": 3
+      },
+      "within_quota": true,
+      "saturated": true
+    },
+    "io": {
+      "fill": {
+        "enabled": true,
+        "ms": 4661,
+        "stopped_by": "enospc",
+        "written_bytes": 61501440,
+        "written_mib": 58
+      },
+      "rewrite": {
+        "ops": 72579,
+        "errors": 0,
+        "mib_per_sec": 806.1,
+        "latency": {
+          "count": 72579,
+          "max_ms": 813.9119999999999,
+          "mean_ms": 1.2154740147838834,
+          "p50_ms": 0.28441700000000003,
+          "p95_ms": 0.901
+        }
+      }
+    },
+    "oom": {
+      "runs": 7,
+      "classes": [
+        {
+          "class": "crash",
+          "count": 7
+        }
+      ],
+      "host_oom_kills": 0
+    }
+  },
+  "tenant_b": {
+    "runs": 13,
+    "succeeded": 13,
+    "alone": {
+      "cpu_ms_median": 1708.003292,
+      "write_p50_ms_median": 0.500583,
+      "handler_ms_median": 1831
+    },
+    "contended": {
+      "cpu_ms_median": 2126.968627,
+      "write_p50_ms_median": 0.526208,
+      "handler_ms_median": 2341
+    },
+    "after": {
+      "cpu_ms_median": 1711.843792,
+      "write_p50_ms_median": 0.555959,
+      "handler_ms_median": 1847
+    },
+    "slowdown": {
+      "cpu": 1.245,
+      "write": 1.051,
+      "handler": 1.279
+    }
+  }
+}

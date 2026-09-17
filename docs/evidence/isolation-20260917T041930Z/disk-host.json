@@ -1,0 +1,9 @@
+{
+  "run_dir": "/home/takanorifukuyama.guest/tsls/.kvm/run",
+  "samples": 43,
+  "host_avail_before_bytes": 28723019776,
+  "host_avail_min_bytes": 28645904384,
+  "host_avail_after_bytes": 28722720768,
+  "host_avail_max_drop_bytes": 77115392,
+  "run_dir_max_bytes": 74911744
+}

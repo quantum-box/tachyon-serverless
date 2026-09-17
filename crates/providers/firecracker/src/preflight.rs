@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use tachyon_serverless_domain::Architecture;
 use tachyon_serverless_provider_port::{PreflightCheck, PreflightReport};
 
-use crate::config::FirecrackerConfig;
+use crate::config::{CgroupMode, FirecrackerConfig};
 use crate::vmm::{EnvPaths, MAX_UNIX_SOCKET_PATH};
 
 /// Hex SHA-256 of a file, streamed.
@@ -162,8 +162,24 @@ pub fn probe_firecracker_version(binary: &Path) -> Option<String> {
 
 /// Preflight check for the egress network (see [`OPTIONAL_CHECKS`]).
 pub const EGRESS_NETWORK_CHECK: &str = "egress_network";
-/// Checks reported but not required for the provider to be ready.
+/// Checks reported but never required for the provider to be ready.
 pub const OPTIONAL_CHECKS: [&str; 1] = [EGRESS_NETWORK_CHECK];
+/// Preflight check for host cgroup v2 limits (required in mode "required").
+pub const HOST_CGROUP_CHECK: &str = "host_cgroup";
+/// Preflight check for the jailer (required when it is configured).
+pub const JAILER_CHECK: &str = "jailer";
+
+/// Names of the checks that do not make the provider unready under `cfg`.
+pub fn optional_checks(cfg: &FirecrackerConfig) -> Vec<&'static str> {
+    let mut optional = OPTIONAL_CHECKS.to_vec();
+    if cfg.cgroup.mode != CgroupMode::Required {
+        optional.push(HOST_CGROUP_CHECK);
+    }
+    if cfg.jailer.is_none() {
+        optional.push(JAILER_CHECK);
+    }
+    optional
+}
 
 fn check(name: &str, ok: bool, detail: impl Into<String>) -> PreflightCheck {
     PreflightCheck {
@@ -278,11 +294,16 @@ pub async fn run_preflight(
     }
 
     // 9. Unix socket path length for a representative environment.
-    let sample = EnvPaths::new(
-        &cfg.workdir,
-        "env_00000000000000000000000000",
-        cfg.vsock_port,
-    );
+    let sample_id = "env_00000000000000000000000000";
+    let mut sample = EnvPaths::new(&cfg.workdir, sample_id, cfg.vsock_port);
+    if let Some(jailer) = &cfg.jailer
+        && let Ok(exec) = crate::jail::exec_name(&cfg.firecracker_binary)
+    {
+        sample = sample.jailed(
+            crate::jail::layout(jailer, &exec, &crate::vmm::instance_id_for(sample_id)),
+            cfg.vsock_port,
+        );
+    }
     let longest = sample.longest_socket_path_len();
     checks.push(check(
         "socket_path_length",
@@ -309,9 +330,44 @@ pub async fn run_preflight(
         ),
     });
 
+    // 11. Host cgroup v2 limits (PLT-4622): required only in mode "required".
+    checks.push(match crate::cgroup::host_support(&cfg.cgroup) {
+        Ok(detail) => check(
+            HOST_CGROUP_CHECK,
+            true,
+            format!("mode {}: {detail}", cfg.cgroup.mode.as_str()),
+        ),
+        Err(reason) => check(
+            HOST_CGROUP_CHECK,
+            false,
+            match cfg.cgroup.mode {
+                CgroupMode::Required => format!("required: {reason}"),
+                mode => format!(
+                    "optional (mode {}): VMMs run without cpu.max / memory.max: {reason}",
+                    mode.as_str()
+                ),
+            },
+        ),
+    });
+
+    // 12. Jailer (PLT-4622): required when configured.
+    checks.push(match &cfg.jailer {
+        Some(jailer) => match crate::jail::host_support(cfg, jailer) {
+            Ok(detail) => check(JAILER_CHECK, true, detail),
+            Err(reason) => check(JAILER_CHECK, false, reason),
+        },
+        None => check(
+            JAILER_CHECK,
+            false,
+            "optional: not configured; the VMM runs as the gateway's uid without chroot or \
+             namespaces (development only)",
+        ),
+    });
+
+    let optional = optional_checks(cfg);
     let ok = checks
         .iter()
-        .filter(|c| !OPTIONAL_CHECKS.contains(&c.name.as_str()))
+        .filter(|c| !optional.contains(&c.name.as_str()))
         .all(|c| c.ok);
     PreflightReport {
         provider: "firecracker".to_owned(),
@@ -409,6 +465,8 @@ mod tests {
             "workdir",
             "socket_path_length",
             "egress_network",
+            "host_cgroup",
+            "jailer",
         ] {
             assert!(names.contains(&expected), "missing check {expected}");
         }
@@ -424,10 +482,21 @@ mod tests {
             report
                 .checks
                 .iter()
-                .filter(|c| c.name != EGRESS_NETWORK_CHECK)
+                .filter(|c| ![EGRESS_NETWORK_CHECK, HOST_CGROUP_CHECK, JAILER_CHECK]
+                    .contains(&c.name.as_str()))
                 .all(|c| c.ok),
-            "the egress network check is reported but optional"
+            "egress network, best-effort cgroups and an unconfigured jailer are reported but optional"
         );
+        let required = FirecrackerConfig {
+            cgroup: crate::config::CgroupConfig {
+                mode: CgroupMode::Required,
+                ..Default::default()
+            },
+            jailer: Some(crate::config::JailerConfig::default()),
+            ..cfg.clone()
+        };
+        let optional = optional_checks(&required);
+        assert!(!optional.contains(&HOST_CGROUP_CHECK) && !optional.contains(&JAILER_CHECK));
         // The workdir probe creates the directory and cleans its probe file.
         let workdir = report.checks.iter().find(|c| c.name == "workdir").unwrap();
         assert!(workdir.ok, "{}", workdir.detail);

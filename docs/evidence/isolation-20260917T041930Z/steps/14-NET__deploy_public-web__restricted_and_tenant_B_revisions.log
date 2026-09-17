@@ -1,0 +1,20 @@
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1853312 bytes, arch aarch64)
+artifact sha256:5c25c0972079a73f68639bfd91f973ff4fcfe386964c583629e49df033c74166
+revision rev_01m2psfykp64s3dn3rx5gre2v6 (#29) created: pending
+revision rev_01m2psfykp64s3dn3rx5gre2v6 is preparing
+revision rev_01m2psfykp64s3dn3rx5gre2v6 is ready
+[e2e] revision publicweb: rev_01m2psfykp64s3dn3rx5gre2v6 (256 MiB, 500 m)
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1853312 bytes, arch aarch64)
+artifact sha256:5c25c0972079a73f68639bfd91f973ff4fcfe386964c583629e49df033c74166
+revision rev_01m2psfz17te78vjq5f752zwsd (#30) created: pending
+revision rev_01m2psfz17te78vjq5f752zwsd is preparing
+revision rev_01m2psfz17te78vjq5f752zwsd is ready
+[e2e] revision restricted: rev_01m2psfz17te78vjq5f752zwsd (256 MiB, 500 m)
+uploading /home/takanorifukuyama.guest/tsls/target/aarch64-unknown-linux-musl/release/example-isolation-probe (1853312 bytes, arch aarch64)
+artifact sha256:5c25c0972079a73f68639bfd91f973ff4fcfe386964c583629e49df033c74166
+revision rev_01m2psfzf4468397x8rqh8kndn (#5) created: pending
+revision rev_01m2psfzf4468397x8rqh8kndn is preparing
+revision rev_01m2psfzf4468397x8rqh8kndn is ready
+{"egress":"public-web","egress_allow":null}
+{"egress":"restricted","egress_allow":[{"cidr":"1.1.1.1/32","ports":[443],"protocol":"tcp"}]}
+{"egress":"public-web","egress_allow":null}

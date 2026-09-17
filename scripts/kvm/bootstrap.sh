@@ -15,7 +15,7 @@
 #   BRIDGE_BIN           runtime bridge binary for the rootfs (default: musl release build)
 #
 # Artifacts (all under .kvm/, gitignored):
-#   .kvm/bin/firecracker   .kvm/vmlinux   .kvm/rootfs.ext4   .kvm/manifest.json   .kvm/dl/
+#   .kvm/bin/firecracker   .kvm/bin/jailer   .kvm/vmlinux   .kvm/rootfs.ext4   .kvm/manifest.json   .kvm/dl/
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -34,6 +34,7 @@ KERNEL="$KVM_DIR/vmlinux"
 ROOTFS="$KVM_DIR/rootfs.ext4"
 MANIFEST="$KVM_DIR/manifest.json"
 FC_BIN="$BIN_DIR/firecracker"
+JAILER_BIN="$BIN_DIR/jailer"
 S3="https://s3.amazonaws.com/spec.ccfc.min"
 RELEASE_URL="https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}"
 
@@ -57,8 +58,9 @@ s3_list() { curl -fsSL "${S3}?list-type=2&${1}" | grep -o "<${2}>[^<]*" | sed "s
 
 # --- 1. Firecracker binary ------------------------------------------------------------
 fetch_firecracker() {
-  if [ -x "$FC_BIN" ] && "$FC_BIN" --version 2>/dev/null | head -n1 | grep -q "Firecracker ${FIRECRACKER_VERSION}\$"; then
-    echo "[firecracker] $FC_BIN is already ${FIRECRACKER_VERSION}"
+  if [ -x "$FC_BIN" ] && "$FC_BIN" --version 2>/dev/null | head -n1 | grep -q "Firecracker ${FIRECRACKER_VERSION}\$" \
+    && [ -x "$JAILER_BIN" ] && "$JAILER_BIN" --version 2>/dev/null | head -n1 | grep -q "Jailer ${FIRECRACKER_VERSION}\$"; then
+    echo "[firecracker] $FC_BIN and $JAILER_BIN are already ${FIRECRACKER_VERSION}"
     return
   fi
   local tgz="firecracker-${FIRECRACKER_VERSION}-${ARCH}.tgz"
@@ -76,6 +78,8 @@ fetch_firecracker() {
   rm -rf "$DL_DIR/release-${FIRECRACKER_VERSION}-${ARCH}"
   tar -xzf "$DL_DIR/$tgz" -C "$DL_DIR"
   install -m 0755 "$DL_DIR/release-${FIRECRACKER_VERSION}-${ARCH}/firecracker-${FIRECRACKER_VERSION}-${ARCH}" "$FC_BIN"
+  # The jailer of the same release (PLT-4622, [provider.firecracker.jailer]).
+  install -m 0755 "$DL_DIR/release-${FIRECRACKER_VERSION}-${ARCH}/jailer-${FIRECRACKER_VERSION}-${ARCH}" "$JAILER_BIN"
   FC_TGZ_SHA256="$actual"
   "$FC_BIN" --version | head -n1
 }

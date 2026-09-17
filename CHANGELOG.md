@@ -12,6 +12,11 @@
 - MIT License を追加
 - README / CONTRIBUTING / CODE_OF_CONDUCT / SECURITY などのリポジトリ基本ドキュメントを追加
 - GitHub の Issue / Pull Request テンプレートと Dependabot 設定を追加
+- VMM の host 側 cgroup v2 上限・jailer・noisy neighbor の計測（Linear PLT-4622）
+  - Firecracker provider が環境ごとに `<cgroup root>/tachyon/<env_id>` を作り、`cpu.max` を `cpu_millis` から（500 m → `50000 100000`、全 vCPU と VMM thread の合計）、`memory.max` を guest memory + `memory_overhead_mib`（既定 64）、`pids.max`（既定 64）で書いて読み戻す。VMM は fork と exec の間に自分でその cgroup に入り、`cgroup.procs` と `/proc/<pid>/cgroup` で所属を確認してから構成する。terminate は `cgroup.kill` → 統計をログ（`cgroup stats at teardown`）→ rmdir、起動時 reconcile は環境の無い cgroup を消す
+  - `[provider.firecracker.cgroup] mode = required | best-effort | off`。`profile = "production"` の既定は `required` で、それ以外は設定エラー。委譲の無い host では preflight `host_cgroup` が失敗し環境作成は `Unavailable`。dev の既定 `best-effort` は使えなければ上限なしで起動し、`enforce_resource_limits` を `unverified` にする
+  - `[provider.firecracker.jailer]`: VMM を Firecracker の jailer 経由で起動する（`<chroot_base>/<exec>/<instance id>/root` の chroot、uid / gid への降格、mount / PID namespace）。kernel・rootfs・function / scratch drive・`fc.log` を chroot に hard link し（scratch と log は jail の uid 所有 0600）、API socket と vsock UDS は chroot 内、egress の tap は jail の uid / gid を owner にして作る。terminate と起動時 reconcile が jail を消す。preflight `jailer`（root、同一 file system、binary 名）。`scripts/kvm/bootstrap.sh` が `.kvm/bin/jailer` を置き、`config/gateway.firecracker.toml` は jailer と `required` を有効にした（gateway は root で起動する）
+  - `examples/isolation-probe` に `{"probe":"cpu"}` / `{"probe":"io"}` / `{"probe":"work"}`、`scripts/kvm/host-watch.sh`（VMM の cgroup・uid・capability・namespace・chroot・seccomp を host から記録）、`scripts/kvm/measure-isolation.sh` に HOST（exit 6）と NOISY（exit 5）を追加
 - ephemeral storage の上限・host 側の上限・egress の起動ゲート（Linear PLT-4622）
   - Firecracker の guest の `/tmp` を、revision の `ephemeral_storage_mib` ちょうどの scratch drive（ext4、環境作成時に `fallocate` で確保）にした。rootfs と function drive は read-only のままなので、guest が書ける host ディスクはこの drive だけになる。`ephemeral_storage_mib` に下限 32 を追加（32..=2048）、CLI に `--ephemeral-storage-mib`
   - 環境ごとの host 側の成果物を上限付きにした: `console.log` は pipe 経由で 4 MiB まで、`fc.log` は watchdog で 4 MiB、`stage/` は function drive 作成後に削除。budget + 512 MiB の空きが無ければ何も書かずに `Unavailable`

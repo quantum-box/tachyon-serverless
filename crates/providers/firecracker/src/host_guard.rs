@@ -203,6 +203,8 @@ pub struct HostBudget {
     pub scratch_drive_bytes: u64,
     pub console_log_max_bytes: u64,
     pub fc_log_max_bytes: u64,
+    /// Copy of the Firecracker binary the jailer puts into each chroot.
+    pub vmm_binary_copy_bytes: u64,
 }
 
 impl HostBudget {
@@ -212,6 +214,7 @@ impl HostBudget {
             .saturating_add(self.scratch_drive_bytes)
             .saturating_add(self.console_log_max_bytes)
             .saturating_add(self.fc_log_max_bytes)
+            .saturating_add(self.vmm_binary_copy_bytes)
     }
 }
 
@@ -324,6 +327,7 @@ mod tests {
             scratch_drive_bytes: 100,
             console_log_max_bytes: 5,
             fc_log_max_bytes: 5,
+            vmm_binary_copy_bytes: 0,
         };
         assert_eq!(budget.total(), 140);
         assert!(check_host_budget(240, &budget, 100).is_ok());

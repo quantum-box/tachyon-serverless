@@ -32,6 +32,9 @@
 //!   `public-web`): TCP connects, raw UDP DNS queries to chosen servers, names
 //!   resolved and then connected to, an HTTP redirect followed, and a TCP
 //!   listener for the cross-tenant check. See `src/net.rs`.
+//! - `{"probe":"cpu"}`, `{"probe":"io"}` and `{"probe":"work"}` (PLT-4622)
+//!   generate CPU / disk load and time a fixed workload for the noisy-neighbour
+//!   measurement. See `src/load.rs`.
 //! - `{"probe":"all"}` (the default) runs egress and resources; the allocation
 //!   step still only runs when `alloc_mib` is set, and the disk probe only runs
 //!   when asked for by name.
@@ -43,6 +46,7 @@
 //! example links statically for `aarch64-unknown-linux-musl` and
 //! `x86_64-unknown-linux-musl` without extra system libraries.
 
+mod load;
 mod net;
 
 use std::io::Write;
@@ -128,6 +132,18 @@ fn run(request: &ProbeRequest, guest: Value) -> Value {
     if request.probe == Probe::Disk {
         report.insert("disk".into(), disk_report(request));
     }
+    match request.probe {
+        Probe::Cpu => {
+            report.insert("cpu".into(), load::cpu_report(&request.payload));
+        }
+        Probe::Io => {
+            report.insert("io".into(), load::io_report(&request.payload));
+        }
+        Probe::Work => {
+            report.insert("work".into(), load::work_report(&request.payload));
+        }
+        _ => {}
+    }
     Value::Object(report)
 }
 
@@ -142,6 +158,9 @@ enum Probe {
     Disk,
     Net,
     Listen,
+    Cpu,
+    Io,
+    Work,
     All,
 }
 
@@ -153,6 +172,9 @@ impl Probe {
             Self::Disk => "disk",
             Self::Net => "net",
             Self::Listen => "listen",
+            Self::Cpu => "cpu",
+            Self::Io => "io",
+            Self::Work => "work",
             Self::All => "all",
         }
     }
@@ -164,6 +186,9 @@ impl Probe {
             "disk" => Some(Self::Disk),
             "net" => Some(Self::Net),
             "listen" => Some(Self::Listen),
+            "cpu" => Some(Self::Cpu),
+            "io" => Some(Self::Io),
+            "work" => Some(Self::Work),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -201,7 +226,7 @@ impl ProbeRequest {
             Some(Value::String(name)) => Probe::parse(name).ok_or_else(|| {
                 HandlerError::with_type(
                     "Probe.Unknown",
-                    format!("unknown probe `{name}` (expected egress, resources, disk, net, listen or all)"),
+                    format!("unknown probe `{name}` (expected egress, resources, disk, net, listen, cpu, io, work or all)"),
                 )
             })?,
             Some(other) => {

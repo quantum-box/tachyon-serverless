@@ -16,7 +16,7 @@ Accepted（2026-09-17、PLT-4622）。実装: `crates/providers/firecracker/src/
 |---|---|---|
 | A | 環境ごとの tap + provider 所有の nftables table（本 ADR） | 採用 |
 | B | 共有 bridge に全 guest を繋ぎ、bridge filter で分ける | 不採用。L2 を共有するので ARP / 近隣探索の偽装を別途塞ぐ必要があり、1 本の規則の誤りが全 tenant に波及する |
-| C | guest ごとの network namespace + veth + iptables | 不採用。namespace と veth の後始末対象が増え、iptables-legacy / nft の混在を抱える。jailer 導入時に再検討する |
+| C | guest ごとの network namespace + veth + iptables | 不採用。namespace と veth の後始末対象が増え、iptables-legacy / nft の混在を抱える。PLT-4622 で jailer を導入したときも `--netns` は使わず、tap を jail の uid / gid を owner にして host namespace に作る形にした（jailed VMM は `CAP_NET_ADMIN` なしでその tap に attach でき、chain は tap 名で効く） |
 | D | guest 内（bridge の init）で firewall を張る | 不採用。guest の root（user code）が外せる |
 | E | HTTP(S) proxy だけを許す | 不採用。TCP / UDP 一般の要件を満たさず、proxy 自体が管理網に置かれる |
 
