@@ -12,6 +12,11 @@
 - MIT License を追加
 - README / CONTRIBUTING / CODE_OF_CONDUCT / SECURITY などのリポジトリ基本ドキュメントを追加
 - GitHub の Issue / Pull Request テンプレートと Dependabot 設定を追加
+- ephemeral storage の上限・host 側の上限・egress の起動ゲート（Linear PLT-4622）
+  - Firecracker の guest の `/tmp` を、revision の `ephemeral_storage_mib` ちょうどの scratch drive（ext4、環境作成時に `fallocate` で確保）にした。rootfs と function drive は read-only のままなので、guest が書ける host ディスクはこの drive だけになる。`ephemeral_storage_mib` に下限 32 を追加（32..=2048）、CLI に `--ephemeral-storage-mib`
+  - 環境ごとの host 側の成果物を上限付きにした: `console.log` は pipe 経由で 4 MiB まで、`fc.log` は watchdog で 4 MiB、`stage/` は function drive 作成後に削除。budget + 512 MiB の空きが無ければ何も書かずに `Unavailable`
+  - egress gate: `InstanceStart` の前に API 計画と `GET /vm/config` を検査し、network interface や MMDS があれば起動しない
+  - `examples/isolation-probe` に `{"probe":"disk"}`、`scripts/kvm/measure-isolation.sh` に DISK ステップ（exit 3）を追加。KVM 実測（`docs/evidence/isolation-20260917T011555Z/`）を経て `enforce_resource_limits` を `Supported` にした
 - idle 休止・再開と warm 機能ゲート（Linear PLT-4633）
   - `ExecutionProvider` に `idle_quiesce` / `idle_resume` を追加（既定実装は `Unavailable` を返すので、実装しない provider は今までどおり）。Firecracker provider は `PATCH /vm {state: Paused/Resumed}` で実装し、「すでにその状態」は成功、VMM プロセス死亡 / API socket 消失 / 環境不在はそれぞれ別の error にする
   - 環境 pool が pool 入りで休止し、claim で再開してから readiness を確認する。休止に失敗した環境は pool に入れず terminate、再開を確認できない環境は retire して cold start に落ちる（dispatch しない）

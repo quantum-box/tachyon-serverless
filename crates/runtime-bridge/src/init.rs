@@ -9,6 +9,9 @@ pub struct BootParams {
     pub env_id: Option<String>,
     pub vsock_port: Option<u32>,
     pub function_dev: Option<String>,
+    /// Writable scratch drive mounted at `/tmp` (PLT-4622). Its size is the
+    /// revision's `ephemeral_storage_mib`; without it `/tmp` is a tmpfs.
+    pub scratch_dev: Option<String>,
 }
 
 /// Parse `key=value` tokens from `/proc/cmdline`.
@@ -22,6 +25,7 @@ pub fn parse_cmdline(cmdline: &str) -> BootParams {
             "tachyon.env_id" => params.env_id = Some(value.to_string()),
             "tachyon.vsock_port" => params.vsock_port = value.parse().ok(),
             "tachyon.function_dev" => params.function_dev = Some(value.to_string()),
+            "tachyon.scratch_dev" => params.scratch_dev = Some(value.to_string()),
             _ => {}
         }
     }
@@ -38,6 +42,8 @@ pub fn read_boot_id() -> Option<String> {
 
 /// Mount point of the function drive inside the guest.
 pub const FUNCTION_MOUNT: &str = "/function";
+/// Mount point of the scratch drive (or the tmpfs fallback) inside the guest.
+pub const SCRATCH_MOUNT: &str = "/tmp";
 
 #[cfg(target_os = "linux")]
 pub use linux::{power_off, setup};
@@ -46,15 +52,21 @@ pub use linux::{power_off, setup};
 mod linux {
     use std::ffi::CString;
 
-    use super::{BootParams, FUNCTION_MOUNT, parse_cmdline};
+    use super::{BootParams, FUNCTION_MOUNT, SCRATCH_MOUNT, parse_cmdline};
 
-    /// Mount the pseudo file systems, read the cmdline and mount the
-    /// function drive read-only.
+    /// Mount the pseudo file systems, read the cmdline, mount the function
+    /// drive read-only and the scratch drive read-write at `/tmp`.
+    ///
+    /// The root file system and the function drive are attached read-only by
+    /// the host, so the scratch drive is the only storage a guest can write
+    /// that is backed by the host disk, and its size is fixed by the host
+    /// (PLT-4622). A scratch drive that the host announced but that cannot be
+    /// mounted is an init error: falling back to a tmpfs would silently change
+    /// the storage limit the revision asked for.
     pub fn setup() -> std::io::Result<BootParams> {
         mount("proc", "/proc", "proc", 0)?;
         mount("sysfs", "/sys", "sysfs", 0)?;
         mount("devtmpfs", "/dev", "devtmpfs", 0)?;
-        mount("tmpfs", "/tmp", "tmpfs", 0)?;
         // The Runtime API is served on 127.0.0.1; a fresh kernel leaves `lo`
         // down, so the user process would get ENETUNREACH.
         bring_up_loopback()?;
@@ -67,6 +79,15 @@ mod linux {
                 "ext4",
                 libc::MS_RDONLY | libc::MS_NOSUID,
             )?;
+        }
+        match &params.scratch_dev {
+            Some(dev) => {
+                mount(dev, SCRATCH_MOUNT, "ext4", libc::MS_NOSUID | libc::MS_NODEV)?;
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(SCRATCH_MOUNT, std::fs::Permissions::from_mode(0o1777))?;
+            }
+            // Older hosts: a tmpfs, bounded by the guest memory.
+            None => mount("tmpfs", SCRATCH_MOUNT, "tmpfs", 0)?,
         }
         Ok(params)
     }
@@ -155,7 +176,7 @@ mod tests {
     #[test]
     fn parses_tachyon_keys() {
         let p = parse_cmdline(
-            "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/tachyon-init tachyon.env_id=env_01abc tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb\n",
+            "console=ttyS0 reboot=k panic=1 pci=off init=/sbin/tachyon-init tachyon.env_id=env_01abc tachyon.vsock_port=5000 tachyon.function_dev=/dev/vdb tachyon.scratch_dev=/dev/vdc\n",
         );
         assert_eq!(
             p,
@@ -163,6 +184,7 @@ mod tests {
                 env_id: Some("env_01abc".into()),
                 vsock_port: Some(5000),
                 function_dev: Some("/dev/vdb".into()),
+                scratch_dev: Some("/dev/vdc".into()),
             }
         );
         assert_eq!(parse_cmdline("quiet"), BootParams::default());

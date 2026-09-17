@@ -120,23 +120,23 @@ provider は相対パスをプロセスの cwd 基準で絶対化するので、
 | isolation | micro_vm |
 | create_terminate / observe / enforce_deadline | supported |
 | egress_none | supported（ADR-0001 M8 を実測。`docs/evidence/isolation-20260916T020934Z/`） |
-| enforce_resource_limits | unverified（M9 で vcpu / mem の guest 側一致と超過 alloc の `crash` 分類は実測済み。ephemeral storage は未制御のため unverified のまま。`docs/evidence/isolation-20260916T020934Z/`） |
+| enforce_resource_limits | supported（PLT-4622。vCPU / memory（M9）と ephemeral storage（DISK）を §3.6 で実測。証跡 `docs/evidence/isolation-20260917T011555Z/`。CPU は vCPU 単位で、host 側 cgroup の quota は無い） |
 | host_metering | unverified |
 | egress_restricted / egress_public_web | unsupported（ネットワークデバイス未設定） |
 | idle_quiesce / idle_resume | supported（PLT-4633 で `PATCH /vm {state: Paused/Resumed}` を実装し §3.7 で実機計測。証跡 `docs/evidence/warm-20260916T162532Z/`。再利用に入るかは `[pool] enabled`、既定 off） |
 | snapshot_create / snapshot_clone | unsupported（未実装） |
 | dev_only | false |
 
-`egress_none`（M8）と `enforce_resource_limits`（M9）を実際に測るのが §3.6、`idle_quiesce` / `idle_resume`（warm 再利用）を測るのが §3.7。
+`egress_none`（M8）と `enforce_resource_limits`（M9・DISK）を実際に測るのが §3.6、`idle_quiesce` / `idle_resume`（warm 再利用）を測るのが §3.7。
 
-### 3.6 隔離の計測（ADR-0001 M8 / M9）
+### 3.6 隔離の計測（ADR-0001 M8 / M9、PLT-4622 DISK）
 
 ```sh
 scripts/kvm/measure-isolation.sh
 ```
 
 `examples/isolation-probe`（guest 用の musl バイナリ。`bootstrap.sh` がビルドする）を gateway 経由で deploy し、
-guest の中から egress（M8）と資源上限（M9）を測る。gateway は `config/gateway.firecracker.toml` でこのスクリプトが起動し、最後に停止する（§3.5 と同じ設定なので、別の gateway を同じ port で動かしたまま実行しない）。
+guest の中から egress（M8）、資源上限（M9）、ephemeral storage の上限（DISK）を測る。gateway は `config/gateway.firecracker.toml` でこのスクリプトが起動し、最後に停止する（§3.5 と同じ設定なので、別の gateway を同じ port で動かしたまま実行しない）。
 
 | ステップ | 内容 | 期待 |
 |---|---|---|
@@ -144,8 +144,9 @@ guest の中から egress（M8）と資源上限（M9）を測る。gateway は 
 | M8 interface | 同じ応答に含まれる `/proc/net/dev` と `/proc/net/route` | `lo` だけ、default route 0 件 |
 | M9 resources | `{"probe":"resources"}`。`/proc/cpuinfo` の processor 数、`available_parallelism`、`/proc/meminfo` の MemTotal、見えていれば cgroup の `memory.max` / `cpu.max` | vCPU は revision の `cpu_millis` から決まる値と一致。MemTotal は要求値以下で、要求値の 70%（`MEM_TOLERANCE_PCT`）以上 |
 | M9 alloc | `--memory-mib 128` の revision（`--no-publish`）に `{"probe":"resources","alloc_mib":512}`。16 MiB ずつ確保し 4 KiB ごとに 1 byte 書く | 上限を超えたところで kernel に kill され、host からは crash に見える。`tsls functions invocation --json` の `status` / `error.class` / `error.error_type` を記録する |
+| DISK fill | `--ephemeral-storage-mib 64` の revision（`--no-publish`）に `{"probe":"disk","fill_mib":256}`。`/tmp` に 1 MiB ずつ書き、失敗したところで止める。並行して host の空き容量（`df`）と provider の workdir（`du`）を 200 ms ごとに記録する | `stopped_by=enospc`、書けた量は cap（64 MiB）以下かつ 80%（`DISK_TOLERANCE_PCT`）以上。`/tmp` は `/dev/vdc` の ext4。`/` と `/function` への書き込みは `EROFS`。host の空きの減少は cap + 64 MiB（`DISK_HOST_SLACK_MIB`）以下 |
 
-主な環境変数: `PROBE_MEMORY_MIB`（既定 256）、`PROBE_CPU_MILLIS`（500）、`ALLOC_MEMORY_MIB`（128）、`ALLOC_MIB`（既定は `ALLOC_MEMORY_MIB` の 4 倍）、`MEM_TOLERANCE_PCT`（70）、`CONNECT_TIMEOUT_MS`（2000）、`DNS_TIMEOUT_MS`（5000）、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
+主な環境変数: `PROBE_MEMORY_MIB`（既定 256）、`PROBE_CPU_MILLIS`（500）、`ALLOC_MEMORY_MIB`（128）、`ALLOC_MIB`（既定は `ALLOC_MEMORY_MIB` の 4 倍）、`MEM_TOLERANCE_PCT`（70）、`DISK_STORAGE_MIB`（64）、`DISK_FILL_MIB`（既定は `DISK_STORAGE_MIB` の 4 倍）、`DISK_TOLERANCE_PCT`（80）、`DISK_HOST_SLACK_MIB`（64）、`CONNECT_TIMEOUT_MS`（2000）、`DNS_TIMEOUT_MS`（5000）、`TSLS_SKIP_BUILD`、`TSLS_GATEWAY_CONFIG` / `TSLS_API_URL` / `TSLS_TOKEN`。
 
 結果の読み方:
 
@@ -154,15 +155,18 @@ guest の中から egress（M8）と資源上限（M9）を測る。gateway は 
 - M9 の vCPU は revision の `cpu_millis` を 1000 で切り上げた値（`ResourceProfile::vcpus`）。`--cpu-millis 500` なら 1 vCPU。
 - guest の MemTotal は machine-config で渡した値より必ず小さい（kernel と予約分）。完全一致は求めず、既定では要求値の 70〜100% を許容する。外れたら finding として記録するが、スクリプトは失敗させない。
 - alloc の進捗は guest の stdout に出るので、OOM kill で応答が返らなくても「どこまで触れたか」が `tsls functions logs`（evidence の `alloc-logs.txt`）に残る。
+- DISK: guest が書ける host ディスク上の領域は scratch drive だけである（rootfs と function drive は Firecracker に `is_read_only: true` で渡すので、guest 側で remount しても書けない）。scratch drive は `ephemeral_storage_mib` ちょうどの ext4 で、環境作成時に `fallocate` で確保する。書けた量が cap より少し小さいのは ext4 のメタデータ分（64 MiB で 58 MiB 書けた）。`/dev`（devtmpfs）も書けるが guest の memory 上にあり、M9 の memory 上限に含まれる。
+- DISK の host 側は「guest の書き込みで host の空きが減らない」ことを見る。scratch drive は作成時に確保済みなので、fill の間に host の空きが追加で減らないのが期待値（減少は drive の確保分だけ）。
 - 値も分類も **nested virtualization 上の記録**（§5）であり、bare metal と x86_64 では未確認。
 
 終了コード:
 
 | exit | 意味 |
 |---|---|
-| 0 | 計測できて M8 PASS（M9 の不一致は finding として記録するだけで、失敗にしない） |
-| 1 | guest から network に到達した（M8 FAIL。security 上の失敗なのでここだけ非 0 にする） |
+| 0 | 計測できて M8 と DISK が PASS（M9 の不一致は finding として記録するだけで、失敗にしない） |
+| 1 | guest から network に到達した（M8 FAIL） |
 | 2 | 計測自体ができなかった（build / gateway / deploy / probe の失敗） |
+| 3 | ephemeral storage の上限が効かなかった（cap を超えて書けた、read-only のはずの場所に書けた、host の空きが budget 以上に減った。DISK FAIL） |
 
 証跡は `docs/evidence/isolation-<UTC>/`:
 
@@ -173,10 +177,37 @@ guest の中から egress（M8）と資源上限（M9）を測る。gateway は 
 | `egress.json` | egress probe の応答（target ごとの `connected` / `error_kind` / `elapsed_ms`、DNS、interface と route、`guest.boot_id`） |
 | `resources.json` | resource probe の応答（vCPU、MemTotal、cgroup） |
 | `alloc-invoke.json` / `alloc-invocation.json` / `alloc-logs.txt` | 上限超え alloc の CLI 応答、invocation の分類、guest の進捗ログ |
-| `revision-baseline.json` / `revision-alloc.json` | 使った revision の spec（要求した vCPU / memory の正本） |
+| `disk.json` / `disk-invocation.json` / `disk-logs.txt` | disk probe の応答（書けた byte 数、止まった理由、`/proc/mounts`、`statvfs` の前後、read-only 検査）、invocation（`evidence.details` に `scratch_drive_bytes` / `scratch_drive_reserved` / `network_interfaces` など）、guest の進捗ログ |
+| `disk-host.json` / `disk-host-samples.txt` | fill 中の host の空き容量と workdir の使用量（200 ms ごと）とその最小・最大 |
+| `revision-baseline.json` / `revision-alloc.json` / `revision-disk.json` | 使った revision の spec（要求した vCPU / memory / ephemeral storage の正本） |
 | `provider.json` / `gateway.log` / `steps/` / `orphan-check.txt` | capability 表、gateway のログ、step ごとのログ、終了後の孤児監査 |
 
-このスクリプトは provider の `Capabilities` を変更しない。`egress_none` を `Unverified` から `Supported` にするのは、この計測結果を確認した上での別の変更（ADR-0001 §「決定」5）。
+このスクリプトは provider の `Capabilities` を変更しない。`egress_none`（M8）と `enforce_resource_limits`（M9・DISK、PLT-4622）を `Unverified` から `Supported` にしたのは、この計測結果を確認した上での別の変更（ADR-0001 §「決定」5）。したがって証跡の `provider.json` は計測時点の値（`enforce_resource_limits` = unverified）を示す。
+
+#### 環境ごとの host 側の上限（PLT-4622）
+
+guest が host のディスクを使い切れないよう、provider は `<workdir>/<env_id>/` の中身をすべて上限付きにしている（`crates/providers/firecracker/src/host_guard.rs`）。
+
+| 成果物 | 上限 | 強制のしかた |
+|---|---|---|
+| `scratch.ext4` | `ephemeral_storage_mib`（32..=2048、既定 256） | 環境作成時に `fallocate` で確保（非対応の fs では sparse に落として `scratch_drive_reserved=false` と warn）。guest は `/tmp` に mount する |
+| `function.ext4` | artifact + 8 MiB | read-only。作成後に `stage/` を消し、artifact を二重に持たない |
+| `console.log` | 4 MiB（`console_log_max_bytes`）+ 1 行の marker | Firecracker の stdout/stderr を pipe で受け、上限を超えた分は読み捨てる（VMM が pipe で詰まらないよう読み続ける）。先頭（boot と init のログ）を残す |
+| `fc.log` | 4 MiB（`fc_log_max_bytes`） | Firecracker が自分で書く（`O_APPEND` なし）ため、1 秒ごとの watchdog が割り当て済みサイズを見て超えたら truncate する。上限は 1 秒ぶんの書き込みだけ超えうる |
+| `_archive/` | 最新 50 環境 × ログ 2 本の上限 | 既存の prune |
+
+環境作成の前に、これらの合計（budget。invocation の `evidence.details.host_disk_budget_bytes`）に `min_host_free_bytes`（512 MiB）を足した空きが workdir の fs に無ければ、何も書かずに `Unavailable` で失敗する（invoke は `platform_error` / `Host.ProviderError`）。3 つの設定値は `FirecrackerConfig` にあり、gateway の TOML からはまだ変えられない（既定値で動く）。
+
+Firecracker の drive `rate_limiter`（帯域・IOPS）は **使っていない**。容量は drive の大きさで決まるので上限の強制には不要で、隣の環境の IO を守る目的の値は実機の負荷計測なしに決められないため後続に回した。
+
+#### egress の起動ゲート（PLT-4622）
+
+P1 の egress policy は「NIC を付けない」ことで構造的に強制している。user code が policy より先に動く余地を無くすため、provider は `InstanceStart` の前に 2 段の fail-closed 検査をする（`crates/providers/firecracker/src/egress_gate.rs`）。
+
+1. 送る予定の API 呼び出しに `/network-interfaces*` と `/mmds*` が無いこと。
+2. 全 device を設定した後、`GET /vm/config` の `network-interfaces` が空配列で `mmds-config` が null であること。key が無い・形が違う応答も失敗にする。
+
+どちらかが通らなければ VM は起動されず（guest の init も user code も動かない）、環境は `Boot` エラーで片付けられる。実機（Firecracker v1.17）での `GET /vm/config` は起動前に `"network-interfaces": []` を返す。起動した環境の `evidence.details.network_interfaces` は 0。
 
 ### 3.7 warm 再利用の計測（PLT-4633: idle 休止・再開）
 
@@ -372,9 +403,9 @@ TSLS_PROVIDER=firecracker scripts/e2e/demo.sh
 - host と同じアーキテクチャの guest のみ。`validate_artifact` は ELF の `e_machine` を revision の宣言と host の両方に照合し、`PT_INTERP` があるバイナリ（動的リンク）は `artifact rejected`（rootfs に libc が無い）。
 - ネットワークなし。`EgressProfile::None` 以外の spec は `InvalidSpec`。
 - 1 環境 1 実行。snapshot は `Unsupported`。warm 再利用（idle 休止・再開）は §3.7 の実機計測を経て `Supported` だが、`[pool]` の既定が off なので既定では働かず、destroy-after-invoke のままである。gate は `docs/architecture.md` §4。
-- `ephemeral_storage_mib` は未制御（function drive は read-only、`/tmp` は guest の tmpfs で上限なし）。
+- `ephemeral_storage_mib` は環境ごとの scratch drive（`/tmp`、ext4、作成時に確保）の大きさで強制する（§3.6）。環境作成が drive の `mkfs.ext4` 分だけ遅くなる（64 MiB で 37 ms、nested virtualization）。warm 再利用（§3.7）では同じ環境の `/tmp` が invocation をまたいで残る（同一 tenant・同一 revision の範囲）。drive の `rate_limiter` は未設定。
 - 課金・メータリング用の host 側計測は timings のみ（`host_metering = Unverified`）。
-- jailer なし。Firecracker は実行ユーザーとして動く。seccomp は Firecracker 既定。
+- jailer なし。Firecracker は gateway と同じユーザーで、chroot・namespace・cgroup なしに動く。seccomp は Firecracker 既定のフィルタ（`--no-seccomp` は渡さない）。host 側の CPU / memory の cgroup 制限も無く、guest の上限は vCPU 数と `mem_size_mib` だけで決まる。
 - `--id` は英数字と `-` のみのため、環境 id の `_` を `-` に置換して渡す（`env_01h...` → `env-01h...`）。
 - `console=ttyS0` でシリアル出力するため boot は速くない（証跡のため）。`boot_args_extra` に `quiet` を足すと短縮できるが console.log は減る。
 - terminate 後のログは `<workdir>/_archive/<env_id>/` に移し、**最新 50 環境分だけ**残す（古いものから削除）。

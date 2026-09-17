@@ -206,6 +206,24 @@ impl ApiClient {
         }
     }
 
+    /// `GET <path>` without a body, answered with a JSON document (for
+    /// example `GET /vm/config`, the configuration the VMM will boot with).
+    pub async fn get_json(&self, path: &str) -> Result<serde_json::Value, ApiError> {
+        let resp = self.request_bytes("GET", path, &[]).await?;
+        if !(200..300).contains(&resp.status) {
+            let body = String::from_utf8_lossy(&resp.body).into_owned();
+            return Err(ApiError::Status {
+                method: "GET".into(),
+                path: path.into(),
+                status: resp.status,
+                reason: resp.reason,
+                body: bounded(&body, 2048),
+            });
+        }
+        serde_json::from_slice(&resp.body)
+            .map_err(|e| ApiError::Malformed(format!("GET {path}: body is not JSON: {e}")))
+    }
+
     pub async fn request(
         &self,
         method: &str,
@@ -213,7 +231,16 @@ impl ApiClient {
         body: &serde_json::Value,
     ) -> Result<HttpResponse, ApiError> {
         let body = serde_json::to_vec(body).map_err(|e| ApiError::Malformed(e.to_string()))?;
-        let req = format_request(method, path, &body);
+        self.request_bytes(method, path, &body).await
+    }
+
+    async fn request_bytes(
+        &self,
+        method: &str,
+        path: &str,
+        body: &[u8],
+    ) -> Result<HttpResponse, ApiError> {
+        let req = format_request(method, path, body);
         let fut = async {
             let mut stream = UnixStream::connect(&self.socket).await?;
             stream.write_all(&req).await?;

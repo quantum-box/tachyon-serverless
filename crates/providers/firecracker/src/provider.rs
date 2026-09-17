@@ -4,13 +4,14 @@
 //!
 //! ```text
 //! <workdir>/<env_id>/
-//!   stage/app        artifact copy (0755)         -> mkfs.ext4 -d stage function.ext4
+//!   stage/app        artifact copy (0755)         -> mkfs.ext4 -d stage function.ext4 (removed after)
 //!   function.ext4    read-only function drive     -> PUT /drives/function
+//!   scratch.ext4     writable /tmp, ephemeral_storage_mib, reserved -> PUT /drives/scratch
 //!   v.sock_<port>    host listener (bound BEFORE InstanceStart)
 //!   fc.sock          Firecracker API socket
 //!   v.sock           vsock UDS bound by Firecracker (host-initiated side, unused)
 //!   fc.log           Firecracker log (--log-path)
-//!   console.log      guest serial console (Firecracker stdout/stderr)
+//!   console.log      guest serial console (Firecracker stdout/stderr, capped)
 //!   fc.pid           pid of the Firecracker process (process-group leader)
 //! ```
 //!
@@ -39,8 +40,15 @@ use tachyon_serverless_provider_port::{
 use crate::api::ApiClient;
 use crate::boot_args::compose_boot_args;
 use crate::config::FirecrackerConfig;
-use crate::drive::{create_sparse_image, function_drive_size_bytes, mkfs_args};
+use crate::drive::{
+    create_reserved_image, create_sparse_image, function_drive_size_bytes, mkfs_args,
+    scratch_drive_size_bytes, scratch_mkfs_args,
+};
+use crate::egress_gate::{check_planned_calls, check_vm_config};
 use crate::elf::{ElfInfo, inspect_elf_file};
+use crate::host_guard::{
+    ConsoleCapture, HostBudget, available_bytes, check_host_budget, spawn_log_watchdog,
+};
 use crate::preflight::{DigestCache, probe_firecracker_version, run_preflight};
 use crate::vmm::{
     EnvPaths, MAX_UNIX_SOCKET_PATH, instance_id_for, kill_process_group, pid_alive,
@@ -119,9 +127,19 @@ impl FirecrackerProvider {
             create_terminate: Support::Supported,
             observe: Support::Supported,
             enforce_deadline: Support::Supported,
-            enforce_resource_limits: Support::unverified(
-                "vcpu/mem verified against the guest (ADR-0001 M9); ephemeral storage not enforced",
-            ),
+            // PLT-4622, measured on real KVM and promoted from `Unverified`
+            // (docs/evidence/isolation-20260917T011555Z, scripts/kvm/measure-isolation.sh):
+            // - vCPU / memory (ADR-0001 M9): the guest sees 1 vCPU for 500 m and
+            //   MemTotal 232 MiB for 256 MiB; allocating 512 MiB in a 128 MiB
+            //   environment ends as `crash` / `Runtime.Crash`;
+            // - ephemeral storage: `/tmp` is a 64 MiB scratch drive for
+            //   `ephemeral_storage_mib = 64`, a fill stops with ENOSPC after
+            //   58 MiB (ext4 metadata), `/` and `/function` answer EROFS, and the
+            //   host lost at most 70 MiB of free space (the reserved drive).
+            // The limits are VM-shaped: CPU is enforced in whole vCPUs (no
+            // host cgroup quota on the VMM), memory by the guest kernel, disk by
+            // the drive size. aarch64 under nested virtualization only.
+            enforce_resource_limits: Support::Supported,
             // ADR-0001 M8 measured on aarch64 (docs/evidence/isolation-20260916T020934Z):
             // no network device is configured, the guest lists loopback only and
             // every connect attempt failed with NetworkUnreachable.
@@ -155,6 +173,44 @@ impl FirecrackerProvider {
         self.cfg.workdir.join(ARCHIVE_DIR)
     }
 
+    /// [`Self::boot_error`] for a VMM that has exited: the console pipe is
+    /// drained to EOF first (bounded), so the tail contains its last words.
+    async fn boot_error_after_exit(
+        paths: &EnvPaths,
+        console: &ConsoleCapture,
+        msg: impl std::fmt::Display,
+    ) -> ProviderError {
+        console.wait_finished(Duration::from_secs(1)).await;
+        Self::boot_error(paths, msg)
+    }
+
+    /// Run `mkfs.ext4` with `args`; `what` names the drive in errors.
+    async fn run_mkfs(
+        &self,
+        args: Vec<std::ffi::OsString>,
+        what: &str,
+    ) -> Result<(), ProviderError> {
+        let mkfs = tokio::process::Command::new(&self.cfg.mkfs_ext4)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .await
+            .map_err(|e| {
+                ProviderError::Boot(format!(
+                    "cannot run {}: {e} (install e2fsprogs >= 1.43)",
+                    self.cfg.mkfs_ext4.display()
+                ))
+            })?;
+        if !mkfs.status.success() {
+            return Err(ProviderError::Boot(format!(
+                "mkfs.ext4 ({what}) failed ({}): {}",
+                mkfs.status,
+                String::from_utf8_lossy(&mkfs.stderr).trim()
+            )));
+        }
+        Ok(())
+    }
+
     /// `ProviderError::Boot` carrying the tails of the guest console and the
     /// Firecracker log so that a failed boot can be diagnosed from the error.
     fn boot_error(paths: &EnvPaths, msg: impl std::fmt::Display) -> ProviderError {
@@ -176,6 +232,26 @@ impl FirecrackerProvider {
     ) -> Result<EnvironmentHandle, ProviderError> {
         let env_id = spec.environment_id.as_str();
 
+        // 0. Host disk budget (PLT-4622): refuse before anything is written
+        //    when this environment's worst case would eat into the reserve.
+        let drive_bytes = function_drive_size_bytes(spec.artifact.size_bytes);
+        let scratch_bytes = scratch_drive_size_bytes(spec.resources.ephemeral_storage_mib);
+        let budget = HostBudget {
+            staged_artifact_bytes: spec.artifact.size_bytes,
+            function_drive_bytes: drive_bytes,
+            scratch_drive_bytes: scratch_bytes,
+            console_log_max_bytes: self.cfg.console_log_max_bytes,
+            fc_log_max_bytes: self.cfg.fc_log_max_bytes,
+        };
+        let available = available_bytes(&paths.dir).map_err(|e| {
+            ProviderError::Unavailable(format!(
+                "cannot read free space of {}: {e}",
+                paths.dir.display()
+            ))
+        })?;
+        check_host_budget(available, &budget, self.cfg.min_host_free_bytes)
+            .map_err(ProviderError::Unavailable)?;
+
         // 1. Stage the artifact as /app (0755).
         tokio::fs::copy(&spec.artifact.path, &paths.stage_app)
             .await
@@ -189,26 +265,38 @@ impl FirecrackerProvider {
         tokio::fs::set_permissions(&paths.stage_app, std::fs::Permissions::from_mode(0o755))
             .await?;
 
-        // 2. Function drive.
-        let drive_bytes = function_drive_size_bytes(spec.artifact.size_bytes);
+        // 2. Function drive. The staged copy is not needed once it is built,
+        //    so it does not count twice against the host disk.
         create_sparse_image(&paths.function_drive, drive_bytes)?;
-        let mkfs = tokio::process::Command::new(&self.cfg.mkfs_ext4)
-            .args(mkfs_args(&paths.stage, &paths.function_drive, drive_bytes))
-            .stdin(std::process::Stdio::null())
-            .output()
-            .await
-            .map_err(|e| {
-                ProviderError::Boot(format!(
-                    "cannot run {}: {e} (install e2fsprogs >= 1.43)",
-                    self.cfg.mkfs_ext4.display()
+        self.run_mkfs(
+            mkfs_args(&paths.stage, &paths.function_drive, drive_bytes),
+            "function drive",
+        )
+        .await?;
+        tokio::fs::remove_dir_all(&paths.stage).await?;
+
+        // 2b. Scratch drive (PLT-4622): the guest's only writable, host-disk
+        //     backed storage, exactly `ephemeral_storage_mib` and reserved now.
+        let scratch_started = Instant::now();
+        let scratch_reserved =
+            create_reserved_image(&paths.scratch_drive, scratch_bytes).map_err(|e| {
+                ProviderError::Unavailable(format!(
+                    "cannot reserve {scratch_bytes} bytes for the scratch drive {}: {e}",
+                    paths.scratch_drive.display()
                 ))
             })?;
-        if !mkfs.status.success() {
-            return Err(ProviderError::Boot(format!(
-                "mkfs.ext4 failed ({}): {}",
-                mkfs.status,
-                String::from_utf8_lossy(&mkfs.stderr).trim()
-            )));
+        self.run_mkfs(
+            scratch_mkfs_args(&paths.scratch_drive, scratch_bytes),
+            "scratch drive",
+        )
+        .await?;
+        let scratch_ms = scratch_started.elapsed().as_millis() as u64;
+        if !scratch_reserved {
+            tracing::warn!(
+                env_id,
+                path = %paths.scratch_drive.display(),
+                "fallocate is not supported here; the scratch drive is sparse and its space is not reserved"
+            );
         }
 
         // 3. Listen for the guest-initiated vsock connection BEFORE the VM starts.
@@ -218,13 +306,26 @@ impl FirecrackerProvider {
 
         // 4. Spawn Firecracker in its own process group.
         let instance_id = instance_id_for(env_id);
-        let child =
-            spawn_firecracker(&self.cfg.firecracker_binary, paths, &instance_id).map_err(|e| {
-                ProviderError::Boot(format!(
-                    "spawn {}: {e}",
-                    self.cfg.firecracker_binary.display()
-                ))
-            })?;
+        let (child, console) = spawn_firecracker(
+            &self.cfg.firecracker_binary,
+            paths,
+            &instance_id,
+            self.cfg.console_log_max_bytes,
+        )
+        .map_err(|e| {
+            ProviderError::Boot(format!(
+                "spawn {}: {e}",
+                self.cfg.firecracker_binary.display()
+            ))
+        })?;
+        // fc.log is written by Firecracker itself; a watchdog keeps it bounded
+        // until the environment directory is removed.
+        spawn_log_watchdog(
+            paths.fc_log.clone(),
+            paths.dir.clone(),
+            self.cfg.fc_log_max_bytes,
+            env_id.to_owned(),
+        );
         let pid = child
             .id()
             .ok_or_else(|| ProviderError::Internal("spawned child has no pid".into()))?;
@@ -240,10 +341,12 @@ impl FirecrackerProvider {
                 break;
             }
             if let Ok(Some(status)) = child.try_wait() {
-                return Err(Self::boot_error(
+                return Err(Self::boot_error_after_exit(
                     paths,
+                    &console,
                     format!("firecracker exited before creating the API socket ({status})"),
-                ));
+                )
+                .await);
             }
             if start.elapsed() > API_SOCKET_WAIT {
                 return Err(Self::boot_error(
@@ -295,26 +398,65 @@ impl FirecrackerProvider {
                 }),
             ),
             (
+                "/drives/scratch",
+                serde_json::json!({
+                    "drive_id": "scratch",
+                    "path_on_host": paths.scratch_drive,
+                    "is_root_device": false,
+                    "is_read_only": false
+                }),
+            ),
+            (
                 "/vsock",
                 serde_json::json!({"guest_cid": GUEST_CID, "uds_path": paths.vsock_uds}),
             ),
-            (
-                "/actions",
-                serde_json::json!({"action_type": "InstanceStart"}),
-            ),
         ];
+        // Egress gate, part 1: the plan itself configures no network path.
+        check_planned_calls(calls.iter().map(|(path, _)| *path))
+            .map_err(|e| Self::boot_error(paths, e))?;
         for (path, body) in &calls {
             if let Err(e) = api.put(path, body).await {
-                let msg = match child.try_wait() {
-                    Ok(Some(status)) => format!(
-                        "firecracker exited before configuration completed ({status}); last API error: {e}"
-                    ),
-                    _ => format!("firecracker API: {e}"),
-                };
-                return Err(Self::boot_error(paths, msg));
+                return Err(match child.try_wait() {
+                    Ok(Some(status)) => {
+                        Self::boot_error_after_exit(
+                            paths,
+                            &console,
+                            format!(
+                                "firecracker exited before configuration completed ({status}); last API error: {e}"
+                            ),
+                        )
+                        .await
+                    }
+                    _ => Self::boot_error(paths, format!("firecracker API: {e}")),
+                });
             }
         }
-        tracing::info!(env_id, vcpus, mem_mib, "InstanceStart accepted");
+        // Egress gate, part 2 (PLT-4622): ask the VMM what it is about to boot
+        // and refuse unless it has no network interface. Nothing in the guest
+        // - and so no user code - runs before this passes.
+        let vm_config = api.get_json("/vm/config").await.map_err(|e| {
+            Self::boot_error(
+                paths,
+                format!("egress gate: cannot read the VM configuration before InstanceStart: {e}"),
+            )
+        })?;
+        check_vm_config(&vm_config).map_err(|e| Self::boot_error(paths, e))?;
+        if let Err(e) = api
+            .put(
+                "/actions",
+                &serde_json::json!({"action_type": "InstanceStart"}),
+            )
+            .await
+        {
+            return Err(Self::boot_error(paths, format!("firecracker API: {e}")));
+        }
+        tracing::info!(
+            env_id,
+            vcpus,
+            mem_mib,
+            scratch_bytes,
+            "InstanceStart accepted"
+        );
 
         // 7. Wait for the guest bridge (or an early VMM exit).
         let stream = tokio::select! {
@@ -336,10 +478,11 @@ impl FirecrackerProvider {
             },
             status = child.wait() => {
                 let status = status.map(|s| s.to_string()).unwrap_or_else(|e| e.to_string());
-                return Err(Self::boot_error(
+                return Err(Self::boot_error_after_exit(
                     paths,
+                    &console,
                     format!("firecracker exited before the guest bridge connected ({status})"),
-                ));
+                ).await);
             }
         };
         let connected_at = Instant::now();
@@ -382,6 +525,16 @@ impl FirecrackerProvider {
         details.insert("mem_mib".into(), mem_mib.into());
         details.insert("vsock_port".into(), self.cfg.vsock_port.into());
         details.insert("function_drive_bytes".into(), drive_bytes.into());
+        details.insert("scratch_drive_bytes".into(), scratch_bytes.into());
+        details.insert("scratch_drive_reserved".into(), scratch_reserved.into());
+        details.insert("scratch_drive_ms".into(), scratch_ms.into());
+        details.insert(
+            "console_log_max_bytes".into(),
+            self.cfg.console_log_max_bytes.into(),
+        );
+        details.insert("fc_log_max_bytes".into(), self.cfg.fc_log_max_bytes.into());
+        details.insert("host_disk_budget_bytes".into(), budget.total().into());
+        details.insert("network_interfaces".into(), 0.into());
         details.insert("env_dir".into(), paths.dir.display().to_string().into());
         details.insert(
             "console_log".into(),
@@ -461,6 +614,7 @@ impl FirecrackerProvider {
             &paths.vsock_uds,
             &paths.vsock_listener,
             &paths.function_drive,
+            &paths.scratch_drive,
             &paths.pid_file,
             &paths.stage_app,
         ] {
@@ -702,6 +856,12 @@ impl ExecutionProvider for FirecrackerProvider {
                 )));
             }
         }
+        if spec.resources.ephemeral_storage_mib == 0 {
+            return Err(ProviderError::InvalidSpec(
+                "resources.ephemeral_storage_mib must be at least 1 (the scratch drive is sized from it)"
+                    .into(),
+            ));
+        }
         if spec.egress != EgressProfile::None {
             return Err(ProviderError::InvalidSpec(format!(
                 "egress profile {:?} is not supported (P1 configures no network device)",
@@ -928,10 +1088,9 @@ mod tests {
         assert!(c.observe.is_supported());
         assert!(c.enforce_deadline.is_supported());
         assert!(c.egress_none.is_supported());
-        assert!(matches!(
-            c.enforce_resource_limits,
-            Support::Unverified { .. }
-        ));
+        // PLT-4622: vCPU / memory / ephemeral storage measured on real KVM
+        // (docs/evidence/isolation-20260917T011555Z).
+        assert!(c.enforce_resource_limits.is_supported());
         assert!(matches!(c.egress_restricted, Support::Unsupported { .. }));
         assert!(matches!(c.egress_public_web, Support::Unsupported { .. }));
         assert!(matches!(c.host_metering, Support::Unverified { .. }));

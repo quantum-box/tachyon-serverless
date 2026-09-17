@@ -3,6 +3,13 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Default [`FirecrackerConfig::console_log_max_bytes`]: 4 MiB.
+pub const DEFAULT_CONSOLE_LOG_MAX_BYTES: u64 = 4 * 1024 * 1024;
+/// Default [`FirecrackerConfig::fc_log_max_bytes`]: 4 MiB.
+pub const DEFAULT_FC_LOG_MAX_BYTES: u64 = 4 * 1024 * 1024;
+/// Default [`FirecrackerConfig::min_host_free_bytes`]: 512 MiB.
+pub const DEFAULT_MIN_HOST_FREE_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Configuration of the Firecracker provider. Mirrors the
 /// `[provider.firecracker]` section of the gateway config (docs/architecture.md §4).
 ///
@@ -30,6 +37,20 @@ pub struct FirecrackerConfig {
     /// Grace period given to a VM that is expected to power off by itself
     /// (`TerminateReason::Completed` / `Shutdown`) before SIGKILL.
     pub kill_grace: Duration,
+    /// Cap on `console.log` (the guest serial console) per environment. The
+    /// console is read through a pipe; bytes past the cap are drained and
+    /// discarded, so a guest that floods its serial port cannot fill the host
+    /// disk (PLT-4622). A one-line marker is written when the cap is reached.
+    pub console_log_max_bytes: u64,
+    /// Cap on the allocated size of `fc.log` per environment. Firecracker
+    /// writes it itself, so it is enforced by a watchdog that truncates the
+    /// file once it holds more than this (checked every second).
+    pub fc_log_max_bytes: u64,
+    /// Free space that must remain in `workdir`'s file system after an
+    /// environment's host-side budget (staged artifact, function drive,
+    /// scratch drive, log caps) is set aside. Below it `create_environment`
+    /// fails closed with `Unavailable` before anything is written.
+    pub min_host_free_bytes: u64,
 }
 
 impl Default for FirecrackerConfig {
@@ -43,6 +64,9 @@ impl Default for FirecrackerConfig {
             boot_args_extra: None,
             mkfs_ext4: PathBuf::from("mkfs.ext4"),
             kill_grace: Duration::from_secs(2),
+            console_log_max_bytes: DEFAULT_CONSOLE_LOG_MAX_BYTES,
+            fc_log_max_bytes: DEFAULT_FC_LOG_MAX_BYTES,
+            min_host_free_bytes: DEFAULT_MIN_HOST_FREE_BYTES,
         }
     }
 }
@@ -86,6 +110,9 @@ mod tests {
         assert_eq!(c.kill_grace, Duration::from_secs(2));
         assert_eq!(c.mkfs_ext4, PathBuf::from("mkfs.ext4"));
         assert!(c.boot_args_extra.is_none());
+        assert_eq!(c.console_log_max_bytes, 4 * 1024 * 1024);
+        assert_eq!(c.fc_log_max_bytes, 4 * 1024 * 1024);
+        assert_eq!(c.min_host_free_bytes, 512 * 1024 * 1024);
     }
 
     #[test]

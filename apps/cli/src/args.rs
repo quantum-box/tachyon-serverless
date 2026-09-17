@@ -163,6 +163,10 @@ pub struct DeployArgs {
     pub memory_mib: Option<u32>,
     #[arg(long)]
     pub cpu_millis: Option<u32>,
+    /// Writable scratch space (`/tmp`) of each environment, in MiB. The firecracker
+    /// provider backs it with a drive of exactly this size (default 256).
+    #[arg(long)]
+    pub ephemeral_storage_mib: Option<u32>,
     #[arg(long)]
     pub timeout_seconds: Option<u32>,
     #[arg(long)]

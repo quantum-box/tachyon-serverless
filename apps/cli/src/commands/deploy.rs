@@ -38,6 +38,9 @@ pub fn build_revision_request(
     if let Some(c) = args.cpu_millis {
         resources.cpu_millis = c;
     }
+    if let Some(e) = args.ephemeral_storage_mib {
+        resources.ephemeral_storage_mib = e;
+    }
     let mut execution = ExecutionRequest::default();
     if let Some(t) = args.timeout_seconds {
         execution.timeout_seconds = t;
@@ -265,6 +268,7 @@ mod tests {
             arch: ArchArg::Aarch64,
             memory_mib: Some(512),
             cpu_millis: None,
+            ephemeral_storage_mib: None,
             timeout_seconds: Some(2),
             init_timeout_seconds: None,
             max_concurrency: Some(1),
@@ -290,6 +294,7 @@ mod tests {
         assert_eq!(r.architecture, "aarch64");
         assert_eq!(r.resources.memory_mib, 512);
         assert_eq!(r.resources.cpu_millis, 500);
+        assert_eq!(r.resources.ephemeral_storage_mib, 256);
         assert_eq!(r.execution.timeout_seconds, 2);
         assert_eq!(r.execution.initialization_timeout_seconds, 30);
         assert_eq!(r.execution.max_concurrency, 1);

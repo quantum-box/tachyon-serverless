@@ -20,15 +20,23 @@
 //!   touched. Progress is printed to stdout after every chunk and flushed,
 //!   because driving the allocation past the configured memory ends in a kernel
 //!   kill that the host observes as a crash.
-//! - `{"probe":"all"}` (the default) runs both; the allocation step still only
-//!   runs when `alloc_mib` is set.
+//! - `{"probe":"disk","fill_mib":N}` (PLT-4622) writes a file of up to N MiB
+//!   (default and maximum 64 GiB, i.e. "until the disk is full") into `dir`
+//!   (default `/tmp`) in 1 MiB chunks until the write fails, and reports how
+//!   much was written, why it stopped (`enospc`, `limit` or `error`), the
+//!   file system before / after (`statvfs`, `/proc/mounts`) and whether `/`
+//!   and `/function` refuse writes. The file is removed afterwards unless
+//!   `keep` is true, so a reused environment gets its space back.
+//! - `{"probe":"all"}` (the default) runs egress and resources; the allocation
+//!   step still only runs when `alloc_mib` is set, and the disk probe only runs
+//!   when asked for by name.
 //!
 //! Other payload keys: `targets` (array of `host:port`), `dns_name`,
 //! `connect_timeout_ms` (default 2000), `dns_timeout_ms` (default 5000).
 //!
-//! Only `std` is used — no network crates — so the example links statically for
-//! `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl` without extra
-//! system libraries.
+//! Only `std` and `libc` (for `statvfs`) are used — no network crates — so the
+//! example links statically for `aarch64-unknown-linux-musl` and
+//! `x86_64-unknown-linux-musl` without extra system libraries.
 
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -48,6 +56,11 @@ const DEFAULT_CHUNK_MIB: usize = 16;
 const MAX_TIMEOUT_MS: u64 = 60_000;
 /// Upper bound for `alloc_mib`, so a typo cannot ask for terabytes.
 const MAX_ALLOC_MIB: usize = 64 * 1024;
+/// Upper bound (and default) for `fill_mib`: large enough to mean "until full".
+const MAX_FILL_MIB: usize = 64 * 1024;
+const DEFAULT_FILL_DIR: &str = "/tmp";
+/// Paths that must refuse writes in a Firecracker guest (read-only drives).
+const READ_ONLY_PROBES: [&str; 2] = ["/", "/function"];
 const MIB: usize = 1024 * 1024;
 const PAGE_BYTES: usize = 4096;
 
@@ -99,6 +112,9 @@ fn run(request: &ProbeRequest, guest: Value) -> Value {
     if request.probe.runs_resources() {
         report.insert("resources".into(), resources_report(request));
     }
+    if request.probe == Probe::Disk {
+        report.insert("disk".into(), disk_report(request));
+    }
     Value::Object(report)
 }
 
@@ -110,6 +126,7 @@ fn run(request: &ProbeRequest, guest: Value) -> Value {
 enum Probe {
     Egress,
     Resources,
+    Disk,
     All,
 }
 
@@ -118,6 +135,7 @@ impl Probe {
         match self {
             Self::Egress => "egress",
             Self::Resources => "resources",
+            Self::Disk => "disk",
             Self::All => "all",
         }
     }
@@ -126,6 +144,7 @@ impl Probe {
         match name {
             "egress" => Some(Self::Egress),
             "resources" | "resource" => Some(Self::Resources),
+            "disk" => Some(Self::Disk),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -149,6 +168,9 @@ struct ProbeRequest {
     dns_timeout: Duration,
     alloc_mib: usize,
     chunk_mib: usize,
+    fill_mib: usize,
+    fill_dir: String,
+    keep_fill: bool,
 }
 
 impl ProbeRequest {
@@ -158,7 +180,7 @@ impl ProbeRequest {
             Some(Value::String(name)) => Probe::parse(name).ok_or_else(|| {
                 HandlerError::with_type(
                     "Probe.Unknown",
-                    format!("unknown probe `{name}` (expected egress, resources or all)"),
+                    format!("unknown probe `{name}` (expected egress, resources, disk or all)"),
                 )
             })?,
             Some(other) => {
@@ -206,6 +228,16 @@ impl ProbeRequest {
             dns_timeout: duration_field(payload, "dns_timeout_ms", DEFAULT_DNS_TIMEOUT_MS),
             alloc_mib: usize_field(payload, "alloc_mib", 0, MAX_ALLOC_MIB),
             chunk_mib: usize_field(payload, "chunk_mib", DEFAULT_CHUNK_MIB, MAX_ALLOC_MIB).max(1),
+            fill_mib: usize_field(payload, "fill_mib", MAX_FILL_MIB, MAX_FILL_MIB),
+            fill_dir: payload
+                .get("dir")
+                .and_then(Value::as_str)
+                .unwrap_or(DEFAULT_FILL_DIR)
+                .to_string(),
+            keep_fill: payload
+                .get("keep")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         })
     }
 }
@@ -705,6 +737,239 @@ fn allocate_and_touch(alloc_mib: usize, chunk_mib: usize) -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// PLT-4622: ephemeral storage
+// ---------------------------------------------------------------------------
+
+/// One line of `/proc/mounts`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MountEntry {
+    device: String,
+    mount_point: String,
+    fs_type: String,
+    options: String,
+}
+
+fn parse_proc_mounts(text: &str) -> Vec<MountEntry> {
+    text.lines()
+        .filter_map(|line| {
+            let mut f = line.split_whitespace();
+            Some(MountEntry {
+                device: f.next()?.to_string(),
+                mount_point: f.next()?.to_string(),
+                fs_type: f.next()?.to_string(),
+                options: f.next()?.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The mount that holds `path`: the longest mount point that prefixes it
+/// (the last one wins when a point is mounted over).
+fn mount_for<'a>(mounts: &'a [MountEntry], path: &str) -> Option<&'a MountEntry> {
+    mounts
+        .iter()
+        .filter(|m| {
+            path == m.mount_point
+                || m.mount_point == "/"
+                || path.starts_with(&format!("{}/", m.mount_point))
+        })
+        .fold(None, |best: Option<&MountEntry>, m| match best {
+            Some(b) if b.mount_point.len() > m.mount_point.len() => Some(b),
+            _ => Some(m),
+        })
+}
+
+fn mount_json(entry: Option<&MountEntry>) -> Value {
+    match entry {
+        Some(m) => json!({
+            "device": m.device,
+            "mount_point": m.mount_point,
+            "fs_type": m.fs_type,
+            "options": m.options,
+            "read_only": m.options.split(',').any(|o| o == "ro"),
+        }),
+        None => Value::Null,
+    }
+}
+
+/// `statvfs` of `path` in bytes, or the error.
+fn fs_stats(path: &str) -> Value {
+    let Ok(c) = std::ffi::CString::new(path) else {
+        return json!({"error": "path contains NUL"});
+    };
+    // SAFETY: zeroed statvfs is a valid out-parameter; `c` is NUL-terminated.
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(c.as_ptr(), &mut st) };
+    if rc != 0 {
+        let e = std::io::Error::last_os_error();
+        return json!({"error": e.to_string(), "os_error": e.raw_os_error()});
+    }
+    #[allow(clippy::unnecessary_cast)] // field widths differ per platform
+    let (frsize, blocks, bfree, bavail) = (
+        st.f_frsize as u64,
+        st.f_blocks as u64,
+        st.f_bfree as u64,
+        st.f_bavail as u64,
+    );
+    json!({
+        "total_bytes": blocks * frsize,
+        "free_bytes": bfree * frsize,
+        "avail_bytes": bavail * frsize,
+        "total_mib": blocks * frsize / MIB as u64,
+        "avail_mib": bavail * frsize / MIB as u64,
+    })
+}
+
+fn io_error_json(e: &std::io::Error) -> Value {
+    json!({
+        "error_kind": format!("{:?}", e.kind()),
+        "os_error": e.raw_os_error(),
+        "error": e.to_string(),
+    })
+}
+
+/// Try to create a file in `dir`; a read-only file system answers EROFS.
+fn write_refused(dir: &str) -> Value {
+    let path = format!("{}/.isolation-probe-write-test", dir.trim_end_matches('/'));
+    match std::fs::File::create(&path) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&path);
+            json!({"dir": dir, "refused": false})
+        }
+        Err(e) => {
+            let mut v = io_error_json(&e);
+            v["dir"] = dir.into();
+            v["refused"] = true.into();
+            v["read_only_fs"] = (e.raw_os_error() == Some(libc::EROFS)).into();
+            v
+        }
+    }
+}
+
+/// Outcome of filling a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FillOutcome {
+    written_bytes: u64,
+    /// `enospc`, `limit` or `error`.
+    stopped_by: &'static str,
+    error: Option<(String, Option<i32>, String)>,
+}
+
+/// Write up to `limit_mib` MiB of non-zero bytes into `file`, counting partial
+/// writes exactly, and stop at the first error.
+fn fill_file(file: &mut std::fs::File, limit_mib: usize) -> FillOutcome {
+    let chunk: Vec<u8> = (0..MIB).map(|i| (i % 251 + 1) as u8).collect();
+    let limit = (limit_mib as u64) * MIB as u64;
+    let mut written = 0u64;
+    let mut next_log = 16 * MIB as u64;
+    let failed = |written, e: std::io::Error| FillOutcome {
+        written_bytes: written,
+        stopped_by: if e.raw_os_error() == Some(libc::ENOSPC) {
+            "enospc"
+        } else {
+            "error"
+        },
+        error: Some((format!("{:?}", e.kind()), e.raw_os_error(), e.to_string())),
+    };
+    while written < limit {
+        let want = ((limit - written) as usize).min(MIB);
+        let mut off = 0;
+        while off < want {
+            match file.write(&chunk[off..want]) {
+                Ok(0) => {
+                    return failed(written, std::io::Error::from(std::io::ErrorKind::WriteZero));
+                }
+                Ok(n) => {
+                    off += n;
+                    written += n as u64;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return failed(written, e),
+            }
+        }
+        if written >= next_log {
+            log_progress(&format!("disk wrote {} MiB", written / MIB as u64));
+            next_log += 16 * MIB as u64;
+        }
+    }
+    // Delayed allocation can defer the failure to the flush.
+    if let Err(e) = file.sync_all() {
+        return failed(written, e);
+    }
+    FillOutcome {
+        written_bytes: written,
+        stopped_by: "limit",
+        error: None,
+    }
+}
+
+fn disk_report(request: &ProbeRequest) -> Value {
+    let started = Instant::now();
+    let dir = request.fill_dir.trim_end_matches('/').to_string();
+    let dir = if dir.is_empty() { "/".to_string() } else { dir };
+    let mounts = std::fs::read_to_string("/proc/mounts")
+        .map(|t| parse_proc_mounts(&t))
+        .unwrap_or_default();
+    let before = fs_stats(&dir);
+    let read_only: Vec<Value> = READ_ONLY_PROBES.iter().map(|d| write_refused(d)).collect();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let path = format!("{dir}/isolation-probe-fill.{}.{nanos}", std::process::id());
+    log_progress(&format!(
+        "disk fill start path={path} limit={} MiB",
+        request.fill_mib
+    ));
+    let (outcome, open_error) = match std::fs::File::create(&path) {
+        Ok(mut file) => (Some(fill_file(&mut file, request.fill_mib)), None),
+        Err(e) => (None, Some(io_error_json(&e))),
+    };
+    let after_fill = fs_stats(&dir);
+    let removed = if request.keep_fill {
+        false
+    } else {
+        std::fs::remove_file(&path).is_ok()
+    };
+    let after_cleanup = fs_stats(&dir);
+    let fill = match &outcome {
+        Some(o) => {
+            log_progress(&format!(
+                "disk fill done wrote={} MiB stopped_by={}",
+                o.written_bytes / MIB as u64,
+                o.stopped_by
+            ));
+            json!({
+                "written_bytes": o.written_bytes,
+                "written_mib": o.written_bytes / MIB as u64,
+                "stopped_by": o.stopped_by,
+                "error_kind": o.error.as_ref().map(|e| e.0.clone()),
+                "os_error": o.error.as_ref().and_then(|e| e.1),
+                "error": o.error.as_ref().map(|e| e.2.clone()),
+            })
+        }
+        None => {
+            json!({"written_bytes": 0, "written_mib": 0, "stopped_by": "error", "open_error": open_error})
+        }
+    };
+    json!({
+        "dir": dir,
+        "path": path,
+        "requested_mib": request.fill_mib,
+        "fill": fill,
+        "removed": removed,
+        "mount": mount_json(mount_for(&mounts, &dir)),
+        "fs_before": before,
+        "fs_after_fill": after_fill,
+        "fs_after_cleanup": after_cleanup,
+        "read_only_checks": read_only,
+        "mounts": mounts.iter().map(|m| mount_json(Some(m))).collect::<Vec<_>>(),
+        "elapsed_ms": elapsed_ms(started),
+        "expectation": "the write stops with ENOSPC at the revision's ephemeral_storage_mib, and / and /function refuse writes (PLT-4622)",
+    })
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 
@@ -776,6 +1041,68 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(bounded.chunk_mib, 1);
         assert_eq!(bounded.targets, vec!["127.0.0.1:1".to_string()]);
         assert_eq!(bounded.dns_name, "probe.invalid");
+    }
+
+    #[test]
+    fn disk_payload_defaults_to_filling_tmp_until_full() {
+        let disk = ProbeRequest::from_payload(&json!({"probe": "disk"})).unwrap();
+        assert_eq!(disk.probe, Probe::Disk);
+        assert!(!disk.probe.runs_egress() && !disk.probe.runs_resources());
+        assert_eq!(disk.fill_mib, MAX_FILL_MIB);
+        assert_eq!(disk.fill_dir, "/tmp");
+        assert!(!disk.keep_fill);
+        let bounded = ProbeRequest::from_payload(
+            &json!({"probe": "disk", "fill_mib": u64::MAX, "dir": "/x", "keep": true}),
+        )
+        .unwrap();
+        assert_eq!(bounded.fill_mib, MAX_FILL_MIB);
+        assert_eq!(bounded.fill_dir, "/x");
+        assert!(bounded.keep_fill);
+        // `all` never fills a disk.
+        let all = ProbeRequest::from_payload(&json!({})).unwrap();
+        assert_ne!(all.probe, Probe::Disk);
+    }
+
+    #[test]
+    fn proc_mounts_resolve_the_mount_of_a_path() {
+        let mounts = parse_proc_mounts(
+            "/dev/root / ext4 ro,relatime 0 0\n\
+             devtmpfs /dev devtmpfs rw,relatime 0 0\n\
+             /dev/vdb /function ext4 ro,nosuid,relatime 0 0\n\
+             /dev/vdc /tmp ext4 rw,nosuid,nodev,relatime 0 0\n",
+        );
+        assert_eq!(mounts.len(), 4);
+        assert_eq!(mount_for(&mounts, "/tmp").unwrap().device, "/dev/vdc");
+        assert_eq!(mount_for(&mounts, "/tmp/a/b").unwrap().device, "/dev/vdc");
+        assert_eq!(mount_for(&mounts, "/tmpx").unwrap().device, "/dev/root");
+        assert_eq!(mount_for(&mounts, "/function").unwrap().fs_type, "ext4");
+        assert_eq!(mount_json(mount_for(&mounts, "/"))["read_only"], true);
+        assert_eq!(mount_json(mount_for(&mounts, "/tmp"))["read_only"], false);
+    }
+
+    #[test]
+    fn fill_stops_at_the_limit_and_the_report_cleans_up() {
+        let dir = std::env::temp_dir().join(format!("probe-fill-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut f = std::fs::File::create(dir.join("f")).unwrap();
+        let o = fill_file(&mut f, 2);
+        assert_eq!(o.stopped_by, "limit");
+        assert_eq!(o.written_bytes, 2 * MIB as u64);
+        assert_eq!(
+            std::fs::metadata(dir.join("f")).unwrap().len(),
+            2 * MIB as u64
+        );
+
+        let request = ProbeRequest::from_payload(
+            &json!({"probe": "disk", "fill_mib": 1, "dir": dir.to_str().unwrap()}),
+        )
+        .unwrap();
+        let report = disk_report(&request);
+        assert_eq!(report["fill"]["stopped_by"], "limit");
+        assert_eq!(report["fill"]["written_mib"], 1);
+        assert_eq!(report["removed"], true);
+        assert!(report["fs_before"]["total_bytes"].as_u64().unwrap() > 0);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

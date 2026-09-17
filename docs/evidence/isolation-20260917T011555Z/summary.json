@@ -1,0 +1,107 @@
+{
+  "run_id": "isolation-20260917T011555Z",
+  "architecture": "aarch64",
+  "host": "Linux 7.0.0-31-generic aarch64",
+  "gateway_config": "/home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml",
+  "function": "isolation-probe",
+  "baseline_revision": "rev_01m2peysrx51k1g60khatypfyr",
+  "alloc_revision": "rev_01m2pezk98c3bztzpqv5v87ny2",
+  "disk_revision": "rev_01m2pf03c0p1x32szkftktppa5",
+  "requested": {
+    "memory_mib": 256,
+    "cpu_millis": 500,
+    "alloc_memory_mib": 128,
+    "alloc_mib": 512,
+    "disk_storage_mib": 64,
+    "disk_fill_mib": 256
+  },
+  "measurements": {
+    "M8": {
+      "status": "PASS",
+      "detail": "3/3 targets attempted, none connected, dns_resolved=false"
+    },
+    "M9": {
+      "status": "PASS",
+      "detail": "vcpu 1/1 vs 1 requested; MemTotal 232 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash"
+    },
+    "DISK": {
+      "status": "PASS",
+      "detail": "wrote 58 MiB of 256 MiB into 64 MiB (/dev/vdc ext4), stopped_by=enospc; read-only refused 2/2; host avail drop max 69 MiB (allowed 128 MiB)"
+    }
+  },
+  "orphans": "clean",
+  "findings": [],
+  "generated_at": "2026-09-17T01:17:02Z",
+  "steps": [
+    {
+      "name": "build gateway, cli and the guest probe",
+      "status": "PASS",
+      "duration_ms": 17,
+      "message": ""
+    },
+    {
+      "name": "gateway healthz/readyz",
+      "status": "PASS",
+      "duration_ms": 9819,
+      "message": ""
+    },
+    {
+      "name": "provider is firecracker / micro_vm",
+      "status": "PASS",
+      "duration_ms": 56,
+      "message": ""
+    },
+    {
+      "name": "function isolation-probe (idempotent)",
+      "status": "PASS",
+      "duration_ms": 45,
+      "message": ""
+    },
+    {
+      "name": "deploy baseline revision (256 MiB)",
+      "status": "PASS",
+      "duration_ms": 661,
+      "message": ""
+    },
+    {
+      "name": "M8: egress probe",
+      "status": "PASS",
+      "duration_ms": 16106,
+      "message": ""
+    },
+    {
+      "name": "M9: resource probe",
+      "status": "PASS",
+      "duration_ms": 9222,
+      "message": ""
+    },
+    {
+      "name": "deploy allocation revision (128 MiB)",
+      "status": "PASS",
+      "duration_ms": 768,
+      "message": ""
+    },
+    {
+      "name": "M9: allocate 512 MiB past the limit",
+      "status": "PASS",
+      "duration_ms": 15640,
+      "message": ""
+    },
+    {
+      "name": "deploy disk revision (64 MiB ephemeral storage)",
+      "status": "PASS",
+      "duration_ms": 816,
+      "message": ""
+    },
+    {
+      "name": "DISK: fill /tmp with 256 MiB",
+      "status": "PASS",
+      "duration_ms": 13468,
+      "message": ""
+    }
+  ],
+  "passed": 11,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

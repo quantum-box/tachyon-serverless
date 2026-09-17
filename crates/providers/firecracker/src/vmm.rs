@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use tokio::process::{Child, Command};
 
+use crate::host_guard::ConsoleCapture;
+
 /// Firecracker's `--id` must match `[A-Za-z0-9-]{1,64}`; environment ids
 /// contain an underscore (`env_...`), so it is replaced by a dash.
 pub fn instance_id_for(env_id: &str) -> String {
@@ -28,6 +30,7 @@ pub struct EnvPaths {
     pub stage: PathBuf,
     pub stage_app: PathBuf,
     pub function_drive: PathBuf,
+    pub scratch_drive: PathBuf,
     pub api_sock: PathBuf,
     pub vsock_uds: PathBuf,
     pub vsock_listener: PathBuf,
@@ -43,6 +46,7 @@ impl EnvPaths {
             stage: dir.join("stage"),
             stage_app: dir.join("stage").join("app"),
             function_drive: dir.join("function.ext4"),
+            scratch_drive: dir.join("scratch.ext4"),
             api_sock: dir.join("fc.sock"),
             vsock_uds: dir.join("v.sock"),
             vsock_listener: dir.join(format!("v.sock_{vsock_port}")),
@@ -68,12 +72,14 @@ pub const MAX_UNIX_SOCKET_PATH: usize = 107;
 
 /// Spawn `firecracker --api-sock ... --id ... --log-path ... --level Warning`
 /// in a new process group with stdin closed and stdout/stderr (the guest
-/// serial console) appended to `console_log`.
+/// serial console) sent through a pipe that a [`ConsoleCapture`] drains into
+/// `console_log`, keeping at most `console_cap` bytes (PLT-4622).
 pub fn spawn_firecracker(
     binary: &Path,
     paths: &EnvPaths,
     instance_id: &str,
-) -> std::io::Result<Child> {
+    console_cap: u64,
+) -> std::io::Result<(Child, ConsoleCapture)> {
     // Firecracker opens --log-path without O_CREAT; the file must exist.
     std::fs::OpenOptions::new()
         .create(true)
@@ -83,7 +89,10 @@ pub fn spawn_firecracker(
         .create(true)
         .append(true)
         .open(&paths.console_log)?;
-    let console_err = console.try_clone()?;
+    // Both ends are close-on-exec; only the dup2'ed stdout/stderr of the
+    // child survive the exec, so the pipe reaches EOF when the VMM exits.
+    let (console_rx, console_tx) = std::io::pipe()?;
+    let console_err = console_tx.try_clone()?;
     let mut cmd = Command::new(binary);
     cmd.arg("--api-sock")
         .arg(&paths.api_sock)
@@ -95,12 +104,18 @@ pub fn spawn_firecracker(
         .arg("Warning")
         // A terminal on stdin would be switched to raw mode by Firecracker.
         .stdin(Stdio::null())
-        .stdout(Stdio::from(console))
+        .stdout(Stdio::from(console_tx))
         .stderr(Stdio::from(console_err))
         .current_dir(&paths.dir)
         .kill_on_drop(false);
     cmd.process_group(0);
-    cmd.spawn()
+    let child = cmd.spawn()?;
+    // Drop our copies of the write end now, or the capture never sees EOF.
+    drop(cmd);
+    Ok((
+        child,
+        ConsoleCapture::spawn(console_rx, console, console_cap),
+    ))
 }
 
 /// SIGKILL the whole process group led by `pid`. Errors (e.g. ESRCH when the
@@ -208,6 +223,7 @@ mod tests {
         assert_eq!(p.dir, PathBuf::from("/w/env_1"));
         assert_eq!(p.stage_app, PathBuf::from("/w/env_1/stage/app"));
         assert_eq!(p.function_drive, PathBuf::from("/w/env_1/function.ext4"));
+        assert_eq!(p.scratch_drive, PathBuf::from("/w/env_1/scratch.ext4"));
         assert_eq!(p.api_sock, PathBuf::from("/w/env_1/fc.sock"));
         assert_eq!(p.vsock_uds, PathBuf::from("/w/env_1/v.sock"));
         assert_eq!(p.vsock_listener, PathBuf::from("/w/env_1/v.sock_5000"));

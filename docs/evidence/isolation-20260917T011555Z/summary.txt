@@ -1,0 +1,41 @@
+tachyon-serverless isolation measurement 20260917T011555Z
+host              Linux 7.0.0-31-generic aarch64 (aarch64)
+gateway config    /home/takanorifukuyama.guest/tsls/config/gateway.firecracker.toml
+provider          firecracker / micro_vm / dev_only=false
+function          isolation-probe (fn_01m2kzn27ynn09aqqp0pk54dep)
+baseline revision rev_01m2peysrx51k1g60khatypfyr (256 MiB, 500 m)
+alloc revision    rev_01m2pezk98c3bztzpqv5v87ny2 (128 MiB, alloc 512 MiB)
+orphans           clean
+
+== M8 egress (expected: every target fails) ==
+  1.1.1.1:443	connected=false	error=NetworkUnreachable	3 ms
+  169.254.169.254:80	connected=false	error=NetworkUnreachable	1 ms
+  10.0.2.2:80	connected=false	error=NetworkUnreachable	0 ms
+  dns example.com	resolved=false	error=ProbeTimeout	5009 ms
+  interfaces: lo (loopback_only=true, default routes 0)
+  guest boot_id: d26686f1-39d7-4c60-8267-dbe4ea06f724
+
+== M9 resources (expected: the guest sees what the revision asked for) ==
+  vcpus: available_parallelism=1 cpuinfo=1
+  memory: MemTotal=232 MiB (238240 kB)
+  cgroup: available=false memory.max=- cpu.max=-
+  alloc invocation inv_01m2pezknx4q9aqxszhx1y3ey3: status=failed class=crash type=Runtime.Crash
+  last guest progress lines:
+    2026-09-17T01:16:43.790Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+    2026-09-17T01:16:44.705Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+
+== DISK ephemeral storage (expected: ENOSPC at 64 MiB, host unaffected) ==
+  fill: /tmp/isolation-probe-fill.104.1789607817599076543 wrote 61505536 B (58 MiB) stopped_by=enospc error=No space left on device (os error 28)
+  mount: /dev/vdc on /tmp ext4 rw,nosuid,nodev,relatime
+  statvfs before: total 62869504 B avail 61505536 B; after fill avail 0 B; after cleanup avail 61505536 B
+  write into /: refused=true Read-only file system (os error 30)
+  write into /function: refused=true Read-only file system (os error 30)
+  host: avail before 30600609792 B, min 30527385600 B, after 30600548352 B; run dir max 73486336 B (52 samples)
+
+== findings ==
+  none
+
+== verdict ==
+  M8   PASS     3/3 targets attempted, none connected, dns_resolved=false
+  M9   PASS     vcpu 1/1 vs 1 requested; MemTotal 232 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash
+  DISK PASS     wrote 58 MiB of 256 MiB into 64 MiB (/dev/vdc ext4), stopped_by=enospc; read-only refused 2/2; host avail drop max 69 MiB (allowed 128 MiB)

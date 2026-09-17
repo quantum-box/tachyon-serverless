@@ -1,0 +1,11 @@
+2026-09-17T01:16:49.089Z [platform/boot] creating environment env_01m2pf03tfctvbwxtq70ha58m0 with provider firecracker
+2026-09-17T01:16:56.805Z [platform/boot] bridge connected after 7692 ms (host_pid=Some(4511))
+2026-09-17T01:16:57.101Z [platform/init] user process started (pid 104)
+2026-09-17T01:16:57.345Z [stderr/init] isolation-probe: starting (arch=aarch64 unisolated=false)
+2026-09-17T01:16:57.707Z [stdout/handler] isolation-probe: probe=disk invocation=inv_01m2pf03spfem663smmwpc4q06 attempt=att_01m2pf0c9r1pa8xp1yx3bytabk alloc_mib=0
+2026-09-17T01:16:57.768Z [stdout/handler] isolation-probe: disk fill start path=/tmp/isolation-probe-fill.104.1789607817599076543 limit=256 MiB
+2026-09-17T01:16:58.520Z [stdout/handler] isolation-probe: disk wrote 16 MiB
+2026-09-17T01:16:59.301Z [stdout/handler] isolation-probe: disk wrote 32 MiB
+2026-09-17T01:17:00.048Z [stdout/handler] isolation-probe: disk wrote 48 MiB
+2026-09-17T01:17:00.595Z [stdout/handler] isolation-probe: disk fill done wrote=58 MiB stopped_by=enospc
+2026-09-17T01:17:01.029Z [platform/shutdown] environment terminated (Completed); cleaned: process-group:4511, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2pf03tfctvbwxtq70ha58m0/console.log, archived:/home/takanorifukuyama.guest/tsls/.kvm/run/_archive/env_01m2pf03tfctvbwxtq70ha58m0/fc.log, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pf03tfctvbwxtq70ha58m0/fc.sock, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pf03tfctvbwxtq70ha58m0/v.sock, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pf03tfctvbwxtq70ha58m0/v.sock_5000, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pf03tfctvbwxtq70ha58m0/function.ext4, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pf03tfctvbwxtq70ha58m0/scratch.ext4, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pf03tfctvbwxtq70ha58m0/fc.pid, /home/takanorifukuyama.guest/tsls/.kvm/run/env_01m2pf03tfctvbwxtq70ha58m0

@@ -10,11 +10,13 @@ publish = false
 # Payload {"probe":"egress"} tries to connect to targets that must be unreachable without a NIC and
 # lists the guest interfaces and routes; {"probe":"resources"} reports the vCPU count, MemTotal and
 # the visible cgroup limits, and with {"alloc_mib": N} allocates and touches N MiB in chunks while
-# printing progress to stdout. Only `std` is used: the example opens no listener and needs no
-# network crate, so it links statically for x86_64/aarch64-unknown-linux-musl.
+# printing progress to stdout; {"probe":"disk","fill_mib":N} writes into /tmp until the write fails
+# and reports where it stopped (PLT-4622). Only `std` and `libc` are used: the example opens no
+# listener and needs no network crate, so it links statically for x86_64/aarch64-unknown-linux-musl.
 description = "Tachyon Serverless example: isolation probe reporting guest egress reachability, interfaces and resource limits as JSON."
 
 [dependencies]
 tachyon-serverless-sdk = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+libc = { workspace = true }
