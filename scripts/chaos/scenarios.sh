@@ -28,8 +28,11 @@ worker_bridge_kill_async
 control_plane_outage
 orphan_recovery_after_crash"
 # A guest kernel exists only with firecracker (TSLS_PROVIDER, scripts/kvm/provider-lib.sh).
+# With firecracker the user process runs inside the microVM, so there is no host pid to SIGKILL:
+# `worker_user_process_kill_sync` has no meaning there and its place is taken by the guest OOM
+# scenario (docs/failure-matrix.md section 8).
 if provider_is_fc; then
-  SCENARIOS="$SCENARIOS
+  SCENARIOS="$(printf '%s\n' "$SCENARIOS" | grep -v '^worker_user_process_kill_sync$')
 worker_user_process_oom_sync"
 fi
 
