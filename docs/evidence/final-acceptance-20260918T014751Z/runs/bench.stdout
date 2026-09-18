@@ -1,0 +1,32 @@
+bench exit=0
+evidence: /home/takanorifukuyama.guest/lab/docs/evidence/bench-20260918T030637Z
+16   PASS   158       hello: pooled environments after the sweep
+17   PASS   442       http-axum: create + deploy (fresh host 1)
+18   PASS   361       http-axum: create + deploy (fresh host 2)
+19   PASS   378       http-axum: create + deploy (fresh host 3)
+20   PASS   395       http-axum: create + deploy (fresh host 4)
+21   PASS   367       http-axum: create + deploy (fresh host 5)
+22   PASS   159646    http-axum: cold x20 (cache hit, pool off)
+23   PASS   428214    http-axum: concurrency sweep, pool off
+24   PASS   10778     http-axum: warm prime
+25   PASS   8020      http-axum: warm x20 (pool on)
+26   PASS   60195     http-axum: paused environment cost over 60s
+27   PASS   28851     http-axum: concurrency sweep, pool on
+28   PASS   183       http-axum: pooled environments after the sweep
+29   PASS   382       cpu-burn: create + deploy (fresh host 1)
+30   PASS   326       cpu-burn: create + deploy (fresh host 2)
+31   PASS   371       cpu-burn: create + deploy (fresh host 3)
+32   PASS   366       cpu-burn: create + deploy (fresh host 4)
+33   PASS   320       cpu-burn: create + deploy (fresh host 5)
+34   PASS   185806    cpu-burn: cold x20 (cache hit, pool off)
+35   PASS   500548    cpu-burn: concurrency sweep, pool off
+36   PASS   8801      cpu-burn: warm prime
+37   PASS   13323     cpu-burn: warm x20 (pool on)
+38   PASS   60119     cpu-burn: paused environment cost over 60s
+39   PASS   70923     cpu-burn: concurrency sweep, pool on
+40   PASS   249       cpu-burn: pooled environments after the sweep
+41   PASS   67        cleanup proof (no gateway, VMM, jail, cgroup, tap, env dir)
+
+41 steps, 0 failed
+evidence: /home/takanorifukuyama.guest/lab/docs/evidence/bench-20260918T030637Z
+wrote /home/takanorifukuyama.guest/lab/docs/evidence/bench-20260918T030637Z/summary.json and /home/takanorifukuyama.guest/lab/docs/evidence/bench-20260918T030637Z/summary.md

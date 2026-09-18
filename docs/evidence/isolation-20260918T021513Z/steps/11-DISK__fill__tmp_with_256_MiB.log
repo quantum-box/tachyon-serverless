@@ -1,0 +1,3 @@
+invocation inv_01m2s4sgjcf640pb6wpgnhdc6h trace=inv_01m2s4sgjcf640pb6wpgnhdc6h
+wrote 58 MiB into /tmp (/dev/vdc ext4), stopped_by=enospc StorageFull
+host avail drop max 77737984 B, run dir max 73842688 B over 111 samples

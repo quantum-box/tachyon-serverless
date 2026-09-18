@@ -1,0 +1,11 @@
+2026-09-18T02:16:10.275Z [platform/boot] creating environment env_01m2s4sgjs10cmn5hcgt77wstw with provider firecracker
+2026-09-18T02:16:27.013Z [platform/boot] bridge connected after 16715 ms (host_pid=Some(639344))
+2026-09-18T02:16:27.798Z [platform/init] user process started (pid 109)
+2026-09-18T02:16:28.177Z [stderr/init] isolation-probe: starting (arch=aarch64 unisolated=false)
+2026-09-18T02:16:28.871Z [stdout/handler] isolation-probe: probe=disk invocation=inv_01m2s4sgjcf640pb6wpgnhdc6h attempt=att_01m2s4t2p5tar3y6zkb4vqsct5 alloc_mib=0
+2026-09-18T02:16:28.981Z [stdout/handler] isolation-probe: disk fill start path=/tmp/isolation-probe-fill.109.1789697788649578628 limit=256 MiB
+2026-09-18T02:16:30.904Z [stdout/handler] isolation-probe: disk wrote 16 MiB
+2026-09-18T02:16:32.495Z [stdout/handler] isolation-probe: disk wrote 32 MiB
+2026-09-18T02:16:33.610Z [stdout/handler] isolation-probe: disk wrote 48 MiB
+2026-09-18T02:16:35.195Z [stdout/handler] isolation-probe: disk fill done wrote=58 MiB stopped_by=enospc
+2026-09-18T02:16:35.712Z [platform/shutdown] environment terminated (Completed); cleaned: process-group:639344, cgroup:/sys/fs/cgroup/tachyon/env_01m2s4sgjs10cmn5hcgt77wstw, jail:/srv/jailer/firecracker/env-01m2s4sgjs10cmn5hcgt77wstw, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s4sgjs10cmn5hcgt77wstw/console.log, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s4sgjs10cmn5hcgt77wstw/fc.log, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4sgjs10cmn5hcgt77wstw/function.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4sgjs10cmn5hcgt77wstw/scratch.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4sgjs10cmn5hcgt77wstw/fc.pid, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4sgjs10cmn5hcgt77wstw

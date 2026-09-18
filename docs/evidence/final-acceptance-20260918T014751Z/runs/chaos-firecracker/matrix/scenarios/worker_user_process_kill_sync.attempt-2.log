@@ -1,0 +1,6 @@
+[chaos worker_user_process_kill_sync] begin (SIGKILL the user process of a running sync invocation) work=/home/takanorifukuyama.guest/w/tsls-chaos.dfHlkl
+[chaos worker_user_process_kill_sync]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos worker_user_process_kill_sync]   ok   workload.async_accepted accepted=3 refused=0
+[chaos worker_user_process_kill_sync] fault injected
+/home/takanorifukuyama.guest/lab/scripts/chaos/scenarios.sh: line 906: kill: `': not a pid or valid job spec
+[chaos worker_user_process_kill_sync]   FAIL harness.scenario_completed the scenario stopped before its last step (see the attempt log)

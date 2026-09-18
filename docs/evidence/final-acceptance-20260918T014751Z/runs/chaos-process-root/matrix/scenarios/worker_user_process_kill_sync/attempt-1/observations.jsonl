@@ -1,0 +1,7 @@
+{"key":"setup.pids","value":"bridge=808029 user=808039 env=env_01m2sbaqdjw7k9k4800efcxsgj"}
+{"key":"client.answer","value":"502 crash Runtime.Crash"}
+{"key":"ledger.status","value":"failed Runtime.Crash"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":3}
+{"key":"usage.terminal_environments","value":8}
+{"key":"usage.environments_without_stop_event","value":0}

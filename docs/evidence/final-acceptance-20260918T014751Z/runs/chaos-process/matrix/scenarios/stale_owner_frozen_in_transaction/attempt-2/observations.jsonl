@@ -1,0 +1,9 @@
+{"key":"outage.b_sync_while_a_frozen","value":"code=503 error_type=Host.StoreUnavailable after=5032ms (client max 20 s)"}
+{"key":"reclaim.invocation_settled_as","value":"succeeded -"}
+{"key":"lease.b_took_its_lease_back","value":"1 renewals after the outage"}
+{"key":"store.slow_write_transactions_a","value":"\"site\":\"crates/application/src/repository/sqlite/mod.rs:1438\",\"held_ms\":20386"}
+{"key":"client.a_answer_to_the_stale_invocation","value":"200"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":9}
+{"key":"usage.terminal_environments","value":17}
+{"key":"usage.environments_without_stop_event","value":0}

@@ -1,0 +1,22 @@
+function=fn_01m2s59bn4ajpxpea3a2tpnqfs revision=rev_01m2s59c0mjejjap5xrrc8qjbk
+PASS  1-known-duration-invocations  200s=3/3 (payload seconds=1.0)
+PASS  2-timeout  status=504 code=timeout
+PASS  3-duplicate-request-replayed  same invocation id for both sends: inv_01m2s5bscdnh8wm69eyw30xsxb / inv_01m2s5bscdnh8wm69eyw30xsxb
+PASS  4-journal-holds-events-ledger-empty  journal pending=25 (attempt_settled=5) ledger events=0
+PASS  5-kill-9-gateway-1  exit=137 (nothing was collected)
+PASS  6-collector-killed-between-ledger-commit-and-cursor  exit=137 ledger events=4 journal cursor=0
+PASS  7-journal-drained-no-double-count  ledger events=25 (journal had 25) distinct=25 duplicates_ignored=4
+PASS  8a-counts  invocations=5 attempts=5 retries=0 timeouts=1
+PASS  8b-host-measured-handler-time  handler_ms=6562 expected [5200, 8700]
+PASS  8c-every-handler-segment-host-measured  non-host handler segments=0
+PASS  8c-known-duration-samples  tolerance 700 ms: [{"outcome":"succeeded","ms":1372,"guest":1111},{"outcome":"succeeded","ms":1332,"guest":1173},{"outcome":"succeeded","ms":1392,"guest":1186},{"outcome":"timeout","ms":2003,"guest":null},{"outcome":"succeeded","ms":463,"guest":283}]
+PASS  8d-billable-is-init-plus-handler  billable_ms=13225 user_init_ms=6663 handler_ms=6562 vcpu_milli_ms=6612500
+PASS  8e-provisional-charge-follows-price-table  vcpu charge=16531 micros (expected 16531, table provisional-dev-2026-09-v1)
+PASS  8f-provisional-not-an-invoice  {"provisional":true,"not_an_invoice":true,"billing_enabled":false}
+PASS  9-tenant-b-sees-nothing  attempts=0 lines=0
+PASS  10-tsls-usage  PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+PASS  11-environment-stopped-carries-cgroup-cpu-and-memory-peak  environment_stopped=5 provider_reported(cpu_usec>0, memory.peak>0)=5; [{"cpu_ms":8336,"peak_mib":44},{"cpu_ms":8799,"peak_mib":44},{"cpu_ms":10378,"peak_mib":44},{"cpu_ms":10524,"peak_mib":44},{"cpu_ms":5819,"peak_mib":44}]
+note  attempt_settled events with resources.cgroup_cpu_usec unknown (by design): 5
+PASS  12-no-vmm-jail-cgroup-tap-left  0 leftovers
+evidence: /home/takanorifukuyama.guest/plt4649/runs/usage/usage/usage-20260918T022439Z-firecracker
+usage e2e: all checks passed

@@ -1,0 +1,258 @@
+{
+  "schema": "tachyon-serverless/bench/v1",
+  "run": "bench-20260918T022840Z",
+  "commit": "4afd8c1d494ad055763151874fc369991c33da64",
+  "worktree_dirty": "false",
+  "host": {
+    "uname": "Linux lima-tsls-kvm 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 03:33:01 UTC 2026 aarch64 GNU/Linux",
+    "arch": "aarch64",
+    "kernel_release": "7.0.0-31-generic",
+    "cpu_model": "0x000",
+    "cpus": "4",
+    "mem_total_kib": "8103308",
+    "kvm": "rw",
+    "nested_virtualization": "true",
+    "lscpu": {
+      "lscpu": [
+        {
+          "field": "Architecture:",
+          "data": "aarch64"
+        },
+        {
+          "field": "CPU op-mode(s):",
+          "data": "64-bit"
+        },
+        {
+          "field": "Byte Order:",
+          "data": "Little Endian"
+        },
+        {
+          "field": "CPU(s):",
+          "data": "4"
+        },
+        {
+          "field": "On-line CPU(s) list:",
+          "data": "0-3"
+        },
+        {
+          "field": "Vendor ID:",
+          "data": "Apple"
+        },
+        {
+          "field": "Model name:",
+          "data": "-"
+        },
+        {
+          "field": "Model:",
+          "data": "0"
+        },
+        {
+          "field": "Thread(s) per core:",
+          "data": "1"
+        },
+        {
+          "field": "Core(s) per cluster:",
+          "data": "4"
+        },
+        {
+          "field": "Socket(s):",
+          "data": "-"
+        },
+        {
+          "field": "Cluster(s):",
+          "data": "1"
+        },
+        {
+          "field": "Stepping:",
+          "data": "0x0"
+        },
+        {
+          "field": "BogoMIPS:",
+          "data": "48.00"
+        },
+        {
+          "field": "Flags:",
+          "data": "fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 asimddp sha512 asimdfhm dit uscat ilrcpc flagm sb paca pacg dcpodp flagm2 frint i8mm bf16 bti afp"
+        },
+        {
+          "field": "NUMA node(s):",
+          "data": "1"
+        },
+        {
+          "field": "NUMA node0 CPU(s):",
+          "data": "0-3"
+        },
+        {
+          "field": "Vulnerability Gather data sampling:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Ghostwrite:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Indirect target selection:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Itlb multihit:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability L1tf:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Mds:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Meltdown:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Mmio stale data:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Old microcode:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Reg file data sampling:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Retbleed:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Spec rstack overflow:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Spec store bypass:",
+          "data": "Vulnerable"
+        },
+        {
+          "field": "Vulnerability Spectre v1:",
+          "data": "Mitigation; __user pointer sanitization"
+        },
+        {
+          "field": "Vulnerability Spectre v2:",
+          "data": "Mitigation; CSV2, but not BHB"
+        },
+        {
+          "field": "Vulnerability Srbds:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Tsa:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Tsx async abort:",
+          "data": "Not affected"
+        },
+        {
+          "field": "Vulnerability Vmscape:",
+          "data": "Not affected"
+        }
+      ]
+    },
+    "cpu_vendor": "Apple",
+    "virtualization": "apple",
+    "nested_detection": "BENCH_NESTED, else systemd-detect-virt != none, else the x86 hypervisor cpu flag",
+    "physical_host": "Apple M4 (macOS, Darwin 25.6.0) -> Lima 'tsls-kvm' vmType vz with nested virtualization, 4 vCPU / 8 GiB guest; the Mac is a shared developer machine (see physical-host-load.tsv)"
+  },
+  "firecracker": {
+    "version": "Firecracker v1.17.0",
+    "manifest_version": "v1.17.0",
+    "binary_sha256": "fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c",
+    "tgz_sha256": "e351ebe4f7a16b5873bbd51005d2e6767103cff4d5ebc829df2d3f95a93e2256"
+  },
+  "jailer_version": "Jailer v1.17.0",
+  "guest_kernel": {
+    "sha256": "947a09e2f89b488cdb5efb42eceb37a6ac414fcb0ddb1e5bba2ba0cd1a873a2d",
+    "manifest_sha256": "947a09e2f89b488cdb5efb42eceb37a6ac414fcb0ddb1e5bba2ba0cd1a873a2d",
+    "key": "firecracker-ci/20260916-dcfc69b625d0-0/aarch64/vmlinux-6.18.48",
+    "url": "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260916-dcfc69b625d0-0/aarch64/vmlinux-6.18.48",
+    "ci_version": "auto",
+    "bytes": 19397120
+  },
+  "rootfs": {
+    "sha256": "ea7b615273214cecd5b45990f999ea585103a557cb3477cc37dfc8073d7d0fae",
+    "bytes": 67108864
+  },
+  "runtime_bridge": {
+    "sha256": "ba077d25290be1b9a387df282700a52855ab907bbf78a072e3f01b8a1114da74",
+    "bytes": 5039960
+  },
+  "artifacts": {
+    "hello": {
+      "sha256": "8f26f2d043c72c24be935f1fc9965b7cf7c5e9605296abc8918fa29ea4cdf076",
+      "bytes": 1432512
+    },
+    "http-axum": {
+      "sha256": "321bea7c92d630b6dcdd689d0c7c1b20c5effe56b4bd669a0c614930bc89d4c5",
+      "bytes": 2007296
+    },
+    "cpu-burn": {
+      "sha256": "95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523",
+      "bytes": 1428432
+    }
+  },
+  "gateway": {
+    "build_profile": "release",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "base_config": "/home/takanorifukuyama.guest/lab/config/gateway.firecracker.toml",
+    "cold_config": {
+      "file": "gateway-cold.toml",
+      "sha256": "b2e663a78159e855160b278aed3b36af6c2a2ca35dd960a8ab22b0704e94d953"
+    },
+    "warm_config": {
+      "file": "gateway-warm.toml",
+      "sha256": "a4c492a72093381bda3109e1241173960c637eb3f3af3aaa1a39dd3a87fcb40e"
+    },
+    "runs_as": "root via sudo (jailer + host cgroup required)",
+    "invoked_by": "takanorifukuyama"
+  },
+  "profile": {
+    "isolation": "firecracker microVM, jailer enabled, host cgroup v2 mode = required, egress none",
+    "memory_mib": 256,
+    "cpu_millis": 500,
+    "timeout_seconds": 30,
+    "revision_max_concurrency": "product default (4)"
+  },
+  "load": {
+    "samples": [
+      "hello",
+      "http-axum",
+      "cpu-burn"
+    ],
+    "fresh_host_trials_per_sample": 5,
+    "cold_n": 20,
+    "warm_n": 20,
+    "warm_gap_ms": 250,
+    "sweep_levels": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "sweep_requests_per_level": 24,
+    "sweep_modes": [
+      "cold",
+      "warm"
+    ],
+    "idle_seconds": 60,
+    "request_timeout_s": 90,
+    "payloads": {
+      "hello": "POST :invoke {\"name\":\"bench\"}",
+      "http-axum": "GET /http/ (router answers ok)",
+      "cpu-burn": "POST :invoke {\"seconds\":0.2}"
+    },
+    "seeds": "none: payloads are fixed and requests are issued in a fixed order; nothing is randomised",
+    "client": "curl on the same host over loopback, one request per process, no keep-alive"
+  }
+}

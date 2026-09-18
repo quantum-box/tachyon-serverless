@@ -1,0 +1,30 @@
+{"name":"setup.a_owns_the_running_invocation","ok":true,"detail":"invocation=inv_01m2s7a2e1dphg349k4472j9q6 a=dsp_01m2s78wq7txnw78km5xatg7ej env=env_01m2s7a2e520r12t6j5jmwhhkp"}
+{"name":"fault.a_stopped_inside_a_write_transaction","ok":true,"detail":"ps stat=Tl flag consumed=yes \"site\":\"crates/application/src/repository/sqlite/triggers.rs:522\""}
+{"name":"outage.nobody_reclaimed_while_the_store_was_locked","ok":true,"detail":"reclaimed rows: "}
+{"name":"reclaim.invocation_settled_once","ok":true,"detail":"status=succeeded -"}
+{"name":"reclaim.b_reclaimed_a_not_the_other_way","ok":true,"detail":"a.reclaimed_at=2026-09-18T03:01:14.596740479Z b.reclaimed_at=-"}
+{"name":"lease.b_is_not_fenced","ok":true,"detail":"b fenced=false reclaimed_at=- renewal log=1"}
+{"name":"fencing.a_is_fenced","ok":true,"detail":"readyz=503 fenced=true stall log=1"}
+{"name":"reclaim.fenced_environment_terminated","ok":true,"detail":"env=env_01m2s7a2e520r12t6j5jmwhhkp state=lost"}
+{"name":"fencing.b_keeps_serving","ok":true,"detail":"code=200"}
+{"name":"fencing.a_refuses_new_invocations","ok":true,"detail":"code=503"}
+{"name":"fencing.settled_invocation_not_overwritten","ok":true,"detail":"invocation succeeded:1:2026-09-18T03:01:14.558403447Z:1091 -> succeeded:1:2026-09-18T03:01:14.558403447Z:1091"}
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=1/1"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=3 refused=0"}
+{"name":"cv.accepted_never_lost","ok":true,"detail":"accepted=9 missing_rows=0"}
+{"name":"cv.accepted_all_terminal","ok":true,"detail":"accepted=9 not_terminal=0"}
+{"name":"cv.outcome_per_policy","ok":true,"detail":"unexpected_outcomes=0 expected_failures=0"}
+{"name":"cv.one_outcome_per_invocation","ok":true,"detail":"invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=1 (re-executions, recorded)"}
+{"name":"cv.side_effect_exactly_once","ok":true,"detail":"orders_not_applied_exactly_once=0 executions=8"}
+{"name":"cv.outbox_drained","ok":true,"detail":"unsent_outbox_rows=0"}
+{"name":"cv.ledger_all_terminal","ok":true,"detail":"invocations=27 non_terminal=0 by_status=succeeded:27"}
+{"name":"cv.jetstream_drained","ok":true,"detail":"pending=0 ack_pending=0 stream_messages=0 redelivered=0"}
+{"name":"cv.cron_each_time_once","ok":true,"detail":"fires=13 distinct_times=13"}
+{"name":"cv.usage_counted_once","ok":true,"detail":"journal_pending=0 ledger_events=123 distinct=123 attempts_settled_twice=0 duplicates_ignored=1"}
+{"name":"cv.every_terminal_environment_metered_once","ok":true,"detail":"terminal environments=16 without a stop event=0 environments with a stop=16 (pooled ones report when they stop, after this check)"}
+{"name":"cv.usage_from_cgroup_accounting_or_unknown","ok":true,"detail":"environment_stopped=16 provider_reported=15 unknown=1 other=0"}
+{"name":"cv.graceful_stop_exit_0","ok":true,"detail":"exit=0"}
+{"name":"cv.no_orphan_processes","ok":true,"detail":"bridge_or_user_processes=0 env_dirs=0"}
+{"name":"cv.no_open_environments","ok":true,"detail":"non_terminal_environment_rows=0"}
+{"name":"cv.no_secret_value_on_disk","ok":true,"detail":"files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.0xqxrc (data_dir, provider workdir with function/scratch drives, console and fc logs, snapshots) /srv/jailer (jails))"}
+{"name":"cv.no_vmm_jail_cgroup_tap_or_table_left","ok":true,"detail":"firecracker/jailer processes, /sys/fs/cgroup/tachyon/*, /srv/jailer/firecracker/*, tsls* taps, table inet tachyon_egress: 0"}

@@ -1,0 +1,4 @@
+# edit 3 ###
+[[tenants]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+hard_limit_micros = 26148

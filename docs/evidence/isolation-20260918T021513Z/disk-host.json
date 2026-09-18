@@ -1,0 +1,9 @@
+{
+  "run_dir": "/home/takanorifukuyama.guest/lab/.kvm/run",
+  "samples": 111,
+  "host_avail_before_bytes": 28379287552,
+  "host_avail_min_bytes": 28301549568,
+  "host_avail_after_bytes": 28378267648,
+  "host_avail_max_drop_bytes": 77737984,
+  "run_dir_max_bytes": 73842688
+}

@@ -1,0 +1,56 @@
+[e2e] isolation measurement 20260918T021513Z (arch aarch64, evidence /home/takanorifukuyama.guest/lab/docs/evidence/isolation-20260918T021513Z)
+[e2e] step 1: build gateway, cli and the guest probe
+[e2e]   PASS (4 ms)
+[e2e] host watcher pid 636779 (cgroups under /sys/fs/cgroup/tachyon)
+[e2e] gateway pid 636780, config /home/takanorifukuyama.guest/plt4649/runs/isolation/gateway.toml, log /home/takanorifukuyama.guest/lab/docs/evidence/isolation-20260918T021513Z/gateway.log
+[e2e] step 2: gateway healthz/readyz
+[e2e]   PASS (3904 ms)
+[e2e] step 3: provider is firecracker / micro_vm
+[e2e]   PASS (13 ms)
+[e2e] step 4: function isolation-probe (idempotent)
+[e2e]   PASS (16 ms)
+[e2e] step 5: deploy baseline revision (256 MiB)
+[e2e]   PASS (436 ms)
+[e2e] step 6: M8: egress probe
+[e2e]   PASS (11489 ms)
+[e2e] step 7: M9: resource probe
+[e2e]   PASS (9314 ms)
+[e2e] step 8: deploy allocation revision (128 MiB)
+[e2e]   PASS (532 ms)
+[e2e] step 9: M9: allocate 512 MiB past the limit
+[e2e]   PASS (29725 ms)
+[e2e] step 10: deploy disk revision (64 MiB ephemeral storage)
+[e2e]   PASS (733 ms)
+[e2e] step 11: DISK: fill /tmp with 256 MiB
+[e2e]   PASS (26923 ms)
+[e2e] step 12: NET: host addresses and capabilities
+[e2e]   PASS (151 ms)
+[e2e] step 13: NET: tenant B function isolation-probe
+[e2e]   PASS (39 ms)
+[e2e] step 14: NET: deploy public-web, restricted and tenant B revisions
+[e2e]   PASS (1781 ms)
+[e2e] step 15: NET: expectations
+[e2e]   PASS (26 ms)
+[e2e] step 16: NET: public-web probe
+[e2e]   PASS (23723 ms)
+[e2e] step 17: NET: restricted probe
+[e2e]   PASS (19582 ms)
+[e2e] step 18: NET: two tenants at once (A -> B)
+[e2e]   PASS (40023 ms)
+[e2e] step 19: NOISY: deploy tenant A (cpu / io / oom) and tenant B revisions
+[e2e]   PASS (1924 ms)
+[e2e] step 20: NOISY: tenant B alone (5 runs)
+[e2e]   PASS (66293 ms)
+[e2e] step 21: NOISY: tenant B next to tenant A (5 runs, then 3 after)
+[e2e]   PASS (161336 ms)
+[e2e] gateway exit status 0
+taps after the run: (none)
+table inet tachyon_egress after the run: absent
+net.json leases left under /home/takanorifukuyama.guest/lab/.kvm/run: 0
+--- nft list tables ---
+table ip nat
+cgroup parent /sys/fs/cgroup/tachyon: absent
+environment cgroups left: (none)
+jails left under /srv/jailer: (none)
+firecracker / jailer processes left: (none)
+jq: error (at /home/takanorifukuyama.guest/lab/docs/evidence/isolation-20260918T021513Z/noisy-b.jsonl:13): Cannot index object with null

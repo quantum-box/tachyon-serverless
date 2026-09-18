@@ -1,0 +1,4 @@
+pre-i1 inv_01m2s7jhh5meyxsjbr9mah6tta inline
+pre-o1 inv_01m2s7jhjkf59hm36c6vn6b3d6 object
+pre-w1 inv_01m2s7jhkwnyfsszbbx07ednwj webhook
+bridge-1 inv_01m2s7jhnmedkqp6kfgatrt8j6 inline

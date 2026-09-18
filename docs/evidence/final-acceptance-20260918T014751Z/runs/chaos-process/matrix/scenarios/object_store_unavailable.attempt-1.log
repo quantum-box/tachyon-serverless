@@ -1,0 +1,32 @@
+[chaos object_store_unavailable] begin (object root unreadable/unwritable (chmod 000) + orphan object from a SIGKILL after the put) work=/home/takanorifukuyama.guest/w/tsls-chaos.MXsuhx
+[chaos object_store_unavailable]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos object_store_unavailable]   ok   workload.async_accepted accepted=6 refused=0
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 410: 852200 Killed                     env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos object_store_unavailable]   ok   setup.orphan_object_on_disk unreferenced=1
+[chaos object_store_unavailable]   ok   setup.held_invocation_accepted code=202 storage=object
+[chaos object_store_unavailable] fault injected
+[chaos object_store_unavailable]   ok   outage.object_input_refused_with_reason code=503 reason=object_store_unavailable
+[chaos object_store_unavailable]   ok   outage.inline_input_still_accepted code=202
+[chaos object_store_unavailable]   ok   outage.read_failure_is_not_a_success status=queued executions=0
+[chaos object_store_unavailable]   ok   outage.gateway_alive pid=852233
+[chaos object_store_unavailable] fault removed
+[chaos object_store_unavailable] converged
+[chaos object_store_unavailable]   ok   gc.orphans_collected unreferenced 1 -> 0; files=3
+[chaos object_store_unavailable]   ok   gc.referenced_objects_kept open invocations missing their object=0
+[chaos object_store_unavailable]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos object_store_unavailable]   ok   workload.async_accepted accepted=3 refused=0
+[chaos object_store_unavailable]   ok   cv.accepted_never_lost accepted=11 missing_rows=0
+[chaos object_store_unavailable]   ok   cv.accepted_all_terminal accepted=11 not_terminal=0
+[chaos object_store_unavailable]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos object_store_unavailable]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos object_store_unavailable]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=8
+[chaos object_store_unavailable]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos object_store_unavailable]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos object_store_unavailable]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos object_store_unavailable]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos object_store_unavailable]   ok   cv.usage_counted_once journal_pending=0 ledger_events=79 distinct=79 attempts_settled_twice=0 duplicates_ignored=0
+[chaos object_store_unavailable]   ok   cv.every_terminal_environment_metered_once terminal environments=19 without a stop event=0 environments with a stop=19 (pooled ones report when they stop, after this check)
+[chaos object_store_unavailable]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos object_store_unavailable]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos object_store_unavailable]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos object_store_unavailable]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.MXsuhx)

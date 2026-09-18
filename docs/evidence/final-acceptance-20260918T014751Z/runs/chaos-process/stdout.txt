@@ -1,0 +1,636 @@
+[chaos matrix] === baseline attempt 1 ===
+[chaos baseline] begin (none (steady workload, graceful stop)) work=/home/takanorifukuyama.guest/w/tsls-chaos.ubRMdo
+[chaos baseline]   ok   workload.sync_ok sync_200_with_secret=3/3
+[chaos baseline]   ok   workload.async_accepted accepted=9 refused=0
+[chaos baseline]   ok   cv.accepted_never_lost accepted=9 missing_rows=0
+[chaos baseline]   ok   cv.accepted_all_terminal accepted=9 not_terminal=0
+[chaos baseline]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos baseline]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos baseline]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=6
+[chaos baseline]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos baseline]   ok   cv.ledger_all_terminal invocations=16 non_terminal=0 by_status=succeeded:16
+[chaos baseline]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos baseline]   ok   cv.cron_each_time_once fires=4 distinct_times=4
+[chaos baseline]   ok   cv.usage_counted_once journal_pending=0 ledger_events=80 distinct=80 attempts_settled_twice=0 duplicates_ignored=0
+[chaos baseline]   ok   cv.every_terminal_environment_metered_once terminal environments=16 without a stop event=0 environments with a stop=16 (pooled ones report when they stop, after this check)
+[chaos baseline]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos baseline]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos baseline]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos baseline]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.ubRMdo)
+[chaos matrix] === sync_gateway_kill attempt 1 ===
+[chaos sync_gateway_kill] begin (SIGKILL gateway with one sync invocation running and one queued behind it) work=/home/takanorifukuyama.guest/w/tsls-chaos.UMPsI4
+[chaos sync_gateway_kill]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos sync_gateway_kill]   ok   workload.async_accepted accepted=6 refused=0
+[chaos sync_gateway_kill]   ok   setup.one_running_one_not_dispatched running=inv_01m2scambgd6ee4dvktj2h4yzk:running queued=inv_01m2scanmvzrap7cmyjn0gfz81:queued
+[chaos sync_gateway_kill] fault injected
+[chaos sync_gateway_kill]   ok   client.no_answer_from_killed_gateway running_client=000 queued_client=000 (transport error: the client retries or reads the status URL)
+[chaos sync_gateway_kill] fault removed
+[chaos sync_gateway_kill] converged
+[chaos sync_gateway_kill]   ok   ledger.dispatched_is_outcome_unknown running -> outcome_unknown Host.Restarted
+[chaos sync_gateway_kill]   ok   ledger.not_dispatched_is_failed_platform queued -> failed Host.Restarted
+[chaos sync_gateway_kill]   ok   ledger.not_dispatched_has_no_attempt_run attempts=
+[chaos sync_gateway_kill]   ok   orphans.worker_of_dead_gateway_terminated env=env_01m2scamcd84yvfkbh9tp8t3g6 processes_left=0 reconcile={"found":0,"terminated":0,"lost":0,"reclaim":{"dispatchers":0,"error":null,"fenced":0,"invocations":0,"leases":0,"pending":0,"terminated":1}}
+[chaos sync_gateway_kill]   ok   client.retry_of_not_started_succeeds code=200
+[chaos sync_gateway_kill]   ok   client.replay_of_unknown_does_not_rerun code=502 error=outcome_unknown invocation=inv_01m2scambgd6ee4dvktj2h4yzk
+[chaos sync_gateway_kill]   ok   cv.accepted_never_lost accepted=6 missing_rows=0
+[chaos sync_gateway_kill]   ok   cv.accepted_all_terminal accepted=6 not_terminal=0
+[chaos sync_gateway_kill]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos sync_gateway_kill]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos sync_gateway_kill]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=4
+[chaos sync_gateway_kill]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos sync_gateway_kill]   ok   cv.ledger_all_terminal invocations=14 non_terminal=0 by_status=failed:1,outcome_unknown:1,succeeded:12
+[chaos sync_gateway_kill]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos sync_gateway_kill]   ok   cv.cron_each_time_once fires=3 distinct_times=3
+[chaos sync_gateway_kill]   ok   cv.usage_counted_once journal_pending=0 ledger_events=63 distinct=63 attempts_settled_twice=0 duplicates_ignored=0
+[chaos sync_gateway_kill]   ok   cv.every_terminal_environment_metered_once terminal environments=13 without a stop event=0 environments with a stop=13 (pooled ones report when they stop, after this check)
+[chaos sync_gateway_kill]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos sync_gateway_kill]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos sync_gateway_kill]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos sync_gateway_kill]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.UMPsI4)
+[chaos matrix] === async_kill_accept_after_commit attempt 1 ===
+[chaos async_kill_accept_after_commit] begin (SIGKILL at failpoint accept.after_commit (before the 202)) work=/home/takanorifukuyama.guest/w/tsls-chaos.5Mo8b3
+[chaos async_kill_accept_after_commit]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos async_kill_accept_after_commit]   ok   workload.async_accepted accepted=6 refused=0
+[chaos async_kill_accept_after_commit] fault injected
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 410: 825506 Killed                     env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos async_kill_accept_after_commit]   ok   fault.failpoint_killed_gateway failpoint=accept.after_commit first_answer=000
+[chaos async_kill_accept_after_commit]   ok   fault.gateway_died_of_sigkill exit=137
+[chaos async_kill_accept_after_commit]   ok   fault.no_202_before_crash code=000
+[chaos async_kill_accept_after_commit] fault removed
+[chaos async_kill_accept_after_commit]   ok   client.retry_with_key code=202 replayed=true
+[chaos async_kill_accept_after_commit] converged
+[chaos async_kill_accept_after_commit]   ok   converge.invocation_succeeded status=succeeded attempts=1 dispatch_attempts=1 executions=1
+[chaos async_kill_accept_after_commit]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos async_kill_accept_after_commit]   ok   workload.async_accepted accepted=3 refused=0
+[chaos async_kill_accept_after_commit]   ok   cv.accepted_never_lost accepted=10 missing_rows=0
+[chaos async_kill_accept_after_commit]   ok   cv.accepted_all_terminal accepted=10 not_terminal=0
+[chaos async_kill_accept_after_commit]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos async_kill_accept_after_commit]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos async_kill_accept_after_commit]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=7
+[chaos async_kill_accept_after_commit]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos async_kill_accept_after_commit]   ok   cv.ledger_all_terminal invocations=14 non_terminal=0 by_status=succeeded:14
+[chaos async_kill_accept_after_commit]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos async_kill_accept_after_commit]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos async_kill_accept_after_commit]   ok   cv.usage_counted_once journal_pending=0 ledger_events=70 distinct=70 attempts_settled_twice=0 duplicates_ignored=0
+[chaos async_kill_accept_after_commit]   ok   cv.every_terminal_environment_metered_once terminal environments=14 without a stop event=0 environments with a stop=14 (pooled ones report when they stop, after this check)
+[chaos async_kill_accept_after_commit]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos async_kill_accept_after_commit]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos async_kill_accept_after_commit]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos async_kill_accept_after_commit]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.5Mo8b3)
+[chaos matrix] === async_kill_after_publish attempt 1 ===
+[chaos async_kill_after_publish] begin (SIGKILL at failpoint outbox.after_publish (broker ACK, row not marked)) work=/home/takanorifukuyama.guest/w/tsls-chaos.BCxnOh
+[chaos async_kill_after_publish]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos async_kill_after_publish]   ok   workload.async_accepted accepted=6 refused=0
+[chaos async_kill_after_publish] fault injected
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 411: 827216 Killed                     env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos async_kill_after_publish]   ok   fault.failpoint_killed_gateway failpoint=outbox.after_publish first_answer=202
+[chaos async_kill_after_publish]   ok   fault.gateway_died_of_sigkill exit=137
+[chaos async_kill_after_publish]   ok   fault.accepted_before_crash code=202 invocation=inv_01m2scc2aa0ftvrcch9a695qd9
+[chaos async_kill_after_publish]   ok   at_crash.no_ack_before_terminal status=accepted unacked_messages=1 unsent_outbox=1
+[chaos async_kill_after_publish] fault removed
+[chaos async_kill_after_publish] converged
+[chaos async_kill_after_publish]   ok   converge.invocation_succeeded status=succeeded attempts=1 dispatch_attempts=1 executions=1
+[chaos async_kill_after_publish]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos async_kill_after_publish]   ok   workload.async_accepted accepted=3 refused=0
+[chaos async_kill_after_publish]   ok   cv.accepted_never_lost accepted=10 missing_rows=0
+[chaos async_kill_after_publish]   ok   cv.accepted_all_terminal accepted=10 not_terminal=0
+[chaos async_kill_after_publish]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos async_kill_after_publish]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos async_kill_after_publish]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=7
+[chaos async_kill_after_publish]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos async_kill_after_publish]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos async_kill_after_publish]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos async_kill_after_publish]   ok   cv.cron_each_time_once fires=2 distinct_times=2
+[chaos async_kill_after_publish]   ok   cv.usage_counted_once journal_pending=0 ledger_events=75 distinct=75 attempts_settled_twice=0 duplicates_ignored=0
+[chaos async_kill_after_publish]   ok   cv.every_terminal_environment_metered_once terminal environments=15 without a stop event=0 environments with a stop=15 (pooled ones report when they stop, after this check)
+[chaos async_kill_after_publish]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos async_kill_after_publish]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos async_kill_after_publish]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos async_kill_after_publish]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.BCxnOh)
+[chaos matrix] === async_kill_after_claim attempt 1 ===
+[chaos async_kill_after_claim] begin (SIGKILL at failpoint dispatch.after_claim (claimed, handler not started)) work=/home/takanorifukuyama.guest/w/tsls-chaos.HEgSSN
+[chaos async_kill_after_claim]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos async_kill_after_claim]   ok   workload.async_accepted accepted=6 refused=0
+[chaos async_kill_after_claim] fault injected
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 519: 828975 Killed                     env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos async_kill_after_claim]   ok   fault.failpoint_killed_gateway failpoint=dispatch.after_claim first_answer=202
+[chaos async_kill_after_claim]   ok   fault.gateway_died_of_sigkill exit=137
+[chaos async_kill_after_claim]   ok   fault.accepted_before_crash code=202 invocation=inv_01m2sccyczyavg4v5nxwkqz1c1
+[chaos async_kill_after_claim]   ok   at_crash.no_ack_before_terminal status=queued unacked_messages=1 unsent_outbox=0
+[chaos async_kill_after_claim] fault removed
+[chaos async_kill_after_claim] converged
+[chaos async_kill_after_claim]   ok   converge.invocation_succeeded status=succeeded attempts=1 dispatch_attempts=2 executions=1
+[chaos async_kill_after_claim]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos async_kill_after_claim]   ok   workload.async_accepted accepted=3 refused=0
+[chaos async_kill_after_claim]   ok   cv.accepted_never_lost accepted=10 missing_rows=0
+[chaos async_kill_after_claim]   ok   cv.accepted_all_terminal accepted=10 not_terminal=0
+[chaos async_kill_after_claim]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos async_kill_after_claim]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos async_kill_after_claim]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=7
+[chaos async_kill_after_claim]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos async_kill_after_claim]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos async_kill_after_claim]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos async_kill_after_claim]   ok   cv.cron_each_time_once fires=2 distinct_times=2
+[chaos async_kill_after_claim]   ok   cv.usage_counted_once journal_pending=0 ledger_events=75 distinct=75 attempts_settled_twice=0 duplicates_ignored=0
+[chaos async_kill_after_claim]   ok   cv.every_terminal_environment_metered_once terminal environments=15 without a stop event=0 environments with a stop=15 (pooled ones report when they stop, after this check)
+[chaos async_kill_after_claim]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos async_kill_after_claim]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos async_kill_after_claim]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos async_kill_after_claim]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.HEgSSN)
+[chaos matrix] === async_kill_before_commit attempt 1 ===
+[chaos async_kill_before_commit] begin (SIGKILL at failpoint dispatch.before_commit (side effect done, outcome not committed)) work=/home/takanorifukuyama.guest/w/tsls-chaos.YaZi7T
+[chaos async_kill_before_commit]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos async_kill_before_commit]   ok   workload.async_accepted accepted=6 refused=0
+[chaos async_kill_before_commit] fault injected
+[chaos async_kill_before_commit]   ok   fault.failpoint_killed_gateway failpoint=dispatch.before_commit first_answer=202
+[chaos async_kill_before_commit]   ok   fault.gateway_died_of_sigkill exit=137
+[chaos async_kill_before_commit]   ok   fault.accepted_before_crash code=202 invocation=inv_01m2scdtbbvb8rjz2zdybh0fnf
+[chaos async_kill_before_commit]   ok   at_crash.no_ack_before_terminal status=running unacked_messages=1 unsent_outbox=0
+[chaos async_kill_before_commit] fault removed
+[chaos async_kill_before_commit] converged
+[chaos async_kill_before_commit]   ok   converge.invocation_succeeded status=succeeded attempts=2 dispatch_attempts=2 executions=2
+[chaos async_kill_before_commit]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos async_kill_before_commit]   ok   workload.async_accepted accepted=3 refused=0
+[chaos async_kill_before_commit]   ok   cv.accepted_never_lost accepted=10 missing_rows=0
+[chaos async_kill_before_commit]   ok   cv.accepted_all_terminal accepted=10 not_terminal=0
+[chaos async_kill_before_commit]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos async_kill_before_commit]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=1 (re-executions, recorded)
+[chaos async_kill_before_commit]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=8
+[chaos async_kill_before_commit]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos async_kill_before_commit]   ok   cv.ledger_all_terminal invocations=14 non_terminal=0 by_status=succeeded:14
+[chaos async_kill_before_commit]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos async_kill_before_commit]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos async_kill_before_commit]   ok   cv.usage_counted_once journal_pending=0 ledger_events=75 distinct=75 attempts_settled_twice=0 duplicates_ignored=0
+[chaos async_kill_before_commit]   ok   cv.every_terminal_environment_metered_once terminal environments=15 without a stop event=0 environments with a stop=15 (pooled ones report when they stop, after this check)
+[chaos async_kill_before_commit]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos async_kill_before_commit]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos async_kill_before_commit]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos async_kill_before_commit]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.YaZi7T)
+[chaos matrix] === async_kill_after_commit_before_ack attempt 1 ===
+[chaos async_kill_after_commit_before_ack] begin (SIGKILL at failpoint dispatch.after_commit (terminal committed, message not ACKed)) work=/home/takanorifukuyama.guest/w/tsls-chaos.CD9C8J
+[chaos async_kill_after_commit_before_ack]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos async_kill_after_commit_before_ack]   ok   workload.async_accepted accepted=6 refused=0
+[chaos async_kill_after_commit_before_ack] fault injected
+[chaos async_kill_after_commit_before_ack]   ok   fault.failpoint_killed_gateway failpoint=dispatch.after_commit first_answer=202
+[chaos async_kill_after_commit_before_ack]   ok   fault.gateway_died_of_sigkill exit=137
+[chaos async_kill_after_commit_before_ack]   ok   fault.accepted_before_crash code=202 invocation=inv_01m2sceqmhvsmw79tb30ag6ffa
+[chaos async_kill_after_commit_before_ack]   ok   at_crash.terminal_committed_message_still_unacked status=succeeded unacked_messages=1
+[chaos async_kill_after_commit_before_ack] fault removed
+[chaos async_kill_after_commit_before_ack] converged
+[chaos async_kill_after_commit_before_ack]   ok   converge.invocation_succeeded status=succeeded attempts=1 dispatch_attempts=1 executions=1
+[chaos async_kill_after_commit_before_ack]   ok   converge.not_executed_again executions=1 attempts=1
+[chaos async_kill_after_commit_before_ack]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos async_kill_after_commit_before_ack]   ok   workload.async_accepted accepted=3 refused=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.accepted_never_lost accepted=10 missing_rows=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.accepted_all_terminal accepted=10 not_terminal=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos async_kill_after_commit_before_ack]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=7
+[chaos async_kill_after_commit_before_ack]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.ledger_all_terminal invocations=14 non_terminal=0 by_status=succeeded:14
+[chaos async_kill_after_commit_before_ack]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos async_kill_after_commit_before_ack]   ok   cv.usage_counted_once journal_pending=0 ledger_events=70 distinct=70 attempts_settled_twice=0 duplicates_ignored=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.every_terminal_environment_metered_once terminal environments=14 without a stop event=0 environments with a stop=14 (pooled ones report when they stop, after this check)
+[chaos async_kill_after_commit_before_ack]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos async_kill_after_commit_before_ack]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.CD9C8J)
+[chaos matrix] === stale_owner_sync_lease attempt 1 ===
+[chaos stale_owner_sync_lease] begin (SIGSTOP gateway A holding a sync slot lease past expiry; B on the same data_dir reclaims; SIGCONT A) work=/home/takanorifukuyama.guest/w/tsls-chaos.5dog0U
+[chaos stale_owner_sync_lease]   ok   setup.a_owns_the_running_invocation invocation=inv_01m2scfchtqmmfvwj9erh90ksb owner=dsp_01m2sceyffhcy7ad08tkacjppe a=dsp_01m2sceyffhcy7ad08tkacjppe env=env_01m2scfcj0nwaq9sd1xrxpxsh6
+[chaos stale_owner_sync_lease] fault injected
+[chaos stale_owner_sync_lease]   ok   reclaim.b_settles_as_outcome_unknown status=outcome_unknown Host.LeaseExpired after 7302 ms
+[chaos stale_owner_sync_lease]   ok   reclaim.not_before_lease_expiry_plus_skew lease_expires_at+reclaimed_at=[2026-09-18T04:30:34.373124448Z 2026-09-18T04:30:35.599739828Z] reclaimed 1226 ms after expiry (skew 500 ms); 7302 ms after SIGSTOP
+[chaos stale_owner_sync_lease]   ok   reclaim.fenced_environment_terminated env=env_01m2scfcj0nwaq9sd1xrxpxsh6 state=lost processes=0
+[chaos stale_owner_sync_lease] fault removed
+[chaos stale_owner_sync_lease]   ok   fencing.late_completion_does_not_overwrite invocation outcome_unknown:1:2026-09-18T04:30:35.599739828Z:1123 -> outcome_unknown:1:2026-09-18T04:30:35.599739828Z:1123; attempts unchanged=yes
+[chaos stale_owner_sync_lease]   ok   fencing.a_is_fenced readyz=503 fenced=true
+[chaos stale_owner_sync_lease]   ok   fencing.a_refuses_new_invocations code=503 error_type=null
+[chaos stale_owner_sync_lease]   ok   fencing.b_keeps_serving code=200
+[chaos stale_owner_sync_lease] converged
+[chaos stale_owner_sync_lease]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos stale_owner_sync_lease]   ok   workload.async_accepted accepted=3 refused=0
+[chaos stale_owner_sync_lease]   ok   cv.accepted_never_lost accepted=9 missing_rows=0
+[chaos stale_owner_sync_lease]   ok   cv.accepted_all_terminal accepted=9 not_terminal=0
+[chaos stale_owner_sync_lease]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos stale_owner_sync_lease]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos stale_owner_sync_lease]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=6
+[chaos stale_owner_sync_lease]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos stale_owner_sync_lease]   ok   cv.ledger_all_terminal invocations=16 non_terminal=0 by_status=outcome_unknown:1,succeeded:15
+[chaos stale_owner_sync_lease]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos stale_owner_sync_lease]   ok   cv.cron_each_time_once fires=2 distinct_times=2
+[chaos stale_owner_sync_lease]   ok   cv.usage_counted_once journal_pending=0 ledger_events=82 distinct=82 attempts_settled_twice=0 duplicates_ignored=0
+[chaos stale_owner_sync_lease]   ok   cv.every_terminal_environment_metered_once terminal environments=17 without a stop event=0 environments with a stop=17 (pooled ones report when they stop, after this check)
+[chaos stale_owner_sync_lease]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos stale_owner_sync_lease]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos stale_owner_sync_lease]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos stale_owner_sync_lease]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.5dog0U)
+[chaos matrix] === stale_owner_frozen_in_transaction attempt 1 ===
+[chaos stale_owner_frozen_in_transaction] begin (gateway A stops itself (SIGSTOP) between BEGIN IMMEDIATE and COMMIT of a state.db write, past both leases; B on the same data_dir; SIGCONT A) work=/home/takanorifukuyama.guest/w/tsls-chaos.UO81yD
+[chaos stale_owner_frozen_in_transaction]   ok   setup.a_owns_the_running_invocation invocation=inv_01m2scghnd9ep045wgh8mxx2tt a=dsp_01m2scg3spt3rkd3jtzsqw6nba env=env_01m2scghnk1rgs1yst6jx2y0sg
+[chaos stale_owner_frozen_in_transaction] fault injected
+[chaos stale_owner_frozen_in_transaction]   ok   fault.a_stopped_inside_a_write_transaction ps stat=Tl flag consumed=yes "site":"crates/application/src/repository/sqlite/slot.rs:133"
+[chaos stale_owner_frozen_in_transaction]   ok   outage.nobody_reclaimed_while_the_store_was_locked reclaimed rows: 
+[chaos stale_owner_frozen_in_transaction] fault removed
+[chaos stale_owner_frozen_in_transaction]   FAIL reclaim.invocation_settled_once status=failed Host.Timeout
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.b_reclaimed_a_not_the_other_way a.reclaimed_at=2026-09-18T04:31:41.960451152Z b.reclaimed_at=-
+[chaos stale_owner_frozen_in_transaction]   ok   lease.b_is_not_fenced b fenced=false reclaimed_at=- renewal log=1
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_is_fenced readyz=503 fenced=true stall log=1
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.fenced_environment_terminated env=env_01m2scghnk1rgs1yst6jx2y0sg state=failed
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.b_keeps_serving code=200
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_refuses_new_invocations code=503
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.settled_invocation_not_overwritten invocation failed:1:2026-09-18T04:31:41.866239695Z:1044 -> failed:1:2026-09-18T04:31:41.866239695Z:1044
+[chaos stale_owner_frozen_in_transaction] converged
+[chaos stale_owner_frozen_in_transaction]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos stale_owner_frozen_in_transaction]   ok   workload.async_accepted accepted=3 refused=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_never_lost accepted=9 missing_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_all_terminal accepted=9 not_terminal=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=6
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.ledger_all_terminal invocations=16 non_terminal=0 by_status=failed:1,succeeded:15
+[chaos stale_owner_frozen_in_transaction]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.cron_each_time_once fires=2 distinct_times=2
+[chaos stale_owner_frozen_in_transaction]   ok   cv.usage_counted_once journal_pending=0 ledger_events=81 distinct=81 attempts_settled_twice=0 duplicates_ignored=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.every_terminal_environment_metered_once terminal environments=17 without a stop event=0 environments with a stop=17 (pooled ones report when they stop, after this check)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.UO81yD)
+[chaos matrix] === stale_owner_frozen_in_transaction attempt 2 ===
+[chaos stale_owner_frozen_in_transaction] begin (gateway A stops itself (SIGSTOP) between BEGIN IMMEDIATE and COMMIT of a state.db write, past both leases; B on the same data_dir; SIGCONT A) work=/home/takanorifukuyama.guest/w/tsls-chaos.8Bo87p
+[chaos stale_owner_frozen_in_transaction]   ok   setup.a_owns_the_running_invocation invocation=inv_01m2scjevajrzq41qthy15a0y7 a=dsp_01m2scj104t0mbf7xdtvxhpp1g env=env_01m2scjevd3yfj89c4kt25y3q9
+[chaos stale_owner_frozen_in_transaction] fault injected
+[chaos stale_owner_frozen_in_transaction]   ok   fault.a_stopped_inside_a_write_transaction ps stat=Tl flag consumed=yes "site":"crates/application/src/repository/sqlite/mod.rs:1438"
+[chaos stale_owner_frozen_in_transaction]   ok   outage.nobody_reclaimed_while_the_store_was_locked reclaimed rows: 
+[chaos stale_owner_frozen_in_transaction] fault removed
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.invocation_settled_once status=succeeded -
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.b_reclaimed_a_not_the_other_way a.reclaimed_at=2026-09-18T04:32:29.429404806Z b.reclaimed_at=-
+[chaos stale_owner_frozen_in_transaction]   ok   lease.b_is_not_fenced b fenced=false reclaimed_at=- renewal log=1
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_is_fenced readyz=503 fenced=true stall log=1
+[chaos stale_owner_frozen_in_transaction]   ok   reclaim.fenced_environment_terminated env=env_01m2scjevd3yfj89c4kt25y3q9 state=stopped
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.b_keeps_serving code=200
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.a_refuses_new_invocations code=503
+[chaos stale_owner_frozen_in_transaction]   ok   fencing.settled_invocation_not_overwritten invocation succeeded:1:2026-09-18T04:32:29.325281798Z:1091 -> succeeded:1:2026-09-18T04:32:29.325281798Z:1091
+[chaos stale_owner_frozen_in_transaction] converged
+[chaos stale_owner_frozen_in_transaction]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos stale_owner_frozen_in_transaction]   ok   workload.async_accepted accepted=3 refused=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_never_lost accepted=9 missing_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.accepted_all_terminal accepted=9 not_terminal=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=6
+[chaos stale_owner_frozen_in_transaction]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos stale_owner_frozen_in_transaction]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos stale_owner_frozen_in_transaction]   ok   cv.usage_counted_once journal_pending=0 ledger_events=77 distinct=77 attempts_settled_twice=0 duplicates_ignored=37
+[chaos stale_owner_frozen_in_transaction]   ok   cv.every_terminal_environment_metered_once terminal environments=17 without a stop event=0 environments with a stop=17 (pooled ones report when they stop, after this check)
+[chaos stale_owner_frozen_in_transaction]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos stale_owner_frozen_in_transaction]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.8Bo87p)
+[chaos matrix] === stale_owner_async_claim attempt 1 ===
+[chaos stale_owner_async_claim] begin (SIGSTOP gateway A holding an async claim past expiry; B on the same data_dir retries; SIGCONT A) work=/home/takanorifukuyama.guest/w/tsls-chaos.e8gC42
+[chaos stale_owner_async_claim]   ok   setup.a_handler_running claimed_by=dsp_01m2sckfh8mq3br7469h8vdkj2 a=dsp_01m2sckfh8mq3br7469h8vdkj2
+[chaos stale_owner_async_claim] fault injected
+[chaos stale_owner_async_claim]   ok   takeover.b_completed_the_invocation status=succeeded attempts=outcome_unknown,succeeded dispatch={"state":"done","attempts":2,"generation":1}
+[chaos stale_owner_async_claim] fault removed
+[chaos stale_owner_async_claim]   ok   fencing.late_settle_does_not_overwrite invocation succeeded:1:2026-09-18T04:33:11.767769385Z:1034 -> succeeded:1:2026-09-18T04:33:11.767769385Z:1034; attempts att_01m2sckzbgmzsvz8n13meatmpb:outcome_unknown:1:687,att_01m2scm4rej1brcmc9qahmwfdt:succeeded:1:512 -> att_01m2sckzbgmzsvz8n13meatmpb:outcome_unknown:1:687,att_01m2scm4rej1brcmc9qahmwfdt:succeeded:1:512
+[chaos stale_owner_async_claim]   ok   fencing.side_effect_once applied=1 skipped=0
+[chaos stale_owner_async_claim]   ok   fencing.one_terminal_no_dead_letter dead_letters=0 succeeded_attempts=1
+[chaos stale_owner_async_claim]   ok   fencing.a_is_fenced a=dsp_01m2sckfh8mq3br7469h8vdkj2
+[chaos stale_owner_async_claim] converged
+[chaos stale_owner_async_claim]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos stale_owner_async_claim]   ok   workload.async_accepted accepted=3 refused=0
+[chaos stale_owner_async_claim]   ok   cv.accepted_never_lost accepted=7 missing_rows=0
+[chaos stale_owner_async_claim]   ok   cv.accepted_all_terminal accepted=7 not_terminal=0
+[chaos stale_owner_async_claim]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos stale_owner_async_claim]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos stale_owner_async_claim]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=5
+[chaos stale_owner_async_claim]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos stale_owner_async_claim]   ok   cv.ledger_all_terminal invocations=9 non_terminal=0 by_status=succeeded:9
+[chaos stale_owner_async_claim]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos stale_owner_async_claim]   ok   cv.cron_each_time_once fires=0 distinct_times=0
+[chaos stale_owner_async_claim]   ok   cv.usage_counted_once journal_pending=0 ledger_events=51 distinct=51 attempts_settled_twice=0 duplicates_ignored=15
+[chaos stale_owner_async_claim]   ok   cv.every_terminal_environment_metered_once terminal environments=11 without a stop event=0 environments with a stop=11 (pooled ones report when they stop, after this check)
+[chaos stale_owner_async_claim]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos stale_owner_async_claim]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos stale_owner_async_claim]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos stale_owner_async_claim]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.e8gC42)
+[chaos matrix] === db_locked_within_lease attempt 1 ===
+[chaos db_locked_within_lease] begin (state.db write-locked (BEGIN EXCLUSIVE from another process) for 20 s < dispatcher lease 60 s) work=/home/takanorifukuyama.guest/w/tsls-chaos.ctJXYg
+[chaos db_locked_within_lease]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos db_locked_within_lease]   ok   workload.async_accepted accepted=6 refused=0
+[chaos db_locked_within_lease] fault injected
+[chaos db_locked_within_lease]   ok   outage.answers_success_or_retryable_503 other_answers=0 store_unavailable=3 slowest_ms=10714 (a write waits at most connection wait + busy timeout)
+[chaos db_locked_within_lease]   ok   outage.store_unavailable_surfaced 503 Host.StoreUnavailable answers=3
+[chaos db_locked_within_lease] fault removed
+[chaos db_locked_within_lease] converged
+[chaos db_locked_within_lease]   ok   recovery.serves_without_restart readyz 200 and sync 200
+[chaos db_locked_within_lease]   ok   outage.no_partial_rows functions 3 + created 1 -> 4; rows for refused async keys=0; invocations before the outage=10 (all terminal: cv.ledger_all_terminal)
+[chaos db_locked_within_lease]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos db_locked_within_lease]   ok   workload.async_accepted accepted=6 refused=0
+[chaos db_locked_within_lease]   ok   recovery.cron_resumed fires 2 -> 8
+[chaos db_locked_within_lease]   ok   cv.accepted_never_lost accepted=13 missing_rows=0
+[chaos db_locked_within_lease]   ok   cv.accepted_all_terminal accepted=13 not_terminal=0
+[chaos db_locked_within_lease]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos db_locked_within_lease]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos db_locked_within_lease]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=9
+[chaos db_locked_within_lease]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos db_locked_within_lease]   ok   cv.ledger_all_terminal invocations=27 non_terminal=0 by_status=succeeded:27
+[chaos db_locked_within_lease]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos db_locked_within_lease]   ok   cv.cron_each_time_once fires=8 distinct_times=8
+[chaos db_locked_within_lease]   ok   cv.usage_counted_once journal_pending=0 ledger_events=139 distinct=139 attempts_settled_twice=0 duplicates_ignored=0
+[chaos db_locked_within_lease]   ok   cv.every_terminal_environment_metered_once terminal environments=29 without a stop event=0 environments with a stop=29 (pooled ones report when they stop, after this check)
+[chaos db_locked_within_lease]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos db_locked_within_lease]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos db_locked_within_lease]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos db_locked_within_lease]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.ctJXYg)
+[chaos matrix] === db_locked_past_lease attempt 1 ===
+[chaos db_locked_past_lease] begin (state.db write-locked for 12 s > dispatcher lease 6 s + skew) work=/home/takanorifukuyama.guest/w/tsls-chaos.6yBG4o
+[chaos db_locked_past_lease]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos db_locked_past_lease]   ok   workload.async_accepted accepted=6 refused=0
+[chaos db_locked_past_lease] fault injected
+[chaos db_locked_past_lease]   ok   outage.answers_success_or_retryable_503 other_answers=0 store_unavailable=0 slowest_ms=13133 (a write waits at most connection wait + busy timeout)
+[chaos db_locked_past_lease] fault removed
+[chaos db_locked_past_lease] converged
+[chaos db_locked_past_lease]   ok   recovery.serves_without_restart readyz 200 and sync 200
+[chaos db_locked_past_lease]   ok   outage.no_partial_rows functions 3 + created 1 -> 4; rows for refused async keys=0; invocations before the outage=10 (all terminal: cv.ledger_all_terminal)
+[chaos db_locked_past_lease]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos db_locked_past_lease]   ok   workload.async_accepted accepted=6 refused=0
+[chaos db_locked_past_lease]   ok   recovery.cron_resumed fires 2 -> 8
+[chaos db_locked_past_lease]   ok   cv.accepted_never_lost accepted=13 missing_rows=0
+[chaos db_locked_past_lease]   ok   cv.accepted_all_terminal accepted=13 not_terminal=0
+[chaos db_locked_past_lease]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos db_locked_past_lease]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos db_locked_past_lease]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=9
+[chaos db_locked_past_lease]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos db_locked_past_lease]   ok   cv.ledger_all_terminal invocations=27 non_terminal=0 by_status=succeeded:27
+[chaos db_locked_past_lease]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos db_locked_past_lease]   ok   cv.cron_each_time_once fires=8 distinct_times=8
+[chaos db_locked_past_lease]   ok   cv.usage_counted_once journal_pending=0 ledger_events=135 distinct=135 attempts_settled_twice=0 duplicates_ignored=0
+[chaos db_locked_past_lease]   ok   cv.every_terminal_environment_metered_once terminal environments=27 without a stop event=0 environments with a stop=27 (pooled ones report when they stop, after this check)
+[chaos db_locked_past_lease]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos db_locked_past_lease]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos db_locked_past_lease]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos db_locked_past_lease]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.6yBG4o)
+[chaos matrix] === broker_sigstop attempt 1 ===
+[chaos broker_sigstop] begin (nats-server SIGSTOP (hung broker) with a small outbox bound, then SIGCONT) work=/home/takanorifukuyama.guest/w/tsls-chaos.2sRXPy
+[chaos broker_sigstop]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos broker_sigstop]   ok   workload.async_accepted accepted=6 refused=0
+[chaos broker_sigstop] fault injected
+[chaos broker_sigstop]   ok   outage.accepted_into_outbox_up_to_bound accepted=10 unsent_outbox=12 bound=12
+[chaos broker_sigstop]   ok   outage.backlog_admission_refuses refused=20 reason=queue_unavailable
+[chaos broker_sigstop]   ok   outage.sync_path_unaffected sync_200=3/3
+[chaos broker_sigstop] fault removed
+[chaos broker_sigstop] converged
+[chaos broker_sigstop]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos broker_sigstop]   ok   workload.async_accepted accepted=3 refused=0
+[chaos broker_sigstop]   ok   cv.accepted_never_lost accepted=19 missing_rows=0
+[chaos broker_sigstop]   ok   cv.accepted_all_terminal accepted=19 not_terminal=0
+[chaos broker_sigstop]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos broker_sigstop]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos broker_sigstop]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=16
+[chaos broker_sigstop]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos broker_sigstop]   ok   cv.ledger_all_terminal invocations=36 non_terminal=0 by_status=succeeded:36
+[chaos broker_sigstop]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos broker_sigstop]   ok   cv.cron_each_time_once fires=11 distinct_times=11
+[chaos broker_sigstop]   ok   cv.usage_counted_once journal_pending=0 ledger_events=180 distinct=180 attempts_settled_twice=0 duplicates_ignored=0
+[chaos broker_sigstop]   ok   cv.every_terminal_environment_metered_once terminal environments=36 without a stop event=0 environments with a stop=36 (pooled ones report when they stop, after this check)
+[chaos broker_sigstop]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos broker_sigstop]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos broker_sigstop]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos broker_sigstop]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.2sRXPy)
+[chaos matrix] === broker_sigkill attempt 1 ===
+[chaos broker_sigkill] begin (nats-server SIGKILL with messages in flight, then restart on the same store) work=/home/takanorifukuyama.guest/w/tsls-chaos.EqfH6c
+[chaos broker_sigkill]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos broker_sigkill]   ok   workload.async_accepted accepted=3 refused=0
+[chaos broker_sigkill] fault injected
+[chaos broker_sigkill]   ok   outage.accepts_into_outbox_while_broker_down accepted=6 unsent=8
+[chaos broker_sigkill] fault removed
+[chaos broker_sigkill] converged
+[chaos broker_sigkill]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos broker_sigkill]   ok   workload.async_accepted accepted=3 refused=0
+[chaos broker_sigkill]   ok   cv.accepted_never_lost accepted=16 missing_rows=0
+[chaos broker_sigkill]   ok   cv.accepted_all_terminal accepted=16 not_terminal=0
+[chaos broker_sigkill]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos broker_sigkill]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos broker_sigkill]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=14
+[chaos broker_sigkill]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos broker_sigkill]   ok   cv.ledger_all_terminal invocations=34 non_terminal=0 by_status=succeeded:34
+[chaos broker_sigkill]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos broker_sigkill]   ok   cv.cron_each_time_once fires=16 distinct_times=16
+[chaos broker_sigkill]   ok   cv.usage_counted_once journal_pending=0 ledger_events=170 distinct=170 attempts_settled_twice=0 duplicates_ignored=0
+[chaos broker_sigkill]   ok   cv.every_terminal_environment_metered_once terminal environments=34 without a stop event=0 environments with a stop=34 (pooled ones report when they stop, after this check)
+[chaos broker_sigkill]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos broker_sigkill]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos broker_sigkill]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos broker_sigkill]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.EqfH6c)
+[chaos matrix] === object_store_unavailable attempt 1 ===
+[chaos object_store_unavailable] begin (object root unreadable/unwritable (chmod 000) + orphan object from a SIGKILL after the put) work=/home/takanorifukuyama.guest/w/tsls-chaos.MXsuhx
+[chaos object_store_unavailable]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos object_store_unavailable]   ok   workload.async_accepted accepted=6 refused=0
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 410: 852200 Killed                     env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos object_store_unavailable]   ok   setup.orphan_object_on_disk unreferenced=1
+[chaos object_store_unavailable]   ok   setup.held_invocation_accepted code=202 storage=object
+[chaos object_store_unavailable] fault injected
+[chaos object_store_unavailable]   ok   outage.object_input_refused_with_reason code=503 reason=object_store_unavailable
+[chaos object_store_unavailable]   ok   outage.inline_input_still_accepted code=202
+[chaos object_store_unavailable]   ok   outage.read_failure_is_not_a_success status=queued executions=0
+[chaos object_store_unavailable]   ok   outage.gateway_alive pid=852233
+[chaos object_store_unavailable] fault removed
+[chaos object_store_unavailable] converged
+[chaos object_store_unavailable]   ok   gc.orphans_collected unreferenced 1 -> 0; files=3
+[chaos object_store_unavailable]   ok   gc.referenced_objects_kept open invocations missing their object=0
+[chaos object_store_unavailable]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos object_store_unavailable]   ok   workload.async_accepted accepted=3 refused=0
+[chaos object_store_unavailable]   ok   cv.accepted_never_lost accepted=11 missing_rows=0
+[chaos object_store_unavailable]   ok   cv.accepted_all_terminal accepted=11 not_terminal=0
+[chaos object_store_unavailable]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos object_store_unavailable]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos object_store_unavailable]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=8
+[chaos object_store_unavailable]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos object_store_unavailable]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos object_store_unavailable]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos object_store_unavailable]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos object_store_unavailable]   ok   cv.usage_counted_once journal_pending=0 ledger_events=79 distinct=79 attempts_settled_twice=0 duplicates_ignored=0
+[chaos object_store_unavailable]   ok   cv.every_terminal_environment_metered_once terminal environments=19 without a stop event=0 environments with a stop=19 (pooled ones report when they stop, after this check)
+[chaos object_store_unavailable]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos object_store_unavailable]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos object_store_unavailable]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos object_store_unavailable]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.MXsuhx)
+[chaos matrix] === usage_journal_full_and_replay attempt 1 ===
+[chaos usage_journal_full_and_replay] begin (usage journal bound reached with the collector stopped; SIGKILL; collector SIGKILL after ledger commit; replay) work=/home/takanorifukuyama.guest/w/tsls-chaos.vPvTPK
+[chaos usage_journal_full_and_replay] fault injected
+[chaos usage_journal_full_and_replay]   ok   bound.refuses_fail_closed ok=10 refused=3 last=503 Host.UsageJournalFull
+[chaos usage_journal_full_and_replay]   ok   bound.refusal_records_nothing invocations before=10 after=10
+[chaos usage_journal_full_and_replay]   ok   bound.async_accepted_durably code=202 invocation=inv_01m2scwjz5n71jwk705hsq2bjm
+[chaos usage_journal_full_and_replay]   ok   bound.async_run_deferred_not_executed status=queued deferrals=1 executions=0
+[chaos usage_journal_full_and_replay]   ok   journal.events_retained_ledger_empty journal_pending=50 ledger_events=0
+[chaos usage_journal_full_and_replay] fault removed
+/home/takanorifukuyama.guest/lab/scripts/chaos/scenarios.sh: line 845: 854363 Killed                     env LOG_FORMAT=json TSLS_USAGE_CRASH_POINT=collector.after_ledger_commit "$GATEWAY_BIN" --config "$WORK/gw-a.toml" >> "$WORK/gateway-a.log" 2>&1
+[chaos usage_journal_full_and_replay]   ok   replay.collector_killed_after_ledger_commit exit=137 ledger_events=25 cursor=0
+[chaos usage_journal_full_and_replay] converged
+[chaos usage_journal_full_and_replay]   ok   replay.ledger_counts_each_event_once journal_before_crash=50 journal_collected=50 ledger_events=50 distinct=50 duplicates_ignored=25 (batch 25)
+[chaos usage_journal_full_and_replay]   ok   replay.usage_matches_known_workload report invocations=10 attempts=10 known successful invokes=10
+[chaos usage_journal_full_and_replay]   ok   replay.accepting_again code=200
+[chaos usage_journal_full_and_replay]   ok   cv.accepted_never_lost accepted=1 missing_rows=0
+[chaos usage_journal_full_and_replay]   ok   cv.accepted_all_terminal accepted=1 not_terminal=0
+[chaos usage_journal_full_and_replay]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos usage_journal_full_and_replay]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos usage_journal_full_and_replay]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=1
+[chaos usage_journal_full_and_replay]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos usage_journal_full_and_replay]   ok   cv.ledger_all_terminal invocations=12 non_terminal=0 by_status=succeeded:12
+[chaos usage_journal_full_and_replay]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos usage_journal_full_and_replay]   ok   cv.usage_counted_once journal_pending=0 ledger_events=60 distinct=60 attempts_settled_twice=0 duplicates_ignored=25
+[chaos usage_journal_full_and_replay]   ok   cv.every_terminal_environment_metered_once terminal environments=12 without a stop event=0 environments with a stop=12 (pooled ones report when they stop, after this check)
+[chaos usage_journal_full_and_replay]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos usage_journal_full_and_replay]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos usage_journal_full_and_replay]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos usage_journal_full_and_replay]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.vPvTPK)
+[chaos matrix] === worker_bridge_kill_sync attempt 1 ===
+[chaos worker_bridge_kill_sync] begin (SIGKILL the runtime bridge (worker) of a running sync invocation) work=/home/takanorifukuyama.guest/w/tsls-chaos.Uz080S
+[chaos worker_bridge_kill_sync]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos worker_bridge_kill_sync]   ok   workload.async_accepted accepted=3 refused=0
+[chaos worker_bridge_kill_sync] fault injected
+[chaos worker_bridge_kill_sync] fault removed
+[chaos worker_bridge_kill_sync]   ok   classify.bridge_loss_after_dispatch status=outcome_unknown Host.OutcomeUnknown client=502/outcome_unknown
+[chaos worker_bridge_kill_sync]   ok   classify.client_not_200 code=502
+[chaos worker_bridge_kill_sync] converged
+[chaos worker_bridge_kill_sync]   ok   cleanup.environment_terminated state=failed processes=0 workdir_left=no
+[chaos worker_bridge_kill_sync]   ok   recovery.next_invoke_succeeds code=200
+[chaos worker_bridge_kill_sync]   ok   cv.accepted_never_lost accepted=3 missing_rows=0
+[chaos worker_bridge_kill_sync]   ok   cv.accepted_all_terminal accepted=3 not_terminal=0
+[chaos worker_bridge_kill_sync]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos worker_bridge_kill_sync]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos worker_bridge_kill_sync]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=2
+[chaos worker_bridge_kill_sync]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos worker_bridge_kill_sync]   ok   cv.ledger_all_terminal invocations=9 non_terminal=0 by_status=outcome_unknown:1,succeeded:8
+[chaos worker_bridge_kill_sync]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos worker_bridge_kill_sync]   ok   cv.cron_each_time_once fires=3 distinct_times=3
+[chaos worker_bridge_kill_sync]   ok   cv.usage_counted_once journal_pending=0 ledger_events=45 distinct=45 attempts_settled_twice=0 duplicates_ignored=0
+[chaos worker_bridge_kill_sync]   ok   cv.every_terminal_environment_metered_once terminal environments=9 without a stop event=0 environments with a stop=9 (pooled ones report when they stop, after this check)
+[chaos worker_bridge_kill_sync]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos worker_bridge_kill_sync]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos worker_bridge_kill_sync]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos worker_bridge_kill_sync]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.Uz080S)
+[chaos matrix] === worker_user_process_kill_sync attempt 1 ===
+[chaos worker_user_process_kill_sync] begin (SIGKILL the user process of a running sync invocation) work=/home/takanorifukuyama.guest/w/tsls-chaos.EezwSM
+[chaos worker_user_process_kill_sync]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos worker_user_process_kill_sync]   ok   workload.async_accepted accepted=3 refused=0
+[chaos worker_user_process_kill_sync] fault injected
+[chaos worker_user_process_kill_sync] fault removed
+[chaos worker_user_process_kill_sync]   ok   classify.user_process_crash status=failed Runtime.Crash client=502/crash
+[chaos worker_user_process_kill_sync]   ok   classify.client_not_200 code=502
+[chaos worker_user_process_kill_sync] converged
+[chaos worker_user_process_kill_sync]   ok   cleanup.environment_terminated state=failed processes=0 workdir_left=no
+[chaos worker_user_process_kill_sync]   ok   recovery.next_invoke_succeeds code=200
+[chaos worker_user_process_kill_sync]   ok   cv.accepted_never_lost accepted=3 missing_rows=0
+[chaos worker_user_process_kill_sync]   ok   cv.accepted_all_terminal accepted=3 not_terminal=0
+[chaos worker_user_process_kill_sync]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos worker_user_process_kill_sync]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos worker_user_process_kill_sync]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=2
+[chaos worker_user_process_kill_sync]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos worker_user_process_kill_sync]   ok   cv.ledger_all_terminal invocations=9 non_terminal=0 by_status=failed:1,succeeded:8
+[chaos worker_user_process_kill_sync]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos worker_user_process_kill_sync]   ok   cv.cron_each_time_once fires=3 distinct_times=3
+[chaos worker_user_process_kill_sync]   ok   cv.usage_counted_once journal_pending=0 ledger_events=45 distinct=45 attempts_settled_twice=0 duplicates_ignored=0
+[chaos worker_user_process_kill_sync]   ok   cv.every_terminal_environment_metered_once terminal environments=9 without a stop event=0 environments with a stop=9 (pooled ones report when they stop, after this check)
+[chaos worker_user_process_kill_sync]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos worker_user_process_kill_sync]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos worker_user_process_kill_sync]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos worker_user_process_kill_sync]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.EezwSM)
+[chaos matrix] === worker_bridge_kill_async attempt 1 ===
+[chaos worker_bridge_kill_async] begin (SIGKILL the runtime bridge of a running async invocation) work=/home/takanorifukuyama.guest/w/tsls-chaos.VVTpQh
+[chaos worker_bridge_kill_async]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos worker_bridge_kill_async]   ok   workload.async_accepted accepted=3 refused=0
+[chaos worker_bridge_kill_async] fault injected
+[chaos worker_bridge_kill_async] fault removed
+[chaos worker_bridge_kill_async] converged
+[chaos worker_bridge_kill_async]   ok   retry.async_run_retried_to_success status=succeeded attempts=outcome_unknown/Host.OutcomeUnknown,succeeded/-
+[chaos worker_bridge_kill_async]   ok   retry.side_effect_once executions=2
+[chaos worker_bridge_kill_async]   ok   cleanup.killed_environment_gone env=env_01m2scyjhre7mpja0r6mdzgn1e state=failed
+[chaos worker_bridge_kill_async]   ok   cv.accepted_never_lost accepted=4 missing_rows=0
+[chaos worker_bridge_kill_async]   ok   cv.accepted_all_terminal accepted=4 not_terminal=0
+[chaos worker_bridge_kill_async]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos worker_bridge_kill_async]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos worker_bridge_kill_async]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=4
+[chaos worker_bridge_kill_async]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos worker_bridge_kill_async]   ok   cv.ledger_all_terminal invocations=6 non_terminal=0 by_status=succeeded:6
+[chaos worker_bridge_kill_async]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos worker_bridge_kill_async]   ok   cv.cron_each_time_once fires=1 distinct_times=1
+[chaos worker_bridge_kill_async]   ok   cv.usage_counted_once journal_pending=0 ledger_events=35 distinct=35 attempts_settled_twice=0 duplicates_ignored=0
+[chaos worker_bridge_kill_async]   ok   cv.every_terminal_environment_metered_once terminal environments=7 without a stop event=0 environments with a stop=7 (pooled ones report when they stop, after this check)
+[chaos worker_bridge_kill_async]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos worker_bridge_kill_async]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos worker_bridge_kill_async]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos worker_bridge_kill_async]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.VVTpQh)
+[chaos matrix] === control_plane_outage attempt 1 ===
+[chaos control_plane_outage] begin (control plane (management gateway) stopped past config TTL and auth lease (scripts/control-plane/outage-e2e.sh)) work=/home/takanorifukuyama.guest/w/tsls-chaos.eRimAI
+[chaos control_plane_outage]   ok   e2e.exit_0 exit=0
+[chaos control_plane_outage]   ok   e2e.summary_ok passed=19 failed=0 skipped=0
+[chaos matrix] === orphan_recovery_after_crash attempt 1 ===
+[chaos orphan_recovery_after_crash] begin (SIGKILL gateway holding busy environments (secret-bound workload), unsent outbox rows, the scheduler lease, an orphan object) work=/home/takanorifukuyama.guest/w/tsls-chaos.brlzS9
+[chaos orphan_recovery_after_crash]   ok   workload.sync_ok sync_200_with_secret=3/3
+[chaos orphan_recovery_after_crash]   ok   workload.async_accepted accepted=9 refused=0
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 410: 861270 Killed                     env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos orphan_recovery_after_crash]   ok   setup.state_to_recover orphan_objects=1 open_envs=2 worker_processes=2 unsent_outbox=4 scheduler_owner_is_a=yes
+[chaos orphan_recovery_after_crash] fault injected
+[chaos orphan_recovery_after_crash] fault removed
+[chaos orphan_recovery_after_crash] converged
+[chaos orphan_recovery_after_crash]   ok   recover.worker_processes_reclaimed before=2 after=0
+[chaos orphan_recovery_after_crash]   ok   recover.environments_settled open before=2 after=0 reconcile={"found":0,"adopted":0,"terminated":0,"lost":0,"foreign":0}
+[chaos orphan_recovery_after_crash]   ok   recover.outbox_claims_released_and_published unsent before=4 after=0
+[chaos orphan_recovery_after_crash]   ok   recover.scheduler_lease_taken_over old=dsp_01m2sd0fd5grqw3jtpte27yfjm new=dsp_01m2sd0rbp7ay837r9zwfe1p9v owner=dsp_01m2sd0rbp7ay837r9zwfe1p9v
+[chaos orphan_recovery_after_crash]   ok   recover.orphan_objects_collected unreferenced=0 files=6
+[chaos orphan_recovery_after_crash]   ok   recover.no_secret_value_on_disk before=0 after=0
+[chaos orphan_recovery_after_crash]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos orphan_recovery_after_crash]   ok   workload.async_accepted accepted=3 refused=0
+[chaos orphan_recovery_after_crash]   ok   cv.accepted_never_lost accepted=15 missing_rows=0
+[chaos orphan_recovery_after_crash]   ok   cv.accepted_all_terminal accepted=15 not_terminal=0
+[chaos orphan_recovery_after_crash]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos orphan_recovery_after_crash]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos orphan_recovery_after_crash]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=11
+[chaos orphan_recovery_after_crash]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos orphan_recovery_after_crash]   ok   cv.ledger_all_terminal invocations=46 non_terminal=0 by_status=outcome_unknown:2,succeeded:44
+[chaos orphan_recovery_after_crash]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos orphan_recovery_after_crash]   ok   cv.cron_each_time_once fires=25 distinct_times=25
+[chaos orphan_recovery_after_crash]   ok   cv.usage_counted_once journal_pending=0 ledger_events=230 distinct=230 attempts_settled_twice=0 duplicates_ignored=0
+[chaos orphan_recovery_after_crash]   ok   cv.every_terminal_environment_metered_once terminal environments=50 without a stop event=0 environments with a stop=50 (pooled ones report when they stop, after this check)
+[chaos orphan_recovery_after_crash]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos orphan_recovery_after_crash]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos orphan_recovery_after_crash]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos orphan_recovery_after_crash]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.brlzS9)
+# PLT-4646 failure matrix — 20260918T042711Z
+
+commit `af0d9ab02ab936b650e208856344a8200ae07762`, Linux 7.0.0-31-generic aarch64, rustc 1.95.0 (59807616e 2026-04-14), nats-server v2.14.7 (nats-server: v2.14.7), provider process (dev-only, no isolation), debug gateway with failpoints.
+
+Single host. These results are not a multi-host HA guarantee.
+
+| scenario | fault | outage_ms | recovery_ms | result | attempts | failed checks (last attempt) |
+|---|---|---|---|---|---|---|
+| baseline | none (steady workload, graceful stop) | - | - | pass | pass |  |
+| sync_gateway_kill | SIGKILL gateway with one sync invocation running and one queued behind it | 132 | 312 | pass | pass |  |
+| async_kill_accept_after_commit | SIGKILL at failpoint accept.after_commit (before the 202) | 68 | 1651 | pass | pass |  |
+| async_kill_after_publish | SIGKILL at failpoint outbox.after_publish (broker ACK, row not marked) | 108 | 5639 | pass | pass |  |
+| async_kill_after_claim | SIGKILL at failpoint dispatch.after_claim (claimed, handler not started) | 104 | 5572 | pass | pass |  |
+| async_kill_before_commit | SIGKILL at failpoint dispatch.before_commit (side effect done, outcome not committed) | 1677 | 5941 | pass | pass |  |
+| async_kill_after_commit_before_ack | SIGKILL at failpoint dispatch.after_commit (terminal committed, message not ACKed) | 1781 | 320 | pass | pass |  |
+| stale_owner_sync_lease | SIGSTOP gateway A holding a sync slot lease past expiry; B on the same data_dir reclaims; SIGCONT A | 10305 | 6702 | pass | pass |  |
+| stale_owner_frozen_in_transaction | gateway A stops itself (SIGSTOP) between BEGIN IMMEDIATE and COMMIT of a state.db write, past both leases; B on the same data_dir; SIGCONT A | 20364 | 4091 | FLAKY (pass on attempt 2) | fail,pass |  |
+| stale_owner_async_claim | SIGSTOP gateway A holding an async claim past expiry; B on the same data_dir retries; SIGCONT A | 33863 | 6540 | pass | pass |  |
+| db_locked_within_lease | state.db write-locked (BEGIN EXCLUSIVE from another process) for 20 s < dispatcher lease 60 s | 21432 | 1269 | pass | pass |  |
+| db_locked_past_lease | state.db write-locked for 12 s > dispatcher lease 6 s + skew | 13378 | 1282 | pass | pass |  |
+| broker_sigstop | nats-server SIGSTOP (hung broker) with a small outbox bound, then SIGCONT | 8289 | 10532 | pass | pass |  |
+| broker_sigkill | nats-server SIGKILL with messages in flight, then restart on the same store | 8514 | 19838 | pass | pass |  |
+| object_store_unavailable | object root unreadable/unwritable (chmod 000) + orphan object from a SIGKILL after the put | 6136 | 3229 | pass | pass |  |
+| usage_journal_full_and_replay | usage journal bound reached with the collector stopped; SIGKILL; collector SIGKILL after ledger commit; replay | 264 | 376 | pass | pass |  |
+| worker_bridge_kill_sync | SIGKILL the runtime bridge (worker) of a running sync invocation | 9 | 47 | pass | pass |  |
+| worker_user_process_kill_sync | SIGKILL the user process of a running sync invocation | 9 | 43 | pass | pass |  |
+| worker_bridge_kill_async | SIGKILL the runtime bridge of a running async invocation | 9 | 7640 | pass | pass |  |
+| control_plane_outage | control plane (management gateway) stopped past config TTL and auth lease (scripts/control-plane/outage-e2e.sh) | 13879 | 2394 | pass | pass |  |
+| orphan_recovery_after_crash | SIGKILL gateway holding busy environments (secret-bound workload), unsent outbox rows, the scheduler lease, an orphan object | 122 | 36038 | pass | pass |  |
+[chaos matrix] evidence: /home/takanorifukuyama.guest/plt4649/runs/chaos-process/matrix

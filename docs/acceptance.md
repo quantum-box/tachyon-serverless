@@ -1,4 +1,4 @@
-# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4646、PLT-4647、PLT-4648、PLT-4650、PLT-4651 X1、PLT-4652 X1）
+# 受入チェックリスト（PLT-4613〜PLT-4634、PLT-4635、PLT-4636、PLT-4637、PLT-4638、PLT-4639、PLT-4641、PLT-4645、PLT-4646、PLT-4647、PLT-4648、PLT-4649、PLT-4650、PLT-4651 X1、PLT-4652 X1）
 
 - 対象: Linear プロジェクト「Tachyon Serverless — 動作プロトタイプ」P0〜P1 と、P2 のうち着手済みの PLT-4631、PLT-4632、PLT-4633
 - 基準: `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、`docs/adr/`
@@ -907,6 +907,60 @@ gate: `shellcheck 0.10.0 -x -P scripts/e2e`（全 tracked `.sh`）、`scripts/ci
 Firecracker（2026-09-17 の KVM 最終検証、`docs/evidence/kvm-final-lab-firecracker-20260917T162937Z/`、Lima VM の home に clone、自動化 agent）: origin/main `9b6f2c8` の clean clone では preflight・bootstrap は通ったが `up` の health 表が失敗した（jail の中の vsock socket path 110 byte を preflight が数えず `socket_path_length` で provider 未準備、root 所有の `state.db` を読めず ledger `unreadable`）。直しながら clone し直して 4 回実行し、`a56b259` で preflight → bootstrap → up → status → demo all（49/49）→ status → teardown（`orphan check: clean`）がすべて exit 0。直した不足: preflight の socket path（jail 側も数える、runbook §2・§6.3）、status の root 所有 state.db、demo が root の gateway を「動いていない」と判定、status の SIGPIPE（exit 141）、P3 の object root の `find` で demo が中断し、ciphertext 検査と secret scan は読めない file（grep exit 2）を「無し」と数えていた（sudo で読み、読めなければ失敗）。
 
 未検証・未着手: x86_64、bare metal、KVM CI runner（未登録）、既存 Tachyon Console への統合（未着手）、別の人間による追試。
+
+## PLT-4649 プロトタイプ最終受入（同期・非同期・ゼロスケール・利用量の一気通貫）
+
+記録日 2026-09-18、branch `cfeature/plt-4649-74d742`（origin/main `40ed8a6` から。実行した commit は各行に併記）。証跡は `docs/evidence/final-acceptance-20260918T014751Z/`（実行ごとの stdout・host 監査・load sample と、各 script が書いた evidence directory）。
+
+実行環境: Apple M4（macOS、Darwin 25.6.0）上の Lima VM `tsls-kvm`（vmType vz + nested virtualization、aarch64、4 vCPU / 8 GiB、Linux 7.0.0-31-generic）、Firecracker / jailer v1.17.0、guest kernel 6.1.155（lab）/ 6.18.48（`scripts/kvm/*` の `.kvm` 資産）、nats-server v2.14.7、rustc 1.95.0。gateway は root（jailer + cgroup `required`、`profile = "production"`）。lab は作業ツリーではなく **clean clone**（VM の `~/lab`）で動かした。
+
+> [!WARNING]
+> 物理 host は共有の開発機で、負荷は時間帯で大きく違った（1 分 load average、`mac-load.tsv` の 1834 sample）。lab・隔離・warm を流した窓は **p50 69.2 / max 194.3**、benchmark の窓は **p50 8.3 / max 58.8**、故障マトリクスの窓は **p50 2.1 / max 14.4**。lab / 隔離 / warm の時間の値はこの条件での参考値にすぎず（warm 計測の cold は 19.1 s で過去の記録の約 3 倍）、**性能の判定には benchmark の値だけを使う**。
+
+Issue（quantum-box/tachyon-apps#9878）の検証は「実 Kata で」だが、本プロジェクトの実行 provider は Firecracker（ADR-0001）なので Firecracker に読み替える（PLT-4635 と同じ規約）。
+
+| # | 受入条件 | 状態 | 証跡 |
+|---|---|---|---|
+| 1 | 3 種のサンプルと、fresh 検証環境 → 2 tenant → Rust/axum 登録 → publish → 同期実行 / ログ → 同時負荷 → 上限制御 → 無負荷で 0 → **再起動** → async / cron → 失敗 / DLQ / redrive → 仮利用量 / 予算停止 → Alias rollback → teardown が実 microVM で再現でき、操作ログ・commit・profile が残る | 達成・KVM実測あり | clean clone（`4afd8c1`）で `scripts/lab/lab.sh --provider firecracker` の preflight → bootstrap → up → status → **`demo all` 64/64 PASS** → status → teardown（`orphan check: clean`）がすべて exit 0。3 サンプルは `examples/hello`・`examples/http-axum`（Rust/axum、`p1.http_adapter` が 200 / ok）・`examples/cpu-burn`。2 tenant は `p1.other_tenant_404` / `p1.other_tenant_invoke_404`。再起動は新設の `demo restart`（下記）。`final-acceptance-*/runs/lab-run2/`（01〜09 の各コマンド出力、`demo/*/results.txt`、lab の command transcript、teardown 後の host 監査） |
+| 2 | tenant / Secret / egress / timeout の合格証跡と、障害時の「結果不明・retry・重複計上なし」 | 達成（単一 host、process と Firecracker の範囲） / 未検証（複数 host、電源断・disk 喪失） | tenant: 上の 404 2 件と、`measure-isolation.sh` の NET cross（tenant A から B の tap へ 4/4 拒否、B が受けた接続 0）。Secret: `secrets.not_leaked`（20 か所 × 5 値、hit 0）と `scripts/e2e/demo.sh` step 27（gateway log・evidence・`state.db`・`logs.db`）。egress: `isolation-20260918T024419Z`（M8 は 3/3 到達不能・DNS 解決なし・interface は lo のみ、public-web 16/16 拒否 + 4/4 許可、restricted 11/11 拒否 + 1/1 許可、policy は 4/4 の起動すべてで `InstanceStart` より前に検証）。timeout: `p1.timeout_enforced_by_host`（exit 4 `timeout`）と E2E の cpu-burn timeout step。障害: 故障マトリクス（下の実行表）と `demo restart` の `restart.accepted_async_not_lost` / `restart.async_counted_once` / `restart.no_replay_for_idle_function` |
+| 3 | warm 対応 / 未対応を区別し、未対応は毎回起動する動作と制限を明示する | 達成・KVM実測あり | `warm-20260918T022403Z`: Firecracker は `idle_quiesce` / `idle_resume` = supported、`[pool] enabled` で 6 回中 5 回 warm（resume 中央値 3 ms、warm total 137 ms に対し cold total 19 114 ms、休止中の VMM は RSS 42 MiB・3 s で CPU tick 0）。benchmark でも休止 60 s の VMM tick 0・cgroup CPU usec 増分 0（3 sample）。process provider は両 capability が `Unsupported` で環境は invocation ごとに作られて終わる（lab demo の P1 NOTE、`zero-scale.sh` の `warm_pool` 記録）。lab の demo は provider の差を隠さず表示する |
+| 4 | 入出力 / Secret / 環境の残存検査、既知制約、性能結果を添えて受入表を埋める | 達成 | 残存: teardown の `orphan check: clean`、`measure-isolation.sh` の HOST（VMM 29/29 が専用 cgroup と jail、実行後に cgroup・jail・VMM・tap・nft table・netns すべて 0）、各 run 後の `host.txt`、benchmark の `cleanup.txt`。入出力: object store は AES-256-GCM で平文が読めない（`p3.object_store_ciphertext`）。既知制約: [known-constraints-and-beta-gap.md](known-constraints-and-beta-gap.md)（この回の結果で §9 の 6 か所を更新）。性能: `bench-20260918T030637Z`（41 step、714 request、失敗 30 = 並列 8・pool off の queue timeout 504 のみ、pool on は全並列で失敗 0）。cold p95 はいずれのサンプルも 3 s 目標に未達（hello 16 284 ms）、warm の基盤追加遅延 p95 は http-axum 10 ms のみ 20 ms 目標に達し hello 49 ms・cpu-burn 48 ms は未達 |
+| 5 | Fast Restore X1 の未完了で本体を block しない／復元のデモだけで本体 Done にしない | 守った | 本節の判定に X1（PLT-4651〜PLT-4654）の結果は入れていない。X1 は [x1-results.md](x1-results.md) と本文書の X1 各節で別に判定する。この受入では X1 の経路を 1 つも実行していない |
+
+### この受入で実行したもの
+
+| 実行 | commit | 結果 | 証跡 |
+|---|---|---|---|
+| `lab.sh --provider firecracker`: preflight → bootstrap → up → status → `demo all` → status → teardown | `4afd8c1` | 64/64 PASS、teardown `orphan check: clean`、host 残留 0 | `runs/lab-run2/` |
+| `TSLS_PROVIDER=firecracker scripts/e2e/demo.sh` | `4afd8c1` | 29/29 PASS | `20260918T021321Z-firecracker/` |
+| `scripts/kvm/measure-isolation.sh` | `bbd650e` | 21/21 step、M8 / M9 / DISK / NET / HOST / NOISY すべて PASS | `isolation-20260918T024419Z/` |
+| `TSLS_PROVIDER=firecracker scripts/e2e/zero-scale.sh` | `bbd650e` | 18/18 PASS | `20260918T024902Z-zero-scale-firecracker/` |
+| `scripts/kvm/measure-warm.sh` | `4afd8c1` | 9/9 step、6 回中 5 回 warm | `warm-20260918T022403Z/` |
+| `TSLS_PROVIDER=firecracker scripts/usage/usage-e2e.sh` / `budget-e2e.sh` | `4afd8c1` | usage 18/18、budget 19/19 | `runs/usage/` |
+| `TSLS_PROVIDER=firecracker scripts/queue/async-dispatch-e2e.sh` / `triggers-e2e.sh` | `bbd650e` | dispatch 40 ok / 0 FAIL、triggers 39 ok / 0 FAIL | `runs/queue/` |
+| `TSLS_PROVIDER=firecracker scripts/chaos/matrix.sh --only`（8 シナリオ + 置き換えの guest OOM） | `bbd650e` / `b29eeec` | 6 pass、1 FLAKY（`stale_owner_frozen_in_transaction` は 2 回目で pass。1 回目は nats の port 競合）、`worker_user_process_kill_sync` は firecracker 非対象と判明（下記 5）。置き換えの `worker_user_process_oom_sync` は pass | `runs/chaos-firecracker/matrix/`、`runs/chaos-firecracker-oom/matrix/` |
+| `scripts/chaos/matrix.sh`（process、全 21 シナリオ） | `af0d9ab` | 20 pass、1 FLAKY（`stale_owner_frozen_in_transaction` は 1 回目が `reclaim.invocation_settled_once status=failed Host.Timeout`、2 回目で pass。凍結した gateway を止める時間が負荷で伸び、client の deadline に当たった）。exit 0 | `runs/chaos-process/matrix/` |
+| `scripts/kvm/bench.sh` | `bbd650e` | 41/41 step、714 request、失敗 30（並列 8・pool off の 504 のみ） | `bench-20260918T030637Z/` |
+
+### 見つけて直した不足
+
+| # | 何が起きたか | 直し方 |
+|---|---|---|
+| 1 | シナリオの「再起動」を lab.sh だけで再現できなかった（`demo` に gateway 再起動をまたぐ検査が無い） | `demo restart` を追加（`demo all` では P2 と P3 の間）。台帳・`prod` alias・invocation log・schema version・startup reconcile・受付済み async（全件 terminal、attempt 上限）・cron の継続・利用量（async は 1 回だけ計上、動いていない関数は不変）を検査する。`eb21e14` |
+| 2 | 1 回目の firecracker `demo all` が P3 で失敗（`p3.async_succeeded status=queued`）。restart phase が 2 秒間隔の cron を phase 中ずっと有効にしており、cold start より速く fire して 32 件のバックログを作り、P3 の async がその後ろで待った | cron を 5 秒間隔にし、再起動後の観測が済んだ時点で無効化し、phase を抜ける前にその fire の完了を待つ（`restart.cron_backlog_drained`）。`4afd8c1` |
+| 3 | `scripts/e2e/zero-scale.sh` の `2-burst-coalesced` が `max provisioned=4`（上限 3）で失敗。capacity sample は `{starting: 2, idle: 1, promised: 1}` で、実在した環境は 3 つだった | `promised` は環境ではなく「idle 環境を割り当てられた invocation」（`EnvironmentCounts.promised`、admission の `ResState::holds_resources`）。数え上げから外した。再実行は 18/18 で `max provisioned=3`。`e3eb79c` |
+| 4 | `scripts/kvm/measure-isolation.sh` が exit 5（NOISY の判定が出ない）。OOM probe の 1 回が負荷の高い host で `Host.InitTimeout` になり `env: null` の記録を残し、判定の jq が null を key に object を index して落ちた | 環境の無い attempt は host OOM kill 0 として数える。再実行は NOISY PASS（tenant B の slowdown は cpu ×0.859・write ×0.167 で基準内）。`bbd650e` |
+| 5 | chaos の firecracker 実行で `worker_user_process_kill_sync` が 2 回とも `kill: '': not a pid` で中断。firecracker では user process は guest の中で動き、host に pid が無い | [failure-matrix.md](failure-matrix.md) §8 の記述どおり、firecracker のシナリオ一覧からこのシナリオを外し、guest OOM（`worker_user_process_oom_sync`）を置く。置き換え後は pass。`b29eeec` |
+| 6 | 同じ実行で `stale_owner_frozen_in_transaction` の 1 回目が `TACHYON_NATS_URL: unbound variable` で中断。`free_port` が選んだ port が bind までに取られ nats-server が起動していなかった | `nats_up` が起動失敗を検出し、port・シナリオ名・log の末尾を出して失敗するようにした。`3a32e53` |
+| 7 | process provider の故障マトリクスを root で流したところ `object_store_unavailable` が 3 回とも失敗（`code=202`、`status=succeeded`）。root は `chmod 000` を無視するので object store が使えなくならず、故障が入っていなかった | process provider は特権不要なので、root での実行を matrix が拒否するようにした（`CHAOS_ALLOW_ROOT=1` で上書き可）。一般ユーザーでの再実行は pass（outage 6 138 ms、recovery 1 607 ms）。`af0d9ab` |
+
+### 未達・残り
+
+- **性能**: cold p95 は 3 s 目標に未達（この host の条件）。warm の基盤追加遅延は http-axum だけが 20 ms 目標に達する。並列 8 で pool を切ると queue timeout（10 s）が cold boot（7〜15 s）に負けて 504 が出る。値はすべて nested virtualization・共有 host の参考値で、bare metal / x86_64 は未測定。
+- **可用性**: 数百 request では測れない。測定窓・除外条件の定義も無い（[known-constraints-and-beta-gap.md](known-constraints-and-beta-gap.md) §2.1）。
+- **複数 host**: node 喪失・disk 喪失・電源断・partition は未試験。すべて 1 host に載っている。
+- **別の人間による追試**: 未実施（この回も自動化 agent による clean clone 実行）。[runbook.md](runbook.md) §9・§10。
+- x86_64、bare metal、KVM CI runner、既存 Tachyon Console への統合、実請求は引き続き対象外。
 
 ## PLT-4650 既知制約・国内有償 β との差分・次の設計判断
 

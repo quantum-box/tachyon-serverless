@@ -1,0 +1,18 @@
+tachyon-serverless KVM preflight (/home/takanorifukuyama.guest/lab)
+
+ok   os                     Linux
+ok   arch                   aarch64
+ok   kvm                    /dev/kvm is rw for takanorifukuyama
+ok   cpu_virt               aarch64: no cpuinfo flag; /dev/kvm present
+ok   kernel                 7.0.0-31-generic
+ok   tool:curl              /usr/bin/curl
+ok   tool:sha256sum         /usr/bin/sha256sum
+ok   tool:tar               /usr/bin/tar
+ok   tool:cargo             /home/takanorifukuyama.guest/.cargo/bin/cargo
+ok   tool:rustup            /home/takanorifukuyama.guest/.cargo/bin/rustup
+ok   tool:gcc               /usr/bin/gcc
+ok   tool:mkfs.ext4         /usr/sbin/mkfs.ext4 (e2fsprogs 1.47.2)
+ok   musl_target            aarch64-unknown-linux-musl installed
+ok   socket_path            84 bytes (max 107): /home/takanorifukuyama.guest/lab/.kvm/run/env_00000000000000000000000000/v.sock_5000
+
+READY: this host can run scripts/kvm/bootstrap.sh and smoke.sh

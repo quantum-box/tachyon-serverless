@@ -1,0 +1,9 @@
+[e2e] tenant A started (cpu 689188, io 689189, oom loop 689190); warming up 15s
+  B contended #1: status=succeeded cpu 2264.686335 ms, write p50 0.518042 ms, handler 2486 ms
+  B contended #2: status=succeeded cpu 1764.7052090000002 ms, write p50 0.617958 ms, handler 1897 ms
+  B contended #3: status=succeeded cpu 1801.446168 ms, write p50 0.560625 ms, handler 1948 ms
+  B contended #4: status=succeeded cpu 2115.643543 ms, write p50 0.527041 ms, handler 2392 ms
+  B contended #5: status=succeeded cpu 2684.5319600000003 ms, write p50 0.843166 ms, handler 2964 ms
+  B after #1: status=succeeded cpu 1717.793042 ms, write p50 0.5477080000000001 ms, handler 1853 ms
+  B after #2: status=succeeded cpu 1738.302376 ms, write p50 0.546833 ms, handler 1876 ms
+  B after #3: status=succeeded cpu 1713.523626 ms, write p50 0.576875 ms, handler 1882 ms

@@ -441,6 +441,7 @@ command log の形式: 先頭に `# command:`、`# started:`、`# lab_dir:`、`#
 |---|---|---|---|---|
 | 2026-09-17 | **自動化された agent**（実装した agent 自身が、作業ツリーではなく GitHub から fresh clone した別 directory で、この文書の §4.1 のコマンドだけを順に実行。**別の人間による追試ではない**） | Darwin 25.6.0 arm64、process provider | preflight → bootstrap → up → demo all → status → CLI → teardown、§6.4 / §6.5 / §6.6 / §6.7 / §6.9 の失敗を起こして記載の手順で復旧 | すべて通過（demo 47/47）。1 回目の追試で見つけた不足 5 件を直してから最終 commit で再実行。記録 `docs/evidence/lab-20260917T1219Z-process-clean-clone/`、詳細と不足の一覧は docs/acceptance.md「PLT-4648」 |
 | — | — | Linux/KVM、firecracker provider | §4.2 | aarch64 nested の Lima VM で実行（自動化 agent、demo all 49/49）。x86_64 は未検証（§10） |
+| 2026-09-18 | **自動化された agent**（PLT-4649 の最終受入。作業ツリーではない clean clone を VM の `~/lab` に作り、この文書の §4.2 のコマンドだけを順に実行。**別の人間による追試ではない**） | Apple M4 上の Lima VM `tsls-kvm`（nested virtualization、aarch64、4 vCPU / 8 GiB）、firecracker provider（jailer + cgroup required、gateway は root） | preflight → bootstrap → up → status → `demo all`（再起動 phase を含む）→ status → teardown | すべて通過（**demo all 64/64**、teardown `orphan check: clean`、host 残留 0）。1 回目は restart phase の cron がバックログを作って P3 が失敗し、直してから再実行。記録 `docs/evidence/final-acceptance-20260918T014751Z/runs/lab-run2/`、詳細は docs/acceptance.md「PLT-4649」 |
 
 ## 10. まだ再現できないこと
 

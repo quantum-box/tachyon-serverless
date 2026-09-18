@@ -1,0 +1,9 @@
+# PLT-4646 failure matrix — 20260918T035524Z
+
+commit `b29eeec46bd820519af9b95871ed65c62637bd12`, Linux 7.0.0-31-generic aarch64, rustc 1.95.0 (59807616e 2026-04-14), nats-server v2.14.7 (nats-server: v2.14.7), provider firecracker (jailed microVMs, host cgroup required, warm pool true), debug gateway with failpoints.
+
+Single host. These results are not a multi-host HA guarantee.
+
+| scenario | fault | outage_ms | recovery_ms | result | attempts | failed checks (last attempt) |
+|---|---|---|---|---|---|---|
+| worker_user_process_oom_sync | user process allocates 512 MiB in a 128 MiB guest (guest OOM killer; firecracker only) | 24406 | 149 | pass | pass |  |

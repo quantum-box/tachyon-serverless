@@ -1,0 +1,5 @@
+[e2e] allocation probe invocation inv_01m2s6dsasgsxxwbv4frqe0at8 (CLI exit 3)
+status=failed class=crash type=Runtime.Crash
+2026-09-18T02:44:53.435Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+2026-09-18T02:44:54.566Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+2026-09-18T02:44:56.709Z [platform/shutdown] environment terminated (Crashed); cleaned: process-group:682222, cgroup:/sys/fs/cgroup/tachyon/env_01m2s6dsat0r7c3wzrd4efwm8a, jail:/srv/jailer/firecracker/env-01m2s6dsat0r7c3wzrd4efwm8a, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s6dsat0r7c3wzrd4efwm8a/console.log, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s6dsat0r7c3wzrd4efwm8a/fc.log, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s6dsat0r7c3wzrd4efwm8a/function.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s6dsat0r7c3wzrd4efwm8a/scratch.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s6dsat0r7c3wzrd4efwm8a/fc.pid, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s6dsat0r7c3wzrd4efwm8a

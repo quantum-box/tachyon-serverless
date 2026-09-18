@@ -9,6 +9,11 @@
 
 ### Added
 
+- プロトタイプ最終受入の実行と、lab demo の再起動 phase（Linear PLT-4649）
+  - `scripts/lab/lab.sh demo restart`（`demo all` では P2 と P3 の間）: gateway を SIGTERM で止めて起動し直し、台帳・`prod` alias・invocation log・schema version・startup reconcile・受付済み async（全件 terminal、attempt 上限）・cron の継続・利用量（async は 1 回だけ計上、動いていない関数は不変）を検査する。これでデモシナリオの「無負荷で 0 →再起動→ async / cron」が lab.sh だけで再現できる
+  - Lima VM（aarch64 nested、Firecracker + jailer + cgroup required）で clean clone から一気通貫を実行: lab `demo all` 64/64、E2E 29/29、隔離 21/21、zero-scale 18/18、warm、usage 18 / budget 19、async dispatch 40 / triggers 39、故障マトリクス（process 全シナリオ・Firecracker 8 シナリオ）、benchmark 41/41（714 request）。証跡は `docs/evidence/final-acceptance-20260918T014751Z/`、判定は `docs/acceptance.md`「PLT-4649」、`docs/known-constraints-and-beta-gap.md` §9
+  - 受入の実行中に見つけた計測・harness の不具合を修正: `zero-scale.sh` が `promised`（idle 環境への割当）を環境として二重に数えていた、`measure-isolation.sh` の NOISY 判定が環境の無い attempt で落ちていた、chaos の `nats_up` が nats-server の起動失敗を分かりにくい unbound variable として報告していた、Firecracker では成立しない `worker_user_process_kill_sync` が一覧に残っていた、process provider の故障マトリクスを root で流すと `chmod 000` の故障が入らなかった
+
 - MIT License を追加
 - README / CONTRIBUTING / CODE_OF_CONDUCT / SECURITY などのリポジトリ基本ドキュメントを追加
 - GitHub の Issue / Pull Request テンプレートと Dependabot 設定を追加

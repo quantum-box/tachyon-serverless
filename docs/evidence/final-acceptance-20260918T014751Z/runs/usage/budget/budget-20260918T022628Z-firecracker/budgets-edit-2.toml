@@ -1,0 +1,6 @@
+# edit 2 ##
+[[tenants]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+hard_limit_micros = 513327
+soft_limit_micros = 2187
+alert_thresholds_percent = [50, 100]

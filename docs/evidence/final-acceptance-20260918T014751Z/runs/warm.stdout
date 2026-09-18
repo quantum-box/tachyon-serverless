@@ -1,0 +1,26 @@
+warm exit=0
+[e2e]   PASS (1265 ms)
+[e2e] gateway exit status 0
+
+#    STATUS MS        STEP
+---- ------ --------- ----------------------------------------
+1    PASS   208       build gateway, cli and the guest function
+2    PASS   43        write a gateway config with reuse on
+3    PASS   10385     gateway healthz/readyz
+4    PASS   152       provider is firecracker and reuse is on
+5    PASS   74        function warm-probe (idempotent)
+6    PASS   654       deploy revision (256 MiB)
+7    PASS   19369     invocation 1 of 6 (cold)
+8    PASS   3224      sample the paused VMM on the host
+9    PASS   1265      invocations 2..6 (expected warm)
+
+9 steps, 0 failed
+
+START  N      BOOT       RESUME     HANDLER    TOTAL      CLIENT    
+-----  -----  ---------  ---------  ---------  ---------  --------- 
+cold   1      16956      -          412        19114      19251     
+warm   5      -          3          107        137        173       
+
+evidence: /home/takanorifukuyama.guest/lab/docs/evidence/warm-20260918T022403Z
+summary:  /home/takanorifukuyama.guest/lab/docs/evidence/warm-20260918T022403Z/summary.txt
+OK: 5 of 6 invocation(s) were warm (cold: 1)

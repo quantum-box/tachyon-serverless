@@ -1,0 +1,10 @@
+checked at 2026-09-18T03:49:23Z after the last gateway stopped
+gateway / firecracker / jailer processes: (none)
+environment cgroups under /sys/fs/cgroup/tachyon: (none)
+cgroup parent present: no
+jails under /srv/jailer: (none)
+tsls* taps: (none)
+nft table inet tachyon_egress: (none)
+environment dirs under /home/takanorifukuyama.guest/lab/.kvm/run: (none)
+loop devices: 0
+root file system use: 39%

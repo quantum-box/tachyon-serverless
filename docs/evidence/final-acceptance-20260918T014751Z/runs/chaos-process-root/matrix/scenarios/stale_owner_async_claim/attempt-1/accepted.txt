@@ -1,0 +1,7 @@
+pre-i1 inv_01m2saybwaabw45gm170c6ecme inline
+pre-o1 inv_01m2saybxqqzayfkpwzk2w2epy object
+pre-w1 inv_01m2saybz0zx3yxp0x0yfpjkdn webhook
+stale-1 inv_01m2sayg7htde8yjc7ngsvq4ea inline
+post-i1 inv_01m2sazvg5tnh0q00kkn202t7r inline
+post-o1 inv_01m2sazvh55kccwyq7gvb00yr3 object
+post-w1 inv_01m2sazvjfdedzzhhdg9ycvqe8 webhook

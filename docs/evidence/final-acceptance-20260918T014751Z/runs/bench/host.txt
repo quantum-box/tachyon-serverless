@@ -1,0 +1,28 @@
+== before 2026-09-18T03:06:37Z
+vm:  12:06:37 up 23:52,  1 user,  load average: 1.66, 1.84, 1.78
+               total        used        free      shared  buff/cache   available
+Mem:            7913         666        1478           1        5975        7246
+/dev/vda1        38G   15G   24G  39% /
+bench exit=0
+== after 2026-09-18T03:49:23Z
+vm:  12:49:23 up 1 day, 35 min,  1 user,  load average: 1.19, 1.42, 1.32
+               total        used        free      shared  buff/cache   available
+Mem:            7913         542        7147           1         387        7370
+/dev/vda1        38G   15G   24G  39% /
+evidence: /home/takanorifukuyama.guest/lab/docs/evidence/bench-20260918T030637Z
+-- processes (gateway, firecracker, jailer, nats-server)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- disk
+/dev/vda1        38G   15G   24G  39% /

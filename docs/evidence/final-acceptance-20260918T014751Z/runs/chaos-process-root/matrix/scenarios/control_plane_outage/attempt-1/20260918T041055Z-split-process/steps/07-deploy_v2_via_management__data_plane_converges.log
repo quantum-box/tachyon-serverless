@@ -1,0 +1,6 @@
+uploading /home/takanorifukuyama.guest/lab/target/debug/example-hello (29862664 bytes, arch aarch64)
+artifact sha256:2ddc4aeceb9f319ae3baf96358987334bfd1c1d683ad784f22061355dfe6f8b4
+revision rev_01m2sbbzp99wb5t9thjpnyr78v (#2) created: pending
+revision rev_01m2sbbzp99wb5t9thjpnyr78v is preparing
+revision rev_01m2sbbzp99wb5t9thjpnyr78v is ready
+[e2e] data plane served v2 2666 ms after the deploy returned

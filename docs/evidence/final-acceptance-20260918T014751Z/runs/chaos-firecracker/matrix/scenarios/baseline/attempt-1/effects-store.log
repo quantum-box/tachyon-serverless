@@ -1,0 +1,19 @@
+effects-store listening on 192.31.196.2:8787 dir=/home/takanorifukuyama.guest/w/tsls-chaos.7t4TpC/effects
+effects-store 192.31.196.1 "POST /count/base-o1 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/base-o1 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /count/base-i1 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/base-i1 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /count/base-i2 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/base-i2 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /count/base-o2 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/base-o2 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /count/base-i3 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/base-i3 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /count/base-o3 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/base-o3 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -

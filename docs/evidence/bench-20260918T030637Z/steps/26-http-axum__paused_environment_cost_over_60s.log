@@ -1,0 +1,2 @@
+  [idle-start] environments=1 gateway_rss_kib=36104 host_available_kib=7466204
+  [idle-end] environments=1 gateway_rss_kib=36104 host_available_kib=7471608

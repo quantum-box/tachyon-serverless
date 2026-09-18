@@ -1,0 +1,136 @@
+# Tachyon Serverless gateway — Firecracker (Linux/KVM) 設定
+#
+# profile = "production" のため dev 専用 provider（process）は選べません。
+# .kvm/ 配下の成果物は docs/protocol.md §C の規約で用意します。
+# token / secret はデモ用のダミー値です。実運用の秘密は別の secret backend から供給してください。
+
+listen = "127.0.0.1:18484"
+profile = "production"
+data_dir = "/home/takanorifukuyama.guest/plt4649/runs/warm/data"
+
+[provider]
+kind = "firecracker"
+
+[provider.firecracker]
+firecracker_binary = ".kvm/bin/firecracker"
+kernel = ".kvm/vmlinux"
+rootfs = ".kvm/rootfs.ext4"    # read-only base rootfs（/sbin/tachyon-init = runtime-bridge）
+workdir = ".kvm/run"           # 環境ごとの API socket / vsock uds / function drive / log
+vsock_port = 5000
+
+# egress restricted / public-web（PLT-4622、docs/adr/0005-egress-profiles.md）。
+# 環境ごとに tap と nftables の chain（table inet tachyon_egress）を作るので、gateway を root
+# （または CAP_NET_ADMIN）で動かし、host の net.ipv4.ip_forward を 1 にしておく。満たさない host では
+# 2 つの capability が理由付きの unsupported になり、egress none だけが動く。省略時は下の既定値。
+# VMM の host 側 cgroup v2 上限（PLT-4622、docs/kvm.md §3.6）。環境ごとに
+# <root>/<parent>/<env_id> を作り、cpu.max = cpu_millis 相当（500m -> "50000 100000"、全 vCPU と
+# VMM の thread の合計）、memory.max = guest memory + memory_overhead_mib、pids.max を書いて読み戻し、
+# VMM を exec 前にその cgroup へ入れて cgroup.procs で所属を確認する。profile = "production" では
+# mode は required（省略時も required、best-effort / off は設定エラー）で、root の cgroup.procs に
+# 書けない host（gateway が root でない、委譲が無い）では preflight が失敗し環境の作成を拒否する。
+# dev profile の省略時は best-effort（使えなければ上限なしで起動し、capability を unverified にする）。
+[provider.firecracker.cgroup]
+mode = "required"
+# root = "/sys/fs/cgroup"        # cgroup v2 の root か、gateway に委譲された subtree
+# parent = "tachyon"
+# memory_overhead_mib = 64       # VMM 自身と drive の page cache の分
+# pids_max = 64
+
+# jailer（PLT-4622）。gateway を root で動かし、VMM を jailer 経由で起動する:
+# <chroot_base>/<firecracker のファイル名>/<instance id>/root に chroot、uid / gid へ降格、
+# mount / PID namespace を分離、Firecracker 既定の seccomp filter。kernel / rootfs / drive / fc.log は
+# chroot へ hard link するので chroot_base は workdir・kernel・rootfs と同じ file system に置く。
+# jailer は Firecracker と同じ release のもの（scripts/kvm/bootstrap.sh が .kvm/bin/jailer に置く）。
+[provider.firecracker.jailer]
+enabled = true
+binary = ".kvm/bin/jailer"
+uid = 64000
+gid = 64000
+# chroot_base = "/srv/jailer"
+# new_pid_ns = true
+
+# [provider.firecracker.network]
+# guest_cidr = "172.30.0.0/16"   # 環境ごとの /30 を切り出す private 範囲
+# dns_resolver = "1.1.1.1"       # public-web の guest が問い合わせてよい唯一の DNS（公開アドレスのみ）
+# nft_binary = "nft"
+# ip_binary = "ip"
+
+[capacity]
+max_concurrency = 8
+max_queue = 32
+queue_timeout_seconds = 10
+max_queue_bytes = 33554432
+
+# admission・autoscaler（PLT-4634、docs/adr/0006-autoscaling-and-admission.md）。
+# 資源の上限は host に合わせて設定する。overhead は [provider.firecracker.cgroup] と揃える:
+# VMM の cgroup は memory.max = guest memory + memory_overhead_mib（既定 64）で強制されるので、
+# 予約もその上限（64 MiB）で数える。guest の runtime bridge は guest memory の内側で動くので 0。
+# cpu.max は cpu_millis に VMM の thread を含めるので CPU の overhead も 0。
+[capacity.node]
+name = "kvm-node"
+# region = "jp"                  # jp-only の tenant / revision を載せる node だけに付ける
+# cpu_millis = 4000
+# memory_mib = 6144              # guest の memory_mib + overhead の合計がこれを超えない
+# ephemeral_storage_mib = 32768
+vmm_overhead_memory_mib = 64     # = [provider.firecracker.cgroup] memory_overhead_mib
+bridge_overhead_memory_mib = 0
+
+# [capacity.tenant_defaults]
+# max_concurrency = 6            # max_concurrency 未満にして 1 tenant の独占を防ぐ
+# max_queue = 16
+#
+# [capacity.start_rate]
+# per_second = 5                 # microVM の起動暴走を防ぐ
+# burst = 8
+#
+# [capacity.circuit_breaker]
+# failure_threshold = 5
+# cooldown_seconds = 30
+
+[invoke]
+inline_output_max_bytes = 65536
+cancel_grace_ms = 1000
+preflight_ttl_seconds = 30
+handshake_timeout_ms = 10000
+
+[[identity.tokens]]
+token = "dev-token-tenant-a"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+subject = "dev-a"
+roles = ["deploy", "invoke"]
+
+[[identity.tokens]]
+token = "dev-token-tenant-b"
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+subject = "dev-b"
+roles = ["deploy", "invoke"]
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzza"
+binding_ref = "demo-secret"
+value = "demo-secret-value-a"
+
+[[secrets.bindings]]
+tenant_id = "tn_01hzzzzzzzzzzzzzzzzzzzzzzb"
+binding_ref = "demo-secret"
+value = "demo-secret-value-b"
+
+# 台帳（Function / Revision / Alias / Invocation / Attempt / Environment / Lease）。
+# 既定は <data_dir>/state.db（埋め込み SQLite、WAL、前進のみの migration）。
+# 旧版の <data_dir>/state.json があれば初回起動時に一度だけ取り込み、
+# state.json.imported-<UTC> に rename する（docs/adr/0003-execution-state-persistence.md）。
+# secret の値は台帳に書かない。invocation の入力は digest だけ、出力は
+# [invoke] inline_output_max_bytes 以下のときだけ本文を持ち、保持期限を過ぎると digest に置き換える。
+[store]
+backend = "sqlite"                 # sqlite | memory（memory は再起動で全て消える）
+output_retention_seconds = 604800  # インライン出力の保持期限（7 日）。0 は無期限
+
+# invocation log は <data_dir>/logs/logs.db（docs/adr/0018）。既定値のまま。
+# [logs]
+# retention_seconds = 604800       # 最後の行からこれを過ぎた invocation の log を消す
+# max_total_bytes = 1073741824     # 超えたら terminal の invocation を古い順に消す
+
+# 起動時の後始末。既定は true で、台帳の収束と孤児環境の回収を listener を
+# 開ける前に行う（docs/architecture.md §4「起動時の後始末」）。
+# [reconcile]
+# on_startup = true

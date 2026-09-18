@@ -1,0 +1,1 @@
+{"error":{"code":"budget_exhausted","message":"budget: the function budget's hard limit (1 micro-units) does not admit this invocation's maximum charge of 183840 (32291 already committed in 2026-09)","request_id":"01m2s3qxc987tq37g6955twynq","error_type":"Host.BudgetExhausted","reason":"budget"}}

@@ -1,0 +1,40 @@
+usage exit=0
+PASS  1-known-duration-invocations  200s=3/3 (payload seconds=1.0)
+PASS  2-timeout  status=504 code=timeout
+PASS  3-duplicate-request-replayed  same invocation id for both sends: inv_01m2s5bscdnh8wm69eyw30xsxb / inv_01m2s5bscdnh8wm69eyw30xsxb
+PASS  4-journal-holds-events-ledger-empty  journal pending=25 (attempt_settled=5) ledger events=0
+PASS  5-kill-9-gateway-1  exit=137 (nothing was collected)
+PASS  6-collector-killed-between-ledger-commit-and-cursor  exit=137 ledger events=4 journal cursor=0
+PASS  7-journal-drained-no-double-count  ledger events=25 (journal had 25) distinct=25 duplicates_ignored=4
+PASS  8a-counts  invocations=5 attempts=5 retries=0 timeouts=1
+PASS  8b-host-measured-handler-time  handler_ms=6562 expected [5200, 8700]
+PASS  8c-every-handler-segment-host-measured  non-host handler segments=0
+PASS  8c-known-duration-samples  tolerance 700 ms: [{"outcome":"succeeded","ms":1372,"guest":1111},{"outcome":"succeeded","ms":1332,"guest":1173},{"outcome":"succeeded","ms":1392,"guest":1186},{"outcome":"timeout","ms":2003,"guest":null},{"outcome":"succeeded","ms":463,"guest":283}]
+PASS  8d-billable-is-init-plus-handler  billable_ms=13225 user_init_ms=6663 handler_ms=6562 vcpu_milli_ms=6612500
+PASS  8e-provisional-charge-follows-price-table  vcpu charge=16531 micros (expected 16531, table provisional-dev-2026-09-v1)
+PASS  8f-provisional-not-an-invoice  {"provisional":true,"not_an_invoice":true,"billing_enabled":false}
+PASS  9-tenant-b-sees-nothing  attempts=0 lines=0
+PASS  10-tsls-usage  PROVISIONAL - provisional usage estimate: not an invoice, nothing is charged, billing is disabled in this prototype
+PASS  11-environment-stopped-carries-cgroup-cpu-and-memory-peak  environment_stopped=5 provider_reported(cpu_usec>0, memory.peak>0)=5; [{"cpu_ms":8336,"peak_mib":44},{"cpu_ms":8799,"peak_mib":44},{"cpu_ms":10378,"peak_mib":44},{"cpu_ms":10524,"peak_mib":44},{"cpu_ms":5819,"peak_mib":44}]
+note  attempt_settled events with resources.cgroup_cpu_usec unknown (by design): 5
+PASS  12-no-vmm-jail-cgroup-tap-left  0 leftovers
+budget exit=0
+PASS  1-probe-reserved-and-settled  status=200 max_charge=146040 settled=2187 micros
+PASS  2-limit-delivered  hard_limit=513327 generation=10
+PASS  3a-parallel-refused-by-budget  200=3 429-budget=5 other=0
+PASS  3b-reserved-never-above-limit  reserved=438120 (3 x 146040) committed=440307 limit=513327
+PASS  4a-excess-returned-all-settled  reserved=0 hold=0 settlements=4 settled=16439 (4 runs reserved 584160)
+PASS  4b-settled-matches-ledger-rating  budget settled=16439 usage ledger total=16440 |diff|=1 (per-run rounding bound 8)
+PASS  4c-remaining  remaining=496888 = 513327 - 16439
+PASS  4d-store-totals-equal-rows  rows=[16439,0,0] totals=[16439,0,0] states=[["settled",4]]
+PASS  5-admitted-after-settlement  status=200
+PASS  6-soft-limit-alerts-only  alerts_fired=[50,100] (soft limit 2187 = the probe, crossed by the next settlement; no refusal from it)
+PASS  7a-stalled-collector-refuses  status=503 {"code":"budget_unavailable","reason":"budget","error_type":"Host.BudgetUnknown"}
+PASS  7b-readyz-reports-stall  readyz=503 oldest_unsettled_age=4s
+PASS  7c-running-work-finished  started before the stall threshold: status=200
+PASS  8-collector-resumed-admission-resumes  status=200
+PASS  9-lower-refuses-raise-resumes  at committed=26148: 429; raised to 1486548: 200 generation=12
+PASS  10-no-budget-fails-closed-and-isolated  status=503 error_type=Host.BudgetUnknown config_state=not_delivered
+PASS  11a-metrics  refusals budget_exhausted/tenant_hard_limit=6 budget_unknown/collector_stalled=1
+PASS  11b-tsls-budget  PROVISIONAL - provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype
+PASS  12-no-vmm-jail-cgroup-tap-left  0 leftovers

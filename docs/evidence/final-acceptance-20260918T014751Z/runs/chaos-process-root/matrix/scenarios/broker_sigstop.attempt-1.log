@@ -1,0 +1,26 @@
+[chaos broker_sigstop] begin (nats-server SIGSTOP (hung broker) with a small outbox bound, then SIGCONT) work=/home/takanorifukuyama.guest/w/tsls-chaos.D6VU7p
+[chaos broker_sigstop]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos broker_sigstop]   ok   workload.async_accepted accepted=6 refused=0
+[chaos broker_sigstop] fault injected
+[chaos broker_sigstop]   ok   outage.accepted_into_outbox_up_to_bound accepted=10 unsent_outbox=12 bound=12
+[chaos broker_sigstop]   ok   outage.backlog_admission_refuses refused=20 reason=queue_unavailable
+[chaos broker_sigstop]   ok   outage.sync_path_unaffected sync_200=3/3
+[chaos broker_sigstop] fault removed
+[chaos broker_sigstop] converged
+[chaos broker_sigstop]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos broker_sigstop]   ok   workload.async_accepted accepted=3 refused=0
+[chaos broker_sigstop]   ok   cv.accepted_never_lost accepted=19 missing_rows=0
+[chaos broker_sigstop]   ok   cv.accepted_all_terminal accepted=19 not_terminal=0
+[chaos broker_sigstop]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos broker_sigstop]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos broker_sigstop]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=16
+[chaos broker_sigstop]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos broker_sigstop]   ok   cv.ledger_all_terminal invocations=34 non_terminal=0 by_status=succeeded:34
+[chaos broker_sigstop]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos broker_sigstop]   ok   cv.cron_each_time_once fires=9 distinct_times=9
+[chaos broker_sigstop]   ok   cv.usage_counted_once journal_pending=0 ledger_events=170 distinct=170 attempts_settled_twice=0 duplicates_ignored=0
+[chaos broker_sigstop]   ok   cv.every_terminal_environment_metered_once terminal environments=34 without a stop event=0 environments with a stop=34 (pooled ones report when they stop, after this check)
+[chaos broker_sigstop]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos broker_sigstop]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos broker_sigstop]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos broker_sigstop]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.D6VU7p)

@@ -1,0 +1,3 @@
+[chaos stale_owner_frozen_in_transaction] begin (gateway A stops itself (SIGSTOP) between BEGIN IMMEDIATE and COMMIT of a state.db write, past both leases; B on the same data_dir; SIGCONT A) work=/home/takanorifukuyama.guest/w/tsls-chaos.kLsYDd
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 302: TACHYON_NATS_URL: unbound variable
+[chaos stale_owner_frozen_in_transaction]   FAIL harness.scenario_completed the scenario stopped before its last step (see the attempt log)

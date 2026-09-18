@@ -1,0 +1,145 @@
+{
+  "node": {
+    "name": "kvm-node",
+    "hosts": 1,
+    "host_scale_out": "not_supported",
+    "capacity": {},
+    "per_environment_overhead": {
+      "cpu_millis": 0,
+      "memory_mib": 64,
+      "ephemeral_storage_mib": 0
+    },
+    "max_concurrency": 8
+  },
+  "reserved": {
+    "cpu_millis": 0,
+    "memory_mib": 0,
+    "ephemeral_storage_mib": 0
+  },
+  "environments": {
+    "starting": 0,
+    "busy": 0,
+    "promised": 0,
+    "parking": 0,
+    "idle": 0,
+    "draining": 0
+  },
+  "in_flight": 0,
+  "queue": {
+    "length": 0,
+    "bytes": 0,
+    "max_length": 32,
+    "max_bytes": 33554432,
+    "timeout_seconds": 60
+  },
+  "start_rate": {
+    "per_second": 20,
+    "burst": 20,
+    "tokens": 20
+  },
+  "rejections": {},
+  "tenant": {
+    "tenant_id": "tn_01hzzzzzzzzzzzzzzzzzzzzzza",
+    "in_flight": 0,
+    "queued": 0,
+    "queued_bytes": 0,
+    "weight": 1
+  },
+  "revisions": [
+    {
+      "revision_id": "rev_01m2s6ntw82fgmg31xernmvgwc",
+      "desired": 1,
+      "max_environments": 3,
+      "environments": {
+        "starting": 0,
+        "busy": 0,
+        "promised": 0,
+        "parking": 0,
+        "idle": 0,
+        "draining": 0
+      },
+      "queued": 0,
+      "arrival_rate_per_second": 0.007,
+      "avg_duration_ms": 1231,
+      "circuit_breaker": "closed",
+      "min_ready": 0,
+      "idle_ttl_seconds": 2,
+      "scale_down_cooldown_seconds": 1,
+      "route_state": "deleting",
+      "last_scale_event": {
+        "kind": "drain",
+        "reason": "function_deleted",
+        "at": "2026-09-18T02:50:00.628316098Z"
+      }
+    },
+    {
+      "revision_id": "rev_01m2s6ps2en0qqvz6b839t1zr9",
+      "desired": 1,
+      "max_environments": 3,
+      "environments": {
+        "starting": 0,
+        "busy": 0,
+        "promised": 0,
+        "parking": 0,
+        "idle": 0,
+        "draining": 0
+      },
+      "queued": 0,
+      "arrival_rate_per_second": 0.028,
+      "avg_duration_ms": 1453,
+      "circuit_breaker": "closed",
+      "min_ready": 0,
+      "idle_ttl_seconds": 2,
+      "scale_down_cooldown_seconds": 1,
+      "route_state": "deleting",
+      "last_scale_event": {
+        "kind": "drain",
+        "reason": "function_deleted",
+        "at": "2026-09-18T02:50:00.628389157Z"
+      }
+    },
+    {
+      "revision_id": "rev_01m2s6q39cwteabzss0s8r5enx",
+      "desired": 1,
+      "max_environments": 3,
+      "environments": {
+        "starting": 0,
+        "busy": 0,
+        "promised": 0,
+        "parking": 0,
+        "idle": 0,
+        "draining": 0
+      },
+      "queued": 0,
+      "arrival_rate_per_second": 0.038,
+      "avg_duration_ms": 3127,
+      "circuit_breaker": "closed",
+      "min_ready": 0,
+      "idle_ttl_seconds": 2,
+      "scale_down_cooldown_seconds": 1,
+      "route_state": "deleting",
+      "last_scale_event": {
+        "kind": "drain",
+        "reason": "function_deleted",
+        "at": "2026-09-18T02:50:00.628375999Z"
+      }
+    }
+  ],
+  "scaling": {
+    "reconcile_interval_ms": 500,
+    "default_idle_ttl_seconds": 60,
+    "default_scale_down_cooldown_seconds": 30,
+    "drain_timeout_seconds": 5,
+    "warm_pool": true,
+    "at_zero": "zero environments is not zero host cost: the gateway, its store and the node keep running"
+  },
+  "reuse": {
+    "provider": "firecracker",
+    "mode": "warm_reuse",
+    "reason": "the provider reports both idle capabilities as supported and [pool] enabled is true",
+    "first_boots": 7,
+    "same_boot_reuses": 5,
+    "boot_id_changed": 0,
+    "boot_id_unreported": 0
+  }
+}

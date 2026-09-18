@@ -1,0 +1,785 @@
+[
+  {
+    "env": "env_01m2s6d76ns4ts7c74c0na3k44",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6djsq76wj4cw1yjcgynm1",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6dsat0r7c3wzrd4efwm8a",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6e77k0fade8zwbfke25h3",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6em24hp78s3qm0zz86t96",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6f093wp6axt5r2a47w3ew",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6fby4h8hdb0zke7teksmk",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6ff4n3zxqvknnacz9g54q",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6gcyjg1hydkep1nwehpx5",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6gjfythz6wmc340ndt598",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6gv1p5xyfa6dqye1w969c",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6h3v4g0h4enp71ecs1bhs",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6hcna2ftkj4g9a8khs8cg",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6hn7dwgh5cy9h16kr2pqg",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6hn86v91d94e5rpeapgpt",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6hn869gcebj3yr7zcyn4j",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6j3wbv2nd8w36eaas0y68",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6jc5d80xkqp9q1ejphcx6",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6jk5smkgexez6426rr4fz",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6jktz5vk4bpt0tgsn7zce",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6js6q3tg533m4fwvxn2qj",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6k0v47nqbaqaaxmtsdrhj",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6k8djjzy5jbxcx97c3twx",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6kw1h4dnww1wtd714qwfv",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6m875h97sqc496wncn0cx",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6mrsj2t71q6f4dychqcj9",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "50000 100000",
+    "memory_max": "201326592",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6n7f951r9dwt2xsdgzjmz",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6nccddmh01z19814k9kb3",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  },
+  {
+    "env": "env_01m2s6nhdh7k7e851j5s3gt9j8",
+    "jailed": true,
+    "observed": true,
+    "in_cgroup": true,
+    "limits_set": true,
+    "unprivileged": true,
+    "confined": true,
+    "seccomp": true,
+    "cpu_max": "100000 100000",
+    "memory_max": "335544320",
+    "uid": 64000,
+    "threads": [
+      {
+        "comm": "firecracker",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_api",
+        "seccomp": 2
+      },
+      {
+        "comm": "fc_vcpu 0",
+        "seccomp": 2
+      }
+    ]
+  }
+]

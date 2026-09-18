@@ -1,0 +1,5 @@
+{"phase":"start","awk_loop_ms":[94,91,94],"vm_loadavg":"1.61 1.83 1.77"}
+{"phase":"before-hello","awk_loop_ms":[98,93,90],"vm_loadavg":"1.61 1.83 1.77"}
+{"phase":"before-http-axum","awk_loop_ms":[133,100,97],"vm_loadavg":"1.06 1.43 1.47"}
+{"phase":"before-cpu-burn","awk_loop_ms":[84,82,81],"vm_loadavg":"0.80 1.23 1.30"}
+{"phase":"end","awk_loop_ms":[130,146,137],"vm_loadavg":"1.19 1.42 1.32"}

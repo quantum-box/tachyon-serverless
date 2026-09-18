@@ -1,0 +1,40 @@
+deploy.revision_ready                        ok rev_01m2s6ve4taxak4ntyj8hfvnaj
+cron.created_via_tsls                        ok trg_01m2s6vebcbp9skda79ne8480r next=2026-09-18T02:52:12Z
+cron.fired                                   ok fires=4 after 9s
+cron.each_fire_is_an_async_invocation_of_the_pinned_revision ok invocations=4
+cron.idempotency_key_per_scheduled_time      ok keys=4 distinct_times=4
+cron.fires_listed_via_tsls                   ok 5 lines
+restart.fires_resume                         ok before=4 after=11
+restart.no_scheduled_time_twice              ok fires=11 distinct_times=11 invocations=11
+restart.unique_fire_rows                     ok duplicate keys=0
+restart.skip_policy_skips_the_downtime       ok fired_inside_downtime=0 window=1789699939..1789699946
+restart.skipped_logged                       ok log_lines=1
+restart.scheduler_lease_owner                ok dsp_01m2s6w5w7nap4rvraycb3wc3s
+disable.status                               ok disabled next_fire_at=null
+disable.no_new_fires                         ok fires 12 -> 12, invocations 12 -> 12 over 5s
+webhook.secret_shown_once_on_create          ok fingerprint=sha256:22425f7a3738
+webhook.secret_never_returned_again          ok get has secret field: false
+webhook.openssl_and_tsls_signatures_agree    ok 
+webhook.invalid_signature_401                ok code=401
+webhook.expired_timestamp_401                ok code=401
+webhook.oversized_body_413                   ok code=413
+webhook.missing_event_id_400                 ok code=400
+webhook.refusals_store_nothing               ok fires/invocations before=0/12 after=0/12
+webhook.valid_202                            ok code=202 invocation=inv_01m2s6whrkj095hmnczbnexemx
+webhook.duplicate_event_same_invocation      ok code=202 {"invocation_id":"inv_01m2s6whrkj095hmnczbnexemx","replayed":true}
+webhook.replayed_signature_new_event_id_same_invocation ok code=202
+webhook.one_fire_row                         ok rows=1
+webhook.invocation_readable_async            ok {"status":"queued","mode":"async","revision_id":"rev_01m2s6ve4taxak4ntyj8hfvnaj"}
+webhook.disabled_410                         ok code=410
+webhook.deleted_404                          ok code=404
+webhook.deleted_secret_erased                ok 
+dispatch.every_fire_terminal                 ok invocations=13 succeeded=13
+dispatch.cron_fires_succeeded                ok succeeded=12 of 12
+dispatch.webhook_fire_succeeded              ok {"status":"succeeded","dispatch":"done","attempts":1}
+dispatch.failing_webhook_accepted            ok code=202 invocation=inv_01m2s6x1errpey4r5h1c6czgqm
+dispatch.failing_fire_retried_then_failed    ok {"status":"failed","error":"Order.InvalidKey","attempts":2,"dispatch":"dead","dead_letter":"dlq_01m2s6xj2td7t6036kskqbt697"}
+dispatch.failing_fire_one_dead_letter        ok [{"reason":"attempts_exhausted","attempts":2}]
+dispatch.fire_runs_metered                   ok usage attempts=15 (runs >= 15)
+microvm.every_fire_attempt_in_a_jailed_firecracker_vm ok attempts=15 not_microvm=0 cold=3 warm=12 environments=3
+evidence.no_secret                           ok 
+[triggers-e2e] PASS (evidence: /home/takanorifukuyama.guest/plt4649/runs/queue/triggers)

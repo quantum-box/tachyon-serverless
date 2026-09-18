@@ -1,0 +1,9 @@
+
+# PLT-4649 final acceptance (same settings as the PLT-4635 KVM verification).
+[pool]
+enabled = true
+
+[scaling]
+reconcile_interval_ms = 500
+drain_timeout_seconds = 5
+allow_short_drain = true

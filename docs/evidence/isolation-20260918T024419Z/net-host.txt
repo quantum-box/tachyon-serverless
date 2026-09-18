@@ -1,0 +1,10 @@
+host_if=eth0 host_ip=192.168.5.15 default_gw=192.168.5.2
+control: 192.168.5.15:22 from the host itself is open (a guest must not reach it)
+net.ipv4.ip_forward=1 (was 0)
+nft nftables v1.1.6 (Commodore Bullmoose #7)
+--- taps before ---
+(none)
+--- table inet tachyon_egress before ---
+Error: No such file or directory
+list table inet tachyon_egress
+                ^^^^^^^^^^^^^^

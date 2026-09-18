@@ -1,0 +1,94 @@
+[e2e] isolation measurement 20260918T024419Z (arch aarch64, evidence /home/takanorifukuyama.guest/lab/docs/evidence/isolation-20260918T024419Z)
+[e2e] step 1: build gateway, cli and the guest probe
+[e2e]   PASS (4 ms)
+[e2e] host watcher pid 681147 (cgroups under /sys/fs/cgroup/tachyon)
+[e2e] gateway pid 681148, config /home/takanorifukuyama.guest/plt4649/runs/isolation/gateway.toml, log /home/takanorifukuyama.guest/lab/docs/evidence/isolation-20260918T024419Z/gateway.log
+[e2e] step 2: gateway healthz/readyz
+[e2e]   PASS (4147 ms)
+[e2e] step 3: provider is firecracker / micro_vm
+[e2e]   PASS (20 ms)
+[e2e] step 4: function isolation-probe (idempotent)
+[e2e]   PASS (19 ms)
+[e2e] step 5: deploy baseline revision (256 MiB)
+[e2e]   PASS (463 ms)
+[e2e] step 6: M8: egress probe
+[e2e]   PASS (11859 ms)
+[e2e] step 7: M9: resource probe
+[e2e]   PASS (6250 ms)
+[e2e] step 8: deploy allocation revision (128 MiB)
+[e2e]   PASS (442 ms)
+[e2e] step 9: M9: allocate 512 MiB past the limit
+[e2e]   PASS (13783 ms)
+[e2e] step 10: deploy disk revision (64 MiB ephemeral storage)
+[e2e]   PASS (435 ms)
+[e2e] step 11: DISK: fill /tmp with 256 MiB
+[e2e]   PASS (11624 ms)
+[e2e] step 12: NET: host addresses and capabilities
+[e2e]   PASS (135 ms)
+[e2e] step 13: NET: tenant B function isolation-probe
+[e2e]   PASS (22 ms)
+[e2e] step 14: NET: deploy public-web, restricted and tenant B revisions
+[e2e]   PASS (1336 ms)
+[e2e] step 15: NET: expectations
+[e2e]   PASS (11 ms)
+[e2e] step 16: NET: public-web probe
+[e2e]   PASS (12513 ms)
+[e2e] step 17: NET: restricted probe
+[e2e]   PASS (11934 ms)
+[e2e] step 18: NET: two tenants at once (A -> B)
+[e2e]   PASS (32062 ms)
+[e2e] step 19: NOISY: deploy tenant A (cpu / io / oom) and tenant B revisions
+[e2e]   PASS (1731 ms)
+[e2e] step 20: NOISY: tenant B alone (5 runs)
+[e2e]   PASS (41207 ms)
+[e2e] step 21: NOISY: tenant B next to tenant A (5 runs, then 3 after)
+[e2e]   PASS (132354 ms)
+[e2e] gateway exit status 0
+taps after the run: (none)
+table inet tachyon_egress after the run: absent
+net.json leases left under /home/takanorifukuyama.guest/lab/.kvm/run: 0
+--- nft list tables ---
+table ip nat
+cgroup parent /sys/fs/cgroup/tachyon: absent
+environment cgroups left: (none)
+jails left under /srv/jailer: (none)
+firecracker / jailer processes left: (none)
+
+#    STATUS MS        STEP
+---- ------ --------- ----------------------------------------
+1    PASS   4         build gateway, cli and the guest probe
+2    PASS   4147      gateway healthz/readyz
+3    PASS   20        provider is firecracker / micro_vm
+4    PASS   19        function isolation-probe (idempotent)
+5    PASS   463       deploy baseline revision (256 MiB)
+6    PASS   11859     M8: egress probe
+7    PASS   6250      M9: resource probe
+8    PASS   442       deploy allocation revision (128 MiB)
+9    PASS   13783     M9: allocate 512 MiB past the limit
+10   PASS   435       deploy disk revision (64 MiB ephemeral storage)
+11   PASS   11624     DISK: fill /tmp with 256 MiB
+12   PASS   135       NET: host addresses and capabilities
+13   PASS   22        NET: tenant B function isolation-probe
+14   PASS   1336      NET: deploy public-web, restricted and tenant B revisions
+15   PASS   11        NET: expectations
+16   PASS   12513     NET: public-web probe
+17   PASS   11934     NET: restricted probe
+18   PASS   32062     NET: two tenants at once (A -> B)
+19   PASS   1731      NOISY: deploy tenant A (cpu / io / oom) and tenant B revisions
+20   PASS   41207     NOISY: tenant B alone (5 runs)
+21   PASS   132354    NOISY: tenant B next to tenant A (5 runs, then 3 after)
+
+21 steps, 0 failed
+
+CHK   RESULT   DETAIL
+---   ------   ----------------------------------------
+M8    PASS     3/3 targets attempted, none connected, dns_resolved=false
+M9    PASS     vcpu 1/1 vs 1 requested; MemTotal 231 MiB vs 256 MiB requested; alloc 512 MiB in 128 MiB -> failed/crash/Runtime.Crash
+DISK  PASS     wrote 58 MiB of 256 MiB into 64 MiB (/dev/vdc ext4), stopped_by=enospc; read-only refused 2/2; host avail drop max 74 MiB (allowed 128 MiB)
+NET   PASS     publicweb: 16/16 denied, 4/4 allowed; restricted: 11/11 denied, 1/1 allowed; cross: 4/4 denied, 1/1 allowed; tenant B accepted 0 connection(s); policy verified before InstanceStart in 4/4 policed boots; taps / table / leases gone after the run
+HOST  PASS     29/29 VMMs observed; in own cgroup with cpu.max/memory.max/pids.max: 29/29; jailed (uid 64000, CapEff 0, chroot, new PID+mount ns, seccomp 2 on vCPU/API threads): 29/29; no cgroup / jail / VMM left
+NOISY PASS     A cpu 0.5135 cores max/5s, 0.501284 mean (quota 0.5000, ≤ ×1.10); A io fill enospc at 58 MiB; A oom runs 6 crash=6, host oom_kill 0; B 13/13 ok, slowdown cpu ×0.859 (≤ ×1.30), write ×0.167 (≤ ×3.00), handler ×0.862
+
+evidence: /home/takanorifukuyama.guest/lab/docs/evidence/isolation-20260918T024419Z
+summary:  /home/takanorifukuyama.guest/lab/docs/evidence/isolation-20260918T024419Z/summary.txt
+M8 PASS, DISK PASS, NET PASS, HOST PASS, NOISY PASS (M9 PASS; M9 findings are reported, not fatal)

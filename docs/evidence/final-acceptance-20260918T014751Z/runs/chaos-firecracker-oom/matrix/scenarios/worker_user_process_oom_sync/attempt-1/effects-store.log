@@ -1,0 +1,7 @@
+effects-store listening on 192.31.196.2:8787 dir=/home/takanorifukuyama.guest/w/tsls-chaos.EdICqb/effects
+effects-store 192.31.196.1 "POST /count/pre-o1 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/pre-o1 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /count/pre-i1 HTTP/1.1" 200 -
+effects-store 192.31.196.1 "POST /effect/pre-i1 HTTP/1.1" 201 -
+effects-store 192.31.196.1 "POST /log HTTP/1.1" 200 -
