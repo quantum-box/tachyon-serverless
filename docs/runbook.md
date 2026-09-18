@@ -27,8 +27,11 @@
 | 配備 | pin した nats-server（macOS / Linux）と Firecracker・jailer・guest kernel（Linux/KVM）を sha256 照合して取得、gateway / CLI / guest を build、使い捨ての設定と secret を生成、nats-server と gateway を起動、SQLite 台帳の migration、全 component の health 確認 | `preflight` → `bootstrap` → `up` |
 | P1 | 関数登録 → revision publish → 同期 invoke（結果・env・secret binding・user error・host 強制 timeout・HTTP adapter）→ logs → boot evidence → v2 publish → rollback → 他 tenant 404 | `demo p1` |
 | P2 | revision の `max_concurrency` を超える burst、scale to zero、cold 再アクセス、alias 切替と戻し、placement label（`jp` node で `jp` は受付・`us` は拒否）、`/metrics` snapshot（operator 専用） | `demo p2` |
+| 再起動 | gateway を止めて起動し直し、台帳・`prod` alias・invocation log・受付済みの async・cron の schedule・利用量（1 回だけ計上）が残ることを確認 | `demo restart` |
 | P3 | `invokeAsync`（inline と object store 経由の大きな入力）、retry → dead letter → redrive（role 検査）、cron trigger、署名付き webhook（正しい署名 202・偽署名 401）、usage 報告、budget による受付停止と解除、secret 値の非漏洩検査 | `demo p3` |
 | 片付け | 自分の lab id が付いたものだけを止めて消し、孤児を検査 | `down` / `teardown` |
+
+`demo all` は P1 → P2 → 再起動 → P3 の順に走る。
 
 rollback は 2 種類ある。**関数の rollback**（alias を前の revision に戻す）は P1 / P2 の demo が行う。**lab 自体の作り直し**は `teardown` → `bootstrap` → `up`（§7）。
 
@@ -118,7 +121,7 @@ cd tachyon-serverless
 scripts/lab/lab.sh preflight          # host の検査。FAIL が無いこと（macOS では os が WARN）
 scripts/lab/lab.sh bootstrap          # nats-server を sha256 照合で取得、cargo build（初回は数分）
 scripts/lab/lab.sh up                 # 設定・secret 生成、nats + gateway 起動、migration、health 表
-scripts/lab/lab.sh demo all           # P1 → P2 → P3（約 1 分）。exit 0 = 全 check PASS
+scripts/lab/lab.sh demo all           # P1 → P2 → 再起動 → P3（約 2 分）。exit 0 = 全 check PASS
 scripts/lab/lab.sh status             # いつでも health 表
 scripts/lab/lab.sh teardown           # 停止・削除・孤児検査。最後に "orphan check: clean"
 ```
@@ -216,6 +219,28 @@ PASS  p2.placement_us_refused                                    exit=6 reason=p
 NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
 ```
 
+**restart**（`demo restart`。`demo all` では P2 と P3 の間で走る）
+
+gateway を SIGTERM で止めて起動し直す（`down` + `up` と同じ経路）。P1 / P2 が作った状態と、止まっている間に受け付けた仕事が残ることを確かめる。
+
+| check | 期待 |
+|---|---|
+| `restart.cron_created` / `restart.cron_fires_after_restart` | `*/2 * * * * *` の cron を有効なまま再起動をまたがせ、accepted の fire が再起動後も増える（scheduler が lease を取り直す） |
+| `restart.async_accepted_202` | 再起動の直前に `invokeAsync` 4 件が 202（`max_concurrency 1`・2 s の handler なので queue に残る） |
+| `restart.stopped` / `restart.started_healthy` | gateway process が消えて `/healthz` が答えない → 起動後に health 表の全 component が ok |
+| `restart.schema_version_unchanged` | `state.db` の `schema_version` が再起動前と同じ（migration は再適用されない） |
+| `restart.ledger_survives` / `restart.cold_invoke_ok` | 関数の数と `prod` alias（P1 の rollback 後の v1）がそのまま、再起動後の同期 invoke は exit 0 |
+| `restart.logs_survive` | 再起動前の invocation の log 行数が変わらない（`logs.db`） |
+| `restart.startup_reconcile` | この起動の gateway log に `startup reconcile finished` |
+| `restart.accepted_async_not_lost` / `restart.async_attempts_bounded` | 受け付けた 4 件すべてが再起動後に terminal になり、`outcome_unknown` 0。1 つの invocation の attempt は最大 3（再起動後の再試行は新しい invocation ではない） |
+| `restart.async_counted_once` / `restart.no_replay_for_idle_function` | cpu-burn の `usage.invocations` がちょうど +4、再起動をまたいで動いていない http-axum の attempts は不変（journal が ledger に二重に入らない） |
+
+```text
+PASS  restart.accepted_async_not_lost                            4/4 terminal after the restart, 0 without an outcome (statuses in restart-async-status.txt)
+PASS  restart.async_counted_once                                 cpu-burn invocations (first attempts) 14 -> 18, expected +4 for the 4 async invocations
+NOTE  the restart is a clean SIGTERM (in-flight synchronous invocations are cancelled). Crash, DB, queue and worker failures are the failure matrix (docs/failure-matrix.md), not this demo.
+```
+
 **P3**（`demo p3`）
 
 | check | 期待 |
@@ -236,7 +261,7 @@ PASS  p3.cron_fired                                              accepted fires 
 PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
 PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
 
-47 checks passed, 0 failed
+61 checks passed, 0 failed
 ```
 
 `tsls budget` と `tsls usage` の表は先頭に `PROVISIONAL - ... nothing is charged, billing is disabled in this prototype` を出す。

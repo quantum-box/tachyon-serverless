@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# scripts/lab/demo.sh - the P1 / P2 / P3 demos of scripts/lab/lab.sh (PLT-4648). Sourced by lab.sh.
+# scripts/lab/demo.sh - the P1 / P2 / restart / P3 demos of scripts/lab/lab.sh (PLT-4648, PLT-4649).
+# Sourced by lab.sh.
 #
 # Runs against the lab's already running gateway (lab.sh up) with the lab's generated tokens, so it
 # never starts its own gateway and never touches another port or directory. Re-runnable: functions
@@ -9,6 +10,9 @@
 #       error, timeout, HTTP), logs, boot evidence, v2 -> rollback -> v1, other tenant 404
 #   P2  burst against revision max_concurrency, scale to zero, cold re-access, alias switch,
 #       placement label (jp node: jp admitted, us refused), metrics snapshot (operator only)
+#   restart  a gateway restart (SIGTERM + start) between P2 and P3: the ledger, the rolled back
+#       alias, the invocation logs, async work accepted before the restart, the cron schedule and
+#       the usage ledger (counted once, no replay) survive it
 #   P3  invokeAsync (inline and object-store input), retries -> dead letter -> redrive (role
 #       checked), cron trigger, signed webhook (good and bad signature), usage report, budget stop
 #       and release, secret values absent from logs / demo outputs / ledger
@@ -231,6 +235,127 @@ demo_p2() {
 }
 
 # ---------------------------------------------------------------------------
+# restart (PLT-4649: the scenario's "idle -> 0 -> restart -> async / cron")
+# ---------------------------------------------------------------------------
+
+# Stops the lab's gateway with SIGTERM and starts it again (lab.sh's own stop_gateway /
+# start_gateway, so it is the same restart an operator does with `lab.sh down` + `lab.sh up`),
+# then checks what has to survive it: the ledger and the alias P1 rolled back, the invocation
+# logs, the environments (reclaimed by the startup reconcile), async work accepted before the
+# restart, the cron schedule, and the usage ledger (no replay, no double count).
+demo_restart() {
+  section "restart: accepted async work, cron, ledger, logs and usage survive a gateway restart (provider $PROVIDER)"
+  local stamp cbid axid inv n=4 i body
+  local greeting_before greeting_after fn_before fn_after schema_before schema_after
+  local logs_before logs_after log_offset this_start cron fires_before fires_after
+  local cb_before cb_after ax_before ax_after ids="" id s accepted=0 terminal=0 unknown=0 attempts_max=0 a deadline
+  stamp="$(date -u +%H%M%S)$(random_hex 2)"
+  cbid="$(ensure_function cpu-burn)"
+  axid="$(ensure_function http-axum)"
+
+  # --- state before the restart -------------------------------------------------------------
+  capture ta functions invoke hello --payload '{"name":"restart"}' --json
+  greeting_before="$(jq -r .greeting <<<"$OUT" 2>/dev/null)"
+  inv="$(ta functions invocations hello --limit 1 --json | jq -r '(.items // .)[0].id')"
+  capture ta functions logs --invocation "$inv"
+  printf '%s\n' "$OUT" >"$DEMO_OUT/restart-logs-before.txt"
+  logs_before="$(grep -c . "$DEMO_OUT/restart-logs-before.txt" || true)"
+  fn_before="$(ta functions list --json | jq -r '(.items // .) | length')"
+  schema_before="$(sqlite_ro "$DATA_DIR/state.db" 'SELECT MAX(version) FROM schema_version' || true)"
+  capture ta usage --group-by function --json
+  printf '%s\n' "$OUT" >"$DEMO_OUT/restart-usage-before.json"
+  cb_before="$(jq -r --arg f "$cbid" '[.lines[] | select(.function_id == $f) | .usage.invocations] | add // 0' <<<"$OUT" 2>/dev/null)"
+  ax_before="$(jq -r --arg f "$axid" '[.lines[] | select(.function_id == $f) | .usage.attempts] | add // 0' <<<"$OUT" 2>/dev/null)"
+
+  # a cron trigger that keeps firing across the restart
+  cron="$(ta triggers create hello --name "lab-restart-cron-$stamp" --kind cron --schedule '*/2 * * * * *' \
+    --timezone Asia/Tokyo --payload '{"name":"restart-cron"}' --missed-run skip --json | jq -r .id)"
+  check restart.cron_created "trigger=$cron schedule='*/2 * * * * *' (kept enabled across the restart)" test -n "$cron" -a "$cron" != null
+  sleep 5
+  fires_before="$(ta triggers fires hello "$cron" --limit 50 --json | jq -r '[(.items // .)[] | select(.outcome == "accepted")] | length' 2>/dev/null)"
+
+  # async work accepted (durably) just before the restart: cpu-burn, one at a time, 2 s each, so
+  # the queue still holds most of it when the gateway goes down.
+  deploy cpu-burn "$GUEST_DIR/example-cpu-burn" --max-concurrency 1 --description "lab restart async" >/dev/null
+  body="$DEMO_OUT/restart-async-body.json"
+  printf '{"seconds":2}' >"$body"
+  for i in $(seq 1 "$n"); do
+    api "$TOKEN_A" POST "/v1/functions/$cbid:invokeAsync" "$body"
+    [ "$HTTP_CODE" = 202 ] || break
+    ids="$ids $(jqb .invocation_id)"
+    accepted=$((accepted + 1))
+  done
+  check restart.async_accepted_202 "$accepted/$n accepted with HTTP 202 before the restart (committed before the answer)" \
+    is "$accepted" "$n"
+
+  # --- restart -------------------------------------------------------------------------------
+  log_offset="$( { wc -c <"$GATEWAY_LOG"; } 2>/dev/null | tr -d ' ' || echo 0)"
+  stop_gateway
+  check restart.stopped "gateway process gone; GET /healthz -> $(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$API/healthz" || true) (000 = no answer)" \
+    test -z "$(gateway_pid || true)"
+  start_gateway
+  check restart.started_healthy "every component healthy again after the restart (health table)" health_table quiet
+  this_start="$DEMO_OUT/restart-gateway-start.log"
+  tail -c +"$((log_offset + 1))" "$GATEWAY_LOG" >"$this_start" 2>/dev/null || true
+
+  # --- what survived -------------------------------------------------------------------------
+  schema_after="$(sqlite_ro "$DATA_DIR/state.db" 'SELECT MAX(version) FROM schema_version' || true)"
+  check restart.schema_version_unchanged "state.db schema_version $schema_before -> $schema_after (migrations are not re-applied)" \
+    is "$schema_after" "$schema_before"
+  fn_after="$(ta functions list --json | jq -r '(.items // .) | length')"
+  capture ta functions invoke hello --payload '{"name":"restart"}' --json
+  greeting_after="$(jq -r .greeting <<<"$OUT" 2>/dev/null)"
+  check restart.cold_invoke_ok "exit=$RC message=$(jq -r .message <<<"$OUT" 2>/dev/null) (a new environment is started after the restart)" is "$RC" 0
+  check restart.ledger_survives "functions $fn_before -> $fn_after, prod alias greeting $greeting_before -> $greeting_after (P1's rollback is still in effect)" \
+    test "$fn_after" = "$fn_before" -a "$greeting_after" = "$greeting_before"
+  capture ta functions logs --invocation "$inv"
+  printf '%s\n' "$OUT" >"$DEMO_OUT/restart-logs-after.txt"
+  logs_after="$(grep -c . "$DEMO_OUT/restart-logs-after.txt" || true)"
+  check restart.logs_survive "invocation=$inv lines $logs_before -> $logs_after (logs.db)" \
+    test "$logs_after" = "$logs_before" -a "$logs_before" != 0
+  check restart.startup_reconcile "gateway log of this start has the startup reconcile" \
+    grep -q 'startup reconcile finished' "$this_start"
+
+  # accepted async work: every invocation reaches a terminal state, none is lost
+  for id in $ids; do
+    s="$(wait_status "$id" 120)"
+    printf '%s %s\n' "$id" "$s" >>"$DEMO_OUT/restart-async-status.txt"
+    case "$s" in succeeded | failed | cancelled) terminal=$((terminal + 1)) ;; *) unknown=$((unknown + 1)) ;; esac
+    a="$(ta functions invocation "$id" --json | jq -r '.attempts | length' 2>/dev/null || echo 0)"
+    [ "${a:-0}" -le "$attempts_max" ] || attempts_max="$a"
+  done
+  check restart.accepted_async_not_lost "$terminal/$n terminal after the restart, $unknown without an outcome (statuses in restart-async-status.txt)" \
+    test "$terminal" = "$n" -a "$unknown" = 0
+  check restart.async_attempts_bounded "most attempts on one invocation: $attempts_max (max_attempts 3; a retry after the restart is not a new invocation)" \
+    test "$attempts_max" -ge 1 -a "$attempts_max" -le 3
+
+  # cron keeps its schedule across the restart
+  sleep 6
+  fires_after="$(ta triggers fires hello "$cron" --limit 50 --json | jq -r '[(.items // .)[] | select(.outcome == "accepted")] | length' 2>/dev/null)"
+  ta triggers update hello "$cron" --disable >&2 || true
+  ta triggers delete hello "$cron" >&2 || true
+  check restart.cron_fires_after_restart "accepted fires $fires_before -> $fires_after (the scheduler takes its lease again)" \
+    test "${fires_after:-0}" -gt "${fires_before:-0}"
+
+  # usage: the async invocations are counted once each, and nothing is replayed for a function
+  # that did not run across the restart
+  deadline=$((SECONDS + 60))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    capture ta usage --group-by function --json
+    cb_after="$(jq -r --arg f "$cbid" '[.lines[] | select(.function_id == $f) | .usage.invocations] | add // 0' <<<"$OUT" 2>/dev/null)"
+    [ "$((cb_after - cb_before))" -lt "$n" ] || break
+    sleep 2
+  done
+  printf '%s\n' "$OUT" >"$DEMO_OUT/restart-usage-after.json"
+  ax_after="$(jq -r --arg f "$axid" '[.lines[] | select(.function_id == $f) | .usage.attempts] | add // 0' <<<"$OUT" 2>/dev/null)"
+  check restart.async_counted_once "cpu-burn invocations (first attempts) $cb_before -> $cb_after, expected +$n for the $n async invocations" \
+    is "$((cb_after - cb_before))" "$n"
+  check restart.no_replay_for_idle_function "http-axum attempts $ax_before -> $ax_after (it did not run across the restart; the journal is not replayed into the ledger twice)" \
+    is "$ax_after" "$ax_before"
+  note "the restart is a clean SIGTERM (in-flight synchronous invocations are cancelled). Crash, DB, queue and worker failures are the failure matrix (docs/failure-matrix.md), not this demo."
+}
+
+# ---------------------------------------------------------------------------
 # P3
 # ---------------------------------------------------------------------------
 
@@ -447,7 +572,7 @@ demo_main() {
   : >"$DEMO_RESULTS"
   echo "demo $phase: lab $LAB_ID provider $PROVIDER api $API outputs $DEMO_OUT"
   case "$phase" in
-    all) for p in p1 p2 p3; do "demo_$p"; done ;;
+    all) for p in p1 p2 restart p3; do "demo_$p"; done ;;
     *) "demo_$phase" ;;
   esac
   demo_secret_scan
