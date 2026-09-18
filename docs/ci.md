@@ -2,7 +2,7 @@
 
 - 対象: `.github/workflows/ci.yml`、`.github/workflows/kvm-integration.yml`、`scripts/ci/*`、`docs/openapi.json`、`crates/protocol/tests/golden/`
 - 関連: [kvm.md](kvm.md)（KVM の手順）、[threat-model.md](threat-model.md)（守るもの）、[acceptance.md](acceptance.md) §PLT-4645
-- 状態（2026-09-17）: hosted runner の gate は GitHub Actions 上で実行した（§8）。**self-hosted KVM runner は未登録**のため、`kvm` job は一度も実行されていない。branch protection の required check の設定も未実施（repository owner の作業、§4.4）。
+- 状態（2026-09-18 更新）: hosted runner の gate は GitHub Actions 上で実行した（§8）。**self-hosted KVM runner は未登録**（当面登録しない方針）のため、`kvm` job は一度も実行されていない。その間の KVM 必要な変更の扱いは §4.2「runner が無い間の運用」。branch protection の required check の設定も未実施（repository owner の作業、§4.4）。
 
 ## 1. 目的
 
@@ -94,6 +94,16 @@ PR は `base...merge commit`、main への push は `before...sha` の差分で�
 - label の付与は write 権限以上に限られる（GitHub の仕様）。
 - fork の PR は label を付けても `kvm` job は走らない。必要なら maintainer が内容を確認したうえで同じ repository の branch に取り込み、その PR に label を付ける。
 
+#### runner が無い間の運用（2026-09-18〜）
+
+self-hosted KVM runner は当面登録しない（§5 の手順は残すが、実施の見込みが立っていない）。その間、KVM 必要な PR では `kvm` job はどうやっても走らないので、label は「runner で実行してよい」ではなく **「maintainer が diff を読み、手元の KVM 実機での実行結果をもって受け入れた」** ことを表す。運用は次のとおり。
+
+1. PR の作成者は、変更した `scripts/kvm/**` / `scripts/e2e/**` を **実 Firecracker（KVM）で実行し、結果を `docs/evidence/` に入れる**。
+2. maintainer は diff とその証跡を確認し、`kvm` label を付ける。**どの実行で確かめたかを PR のコメントに残す**（証跡 directory と PASS 数）。
+3. 証跡の無い KVM 必要な変更に label を付けない。label の無い赤い `kvm-gate` は「まだ誰も確かめていない」という意味のまま残す。
+
+label を付けずに merge すると gate は赤のままになり、「未確認」と「いつもの赤」が区別できなくなる。**required check を常時赤のまま運用しない**ために、KVM 必要な PR は必ず上の 1〜3 を通す。runner を登録できたら（[known-constraints-and-beta-gap.md](known-constraints-and-beta-gap.md) §7.1 V8）この節は削除し、label は本来の「実行許可」に戻す。
+
 ### 4.3 workflow の `if:` は多層防御にすぎない
 
 この repository は **public** である。PR は workflow ファイル自体を書き換えられる（`pull_request` の run は PR の merge commit の workflow を使う）ので、`if:` 条件だけでは fork PR が self-hosted runner に job を投げることを防げない。runner 側で次を必ず設定する（§5）。
@@ -111,7 +121,7 @@ PR は `base...merge commit`、main への push は `before...sha` の差分で�
 
 ## 5. KVM runner を安全に登録する手順（将来）
 
-**この Issue では登録していない。** 登録は repository owner が行う。
+**まだ登録していない。当面は登録しない方針で、それまでの運用は §4.2「runner が無い間の運用」に従う。** 登録は repository owner が行う。
 
 1. host を用意する: Linux x86_64（`docs/inventory-tachyon-apps.md` §6 の第一 profile）、bare metal または nested virtualization を許す VM。production と同じネットワーク・アカウントに置かない。外向き通信は GitHub、`github.com/firecracker-microvm` の release、`s3.amazonaws.com/spec.ccfc.min`（guest kernel）、crates.io、static.rust-lang.org に絞る。
 2. 1 job ごとに作り直す使い捨て VM（またはコンテナ + `/dev/kvm`）を image から起動する仕組みを用意する。image には `curl jq e2fsprogs gcc rustup pgrep` と、`kvm` group の非 root ユーザーを入れる。**`.kvm/` や `target/` を image に焼かない**（bootstrap が毎回取得・検証する）。
