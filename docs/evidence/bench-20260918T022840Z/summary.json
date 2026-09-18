@@ -1,0 +1,232 @@
+{
+  "run": "bench-20260918T022840Z",
+  "commit": "4afd8c1d494ad055763151874fc369991c33da64",
+  "host_contention": {
+    "calibration": [
+      {
+        "phase": "start",
+        "awk_loop_ms": [
+          232,
+          251,
+          254
+        ],
+        "vm_loadavg": "0.70 1.06 1.13"
+      }
+    ],
+    "physical_host_load1": {
+      "n": 1,
+      "p50": 69.12,
+      "p95": 69.12,
+      "p99": 69.12,
+      "min": 69.12,
+      "max": 69.12,
+      "mean": 69.1
+    },
+    "note": "calibration = wall ms of a fixed awk loop inside the VM; physical_host_load1 = 1-minute load average of the machine running the VM, sampled outside the VM when provided (physical-host-load.tsv)"
+  },
+  "rules": "nearest-rank percentiles over all attempts of a group including failures; timing percentiles over attempts carrying the timing (n shown); nothing dropped",
+  "scenarios": [],
+  "sweeps": [],
+  "gateway_starts": {
+    "fresh_host": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "min": null,
+      "max": null,
+      "mean": null
+    },
+    "warm_config_page_cache_warm": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "min": null,
+      "max": null,
+      "mean": null
+    }
+  },
+  "deploys": {
+    "create_client_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "min": null,
+      "max": null,
+      "mean": null
+    },
+    "deploy_client_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "min": null,
+      "max": null,
+      "mean": null
+    }
+  },
+  "resources": {
+    "paused_idle": [],
+    "gateway_rss_by_pooled_environments": [],
+    "pooled_after_sweep": [],
+    "teardown_by_sample": [
+      {
+        "sample": "hello",
+        "environments": 0,
+        "memory_peak_bytes": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "cpu_usage_usec": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "cpu_throttled_usec": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "throttled_period_ratio": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "oom_kills": 0
+      },
+      {
+        "sample": "http-axum",
+        "environments": 0,
+        "memory_peak_bytes": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "cpu_usage_usec": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "cpu_throttled_usec": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "throttled_period_ratio": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "oom_kills": 0
+      },
+      {
+        "sample": "cpu-burn",
+        "environments": 0,
+        "memory_peak_bytes": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "cpu_usage_usec": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "cpu_throttled_usec": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "throttled_period_ratio": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "min": null,
+          "max": null,
+          "mean": null
+        },
+        "oom_kills": 0
+      }
+    ]
+  },
+  "rfc_targets": [
+    {
+      "target": "cold first response: small Rust function, image cache hit, p95 <= 3 s (RFC §19)",
+      "measured": null,
+      "verdict": "未測定",
+      "reason": "hello cold was not run"
+    },
+    {
+      "target": "cold first response, image cache miss: reported separately (RFC §19)",
+      "measured": [],
+      "verdict": "未測定",
+      "reason": "RFC gives no number for the miss case; recorded so it is not mixed into the hit percentiles"
+    },
+    {
+      "target": "warm platform added latency p95 <= 20 ms, user handler excluded (RFC §19)",
+      "measured": [],
+      "verdict": "未測定",
+      "reason": "judged per sample on host_platform p95; host_platform = total_ms - handler_ms (queue, resume, readiness, response, bookkeeping) over every attempt of the warm group including any that fell back to cold; client_platform adds loopback HTTP and curl. RFC asks for same-region under a set load; this is loopback on one nested host, sequential"
+    },
+    {
+      "target": "Fast Restore: end-to-end p95/p99 and cost better than cold (RFC §19)",
+      "measured": null,
+      "verdict": "未測定",
+      "reason": "snapshot restore is not implemented (Capabilities.snapshot_clone = unsupported); X1 adds it to this benchmark"
+    },
+    {
+      "target": "normal invoke availability 99.9% (RFC §19)",
+      "measured": [],
+      "verdict": "未測定",
+      "reason": "a few hundred requests on one host are not an availability measurement; failure rates are listed for the record only"
+    }
+  ]
+}

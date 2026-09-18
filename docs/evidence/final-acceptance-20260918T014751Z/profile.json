@@ -1,0 +1,40 @@
+{
+  "issue": "PLT-4649 / quantum-box/tachyon-apps#9878",
+  "date_utc": "2026-09-18",
+  "branch": "cfeature/plt-4649-74d742",
+  "base": "40ed8a6",
+  "commits_run": {
+    "lab_run1": "eb21e14",
+    "lab_run2, e2e demo, warm, usage/budget, isolation #1, zero-scale #1, bench #1": "4afd8c1",
+    "isolation #2, zero-scale #2, queue e2e, chaos firecracker, bench #2": "bbd650e",
+    "chaos firecracker guest OOM, chaos process (root), object_store retry": "b29eeec",
+    "chaos process (full, ordinary user)": "af0d9ab"
+  },
+  "host": {
+    "physical": "Apple M4, macOS Darwin 25.6.0, shared developer machine",
+    "vm": "Lima tsls-kvm, vmType vz, nested virtualization, aarch64, 4 vCPU, 8 GiB",
+    "kernel": "7.0.0-31-generic",
+    "load1_over_the_whole_run": {
+      "n": 1834,
+      "p50": 8.33,
+      "max": 194.25,
+      "min": 1.04
+    }
+  },
+  "versions": {
+    "firecracker": "v1.17.0",
+    "jailer": "v1.17.0",
+    "guest_kernel_lab": "6.1.155",
+    "guest_kernel_kvm_scripts": "6.18.48",
+    "nats_server": "v2.14.7",
+    "rustc": "1.95.0"
+  },
+  "provider_settings": {
+    "firecracker": "jailer enabled, cgroup v2 required, gateway as root, profile=production",
+    "process": "ordinary user (the matrix refuses root: chmod-based faults cannot fail closed)"
+  },
+  "billing": {
+    "billing_enabled": false,
+    "note": "provisional rating only; nothing was charged"
+  }
+}

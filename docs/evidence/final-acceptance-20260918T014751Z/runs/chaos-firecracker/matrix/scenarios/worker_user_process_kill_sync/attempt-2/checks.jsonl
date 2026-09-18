@@ -1,0 +1,3 @@
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=1/1"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=3 refused=0"}
+{"name":"harness.scenario_completed","ok":false,"detail":"the scenario stopped before its last step (see the attempt log)"}

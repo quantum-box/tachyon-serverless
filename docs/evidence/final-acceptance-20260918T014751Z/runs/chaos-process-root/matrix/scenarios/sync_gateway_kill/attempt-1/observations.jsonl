@@ -1,0 +1,7 @@
+{"key":"before.running_status","value":"running"}
+{"key":"before.queued_status","value":"queued"}
+{"key":"before.worker_processes_after_kill","value":0}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":6}
+{"key":"usage.terminal_environments","value":18}
+{"key":"usage.environments_without_stop_event","value":0}

@@ -1,0 +1,26 @@
+id           inv_01m2s4mjg1qnm887bvtdqhd5at
+function     fn_01m2s4mgxpt3n6f8mch3spkd5z
+revision     rev_01m2s4mh7m9gpk7tgm136mjwz6
+alias        prod
+mode         sync
+status       succeeded
+error        -
+http_status  -
+trace_id     inv_01m2s4mjg1qnm887bvtdqhd5at
+input        sha256:d7d234f759ec34fd6298b7e32318614760070aaef9f4e92ced928324b49a0602 (15 bytes)
+accepted_at  2026-09-18T02:13:28.193Z
+started_at   2026-09-18T02:13:37.890Z
+finished_at  2026-09-18T02:13:38.182Z
+deadlines    queue=2026-09-18T02:13:38.193Z init=2026-09-18T02:13:58.194Z execution=2026-09-18T02:14:07.890Z client=2026-09-18T02:14:38.193Z
+output:
+{
+  "greeting": "v1",
+  "message": "hello, demo",
+  "secret_present": true,
+  "unisolated": false
+}
+attempts: 1
+  #1 att_01m2s4mvz2y03xpwbgm2h7h6q7 env=env_01m2s4mjg268vfdtgkzwex6rvf epoch=1 status=succeeded start=cold
+     timings: queue_wait=0 ms boot=8719 ms init=900 ms handler=286 ms response=0 ms total=9987 ms
+     boot_evidence: host_pid=635703 guest_boot_id=46f9e8ae-521f-43eb-a352-80af79ff819f details={"boot_ms":8719,"bridge_version":"0.1.0","cgroup":"/sys/fs/cgroup/tachyon/env_01m2s4mjg268vfdtgkzwex6rvf","cgroup_cpu_max":"50000 100000","cgroup_memory_max_bytes":335544320,"cgroup_mode":"required","cgroup_pids_max":64,"console_log":"/home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4mjg268vfdtgkzwex6rvf/console.log","console_log_max_bytes":4194304,"egress_profile":"none","env_dir":"/home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4mjg268vfdtgkzwex6rvf","fc_log_max_bytes":4194304,"firecracker_version":"v1.17.0","function_drive_bytes":10485760,"guest_architecture":"aarch64","guest_handler_ms":100,"guest_init_ms":603,"host_disk_budget_bytes":292119960,"instance_id":"env-01m2s4mjg268vfdtgkzwex6rvf","jail_root":"/srv/jailer/firecracker/env-01m2s4mjg268vfdtgkzwex6rvf/root","jailed":true,"kernel_path":"/home/takanorifukuyama.guest/lab/.kvm/vmlinux","kernel_sha256":"947a09e2f89b488cdb5efb42eceb37a6ac414fcb0ddb1e5bba2ba0cd1a873a2d","mem_mib":256,"network_interfaces":0,"provider":"firecracker","rootfs_path":"/home/takanorifukuyama.guest/lab/.kvm/rootfs.ext4","rootfs_sha256":"ea7b615273214cecd5b45990f999ea585103a557cb3477cc37dfc8073d7d0fae","scratch_drive_bytes":268435456,"scratch_drive_ms":4,"scratch_drive_reserved":true,"vcpus":1,"vmm_gid":64000,"vmm_new_pid_ns":true,"vmm_uid":64000,"vsock_port":5000}
+     dispatched_at=2026-09-18T02:13:37.890Z finished_at=2026-09-18T02:13:38.182Z

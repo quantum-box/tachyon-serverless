@@ -1,0 +1,6 @@
+dead_letters_by_reason={"attempts_exhausted": 1, "non_retryable": 1, "poison": 1}
+invocations_with_more_than_one_dead_letter=0
+non_terminal_async_invocations=0
+dispatch_states={"dead": 2, "done": 7}
+redrives=1
+invocations_with_several_succeeded_attempts=1

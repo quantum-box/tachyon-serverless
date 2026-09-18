@@ -1,0 +1,4 @@
+invocation inv_01m2s6d76mseqg4zc5ncmnh344 trace=inv_01m2s6d76mseqg4zc5ncmnh344
+  1.1.1.1:443 connected=false error=NetworkUnreachable 0 ms
+  169.254.169.254:80 connected=false error=NetworkUnreachable 0 ms
+  10.0.2.2:80 connected=false error=NetworkUnreachable 0 ms

@@ -1,0 +1,256 @@
+{
+  "run": "bench-20260918T030637Z",
+  "generated_at": "2026-09-18T03:49:23Z",
+  "steps": [
+    {
+      "name": "preflight (sudo, kvm, jailer + cgroup required, host not shared, disk)",
+      "status": "PASS",
+      "duration_ms": 18,
+      "message": ""
+    },
+    {
+      "name": "build (release gateway / cli, musl guests)",
+      "status": "PASS",
+      "duration_ms": 143,
+      "message": ""
+    },
+    {
+      "name": "metadata",
+      "status": "PASS",
+      "duration_ms": 1184,
+      "message": ""
+    },
+    {
+      "name": "calibration before the run (BENCH_MAX_CALIBRATION_MS)",
+      "status": "PASS",
+      "duration_ms": 299,
+      "message": ""
+    },
+    {
+      "name": "hello: create + deploy (fresh host 1)",
+      "status": "PASS",
+      "duration_ms": 384,
+      "message": ""
+    },
+    {
+      "name": "hello: create + deploy (fresh host 2)",
+      "status": "PASS",
+      "duration_ms": 314,
+      "message": ""
+    },
+    {
+      "name": "hello: create + deploy (fresh host 3)",
+      "status": "PASS",
+      "duration_ms": 310,
+      "message": ""
+    },
+    {
+      "name": "hello: create + deploy (fresh host 4)",
+      "status": "PASS",
+      "duration_ms": 313,
+      "message": ""
+    },
+    {
+      "name": "hello: create + deploy (fresh host 5)",
+      "status": "PASS",
+      "duration_ms": 313,
+      "message": ""
+    },
+    {
+      "name": "hello: cold x20 (cache hit, pool off)",
+      "status": "PASS",
+      "duration_ms": 215753,
+      "message": ""
+    },
+    {
+      "name": "hello: concurrency sweep, pool off",
+      "status": "PASS",
+      "duration_ms": 531149,
+      "message": ""
+    },
+    {
+      "name": "hello: warm prime",
+      "status": "PASS",
+      "duration_ms": 8358,
+      "message": ""
+    },
+    {
+      "name": "hello: warm x20 (pool on)",
+      "status": "PASS",
+      "duration_ms": 9957,
+      "message": ""
+    },
+    {
+      "name": "hello: paused environment cost over 60s",
+      "status": "PASS",
+      "duration_ms": 60084,
+      "message": ""
+    },
+    {
+      "name": "hello: concurrency sweep, pool on",
+      "status": "PASS",
+      "duration_ms": 41764,
+      "message": ""
+    },
+    {
+      "name": "hello: pooled environments after the sweep",
+      "status": "PASS",
+      "duration_ms": 158,
+      "message": ""
+    },
+    {
+      "name": "http-axum: create + deploy (fresh host 1)",
+      "status": "PASS",
+      "duration_ms": 442,
+      "message": ""
+    },
+    {
+      "name": "http-axum: create + deploy (fresh host 2)",
+      "status": "PASS",
+      "duration_ms": 361,
+      "message": ""
+    },
+    {
+      "name": "http-axum: create + deploy (fresh host 3)",
+      "status": "PASS",
+      "duration_ms": 378,
+      "message": ""
+    },
+    {
+      "name": "http-axum: create + deploy (fresh host 4)",
+      "status": "PASS",
+      "duration_ms": 395,
+      "message": ""
+    },
+    {
+      "name": "http-axum: create + deploy (fresh host 5)",
+      "status": "PASS",
+      "duration_ms": 367,
+      "message": ""
+    },
+    {
+      "name": "http-axum: cold x20 (cache hit, pool off)",
+      "status": "PASS",
+      "duration_ms": 159646,
+      "message": ""
+    },
+    {
+      "name": "http-axum: concurrency sweep, pool off",
+      "status": "PASS",
+      "duration_ms": 428214,
+      "message": ""
+    },
+    {
+      "name": "http-axum: warm prime",
+      "status": "PASS",
+      "duration_ms": 10778,
+      "message": ""
+    },
+    {
+      "name": "http-axum: warm x20 (pool on)",
+      "status": "PASS",
+      "duration_ms": 8020,
+      "message": ""
+    },
+    {
+      "name": "http-axum: paused environment cost over 60s",
+      "status": "PASS",
+      "duration_ms": 60195,
+      "message": ""
+    },
+    {
+      "name": "http-axum: concurrency sweep, pool on",
+      "status": "PASS",
+      "duration_ms": 28851,
+      "message": ""
+    },
+    {
+      "name": "http-axum: pooled environments after the sweep",
+      "status": "PASS",
+      "duration_ms": 183,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: create + deploy (fresh host 1)",
+      "status": "PASS",
+      "duration_ms": 382,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: create + deploy (fresh host 2)",
+      "status": "PASS",
+      "duration_ms": 326,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: create + deploy (fresh host 3)",
+      "status": "PASS",
+      "duration_ms": 371,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: create + deploy (fresh host 4)",
+      "status": "PASS",
+      "duration_ms": 366,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: create + deploy (fresh host 5)",
+      "status": "PASS",
+      "duration_ms": 320,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: cold x20 (cache hit, pool off)",
+      "status": "PASS",
+      "duration_ms": 185806,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: concurrency sweep, pool off",
+      "status": "PASS",
+      "duration_ms": 500548,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: warm prime",
+      "status": "PASS",
+      "duration_ms": 8801,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: warm x20 (pool on)",
+      "status": "PASS",
+      "duration_ms": 13323,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: paused environment cost over 60s",
+      "status": "PASS",
+      "duration_ms": 60119,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: concurrency sweep, pool on",
+      "status": "PASS",
+      "duration_ms": 70923,
+      "message": ""
+    },
+    {
+      "name": "cpu-burn: pooled environments after the sweep",
+      "status": "PASS",
+      "duration_ms": 249,
+      "message": ""
+    },
+    {
+      "name": "cleanup proof (no gateway, VMM, jail, cgroup, tap, env dir)",
+      "status": "PASS",
+      "duration_ms": 67,
+      "message": ""
+    }
+  ],
+  "passed": 41,
+  "failed": 0,
+  "skipped": 0,
+  "ok": true
+}

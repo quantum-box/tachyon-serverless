@@ -1,0 +1,29 @@
+[chaos async_kill_after_publish] begin (SIGKILL at failpoint outbox.after_publish (broker ACK, row not marked)) work=/home/takanorifukuyama.guest/w/tsls-chaos.BCxnOh
+[chaos async_kill_after_publish]   ok   workload.sync_ok sync_200_with_secret=2/2
+[chaos async_kill_after_publish]   ok   workload.async_accepted accepted=6 refused=0
+[chaos async_kill_after_publish] fault injected
+/home/takanorifukuyama.guest/lab/scripts/chaos/lib.sh: line 411: 827216 Killed                     env LOG_FORMAT=json TSLS_FAILPOINTS="$fp" "$@" "$GATEWAY_BIN" --config "$WORK/gw-$name.toml" >> "$WORK/gateway-$name.log" 2>&1
+[chaos async_kill_after_publish]   ok   fault.failpoint_killed_gateway failpoint=outbox.after_publish first_answer=202
+[chaos async_kill_after_publish]   ok   fault.gateway_died_of_sigkill exit=137
+[chaos async_kill_after_publish]   ok   fault.accepted_before_crash code=202 invocation=inv_01m2scc2aa0ftvrcch9a695qd9
+[chaos async_kill_after_publish]   ok   at_crash.no_ack_before_terminal status=accepted unacked_messages=1 unsent_outbox=1
+[chaos async_kill_after_publish] fault removed
+[chaos async_kill_after_publish] converged
+[chaos async_kill_after_publish]   ok   converge.invocation_succeeded status=succeeded attempts=1 dispatch_attempts=1 executions=1
+[chaos async_kill_after_publish]   ok   workload.sync_ok sync_200_with_secret=1/1
+[chaos async_kill_after_publish]   ok   workload.async_accepted accepted=3 refused=0
+[chaos async_kill_after_publish]   ok   cv.accepted_never_lost accepted=10 missing_rows=0
+[chaos async_kill_after_publish]   ok   cv.accepted_all_terminal accepted=10 not_terminal=0
+[chaos async_kill_after_publish]   ok   cv.outcome_per_policy unexpected_outcomes=0 expected_failures=0
+[chaos async_kill_after_publish]   ok   cv.one_outcome_per_invocation invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)
+[chaos async_kill_after_publish]   ok   cv.side_effect_exactly_once orders_not_applied_exactly_once=0 executions=7
+[chaos async_kill_after_publish]   ok   cv.outbox_drained unsent_outbox_rows=0
+[chaos async_kill_after_publish]   ok   cv.ledger_all_terminal invocations=15 non_terminal=0 by_status=succeeded:15
+[chaos async_kill_after_publish]   ok   cv.jetstream_drained pending=0 ack_pending=0 stream_messages=0 redelivered=0
+[chaos async_kill_after_publish]   ok   cv.cron_each_time_once fires=2 distinct_times=2
+[chaos async_kill_after_publish]   ok   cv.usage_counted_once journal_pending=0 ledger_events=75 distinct=75 attempts_settled_twice=0 duplicates_ignored=0
+[chaos async_kill_after_publish]   ok   cv.every_terminal_environment_metered_once terminal environments=15 without a stop event=0 environments with a stop=15 (pooled ones report when they stop, after this check)
+[chaos async_kill_after_publish]   ok   cv.graceful_stop_exit_0 exit=0
+[chaos async_kill_after_publish]   ok   cv.no_orphan_processes bridge_or_user_processes=0 env_dirs=0
+[chaos async_kill_after_publish]   ok   cv.no_open_environments non_terminal_environment_rows=0
+[chaos async_kill_after_publish]   ok   cv.no_secret_value_on_disk files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.BCxnOh)

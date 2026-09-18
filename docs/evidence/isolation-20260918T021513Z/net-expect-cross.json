@@ -1,0 +1,25 @@
+{
+  "connect": {
+    "allow": [
+      "1.1.1.1:443"
+    ],
+    "deny": [
+      "172.30.0.2:8080",
+      "172.30.0.2:22",
+      "172.30.0.1:22",
+      "172.30.0.1:8080"
+    ]
+  },
+  "udp_dns": {
+    "allow": [],
+    "deny": []
+  },
+  "resolve": {
+    "allow": [],
+    "deny_connect": [],
+    "deny_resolve": []
+  },
+  "http_redirect": {
+    "deny_follow": false
+  }
+}

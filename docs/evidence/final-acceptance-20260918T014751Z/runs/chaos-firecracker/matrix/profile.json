@@ -1,0 +1,33 @@
+{
+  "stamp": "20260918T025322Z",
+  "commit": "bbd650e13f2a421d7cfde1807ef322cfd166e5d9",
+  "uncommitted_files": 7,
+  "os": "Linux 7.0.0-31-generic aarch64",
+  "os_version": "Ubuntu 26.04 LTS",
+  "cpus": "4",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "nats_server": "v2.14.7 (nats-server: v2.14.7)",
+  "bash": "5.3.9(1)-release",
+  "python_sqlite": "3.46.1",
+  "provider": "firecracker (jailed microVMs, host cgroup required, warm pool true)",
+  "build": "debug gateway with --features failpoints",
+  "gateway_sha256": "f2f8a593ffce3f85ba7809eef2296ccc50f3d8b537d277028f1a73ff95e9dec9",
+  "harness_sha256": {
+    "lib": "230fc0ae53a0896187d3b2a7c50b5d0c0f51622253f8699d561d41abed9d7892",
+    "scenarios": "d9e6c983c03b9ee1abb46dd4ee9eef9b2249682f42213ddd6cafb109f6bf14bb"
+  },
+  "config_digest_note": "each attempt stores its gateway configuration (secret redacted) next to its result; results carry their sha256",
+  "scenarios": [
+    "baseline",
+    "sync_gateway_kill",
+    "stale_owner_sync_lease",
+    "stale_owner_frozen_in_transaction",
+    "worker_bridge_kill_sync",
+    "worker_user_process_kill_sync",
+    "worker_bridge_kill_async",
+    "orphan_recovery_after_crash"
+  ],
+  "retries": 1,
+  "seeds": "none: scenarios use fixed timings; secrets and keys are random per scenario",
+  "scope": "single host; not evidence of multi-host HA"
+}

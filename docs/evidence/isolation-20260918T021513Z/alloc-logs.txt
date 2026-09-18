@@ -1,0 +1,12 @@
+2026-09-18T02:15:39.570Z [platform/boot] creating environment env_01m2s4rjp6gv79bk3kh18w123d with provider firecracker
+2026-09-18T02:15:52.382Z [platform/boot] bridge connected after 12797 ms (host_pid=Some(638025))
+2026-09-18T02:15:52.854Z [platform/init] user process started (pid 110)
+2026-09-18T02:15:53.257Z [stderr/init] isolation-probe: starting (arch=aarch64 unisolated=false)
+2026-09-18T02:15:53.850Z [stdout/handler] isolation-probe: probe=resources invocation=inv_01m2s4rjp5we23pmj3r1rabmrj attempt=att_01m2s4s0hyrw4aqhm6stqk2fhk alloc_mib=512
+2026-09-18T02:15:53.880Z [stdout/handler] isolation-probe: alloc start requested=512 MiB chunk=16 MiB chunks=32
+2026-09-18T02:15:55.172Z [stdout/handler] isolation-probe: alloc touched 16 MiB of 512 MiB
+2026-09-18T02:15:57.551Z [stdout/handler] isolation-probe: alloc touched 32 MiB of 512 MiB
+2026-09-18T02:16:00.478Z [stdout/handler] isolation-probe: alloc touched 48 MiB of 512 MiB
+2026-09-18T02:16:03.757Z [stdout/handler] isolation-probe: alloc touched 64 MiB of 512 MiB
+2026-09-18T02:16:04.686Z [stdout/handler] isolation-probe: alloc touched 80 MiB of 512 MiB
+2026-09-18T02:16:09.033Z [platform/shutdown] environment terminated (Crashed); cleaned: process-group:638025, cgroup:/sys/fs/cgroup/tachyon/env_01m2s4rjp6gv79bk3kh18w123d, jail:/srv/jailer/firecracker/env-01m2s4rjp6gv79bk3kh18w123d, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s4rjp6gv79bk3kh18w123d/console.log, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s4rjp6gv79bk3kh18w123d/fc.log, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4rjp6gv79bk3kh18w123d/function.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4rjp6gv79bk3kh18w123d/scratch.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4rjp6gv79bk3kh18w123d/fc.pid, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4rjp6gv79bk3kh18w123d

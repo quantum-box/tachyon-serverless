@@ -1,0 +1,7 @@
+{"key":"at_crash.status","value":"succeeded"}
+{"key":"at_crash.side_effects_applied","value":1}
+{"key":"at_crash.unacked_messages","value":1}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":10}
+{"key":"usage.terminal_environments","value":15}
+{"key":"usage.environments_without_stop_event","value":0}

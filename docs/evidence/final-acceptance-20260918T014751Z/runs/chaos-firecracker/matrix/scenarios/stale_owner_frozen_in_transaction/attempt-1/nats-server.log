@@ -1,0 +1,26 @@
+[720565] 2026/09/18 11:59:00.884575 [INF] Starting nats-server
+[720565] 2026/09/18 11:59:00.884709 [INF]   Version:  2.14.7
+[720565] 2026/09/18 11:59:00.884714 [INF]   Git:      [8d8b69a]
+[720565] 2026/09/18 11:59:00.884723 [INF]   Name:     tachyon-queue-local
+[720565] 2026/09/18 11:59:00.884728 [INF]   Node:     OBUMwGpe
+[720565] 2026/09/18 11:59:00.884729 [INF]   ID:       NBY4ITUCHZVK7H6GFMNXYFF4HR3VXUY4CPPSS7MTCWGIRUEMHXALWSU3
+[720565] 2026/09/18 11:59:00.884853 [WRN] Plaintext passwords detected, use nkeys or bcrypt
+[720565] 2026/09/18 11:59:00.884871 [INF] Using configuration file: /home/takanorifukuyama.guest/w/tsls-chaos.kLsYDd/nats/nats-server.conf (sha256:557daad6299a801e04c519767a5a31bcba11ead885d66bd63b9101ec319ddc15)
+[720565] 2026/09/18 11:59:00.888410 [INF] Starting http monitor on 127.0.0.1:48457
+[720565] 2026/09/18 11:59:00.888620 [INF] Starting JetStream
+[720565] 2026/09/18 11:59:00.888898 [INF]     _ ___ _____ ___ _____ ___ ___   _   __  __
+[720565] 2026/09/18 11:59:00.888906 [INF]  _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |
+[720565] 2026/09/18 11:59:00.888910 [INF] | || | _|  | | \__ \ | | |   / _| / _ \| |\/| |
+[720565] 2026/09/18 11:59:00.888911 [INF]  \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|
+[720565] 2026/09/18 11:59:00.888911 [INF] 
+[720565] 2026/09/18 11:59:00.888913 [INF]          https://docs.nats.io/jetstream
+[720565] 2026/09/18 11:59:00.888914 [INF] 
+[720565] 2026/09/18 11:59:00.888915 [INF] ---------------- JETSTREAM ----------------
+[720565] 2026/09/18 11:59:00.888917 [INF]   Strict:          true
+[720565] 2026/09/18 11:59:00.888957 [INF]   Max Memory:      64.00 MB
+[720565] 2026/09/18 11:59:00.888960 [INF]   Max Storage:     2.00 GB
+[720565] 2026/09/18 11:59:00.888961 [INF]   Store Directory: "/home/takanorifukuyama.guest/w/tsls-chaos.kLsYDd/nats/jetstream/jetstream"
+[720565] 2026/09/18 11:59:00.888963 [INF]   API Level:       4
+[720565] 2026/09/18 11:59:00.888964 [INF] -------------------------------------------
+[720565] 2026/09/18 11:59:00.890314 [INF] Took 1.68091ms to start JetStream
+[720565] 2026/09/18 11:59:00.890476 [FTL] Error listening on port: 127.0.0.1:48457, "listen tcp 127.0.0.1:48457: bind: address already in use"

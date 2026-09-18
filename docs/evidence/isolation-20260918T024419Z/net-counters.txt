@@ -1,0 +1,47 @@
+== env_01m2s6em24hp78s3qm0zz86t96 ==
+table inet tachyon_egress {
+	chain g_tsls4621d524e22 {
+		meta nfproto != ipv4 counter packets 0 bytes 0 drop
+		ip saddr != 172.30.0.2 counter packets 0 bytes 0 drop
+		ip daddr @blocked_ipv4 counter packets 19 bytes 1137 drop
+		ip daddr 1.1.1.1 meta l4proto { tcp, udp } th dport 53 counter packets 7 bytes 421 accept
+		meta l4proto { tcp, udp } th dport 53 counter packets 1 bytes 57 drop
+		counter packets 54 bytes 3073 accept
+	}
+}
+
+== env_01m2s6f093wp6axt5r2a47w3ew ==
+table inet tachyon_egress {
+	chain g_tsls8c53bcd18a6 {
+		meta nfproto != ipv4 counter packets 0 bytes 0 drop
+		ip saddr != 172.30.0.2 counter packets 0 bytes 0 drop
+		ip daddr @blocked_ipv4 counter packets 6 bytes 360 drop
+		ip daddr 1.1.1.1 tcp dport 443 counter packets 4 bytes 216 accept
+		counter packets 6 bytes 354 drop
+	}
+}
+
+== env_01m2s6ff4n3zxqvknnacz9g54q ==
+table inet tachyon_egress {
+	chain g_tsls5f7ad0368e4 {
+		meta nfproto != ipv4 counter packets 0 bytes 0 drop
+		ip saddr != 172.30.0.6 counter packets 0 bytes 0 drop
+		ip daddr @blocked_ipv4 counter packets 4 bytes 240 drop
+		ip daddr 1.1.1.1 meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 accept
+		meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 drop
+		counter packets 4 bytes 216 accept
+	}
+}
+
+== env_01m2s6fby4h8hdb0zke7teksmk ==
+table inet tachyon_egress {
+	chain g_tsls54e7f508f8f {
+		meta nfproto != ipv4 counter packets 0 bytes 0 drop
+		ip saddr != 172.30.0.2 counter packets 0 bytes 0 drop
+		ip daddr @blocked_ipv4 counter packets 0 bytes 0 drop
+		ip daddr 1.1.1.1 meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 accept
+		meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 drop
+		counter packets 0 bytes 0 accept
+	}
+}
+

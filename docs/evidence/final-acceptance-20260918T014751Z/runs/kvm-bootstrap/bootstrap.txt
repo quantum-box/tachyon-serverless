@@ -1,0 +1,117 @@
+[firecracker] downloading https://github.com/firecracker-microvm/firecracker/releases/download/v1.17.0/firecracker-v1.17.0-aarch64.tgz
+[firecracker] sha256 verified (e351ebe4f7a16b5873bbd51005d2e6767103cff4d5ebc829df2d3f95a93e2256)
+Firecracker v1.17.0
+[kernel] CI prefix: firecracker-ci/20260916-dcfc69b625d0-0/
+[kernel] downloading https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/20260916-dcfc69b625d0-0/aarch64/vmlinux-6.18.48
+[kernel] sha256 947a09e2f89b488cdb5efb42eceb37a6ac414fcb0ddb1e5bba2ba0cd1a873a2d
+[manifest] wrote /home/takanorifukuyama.guest/lab/.kvm/manifest.json
+[rust] rustup target add aarch64-unknown-linux-musl
+info: component rust-std for target aarch64-unknown-linux-musl is up to date
+[rust] cargo build --release --target aarch64-unknown-linux-musl (bridge + examples)
+   Compiling example-isolation-probe v0.1.0 (/home/takanorifukuyama.guest/lab/examples/isolation-probe)
+    Finished `release` profile [optimized] target(s) in 1.73s
+[rust] cargo build --release --bin fc-smoke (host)
+   Compiling syn v3.0.5
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling serde_core v1.0.229
+   Compiling pin-project-lite v0.2.17
+   Compiling getrandom v0.3.4
+   Compiling zerocopy v0.8.57
+   Compiling generic-array v0.14.7
+   Compiling typenum v1.20.1
+   Compiling memchr v2.8.3
+   Compiling serde v1.0.229
+   Compiling zmij v1.0.23
+   Compiling rand_core v0.9.5
+   Compiling futures-sink v0.3.34
+   Compiling futures-core v0.3.34
+   Compiling serde_json v1.0.151
+   Compiling num-traits v0.2.19
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling errno v0.3.14
+   Compiling itoa v1.0.18
+   Compiling once_cell v1.21.4
+   Compiling thiserror v2.0.20
+   Compiling tracing-core v0.1.36
+   Compiling serde_derive v1.0.229
+   Compiling tokio-macros v2.7.2
+   Compiling thiserror-impl v2.0.20
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_chacha v0.9.0
+   Compiling rand v0.9.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling digest v0.10.7
+   Compiling socket2 v0.6.5
+   Compiling cpufeatures v0.2.17
+   Compiling mio v1.2.3
+   Compiling bytes v1.12.1
+   Compiling utf8parse v0.2.2
+   Compiling iana-time-zone v0.1.65
+   Compiling chrono v0.4.45
+   Compiling anstyle-parse v1.0.0
+   Compiling tokio v1.53.1
+   Compiling sha2 v0.10.9
+   Compiling ulid v1.2.1
+   Compiling futures-macro v0.3.34
+   Compiling futures-channel v0.3.34
+   Compiling syn v2.0.119
+   Compiling slab v0.4.12
+   Compiling smallvec v1.16.1
+   Compiling futures-io v0.3.34
+   Compiling parking_lot_core v0.9.12
+   Compiling colorchoice v1.0.5
+   Compiling hex v0.4.3
+   Compiling futures-task v0.3.34
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling regex-syntax v0.8.11
+   Compiling anstream v1.0.0
+   Compiling regex-automata v0.4.18
+   Compiling tracing-attributes v0.1.31
+   Compiling futures-util v0.3.34
+   Compiling tachyon-serverless-domain v0.1.0 (/home/takanorifukuyama.guest/lab/crates/domain)
+   Compiling lazy_static v1.5.0
+   Compiling log v0.4.34
+   Compiling anyhow v1.0.104
+   Compiling strsim v0.11.1
+   Compiling clap_lex v1.1.1
+   Compiling scopeguard v1.2.0
+   Compiling lock_api v0.4.14
+   Compiling clap_builder v4.6.7
+   Compiling clap_derive v4.6.7
+   Compiling tracing-log v0.2.0
+   Compiling sharded-slab v0.1.7
+   Compiling futures-executor v0.3.34
+   Compiling tracing v0.1.44
+   Compiling matchers v0.2.0
+   Compiling tokio-util v0.7.19
+   Compiling tracing-serde v0.2.0
+   Compiling async-trait v0.1.92
+   Compiling thread_local v1.1.10
+   Compiling nu-ansi-term v0.50.3
+   Compiling tachyon-serverless-provider-port v0.1.0 (/home/takanorifukuyama.guest/lab/crates/provider-port)
+   Compiling tachyon-serverless-protocol v0.1.0 (/home/takanorifukuyama.guest/lab/crates/protocol)
+   Compiling tracing-subscriber v0.3.23
+   Compiling futures v0.3.34
+   Compiling parking_lot v0.12.5
+   Compiling clap v4.6.7
+   Compiling tachyon-serverless-provider-firecracker v0.1.0 (/home/takanorifukuyama.guest/lab/crates/providers/firecracker)
+    Finished `release` profile [optimized] target(s) in 19.62s
+rootfs: /home/takanorifukuyama.guest/lab/.kvm/rootfs.ext4 (64M)
+  /sbin/tachyon-init <- /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/tachyon-serverless-runtime-bridge
+  sha256 ea7b615273214cecd5b45990f999ea585103a557cb3477cc37dfc8073d7d0fae
+
+bootstrap complete (aarch64, Firecracker v1.17.0)
+  fe726e0b43c04363ac07e358be4dee982c3947c65ed3ae10c770fef5e1cd756c  .kvm/bin/firecracker
+  947a09e2f89b488cdb5efb42eceb37a6ac414fcb0ddb1e5bba2ba0cd1a873a2d  .kvm/vmlinux (firecracker-ci/20260916-dcfc69b625d0-0/aarch64/vmlinux-6.18.48)
+  ea7b615273214cecd5b45990f999ea585103a557cb3477cc37dfc8073d7d0fae  .kvm/rootfs.ext4
+  ba077d25290be1b9a387df282700a52855ab907bbf78a072e3f01b8a1114da74  target/aarch64-unknown-linux-musl/release/tachyon-serverless-runtime-bridge
+  8f26f2d043c72c24be935f1fc9965b7cf7c5e9605296abc8918fa29ea4cdf076  target/aarch64-unknown-linux-musl/release/example-hello
+  321bea7c92d630b6dcdd689d0c7c1b20c5effe56b4bd669a0c614930bc89d4c5  target/aarch64-unknown-linux-musl/release/example-http-axum
+  95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523  target/aarch64-unknown-linux-musl/release/example-cpu-burn
+  bb805c89e9799ba454d1838b1e82f251fda7c22b88a6cdd8203f023f3868469c  target/aarch64-unknown-linux-musl/release/example-isolation-probe
+next: scripts/kvm/smoke.sh
+exit=0

@@ -1,0 +1,21 @@
+e2e demo exit=0
+12   PASS   12257     init failure revision -> exit 3 init_error
+13   PASS   9342      http GET / -> 200 ok
+14   PASS   6466      http POST /echo -> body echoed
+15   PASS   6551      http GET /status/404 -> 404 passthrough
+16   PASS   6582      http GET /headers -> custom header visible
+17   PASS   7545      invoke cpu-burn 1s ok
+18   PASS   9679      cpu-burn timeout 2s -> exit 4 timeout, wall < 10s
+19   PASS   2071      no orphan bridge / VMM processes
+20   PASS   13        logs contain handler lines
+21   PASS   21        history shows attempts with boot evidence
+22   PASS   13435     rollback: v2 -> rollback -> v1
+23   PASS   34        cross-tenant get/invoke -> 404
+24   PASS   98        cancel running invocation
+25   PASS   107       collect evidence
+26   PASS   13        gateway stops on SIGTERM with exit 0
+27   PASS   4510      invocation logs survive a gateway restart
+28   PASS   27        secret values absent from gateway log, evidence, state and logs.db
+29   PASS   28        no orphans after gateway shutdown
+
+29 steps, 0 failed

@@ -1,0 +1,7 @@
+2026-09-18T02:13:28.267Z [platform/boot] creating environment env_01m2s4mjg268vfdtgkzwex6rvf with provider firecracker
+2026-09-18T02:13:36.997Z [platform/boot] bridge connected after 8719 ms (host_pid=Some(635703))
+2026-09-18T02:13:37.385Z [platform/init] user process started (pid 109)
+2026-09-18T02:13:37.609Z [stderr/init] hello: starting (unisolated=false)
+2026-09-18T02:13:38.075Z [stdout/handler] hello: handling invocation=inv_01m2s4mjg1qnm887bvtdqhd5at attempt=att_01m2s4mvz2y03xpwbgm2h7h6q7 remaining_ms=29888
+2026-09-18T02:13:38.076Z [stderr/handler] hello: payload={"name":"demo"}
+2026-09-18T02:13:38.520Z [platform/shutdown] environment terminated (Completed); cleaned: process-group:635703, cgroup:/sys/fs/cgroup/tachyon/env_01m2s4mjg268vfdtgkzwex6rvf, jail:/srv/jailer/firecracker/env-01m2s4mjg268vfdtgkzwex6rvf, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s4mjg268vfdtgkzwex6rvf/console.log, archived:/home/takanorifukuyama.guest/lab/.kvm/run/_archive/env_01m2s4mjg268vfdtgkzwex6rvf/fc.log, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4mjg268vfdtgkzwex6rvf/function.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4mjg268vfdtgkzwex6rvf/scratch.ext4, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4mjg268vfdtgkzwex6rvf/fc.pid, /home/takanorifukuyama.guest/lab/.kvm/run/env_01m2s4mjg268vfdtgkzwex6rvf

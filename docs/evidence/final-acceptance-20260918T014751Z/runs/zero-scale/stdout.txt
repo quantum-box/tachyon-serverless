@@ -1,0 +1,35 @@
+provider=firecracker warm_pool=true drain_timeout=5s reconcile=500ms
+uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2s6ntw82fgmg31xernmvgwc (#1) created: pending
+revision rev_01m2s6ntw82fgmg31xernmvgwc is preparing
+revision rev_01m2s6ntw82fgmg31xernmvgwc is ready
+PASS  1-zero-before-traffic  provisioned=0
+PASS  2-burst-served  200s=7/7
+PASS  2-burst-coalesced  max provisioned=3 (revision max_concurrency 3)
+PASS  3-idle-to-zero  provisioned=0 warm_pool=true last_scale_event={"kind":"scale_to_zero","reason":"idle_ttl","at":"2026-09-18T02:49:19.229362138Z"}
+PASS  3-scaled-down-by-sweeper  last kind=scale_to_zero
+PASS  4-reaccess-cold-start  status=200 start_kind=cold
+uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2s6ps2en0qqvz6b839t1zr9 (#2) created: pending
+revision rev_01m2s6ps2en0qqvz6b839t1zr9 is preparing
+revision rev_01m2s6ps2en0qqvz6b839t1zr9 is ready
+PASS  5-new-admission-on-new-revision  after: revision=rev_01m2s6ps2en0qqvz6b839t1zr9 alias_generation=2
+PASS  5-running-invocation-not-switched  long: status=200 revision=rev_01m2s6ntw82fgmg31xernmvgwc alias_generation=1
+PASS  5-route-generation-at-admission  long=1 < after=2
+PASS  5-old-revision-drained  rev1 provisioned=0 route_state=unrouted
+uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2s6q39cwteabzss0s8r5enx (#3) created: pending
+revision rev_01m2s6q39cwteabzss0s8r5enx is preparing
+revision rev_01m2s6q39cwteabzss0s8r5enx is ready
+PASS  6-drain-timeout  status=504 error_type=Host.DrainTimeout after 6s (drain timeout 5s)
+PASS  7-deleting  deletion_state=deleting
+PASS  7-new-invocation-refused  status=409 {"code":"function_deleted","message":"function deleted: function fn_01m2s6ntr5bs0560zjxa69h197 is deleted","request_id":"01m2s6qf94xtgrxc011e4jcnbf","error_type":"Host.FunctionDeleted"}
+PASS  7-in-flight-completed  status=200 body={"burned_seconds":3.000126543,"cancelled":false,"iterations":929800000}
+PASS  7-retry-after-delete-refused  status=409 {"code":"function_deleted","message":"function deleted: function fn_01m2s6ntr5bs0560zjxa69h197 is deleted","request_id":"01m2s6qj9tentkv1n4qejavct6","error_type":"Host.FunctionDeleted"}
+PASS  7-deletion-drained  {"deletion_state":"deleted","deleted_at":"2026-09-18T02:50:00.341951578Z","drained_at":"2026-09-18T02:50:03.628593704Z"}
+PASS  7-no-environment-left  provisioned=0
+PASS  8-zero-environments-is-not-zero-host-cost  zero environments is not zero host cost: the gateway, its store and the node keep running; hosts=1
+evidence: /home/takanorifukuyama.guest/lab/docs/evidence/20260918T024902Z-zero-scale-firecracker

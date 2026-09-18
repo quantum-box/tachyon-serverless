@@ -1250,7 +1250,8 @@ evaluate_noisy() {
               saturated: ($rates.mean_cores_after_warmup != null and $rates.mean_cores_after_warmup >= $quota * 0.8)},
         io: ($a_io[0].io // null | if . then {fill, rewrite: (.rewrite | {ops, errors, mib_per_sec, latency})} else null end),
         oom: {runs: ($a_oom[0] | length), classes: ($a_oom[0] | group_by(.class) | map({class: .[0].class, count: length})),
-              host_oom_kills: ([$a_oom[0][] | .env as $e | ($td[$e]["memory.events"].oom_kill // 0)] | add // 0)}
+              host_oom_kills: ([$a_oom[0][] | .env as $e |
+                                 if $e == null then 0 else ($td[$e]["memory.events"].oom_kill // 0) end] | add // 0)}
       },
       tenant_b: {
         runs: ($all | length), succeeded: ([$all[] | select(.status == "succeeded" and .ok)] | length),

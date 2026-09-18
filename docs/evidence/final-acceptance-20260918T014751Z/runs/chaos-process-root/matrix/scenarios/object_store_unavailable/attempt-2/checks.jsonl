@@ -1,0 +1,27 @@
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=2/2"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=6 refused=0"}
+{"name":"setup.orphan_object_on_disk","ok":true,"detail":"unreferenced=1"}
+{"name":"setup.held_invocation_accepted","ok":true,"detail":"code=202 storage=object"}
+{"name":"outage.object_input_refused_with_reason","ok":false,"detail":"code=202 reason=null"}
+{"name":"outage.inline_input_still_accepted","ok":true,"detail":"code=202"}
+{"name":"outage.read_failure_is_not_a_success","ok":false,"detail":"status=succeeded executions=1"}
+{"name":"outage.gateway_alive","ok":true,"detail":"pid=801076"}
+{"name":"gc.orphans_collected","ok":true,"detail":"unreferenced 1 -> 0; files=4"}
+{"name":"gc.referenced_objects_kept","ok":true,"detail":"open invocations missing their object=0"}
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=1/1"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=3 refused=0"}
+{"name":"cv.accepted_never_lost","ok":true,"detail":"accepted=12 missing_rows=0"}
+{"name":"cv.accepted_all_terminal","ok":true,"detail":"accepted=12 not_terminal=0"}
+{"name":"cv.outcome_per_policy","ok":true,"detail":"unexpected_outcomes=0 expected_failures=0"}
+{"name":"cv.one_outcome_per_invocation","ok":true,"detail":"invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)"}
+{"name":"cv.side_effect_exactly_once","ok":true,"detail":"orders_not_applied_exactly_once=0 executions=9"}
+{"name":"cv.outbox_drained","ok":true,"detail":"unsent_outbox_rows=0"}
+{"name":"cv.ledger_all_terminal","ok":true,"detail":"invocations=16 non_terminal=0 by_status=succeeded:16"}
+{"name":"cv.jetstream_drained","ok":true,"detail":"pending=0 ack_pending=0 stream_messages=0 redelivered=0"}
+{"name":"cv.cron_each_time_once","ok":true,"detail":"fires=1 distinct_times=1"}
+{"name":"cv.usage_counted_once","ok":true,"detail":"journal_pending=0 ledger_events=84 distinct=84 attempts_settled_twice=0 duplicates_ignored=0"}
+{"name":"cv.every_terminal_environment_metered_once","ok":true,"detail":"terminal environments=20 without a stop event=0 environments with a stop=20 (pooled ones report when they stop, after this check)"}
+{"name":"cv.graceful_stop_exit_0","ok":true,"detail":"exit=0"}
+{"name":"cv.no_orphan_processes","ok":true,"detail":"bridge_or_user_processes=0 env_dirs=0"}
+{"name":"cv.no_open_environments","ok":true,"detail":"non_terminal_environment_rows=0"}
+{"name":"cv.no_secret_value_on_disk","ok":true,"detail":"files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.IPhM5j)"}

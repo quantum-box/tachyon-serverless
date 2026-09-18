@@ -1,0 +1,578 @@
+# HELP tsls_build_info Gateway version (value is always 1).
+# TYPE tsls_build_info gauge
+tsls_build_info{version="0.1.0"} 1
+# HELP tsls_environment_reuse_mode 1 for the active mode: warm_reuse (pooled environments are reused) or every_invocation_boots (no warm stage: every invocation boots its own environment).
+# TYPE tsls_environment_reuse_mode gauge
+tsls_environment_reuse_mode{provider="firecracker",mode="warm_reuse"} 0
+tsls_environment_reuse_mode{provider="firecracker",mode="every_invocation_boots"} 1
+# HELP tsls_pool_reuse_enabled 1 when the provider's idle capabilities and [pool] enabled allow environment reuse.
+# TYPE tsls_pool_reuse_enabled gauge
+tsls_pool_reuse_enabled 0
+# HELP tsls_pool_held_environments Environments whose bridge session the pool holds (idle or being quiesced).
+# TYPE tsls_pool_held_environments gauge
+tsls_pool_held_environments 0
+# HELP tsls_pool_quiescing_environments Environments on their way into the pool (being quiesced).
+# TYPE tsls_pool_quiescing_environments gauge
+tsls_pool_quiescing_environments 0
+# HELP tsls_node_info The node this gateway schedules on (value is always 1).
+# TYPE tsls_node_info gauge
+tsls_node_info{node="lab-515d0a36"} 1
+# HELP tsls_node_reserved_cpu_millicores CPU reserved by live reservations (starting, busy, parking, idle, draining) including per-environment overhead.
+# TYPE tsls_node_reserved_cpu_millicores gauge
+tsls_node_reserved_cpu_millicores 0
+# HELP tsls_node_reserved_memory_bytes Memory reserved by live reservations including per-environment overhead.
+# TYPE tsls_node_reserved_memory_bytes gauge
+tsls_node_reserved_memory_bytes 0
+# HELP tsls_node_reserved_ephemeral_storage_bytes Ephemeral storage reserved by live reservations.
+# TYPE tsls_node_reserved_ephemeral_storage_bytes gauge
+tsls_node_reserved_ephemeral_storage_bytes 0
+# HELP tsls_node_environment_overhead_memory_bytes Per-environment VMM + bridge memory overhead added to every reservation.
+# TYPE tsls_node_environment_overhead_memory_bytes gauge
+tsls_node_environment_overhead_memory_bytes 67108864
+# HELP tsls_node_max_concurrency [capacity] max_concurrency: the cap on promised + starting + busy.
+# TYPE tsls_node_max_concurrency gauge
+tsls_node_max_concurrency 8
+# HELP tsls_node_in_flight Promised + starting + busy reservations on the node.
+# TYPE tsls_node_in_flight gauge
+tsls_node_in_flight 0
+# HELP tsls_environments Environments on the node by admission state (promised, starting, busy, parking, idle, draining). idle is the ready pool.
+# TYPE tsls_environments gauge
+tsls_environments{state="promised"} 0
+tsls_environments{state="starting"} 0
+tsls_environments{state="busy"} 0
+tsls_environments{state="parking"} 0
+tsls_environments{state="idle"} 0
+tsls_environments{state="draining"} 0
+# HELP tsls_revision_environments Environments of a revision by admission state.
+# TYPE tsls_revision_environments gauge
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv",state="promised"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv",state="starting"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv",state="busy"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv",state="parking"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv",state="idle"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv",state="draining"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4",state="promised"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4",state="starting"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4",state="busy"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4",state="parking"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4",state="idle"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4",state="draining"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr",state="promised"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr",state="starting"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr",state="busy"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr",state="parking"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr",state="idle"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr",state="draining"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5",state="promised"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5",state="starting"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5",state="busy"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5",state="parking"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5",state="idle"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5",state="draining"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch",state="promised"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch",state="starting"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch",state="busy"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch",state="parking"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch",state="idle"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch",state="draining"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7",state="promised"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7",state="starting"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7",state="busy"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7",state="parking"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7",state="idle"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7",state="draining"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz",state="promised"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz",state="starting"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz",state="busy"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz",state="parking"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz",state="idle"} 0
+tsls_revision_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz",state="draining"} 0
+# HELP tsls_revision_desired_environments The autoscaler's desired environments for a revision.
+# TYPE tsls_revision_desired_environments gauge
+tsls_revision_desired_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv"} 1
+tsls_revision_desired_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4"} 1
+tsls_revision_desired_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr"} 1
+tsls_revision_desired_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5"} 1
+tsls_revision_desired_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch"} 1
+tsls_revision_desired_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7"} 1
+tsls_revision_desired_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz"} 1
+# HELP tsls_revision_max_environments A revision's max_concurrency (its environment cap).
+# TYPE tsls_revision_max_environments gauge
+tsls_revision_max_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv"} 4
+tsls_revision_max_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4"} 4
+tsls_revision_max_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr"} 4
+tsls_revision_max_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5"} 4
+tsls_revision_max_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch"} 2
+tsls_revision_max_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7"} 4
+tsls_revision_max_environments{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz"} 4
+# HELP tsls_revision_min_ready A revision's min_ready.
+# TYPE tsls_revision_min_ready gauge
+tsls_revision_min_ready{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv"} 0
+tsls_revision_min_ready{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4"} 0
+tsls_revision_min_ready{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr"} 0
+tsls_revision_min_ready{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5"} 0
+tsls_revision_min_ready{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch"} 0
+tsls_revision_min_ready{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7"} 0
+tsls_revision_min_ready{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz"} 0
+# HELP tsls_revision_queue_length Invocations of a revision waiting for admission.
+# TYPE tsls_revision_queue_length gauge
+tsls_revision_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv"} 0
+tsls_revision_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4"} 0
+tsls_revision_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr"} 0
+tsls_revision_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5"} 0
+tsls_revision_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch"} 0
+tsls_revision_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7"} 0
+tsls_revision_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz"} 0
+# HELP tsls_revision_circuit_breaker_state Start-failure breaker of a revision: 0 closed, 1 half_open, 2 open.
+# TYPE tsls_revision_circuit_breaker_state gauge
+tsls_revision_circuit_breaker_state{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s42d16g7qqn4t0sg8q0rwv"} 0
+tsls_revision_circuit_breaker_state{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s43dpzp521zatjga4ennt4"} 0
+tsls_revision_circuit_breaker_state{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4420fbw49b1n8ynkng4rr"} 0
+tsls_revision_circuit_breaker_state{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s44nbaaccbxxd5scqghqd5"} 0
+tsls_revision_circuit_breaker_state{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s45p29hddf2ydnhye4fcch"} 0
+tsls_revision_circuit_breaker_state{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s4790k9c0rc3krwrxnskg7"} 0
+tsls_revision_circuit_breaker_state{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza",revision="rev_01m2s47xzztjre753e9xr20acz"} 0
+# HELP tsls_queue_length Invocations waiting for admission.
+# TYPE tsls_queue_length gauge
+tsls_queue_length 0
+# HELP tsls_queue_bytes Payload bytes held by waiting invocations.
+# TYPE tsls_queue_bytes gauge
+tsls_queue_bytes 0
+# HELP tsls_queue_max_length [capacity] max_queue.
+# TYPE tsls_queue_max_length gauge
+tsls_queue_max_length 32
+# HELP tsls_queue_max_bytes [capacity] max_queue_bytes.
+# TYPE tsls_queue_max_bytes gauge
+tsls_queue_max_bytes 33554432
+# HELP tsls_queue_oldest_age_seconds Age of the oldest waiting invocation (0 when the queue is empty).
+# TYPE tsls_queue_oldest_age_seconds gauge
+tsls_queue_oldest_age_seconds 0
+# HELP tsls_tenant_queue_length Invocations of a tenant waiting for admission.
+# TYPE tsls_tenant_queue_length gauge
+tsls_tenant_queue_length{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 0
+# HELP tsls_tenant_queue_oldest_age_seconds Age of a tenant's oldest waiting invocation (0 when none).
+# TYPE tsls_tenant_queue_oldest_age_seconds gauge
+tsls_tenant_queue_oldest_age_seconds{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 0
+# HELP tsls_tenant_in_flight Promised + starting + busy of a tenant.
+# TYPE tsls_tenant_in_flight gauge
+tsls_tenant_in_flight{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 0
+# HELP tsls_tenant_grants_total Admission grants to a tenant (cold and warm).
+# TYPE tsls_tenant_grants_total counter
+tsls_tenant_grants_total{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 16
+# HELP tsls_start_rate_tokens Cold-start tokens available now.
+# TYPE tsls_start_rate_tokens gauge
+tsls_start_rate_tokens 20
+# HELP tsls_admission_arrivals_total Invocations that asked admission for the first time.
+# TYPE tsls_admission_arrivals_total counter
+tsls_admission_arrivals_total 16
+# HELP tsls_admission_grants_total Admission grants by kind: cold (a new environment reserved) or warm (a pooled environment promised).
+# TYPE tsls_admission_grants_total counter
+tsls_admission_grants_total{kind="cold"} 16
+tsls_admission_grants_total{kind="warm"} 0
+# HELP tsls_admission_rejections_total Admission refusals by reason (queue_full, quota, capacity, queue_deadline, circuit_open, placement, function_deleted).
+# TYPE tsls_admission_rejections_total counter
+tsls_admission_rejections_total{reason="capacity"} 0
+tsls_admission_rejections_total{reason="quota"} 0
+tsls_admission_rejections_total{reason="queue_full"} 0
+tsls_admission_rejections_total{reason="queue_deadline"} 0
+tsls_admission_rejections_total{reason="circuit_open"} 0
+tsls_admission_rejections_total{reason="placement"} 1
+tsls_admission_rejections_total{reason="function_deleted"} 0
+# HELP tsls_admission_coalesced_waits_total Grants to invocations the autoscaler gate held back while enough environments were ready or starting (activation coalescing).
+# TYPE tsls_admission_coalesced_waits_total counter
+tsls_admission_coalesced_waits_total 0
+# HELP tsls_admission_starts_avoided_total Coalesced waits served by an existing environment instead of a new boot.
+# TYPE tsls_admission_starts_avoided_total counter
+tsls_admission_starts_avoided_total 0
+# HELP tsls_environment_starts_total Cold start results reported to the circuit breakers (success, failure).
+# TYPE tsls_environment_starts_total counter
+tsls_environment_starts_total{result="success"} 16
+tsls_environment_starts_total{result="failure"} 0
+# HELP tsls_circuit_breaker_opens_total Times a revision's start-failure breaker opened.
+# TYPE tsls_circuit_breaker_opens_total counter
+tsls_circuit_breaker_opens_total 0
+# HELP tsls_scale_events_total Scale decisions by kind (activation, scale_up, prestart, scale_down, scale_to_zero, drain) and reason.
+# TYPE tsls_scale_events_total counter
+tsls_scale_events_total{kind="activation",reason="backlog"} 12
+tsls_scale_events_total{kind="scale_up",reason="backlog"} 4
+tsls_scale_events_total{kind="prestart",reason="none"} 0
+tsls_scale_events_total{kind="scale_down",reason="none"} 0
+tsls_scale_events_total{kind="scale_to_zero",reason="none"} 0
+tsls_scale_events_total{kind="drain",reason="alias_switch"} 4
+# HELP tsls_gate_refusals_total Invocations or cold starts the invoke gate refused (configuration, authorization, control-plane outage), by error_type.
+# TYPE tsls_gate_refusals_total counter
+tsls_gate_refusals_total{error_type="none"} 0
+# HELP tsls_attempts_total Finished attempts by start kind (cold, warm, restored) and status.
+# TYPE tsls_attempts_total counter
+tsls_attempts_total{start_kind="cold",status="failed"} 2
+tsls_attempts_total{start_kind="cold",status="succeeded"} 14
+tsls_attempts_total{start_kind="warm",status="succeeded"} 0
+tsls_attempts_total{start_kind="restored",status="succeeded"} 0
+# HELP tsls_attempt_phase_seconds Host-measured phase durations by phase (queue_wait, boot, init, resume, handler, total) and start kind. boot and init are recorded for starts that booted only.
+# TYPE tsls_attempt_phase_seconds histogram
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="0.005"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="0.01"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="0.025"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="0.05"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="0.1"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="0.25"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="0.5"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="1"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="2.5"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="5"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="10"} 13
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="30"} 16
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="60"} 16
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="300"} 16
+tsls_attempt_phase_seconds_bucket{phase="queue_wait",start_kind="cold",le="+Inf"} 16
+tsls_attempt_phase_seconds_sum{phase="queue_wait",start_kind="cold"} 59.452
+tsls_attempt_phase_seconds_count{phase="queue_wait",start_kind="cold"} 16
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="0.005"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="0.01"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="0.025"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="0.05"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="0.1"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="0.25"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="0.5"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="1"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="2.5"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="5"} 0
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="10"} 6
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="30"} 16
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="60"} 16
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="300"} 16
+tsls_attempt_phase_seconds_bucket{phase="boot",start_kind="cold",le="+Inf"} 16
+tsls_attempt_phase_seconds_sum{phase="boot",start_kind="cold"} 177.924
+tsls_attempt_phase_seconds_count{phase="boot",start_kind="cold"} 16
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="0.005"} 0
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="0.01"} 0
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="0.025"} 0
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="0.05"} 0
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="0.1"} 0
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="0.25"} 0
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="0.5"} 2
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="1"} 7
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="2.5"} 16
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="5"} 16
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="10"} 16
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="30"} 16
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="60"} 16
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="300"} 16
+tsls_attempt_phase_seconds_bucket{phase="init",start_kind="cold",le="+Inf"} 16
+tsls_attempt_phase_seconds_sum{phase="init",start_kind="cold"} 16.714
+tsls_attempt_phase_seconds_count{phase="init",start_kind="cold"} 16
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="0.005"} 0
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="0.01"} 0
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="0.025"} 0
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="0.05"} 0
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="0.1"} 0
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="0.25"} 4
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="0.5"} 10
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="1"} 10
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="2.5"} 16
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="5"} 16
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="10"} 16
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="30"} 16
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="60"} 16
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="300"} 16
+tsls_attempt_phase_seconds_bucket{phase="handler",start_kind="cold",le="+Inf"} 16
+tsls_attempt_phase_seconds_sum{phase="handler",start_kind="cold"} 10.894000000000002
+tsls_attempt_phase_seconds_count{phase="handler",start_kind="cold"} 16
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="0.005"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="0.01"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="0.025"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="0.05"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="0.1"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="0.25"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="0.5"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="1"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="2.5"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="5"} 0
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="10"} 4
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="30"} 15
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="60"} 16
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="300"} 16
+tsls_attempt_phase_seconds_bucket{phase="total",start_kind="cold",le="+Inf"} 16
+tsls_attempt_phase_seconds_sum{phase="total",start_kind="cold"} 268.30500000000006
+tsls_attempt_phase_seconds_count{phase="total",start_kind="cold"} 16
+# HELP tsls_boot_identity_checks_total Attempt guest boot ids compared with the first boot id of their environment: first_boot, same_boot (reuse of the same guest), boot_changed (must stay 0), unreported (no guest kernel).
+# TYPE tsls_boot_identity_checks_total counter
+tsls_boot_identity_checks_total{result="first_boot"} 16
+tsls_boot_identity_checks_total{result="same_boot"} 0
+tsls_boot_identity_checks_total{result="boot_changed"} 0
+tsls_boot_identity_checks_total{result="unreported"} 0
+# HELP tsls_environment_stats Live environments of this dispatcher whose host usage was available or unavailable in this scrape.
+# TYPE tsls_environment_stats gauge
+tsls_environment_stats{result="available"} 0
+tsls_environment_stats{result="unavailable"} 0
+# HELP tsls_idle_environment_cpu_seconds_total Host CPU spent by environments that were idle in two successive samples (scrapes).
+# TYPE tsls_idle_environment_cpu_seconds_total counter
+tsls_idle_environment_cpu_seconds_total 0
+# HELP tsls_idle_environment_cpu_ratio_max Highest CPU seconds per wall second among environments idle in the last two samples (0 when none).
+# TYPE tsls_idle_environment_cpu_ratio_max gauge
+tsls_idle_environment_cpu_ratio_max 0
+# HELP tsls_idle_environments_sampled Environments the last idle CPU round measured.
+# TYPE tsls_idle_environments_sampled gauge
+tsls_idle_environments_sampled 0
+# HELP tsls_dispatcher_fenced 1 when this dispatcher lost its lease and takes no new work.
+# TYPE tsls_dispatcher_fenced gauge
+tsls_dispatcher_fenced 0
+# HELP tsls_dispatcher_heartbeats_total Dispatcher lease heartbeats by result (renewed, fenced, error).
+# TYPE tsls_dispatcher_heartbeats_total counter
+tsls_dispatcher_heartbeats_total{result="renewed"} 21
+tsls_dispatcher_heartbeats_total{result="fenced"} 0
+tsls_dispatcher_heartbeats_total{result="error"} 0
+# HELP tsls_dispatcher_slot_lease_renewals_total Slot leases renewed by heartbeats.
+# TYPE tsls_dispatcher_slot_lease_renewals_total counter
+tsls_dispatcher_slot_lease_renewals_total 2
+# HELP tsls_config_generation Highest configuration generation applied to the cache.
+# TYPE tsls_config_generation gauge
+tsls_config_generation 28
+# HELP tsls_config_synced 1 once the configuration cache received a delivery.
+# TYPE tsls_config_synced gauge
+tsls_config_synced 1
+# HELP tsls_config_consecutive_failures Failed configuration refreshes since the last success (>0: control plane unreachable).
+# TYPE tsls_config_consecutive_failures gauge
+tsls_config_consecutive_failures 0
+# HELP tsls_config_valid_remaining_seconds Seconds the delivered configuration stays valid without a refresh (negative: expired).
+# TYPE tsls_config_valid_remaining_seconds gauge
+tsls_config_valid_remaining_seconds 59.975
+# HELP tsls_auth_lease_remaining_seconds Seconds the delivered authorization grants stay valid (negative: expired).
+# TYPE tsls_auth_lease_remaining_seconds gauge
+tsls_auth_lease_remaining_seconds 59.975
+# HELP tsls_config_reconnects_total Refreshes that succeeded after at least one failure.
+# TYPE tsls_config_reconnects_total counter
+tsls_config_reconnects_total 0
+# HELP tsls_config_entries Entries in the configuration cache.
+# TYPE tsls_config_entries gauge
+tsls_config_entries 22
+# HELP tsls_trigger_scheduler_owner 1 when this gateway held the cron scheduler lease on its last pass.
+# TYPE tsls_trigger_scheduler_owner gauge
+tsls_trigger_scheduler_owner 1
+# HELP tsls_trigger_cron_fires_total Scheduled cron times handled by result (accepted, already_fired, refused, deferred, inactive).
+# TYPE tsls_trigger_cron_fires_total counter
+tsls_trigger_cron_fires_total{result="accepted"} 0
+tsls_trigger_cron_fires_total{result="already_fired"} 0
+tsls_trigger_cron_fires_total{result="refused"} 0
+tsls_trigger_cron_fires_total{result="deferred"} 0
+tsls_trigger_cron_fires_total{result="inactive"} 0
+# HELP tsls_trigger_cron_missed_runs_total Late scheduled cron times by what the missed-run policy did (run, skipped).
+# TYPE tsls_trigger_cron_missed_runs_total counter
+tsls_trigger_cron_missed_runs_total{action="run"} 0
+tsls_trigger_cron_missed_runs_total{action="skipped"} 0
+# HELP tsls_trigger_webhook_deliveries_total Webhook deliveries by result (accepted, replayed, signature_refused, timestamp_refused, too_large, invalid_event_id, disabled, not_found, refused).
+# TYPE tsls_trigger_webhook_deliveries_total counter
+tsls_trigger_webhook_deliveries_total{result="accepted"} 0
+tsls_trigger_webhook_deliveries_total{result="replayed"} 0
+tsls_trigger_webhook_deliveries_total{result="signature_refused"} 0
+tsls_trigger_webhook_deliveries_total{result="timestamp_refused"} 0
+tsls_trigger_webhook_deliveries_total{result="too_large"} 0
+tsls_trigger_webhook_deliveries_total{result="invalid_event_id"} 0
+tsls_trigger_webhook_deliveries_total{result="disabled"} 0
+tsls_trigger_webhook_deliveries_total{result="not_found"} 0
+tsls_trigger_webhook_deliveries_total{result="refused"} 0
+# HELP tsls_async_outbox_pending_events Accepted asynchronous invocations whose event is not published to the queue yet.
+# TYPE tsls_async_outbox_pending_events gauge
+tsls_async_outbox_pending_events 0
+# HELP tsls_async_outbox_oldest_pending_age_seconds Age of the oldest unpublished outbox event (0 when none).
+# TYPE tsls_async_outbox_oldest_pending_age_seconds gauge
+tsls_async_outbox_oldest_pending_age_seconds 0
+# HELP tsls_async_outbox_sent_retained_events Published outbox events still retained (sent_retention_seconds).
+# TYPE tsls_async_outbox_sent_retained_events gauge
+tsls_async_outbox_sent_retained_events 0
+# HELP tsls_async_queue_condition 1 for the queue condition the outbox publisher last saw (healthy, full, unavailable).
+# TYPE tsls_async_queue_condition gauge
+tsls_async_queue_condition{condition="healthy"} 1
+tsls_async_queue_condition{condition="full"} 0
+tsls_async_queue_condition{condition="unavailable"} 0
+# HELP tsls_usage_journal_healthy 1 when the usage journal can be read and written (PLT-4642).
+# TYPE tsls_usage_journal_healthy gauge
+tsls_usage_journal_healthy 1
+# HELP tsls_usage_journal_admitting 1 when the usage journal has more than its admission headroom left: new invocations are admitted metered.
+# TYPE tsls_usage_journal_admitting gauge
+tsls_usage_journal_admitting 1
+# HELP tsls_usage_journal_pending_events Usage events written to the journal and not yet delivered to the usage ledger.
+# TYPE tsls_usage_journal_pending_events gauge
+tsls_usage_journal_pending_events 0
+# HELP tsls_usage_journal_pending_bytes Bytes of the pending usage events.
+# TYPE tsls_usage_journal_pending_bytes gauge
+tsls_usage_journal_pending_bytes 0
+# HELP tsls_usage_journal_max_events [usage] journal_max_events.
+# TYPE tsls_usage_journal_max_events gauge
+tsls_usage_journal_max_events 100000
+# HELP tsls_usage_journal_max_bytes [usage] journal_max_bytes.
+# TYPE tsls_usage_journal_max_bytes gauge
+tsls_usage_journal_max_bytes 67108864
+# HELP tsls_usage_unjournaled_events_total Usage events the journal refused (full or unavailable): unmetered, never estimated.
+# TYPE tsls_usage_unjournaled_events_total counter
+tsls_usage_unjournaled_events_total 0
+# HELP tsls_usage_collector_runs_total Usage collector runs of this process.
+# TYPE tsls_usage_collector_runs_total counter
+tsls_usage_collector_runs_total 409
+# HELP tsls_usage_collector_failing 1 when the last usage collector run failed (ledger unavailable, journal integrity).
+# TYPE tsls_usage_collector_failing gauge
+tsls_usage_collector_failing 0
+# HELP tsls_usage_collector_last_success_age_seconds Seconds since the usage collector last delivered successfully (collector lag). Absent before the first success.
+# TYPE tsls_usage_collector_last_success_age_seconds gauge
+tsls_usage_collector_last_success_age_seconds 0.344
+# HELP tsls_usage_collector_delivered_events_total Journal entries this process's collector delivered to the ledger (re-deliveries included).
+# TYPE tsls_usage_collector_delivered_events_total counter
+tsls_usage_collector_delivered_events_total 80
+# HELP tsls_usage_ledger_events Distinct usage events in the usage ledger.
+# TYPE tsls_usage_ledger_events gauge
+tsls_usage_ledger_events 80
+# HELP tsls_usage_ledger_duplicates_ignored_total Deliveries the usage ledger dropped because it already had the event id.
+# TYPE tsls_usage_ledger_duplicates_ignored_total counter
+tsls_usage_ledger_duplicates_ignored_total 0
+# HELP tsls_async_dispatch_deliveries_total Queue deliveries the dispatcher handled, by outcome (completed, rescheduled, dead_lettered, skipped_terminal, skipped_stale, skipped_claimed, not_due, poison, failed, lost_claim).
+# TYPE tsls_async_dispatch_deliveries_total counter
+tsls_async_dispatch_deliveries_total{outcome="completed"} 0
+tsls_async_dispatch_deliveries_total{outcome="rescheduled"} 0
+tsls_async_dispatch_deliveries_total{outcome="dead_lettered"} 0
+tsls_async_dispatch_deliveries_total{outcome="skipped_terminal"} 0
+tsls_async_dispatch_deliveries_total{outcome="skipped_stale"} 0
+tsls_async_dispatch_deliveries_total{outcome="skipped_claimed"} 0
+tsls_async_dispatch_deliveries_total{outcome="not_due"} 0
+tsls_async_dispatch_deliveries_total{outcome="poison"} 0
+tsls_async_dispatch_deliveries_total{outcome="failed"} 0
+tsls_async_dispatch_deliveries_total{outcome="lost_claim"} 0
+# HELP tsls_async_dispatch_queue_operations_total ack / nak / term calls on the queue, by result (ok, error). An ack is only sent after the ledger commit.
+# TYPE tsls_async_dispatch_queue_operations_total counter
+tsls_async_dispatch_queue_operations_total{operation="ack",result="ok"} 0
+tsls_async_dispatch_queue_operations_total{operation="ack",result="error"} 0
+tsls_async_dispatch_queue_operations_total{operation="nak",result="ok"} 0
+tsls_async_dispatch_queue_operations_total{operation="nak",result="error"} 0
+tsls_async_dispatch_queue_operations_total{operation="term",result="ok"} 0
+tsls_async_dispatch_queue_operations_total{operation="term",result="error"} 0
+# HELP tsls_async_dispatch_runs_in_flight Asynchronous deliveries being handled by this gateway now.
+# TYPE tsls_async_dispatch_runs_in_flight gauge
+tsls_async_dispatch_runs_in_flight 0
+# HELP tsls_async_retries_scheduled_total Next tries committed with the next outbox generation: retry (counted against max_attempts) or deferral (capacity, retry budget, shutdown; not counted).
+# TYPE tsls_async_retries_scheduled_total counter
+tsls_async_retries_scheduled_total{kind="retry"} 0
+tsls_async_retries_scheduled_total{kind="deferral"} 0
+# HELP tsls_async_dead_letters_total Dead letters committed by this gateway, by reason.
+# TYPE tsls_async_dead_letters_total counter
+tsls_async_dead_letters_total{reason="non_retryable"} 0
+tsls_async_dead_letters_total{reason="attempts_exhausted"} 0
+tsls_async_dead_letters_total{reason="expired"} 0
+tsls_async_dead_letters_total{reason="function_deleted"} 0
+tsls_async_dead_letters_total{reason="revision_unavailable"} 0
+tsls_async_dead_letters_total{reason="poison"} 0
+# HELP tsls_async_redrives_total Dead letters redriven into a new asynchronous invocation.
+# TYPE tsls_async_redrives_total counter
+tsls_async_redrives_total 0
+# HELP tsls_async_reaper_actions_total What the reaper committed: abandoned (a run whose claim expired, rescheduled), republished (an event the broker lost), dead_lettered, lost (fence moved on), failed.
+# TYPE tsls_async_reaper_actions_total counter
+tsls_async_reaper_actions_total{action="abandoned"} 0
+tsls_async_reaper_actions_total{action="republished"} 0
+tsls_async_reaper_actions_total{action="dead_lettered"} 0
+tsls_async_reaper_actions_total{action="lost"} 0
+tsls_async_reaper_actions_total{action="failed"} 0
+# HELP tsls_budget_enabled 1 when this gateway enforces budgets ([budget] enabled).
+# TYPE tsls_budget_enabled gauge
+tsls_budget_enabled 1
+# HELP tsls_budget_store_healthy 1 when the budget store (usage/budget.db) can be read and written.
+# TYPE tsls_budget_store_healthy gauge
+tsls_budget_store_healthy 1
+# HELP tsls_budget_collector_stalled 1 when a finished run waited longer than [budget] max_unsettled_age_seconds for settlement: new invocations are refused (Host.BudgetUnknown).
+# TYPE tsls_budget_collector_stalled gauge
+tsls_budget_collector_stalled 0
+# HELP tsls_budget_active_reservations Budget reservations not yet settled, released or expired (all tenants).
+# TYPE tsls_budget_active_reservations gauge
+tsls_budget_active_reservations 0
+# HELP tsls_budget_unsettled_runs Finished runs whose usage has not been settled yet.
+# TYPE tsls_budget_unsettled_runs gauge
+tsls_budget_unsettled_runs 0
+# HELP tsls_budget_reserved_micros Maximum charges reserved by unsettled runs in the current period, per tenant (bounded by [metrics] max_tenant_series), in micro-units of the price table currency.
+# TYPE tsls_budget_reserved_micros gauge
+tsls_budget_reserved_micros{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 0
+# HELP tsls_budget_settled_micros Provisional rated charges of settled runs in the current period, per tenant.
+# TYPE tsls_budget_settled_micros gauge
+tsls_budget_settled_micros{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 37816
+# HELP tsls_budget_unmetered_hold_micros Reserved amounts kept because a run's usage could not be fully measured (expired or unjournaled), per tenant. Never billable.
+# TYPE tsls_budget_unmetered_hold_micros gauge
+tsls_budget_unmetered_hold_micros{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 0
+# HELP tsls_budget_remaining_micros Hard limit minus committed (reserved + settled + unmetered holds), per tenant with a hard limit.
+# TYPE tsls_budget_remaining_micros gauge
+tsls_budget_remaining_micros{tenant="tn_01hzzzzzzzzzzzzzzzzzzzzzza"} 999999962184
+# HELP tsls_budget_reservations_total Budget reservations this process made.
+# TYPE tsls_budget_reservations_total counter
+tsls_budget_reservations_total 16
+# HELP tsls_budget_refusals_total Invocations this process refused because of the budget, by reason (budget_exhausted, budget_unknown, budget_store_unavailable) and cause.
+# TYPE tsls_budget_refusals_total counter
+tsls_budget_refusals_total{reason="budget_exhausted",cause="tenant_hard_limit"} 0
+tsls_budget_refusals_total{reason="budget_exhausted",cause="function_hard_limit"} 0
+tsls_budget_refusals_total{reason="budget_unknown",cause="not_delivered"} 0
+tsls_budget_refusals_total{reason="budget_unknown",cause="lease_expired"} 0
+tsls_budget_refusals_total{reason="budget_unknown",cause="price_table_mismatch"} 0
+tsls_budget_refusals_total{reason="budget_unknown",cause="collector_stalled"} 0
+tsls_budget_refusals_total{reason="budget_store_unavailable",cause="store_unavailable"} 0
+# HELP tsls_budget_recheck_refusals_total Queued invocations refused by the budget re-check when they were granted capacity.
+# TYPE tsls_budget_recheck_refusals_total counter
+tsls_budget_recheck_refusals_total 0
+# HELP tsls_budget_transitions_total Reservations this process closed, by result (settled, settled_incomplete, released, expired).
+# TYPE tsls_budget_transitions_total counter
+tsls_budget_transitions_total{result="settled"} 16
+tsls_budget_transitions_total{result="settled_incomplete"} 0
+tsls_budget_transitions_total{result="released"} 0
+tsls_budget_transitions_total{result="expired"} 0
+# HELP tsls_budget_alerts_total Soft-limit alert thresholds crossed (each fires once per scope and period), by scope (tenant, function). Alerts never stop anything.
+# TYPE tsls_budget_alerts_total counter
+tsls_budget_alerts_total{scope="tenant"} 0
+tsls_budget_alerts_total{scope="function"} 0
+# HELP tsls_budget_overrun_micros_total Measured charges above their reservation, settled in full.
+# TYPE tsls_budget_overrun_micros_total counter
+tsls_budget_overrun_micros_total 0
+# HELP tsls_logs_store_healthy 1 when logs/logs.db is open and the last flush committed. 0 is a degraded log store: invocations still run, their log lines are dropped and counted.
+# TYPE tsls_logs_store_healthy gauge
+tsls_logs_store_healthy 1
+# HELP tsls_logs_lines_written_total Log lines this process committed to logs/logs.db (marker lines excluded).
+# TYPE tsls_logs_lines_written_total counter
+tsls_logs_lines_written_total 90
+# HELP tsls_logs_bytes_written_total Line bytes this process committed to logs/logs.db.
+# TYPE tsls_logs_bytes_written_total counter
+tsls_logs_bytes_written_total 16610
+# HELP tsls_logs_lines_truncated_total Committed lines that were cut at [limits] max_log_line_bytes.
+# TYPE tsls_logs_lines_truncated_total counter
+tsls_logs_lines_truncated_total 0
+# HELP tsls_logs_marker_lines_total Platform marker lines committed for a cap or a loss ([tachyon] ...).
+# TYPE tsls_logs_marker_lines_total counter
+tsls_logs_marker_lines_total 0
+# HELP tsls_logs_lines_dropped_total Log lines not stored, by reason: queue_full (writer queue bound), store_unavailable (logs.db refused the batch), invocation_limit, attempt_limit, unattributed (no invocation).
+# TYPE tsls_logs_lines_dropped_total counter
+tsls_logs_lines_dropped_total{reason="queue_full"} 0
+tsls_logs_lines_dropped_total{reason="store_unavailable"} 0
+tsls_logs_lines_dropped_total{reason="invocation_limit"} 0
+tsls_logs_lines_dropped_total{reason="attempt_limit"} 0
+tsls_logs_lines_dropped_total{reason="unattributed"} 0
+# HELP tsls_logs_queue_lines Lines waiting in the writer queue.
+# TYPE tsls_logs_queue_lines gauge
+tsls_logs_queue_lines 0
+# HELP tsls_logs_queue_bytes Line bytes waiting in the writer queue.
+# TYPE tsls_logs_queue_bytes gauge
+tsls_logs_queue_bytes 0
+# HELP tsls_logs_flush_lag_seconds Age of the oldest line of the last committed batch when it committed (enqueue to commit).
+# TYPE tsls_logs_flush_lag_seconds gauge
+tsls_logs_flush_lag_seconds 0.054907
+# HELP tsls_logs_flush_failures_total Batches logs/logs.db refused (locked, full disk, cannot open).
+# TYPE tsls_logs_flush_failures_total counter
+tsls_logs_flush_failures_total 0
+# HELP tsls_logs_stored_bytes Line bytes stored in logs/logs.db (markers included; SQLite pages and indexes not counted). Compared with [logs] max_total_bytes.
+# TYPE tsls_logs_stored_bytes gauge
+tsls_logs_stored_bytes 16610
+# HELP tsls_logs_stored_lines Rows stored in logs/logs.db (markers included).
+# TYPE tsls_logs_stored_lines gauge
+tsls_logs_stored_lines 90
+# HELP tsls_logs_retention_deleted_lines_total Lines the retention passes deleted, by reason (age: retention_seconds, size: max_total_bytes).
+# TYPE tsls_logs_retention_deleted_lines_total counter
+tsls_logs_retention_deleted_lines_total{reason="age"} 0
+tsls_logs_retention_deleted_lines_total{reason="size"} 0
+# HELP tsls_logs_retention_skipped_non_terminal Invocations the last size-cap pass kept because the ledger does not report them terminal.
+# TYPE tsls_logs_retention_skipped_non_terminal gauge
+tsls_logs_retention_skipped_non_terminal 0
+# HELP tsls_metrics_series_truncated Label sets folded into the _other series of a family because of the [metrics] cardinality caps.
+# TYPE tsls_metrics_series_truncated gauge
+tsls_metrics_series_truncated{dimension="revision"} 0
+tsls_metrics_series_truncated{dimension="tenant"} 0
+tsls_metrics_series_truncated{dimension="environment"} 0

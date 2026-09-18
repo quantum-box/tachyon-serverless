@@ -11,8 +11,11 @@
 #                        on Linux/KVM), cargo build, musl guest + rootfs (firecracker). Idempotent.
 #   up [--console]       generate config + throwaway secrets (0600), start nats-server and the gateway
 #                        (migrations run at start), then health-check every component
-#   demo p1|p2|p3|all    P1 sync invoke/logs/rollback, P2 burst/zero/alias/metrics, P3 async/DLQ/
-#                        redrive/cron/webhook/usage/budget stop. Exit 0 only when every check passed
+#   demo p1|p2|restart|p3|all
+#                        P1 sync invoke/logs/rollback, P2 burst/zero/alias/metrics, restart (the
+#                        gateway is stopped and started again: ledger, logs, accepted async work,
+#                        cron and usage survive), P3 async/DLQ/redrive/cron/webhook/usage/budget
+#                        stop. Exit 0 only when every check passed
 #   status               process + health table of every component (exit 1 when a check fails)
 #   logs [gateway|nats|commands|last]
 #   down                 stop the gateway and nats-server (data kept)
@@ -37,7 +40,7 @@ SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SO
 # shellcheck source=scripts/lab/lib.sh
 . "$(dirname "$SCRIPT_PATH")/lib.sh"
 
-usage() { sed -n '2,31p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,34p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//'; }
 
 # ---------------------------------------------------------------------------
 # argument parsing
@@ -1156,8 +1159,8 @@ cmd_logs() {
 cmd_demo() {
   local phase="${1:-}"
   case "$phase" in
-    p1 | p2 | p3 | all) ;;
-    *) lab_die "demo needs p1|p2|p3|all" ;;
+    p1 | p2 | restart | p3 | all) ;;
+    *) lab_die "demo needs p1|p2|restart|p3|all" ;;
   esac
   lab_require_init
   lab_provider

@@ -153,9 +153,14 @@ echo "provider=$PROVIDER warm_pool=$WARM_POOL drain_timeout=${DRAIN_TIMEOUT}s re
 
 # rev_json REVISION_ID -> the revision's capacity entry ({} when absent: nothing provisioned).
 rev_json() { capacity | jq -c --arg r "$1" '(.revisions[] | select(.revision_id == $r)) // {}'; }
-# provisioned REVISION_ID -> starting + busy + parking + idle + draining + promised
+# provisioned REVISION_ID -> the environments that exist: starting + busy + parking + idle + draining.
+# `promised` is NOT one of them: it counts an invocation that was granted a pooled environment which
+# is still counted in `idle` until it is taken (docs/openapi.json `EnvironmentCounts.promised`, and
+# `ResState::holds_resources` in crates/application/src/services/admission/state.rs: "a promise does
+# not hold node resources: the idle environment it points at already does"). Adding it counted one
+# environment twice and made the burst look like it had passed the revision's cap.
 provisioned() {
-  rev_json "$1" | jq '(.environments // {}) | [.starting, .busy, .parking, .idle, .draining, .promised] | map(. // 0) | add'
+  rev_json "$1" | jq '(.environments // {}) | [.starting, .busy, .parking, .idle, .draining] | map(. // 0) | add'
 }
 busy() { rev_json "$1" | jq '.environments.busy // 0'; }
 # wait_until SECONDS CMD... -> 0 once CMD succeeds

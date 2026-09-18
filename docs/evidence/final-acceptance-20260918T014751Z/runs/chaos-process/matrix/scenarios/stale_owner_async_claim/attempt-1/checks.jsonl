@@ -1,0 +1,23 @@
+{"name":"setup.a_handler_running","ok":true,"detail":"claimed_by=dsp_01m2sckfh8mq3br7469h8vdkj2 a=dsp_01m2sckfh8mq3br7469h8vdkj2"}
+{"name":"takeover.b_completed_the_invocation","ok":true,"detail":"status=succeeded attempts=outcome_unknown,succeeded dispatch={\"state\":\"done\",\"attempts\":2,\"generation\":1}"}
+{"name":"fencing.late_settle_does_not_overwrite","ok":true,"detail":"invocation succeeded:1:2026-09-18T04:33:11.767769385Z:1034 -> succeeded:1:2026-09-18T04:33:11.767769385Z:1034; attempts att_01m2sckzbgmzsvz8n13meatmpb:outcome_unknown:1:687,att_01m2scm4rej1brcmc9qahmwfdt:succeeded:1:512 -> att_01m2sckzbgmzsvz8n13meatmpb:outcome_unknown:1:687,att_01m2scm4rej1brcmc9qahmwfdt:succeeded:1:512"}
+{"name":"fencing.side_effect_once","ok":true,"detail":"applied=1 skipped=0"}
+{"name":"fencing.one_terminal_no_dead_letter","ok":true,"detail":"dead_letters=0 succeeded_attempts=1"}
+{"name":"fencing.a_is_fenced","ok":true,"detail":"a=dsp_01m2sckfh8mq3br7469h8vdkj2"}
+{"name":"workload.sync_ok","ok":true,"detail":"sync_200_with_secret=1/1"}
+{"name":"workload.async_accepted","ok":true,"detail":"accepted=3 refused=0"}
+{"name":"cv.accepted_never_lost","ok":true,"detail":"accepted=7 missing_rows=0"}
+{"name":"cv.accepted_all_terminal","ok":true,"detail":"accepted=7 not_terminal=0"}
+{"name":"cv.outcome_per_policy","ok":true,"detail":"unexpected_outcomes=0 expected_failures=0"}
+{"name":"cv.one_outcome_per_invocation","ok":true,"detail":"invocations_with_>1_dead_letter=0 succeeded_but_dead_lettered=0 invocations_with_>1_succeeded_attempt=0 (re-executions, recorded)"}
+{"name":"cv.side_effect_exactly_once","ok":true,"detail":"orders_not_applied_exactly_once=0 executions=5"}
+{"name":"cv.outbox_drained","ok":true,"detail":"unsent_outbox_rows=0"}
+{"name":"cv.ledger_all_terminal","ok":true,"detail":"invocations=9 non_terminal=0 by_status=succeeded:9"}
+{"name":"cv.jetstream_drained","ok":true,"detail":"pending=0 ack_pending=0 stream_messages=0 redelivered=0"}
+{"name":"cv.cron_each_time_once","ok":true,"detail":"fires=0 distinct_times=0"}
+{"name":"cv.usage_counted_once","ok":true,"detail":"journal_pending=0 ledger_events=51 distinct=51 attempts_settled_twice=0 duplicates_ignored=15"}
+{"name":"cv.every_terminal_environment_metered_once","ok":true,"detail":"terminal environments=11 without a stop event=0 environments with a stop=11 (pooled ones report when they stop, after this check)"}
+{"name":"cv.graceful_stop_exit_0","ok":true,"detail":"exit=0"}
+{"name":"cv.no_orphan_processes","ok":true,"detail":"bridge_or_user_processes=0 env_dirs=0"}
+{"name":"cv.no_open_environments","ok":true,"detail":"non_terminal_environment_rows=0"}
+{"name":"cv.no_secret_value_on_disk","ok":true,"detail":"files_containing_the_secret_value=0 (config excluded; /home/takanorifukuyama.guest/w/tsls-chaos.e8gC42)"}

@@ -1,0 +1,5 @@
+  B alone #1: status=succeeded cpu 2018.147543 ms, write p50 0.986458 ms, handler 2202 ms
+  B alone #2: status=succeeded cpu 2425.952251 ms, write p50 3.315417 ms, handler 2770 ms
+  B alone #3: status=succeeded cpu 2484.82496 ms, write p50 3.672375 ms, handler 2827 ms
+  B alone #4: status=succeeded cpu 2499.265876 ms, write p50 3.361083 ms, handler 2865 ms
+  B alone #5: status=succeeded cpu 2464.0287089999997 ms, write p50 3.419292 ms, handler 2775 ms

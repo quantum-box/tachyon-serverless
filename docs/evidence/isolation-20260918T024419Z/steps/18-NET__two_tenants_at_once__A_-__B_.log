@@ -1,0 +1,7 @@
+[e2e] tenant B env env_01m2s6fby4h8hdb0zke7teksmk: guest 172.30.0.2, tap host 172.30.0.1
+  ok   A -> 1.1.1.1:443 expect=allow (1.1.1.1:443)
+  ok   A -> 172.30.0.2:8080 expect=deny (TimedOut)
+  ok   A -> 172.30.0.2:22 expect=deny (TimedOut)
+  ok   A -> 172.30.0.1:22 expect=deny (TimedOut)
+  ok   A -> 172.30.0.1:8080 expect=deny (TimedOut)
+  B listening=true accepted=0 peers=[]

@@ -66,6 +66,16 @@ for t in curl jq python3 perl openssl cargo; do
   command -v "$t" >/dev/null 2>&1 || { echo "missing tool: $t" >&2; exit 1; }
 done
 
+# The process provider needs no privileges, and root would make `object_store_unavailable` pass
+# for the wrong reason: root ignores the `chmod 000` of the object root, so the store stays
+# readable and the scenario's refusals never happen. Firecracker is the case that needs root
+# (jailer + cgroup).
+if ! provider_is_fc && [ "$(id -u)" = 0 ] && [ "${CHAOS_ALLOW_ROOT:-0}" != 1 ]; then
+  echo "refusing to run the process provider as root: chmod-based faults cannot fail closed" >&2
+  echo "run it as an ordinary user, or set CHAOS_ALLOW_ROOT=1 to override" >&2
+  exit 2
+fi
+
 cd "$REPO_ROOT"
 if [ "${TSLS_SKIP_BUILD:-0}" != 1 ]; then
   chaos_log "building (gateway with the test-only failpoints feature)"

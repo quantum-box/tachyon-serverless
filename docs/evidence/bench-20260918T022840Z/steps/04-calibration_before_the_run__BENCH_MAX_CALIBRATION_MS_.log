@@ -1,0 +1,2 @@
+[e2e] calibration (start): awk loop ms = 232 251 254
+[e2e] WARN: calibration 254 ms > BENCH_MAX_CALIBRATION_MS=150: the host looks busy

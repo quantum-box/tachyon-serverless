@@ -1,0 +1,68 @@
+PASS  p1.provider_kind                                           kind=firecracker isolation=micro_vm dev_only=false
+PASS  p1.provider_is_microvm                                     isolation=micro_vm dev_only=false
+PASS  p1.function_registered                                     hello=fn_01m2s42cmzz67ra5vhgkwygeb9
+PASS  p1.publish_v1                                              revision=rev_01m2s42d16g7qqn4t0sg8q0rwv (prod -> v1)
+PASS  p1.sync_invoke_ok                                          exit=0 message=hello, lab
+PASS  p1.env_and_secret_binding                                  greeting=v1 secret_present=true (the value itself is never returned)
+PASS  p1.logs                                                    invocation=inv_01m2s42daaph0h3jwp4c0k01a8 lines=7
+PASS  p1.boot_evidence                                           host_pid=625797 guest_boot_id=5e1aec19-89d0-4666-9eac-6cb3dd8a2e88 handler_ms=323
+PASS  p1.guest_boot_id                                           a microVM reports its own boot id
+PASS  p1.user_error                                              exit=3 code=user_error
+PASS  p1.http_adapter                                            status=200 body=ok
+PASS  p1.timeout_enforced_by_host                                exit=4 code=timeout (handler ignores SIGTERM; host kills at 2 s + grace)
+PASS  p1.publish_v2                                              revision=rev_01m2s44nbaaccbxxd5scqghqd5 greeting=v2
+PASS  p1.rollback_to_v1                                          prod -> previous revision, greeting=v1
+PASS  p1.other_tenant_404                                        tenant B get fn_01m2s42cmzz67ra5vhgkwygeb9: exit=2 code=not_found
+PASS  p1.other_tenant_invoke_404                                 tenant B invoke: exit=2
+PASS  p1.no_environment_left                                     environments after the runs: {"starting":0,"busy":0,"promised":0,"parking":0,"idle":0,"draining":0}
+PASS  p2.revision_max_concurrency                                revision=rev_01m2s45p29hddf2ydnhye4fcch max_concurrency=2
+PASS  p2.burst_all_served                                        5/5 invocations exit 0 (the rest waited in the queue)
+PASS  p2.burst_bounded                                           max environments of the revision observed=2 (limit 2; samples in p2-capacity-samples.ndjson)
+PASS  p2.scale_to_zero                                           environments of rev_01m2s45p29hddf2ydnhye4fcch=0; zero environments is not zero host cost: the gateway, its store and the node keep running
+PASS  p2.cold_reaccess                                           exit=0 (a new environment is started for the request)
+PASS  p2.alias_switch                                            prod generation 3 -> v3: greeting before=v1 after=v3
+PASS  p2.alias_rollback                                          greeting=v1 (back to v1)
+PASS  p2.placement_jp_label_admitted                             node label region=jp, revision requires jp: exit=0
+PASS  p2.placement_us_refused                                    exit=6 reason=placement (never relaxed)
+NOTE  region = "jp" is a scheduling LABEL written into this lab's config. It is not evidence of where data is stored or processed.
+PASS  p2.metrics_snapshot                                        HTTP 200, 352 samples -> p2-metrics.prom
+PASS  p2.metrics_operator_only                                   tenant token -> HTTP 401
+PASS  restart.cron_created                                       trigger=trg_01m2s48dc9kr42w3j0eggz984r schedule='*/5 * * * * *' (kept enabled across the restart)
+PASS  restart.async_accepted_202                                 4/4 accepted with HTTP 202 before the restart (committed before the answer)
+PASS  restart.stopped                                            gateway process gone; GET /healthz -> 000 (000 = no answer)
+PASS  restart.started_healthy                                    every component healthy again after the restart (health table)
+PASS  restart.cron_fires_after_restart                           accepted fires 2 -> 6 (the scheduler takes its lease again)
+PASS  restart.schema_version_unchanged                           state.db schema_version 8 -> 8 (migrations are not re-applied)
+PASS  restart.cold_invoke_ok                                     exit=0 message=hello, restart (a new environment is started after the restart)
+PASS  restart.ledger_survives                                    functions 3 -> 3, prod alias greeting v1 -> v1 (P1's rollback is still in effect)
+PASS  restart.logs_survive                                       invocation=inv_01m2s487052sbpnn8c3xd4p8yv lines 7 -> 7 (logs.db)
+PASS  restart.startup_reconcile                                  gateway log of this start has the startup reconcile
+PASS  restart.accepted_async_not_lost                            4/4 terminal after the restart, 0 without an outcome (statuses in restart-async-status.txt)
+PASS  restart.async_attempts_bounded                             most attempts on one invocation: 1 (max_attempts 3; a retry after the restart is not a new invocation)
+PASS  restart.async_counted_once                                 cpu-burn invocations (first attempts) 7 -> 11, expected +4 for the 4 async invocations
+PASS  restart.no_replay_for_idle_function                        http-axum attempts 1 -> 1 (it did not run across the restart; the journal is not replayed into the ledger twice)
+PASS  restart.cron_backlog_drained                               hello invocations still running or queued after the cron was deleted: 0
+NOTE  the restart is a clean SIGTERM (in-flight synchronous invocations are cancelled). Crash, DB, queue and worker failures are the failure matrix (docs/failure-matrix.md), not this demo.
+NOTE  firecracker: examples/idempotent-async needs the host file system, so the async demo uses hello ({"fail":true} for the dead letter)
+PASS  p3.async_accepted_202                                      HTTP 202 invocation=inv_01m2s4a80s63rb8rmn9q72054n (committed before the 202)
+PASS  p3.async_succeeded                                         status=succeeded (published to NATS JetStream, run by the dispatcher)
+PASS  p3.async_large_input_object_store                          HTTP 202 status=succeeded objects under data/objects: 0 -> 2 (AES-256-GCM, lab key)
+PASS  p3.object_store_ciphertext                                 the 100 KiB plaintext pad is not readable in data/objects
+PASS  p3.retries_then_dead_letter                                status=failed attempts=3 (max_attempts 3) dead_letter=dlq_01m2s4b7xjrbn5bmjxr9ms0gr2
+PASS  p3.dead_letter_listed                                      reason=attempts_exhausted
+PASS  p3.redrive_needs_role                                      deploy+invoke token: exit=2 code=forbidden
+PASS  p3.redrive_accepted                                        exit=0 new invocation=inv_01m2s4b8cq5r0kg58ssx4zzd08 requested_by=lab-a-oncall
+PASS  p3.redrive_ran                                             status=failed (hello {"fail":true} fails again by design; the redrive itself is what is shown)
+PASS  p3.cron_created                                            trigger=trg_01m2s4bvncr1prq323s6q0rwxn schedule='*/2 * * * * *' (6 fields: every 2 s)
+PASS  p3.cron_fired                                              accepted fires in ~7 s: 3 (then disabled)
+PASS  p3.cron_fire_ran                                           first fire invocation=inv_01m2s4c0w2mhkr01j7nf7drxkc status=succeeded
+PASS  p3.webhook_created                                         trigger=trg_01m2s4caf5es529jh275np2dbz secret shown once (kept in memory only, never written)
+PASS  p3.webhook_signed_202                                      HTTP 202
+PASS  p3.webhook_bad_signature_401                               HTTP 401 (no invocation)
+PASS  p3.webhook_fire_ran                                        invocation=inv_01m2s4cafrr0xkf4ep5j8hrtey status=succeeded
+PASS  p3.usage_report                                            lines=3 attempts=40 retries=4 provisional=true billing_enabled=false
+PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
+PASS  p3.budget_is_per_function                                  hello still admitted: exit=0
+PASS  p3.budget_released                                         exit=0 after the limit was removed
+NOTE  budgets and usage are provisional (dev price table); billing is disabled and nothing is charged. Local only: no cloud spend.
+PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)

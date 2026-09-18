@@ -1,0 +1,7 @@
+{"key":"setup.pids","value":"bridge=806423 user=806428 env=env_01m2sb9xm3hg40qpcgxb9g9zpr"}
+{"key":"client.answer","value":"502 outcome_unknown Host.OutcomeUnknown"}
+{"key":"ledger.status","value":"outcome_unknown Host.OutcomeUnknown"}
+{"key":"cv.invocations_with_several_succeeded_attempts","value":0}
+{"key":"async_accepted","value":3}
+{"key":"usage.terminal_environments","value":9}
+{"key":"usage.environments_without_stop_event","value":0}

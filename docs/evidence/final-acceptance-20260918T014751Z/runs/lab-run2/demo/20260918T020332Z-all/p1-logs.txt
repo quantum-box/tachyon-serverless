@@ -1,0 +1,7 @@
+2026-09-18T02:03:33.237Z [platform/boot] creating environment env_01m2s42dahhgwa2tw9sd7qmss4 with provider firecracker
+2026-09-18T02:03:46.874Z [platform/boot] bridge connected after 13726 ms (host_pid=Some(625797))
+2026-09-18T02:03:47.469Z [platform/init] user process started (pid 104)
+2026-09-18T02:03:47.842Z [stderr/init] hello: starting (unisolated=false)
+2026-09-18T02:03:48.429Z [stdout/handler] hello: handling invocation=inv_01m2s42daaph0h3jwp4c0k01a8 attempt=att_01m2s42w4hpa9ht9rfh9n733kr remaining_ms=29875
+2026-09-18T02:03:48.440Z [stderr/handler] hello: payload={"name":"lab"}
+2026-09-18T02:03:48.979Z [platform/shutdown] environment terminated (Completed); cleaned: process-group:625797, cgroup:/sys/fs/cgroup/tsls-lab-515d0a36/env_01m2s42dahhgwa2tw9sd7qmss4, jail:/home/takanorifukuyama.guest/lab/.lab/fc/jail/firecracker/env-01m2s42dahhgwa2tw9sd7qmss4, archived:/home/takanorifukuyama.guest/lab/.lab/fc/run/_archive/env_01m2s42dahhgwa2tw9sd7qmss4/console.log, archived:/home/takanorifukuyama.guest/lab/.lab/fc/run/_archive/env_01m2s42dahhgwa2tw9sd7qmss4/fc.log, /home/takanorifukuyama.guest/lab/.lab/fc/run/env_01m2s42dahhgwa2tw9sd7qmss4/function.ext4, /home/takanorifukuyama.guest/lab/.lab/fc/run/env_01m2s42dahhgwa2tw9sd7qmss4/scratch.ext4, /home/takanorifukuyama.guest/lab/.lab/fc/run/env_01m2s42dahhgwa2tw9sd7qmss4/fc.pid, /home/takanorifukuyama.guest/lab/.lab/fc/run/env_01m2s42dahhgwa2tw9sd7qmss4

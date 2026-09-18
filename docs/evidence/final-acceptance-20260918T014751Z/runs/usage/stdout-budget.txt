@@ -1,0 +1,32 @@
+uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2s5ckgbzd6wtb2yg46dag9v (#1) created: pending
+revision rev_01m2s5ckgbzd6wtb2yg46dag9v is preparing
+revision rev_01m2s5ckgbzd6wtb2yg46dag9v is ready
+function=fn_01m2s5ck7pzaqv0hkep2rpdn42 revision=rev_01m2s5ckgbzd6wtb2yg46dag9v
+PASS  1-probe-reserved-and-settled  status=200 max_charge=146040 settled=2187 micros
+PASS  2-limit-delivered  hard_limit=513327 generation=10
+PASS  3a-parallel-refused-by-budget  200=3 429-budget=5 other=0
+PASS  3b-reserved-never-above-limit  reserved=438120 (3 x 146040) committed=440307 limit=513327
+PASS  4a-excess-returned-all-settled  reserved=0 hold=0 settlements=4 settled=16439 (4 runs reserved 584160)
+PASS  4b-settled-matches-ledger-rating  budget settled=16439 usage ledger total=16440 |diff|=1 (per-run rounding bound 8)
+PASS  4c-remaining  remaining=496888 = 513327 - 16439
+PASS  4d-store-totals-equal-rows  rows=[16439,0,0] totals=[16439,0,0] states=[["settled",4]]
+PASS  5-admitted-after-settlement  status=200
+PASS  6-soft-limit-alerts-only  alerts_fired=[50,100] (soft limit 2187 = the probe, crossed by the next settlement; no refusal from it)
+PASS  7a-stalled-collector-refuses  status=503 {"code":"budget_unavailable","reason":"budget","error_type":"Host.BudgetUnknown"}
+PASS  7b-readyz-reports-stall  readyz=503 oldest_unsettled_age=4s
+PASS  7c-running-work-finished  started before the stall threshold: status=200
+PASS  8-collector-resumed-admission-resumes  status=200
+PASS  9-lower-refuses-raise-resumes  at committed=26148: 429; raised to 1486548: 200 generation=12
+uploading /home/takanorifukuyama.guest/lab/target/aarch64-unknown-linux-musl/release/example-cpu-burn (1428432 bytes, arch aarch64)
+artifact sha256:95b667ac9c2213df656092e3aa627db6c1945437d5abce46292881e256e3e523
+revision rev_01m2s5gc095wcr15db0gq32x41 (#1) created: pending
+revision rev_01m2s5gc095wcr15db0gq32x41 is preparing
+revision rev_01m2s5gc095wcr15db0gq32x41 is ready
+PASS  10-no-budget-fails-closed-and-isolated  status=503 error_type=Host.BudgetUnknown config_state=not_delivered
+PASS  11a-metrics  refusals budget_exhausted/tenant_hard_limit=6 budget_unknown/collector_stalled=1
+PASS  11b-tsls-budget  PROVISIONAL - provisional budget: amounts are the PLT-4642 provisional rating, not an invoice; nothing is charged, billing is disabled in this prototype
+PASS  12-no-vmm-jail-cgroup-tap-left  0 leftovers
+evidence: /home/takanorifukuyama.guest/plt4649/runs/usage/budget/budget-20260918T022628Z-firecracker
+budget e2e: all checks passed

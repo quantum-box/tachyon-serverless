@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "connect",
+    "target": "1.1.1.1:443",
+    "expect": "allow",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "1.1.1.1:443"
+  },
+  {
+    "kind": "connect",
+    "target": "172.30.0.2:8080",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "172.30.0.2:22",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "172.30.0.1:22",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  },
+  {
+    "kind": "connect",
+    "target": "172.30.0.1:8080",
+    "expect": "deny",
+    "inconclusive": false,
+    "ok": true,
+    "detail": "TimedOut"
+  }
+]

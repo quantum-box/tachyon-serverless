@@ -1,0 +1,93 @@
+== leases while both environments run ==
+{"env_id":"env_01m2s4vt8k881300vjye4gwq49","index":1,"tap":"tsls84a5f908f86","host_ip":"172.30.0.5","guest_ip":"172.30.0.6","netmask":"255.255.255.252","guest_mac":"06:00:ac:1e:00:06","profile":"public-web","dns_resolver":"1.1.1.1"}
+{"env_id":"env_01m2s4vq0qp46tm0js5sqebq1v","index":0,"tap":"tsls58ec60ef776","host_ip":"172.30.0.1","guest_ip":"172.30.0.2","netmask":"255.255.255.252","guest_mac":"06:00:ac:1e:00:02","profile":"public-web","dns_resolver":"1.1.1.1"}
+== taps ==
+tsls58ec60ef776  UP             0e:51:42:f0:7d:92 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+tsls84a5f908f86  UP             b2:d4:3d:7f:4d:df <BROADCAST,MULTICAST,UP,LOWER_UP> 
+== table inet tachyon_egress ==
+table inet tachyon_egress {
+	comment "tachyon-serverless egress v1"
+	set blocked_ipv4 {
+		type ipv4_addr
+		flags interval
+		elements = { 0.0.0.0/8, 10.0.0.0/8,
+			     100.64.0.0/10, 127.0.0.0/8,
+			     169.254.0.0/16, 172.16.0.0/12,
+			     192.0.0.0/24, 192.0.2.0/24,
+			     192.88.99.0/24, 192.168.0.0/16,
+			     198.18.0.0/15, 198.51.100.0/24,
+			     203.0.113.0/24, 224.0.0.0/4,
+			     240.0.0.0/4 }
+	}
+
+	set blocked_ipv6 {
+		type ipv6_addr
+		flags interval
+		elements = { ::,
+			     ::1,
+			     ::ffff:0.0.0.0/96,
+			     64:ff9b::/96,
+			     64:ff9b:1::/48,
+			     100::/64,
+			     2001::/23,
+			     2001:db8::/32,
+			     2002::/16,
+			     fc00::/7,
+			     fe80::/10,
+			     fec0::/10,
+			     ff00::/8 }
+	}
+
+	map guest_taps {
+		type ifname : verdict
+		elements = { "tsls58ec60ef776" : jump g_tsls58ec60ef776,
+			     "tsls84a5f908f86" : jump g_tsls84a5f908f86 }
+	}
+
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname "tsls*" jump guest_egress
+		oifname "tsls*" ct state established,related counter packets 0 bytes 0 accept
+		oifname "tsls*" counter packets 0 bytes 0 drop
+	}
+
+	chain guest_egress {
+		ip6 daddr @blocked_ipv6 counter packets 0 bytes 0 drop
+		meta nfproto ipv6 counter packets 0 bytes 0 drop
+		iifname vmap @guest_taps
+		counter packets 0 bytes 0 drop
+	}
+
+	chain input {
+		type filter hook input priority filter - 10; policy accept;
+		iifname "tsls*" counter packets 0 bytes 0 drop
+	}
+
+	chain output {
+		type filter hook output priority filter - 10; policy accept;
+		oifname "tsls*" counter packets 4 bytes 201 drop
+	}
+
+	chain postrouting {
+		type nat hook postrouting priority srcnat; policy accept;
+		ip saddr 172.30.0.0/16 oifname != "tsls*" masquerade
+	}
+
+	chain g_tsls58ec60ef776 {
+		meta nfproto != ipv4 counter packets 0 bytes 0 drop
+		ip saddr != 172.30.0.2 counter packets 0 bytes 0 drop
+		ip daddr @blocked_ipv4 counter packets 0 bytes 0 drop
+		ip daddr 1.1.1.1 meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 accept
+		meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 drop
+		counter packets 0 bytes 0 accept
+	}
+
+	chain g_tsls84a5f908f86 {
+		meta nfproto != ipv4 counter packets 0 bytes 0 drop
+		ip saddr != 172.30.0.6 counter packets 0 bytes 0 drop
+		ip daddr @blocked_ipv4 counter packets 0 bytes 0 drop
+		ip daddr 1.1.1.1 meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 accept
+		meta l4proto { tcp, udp } th dport 53 counter packets 0 bytes 0 drop
+		counter packets 0 bytes 0 accept
+	}
+}

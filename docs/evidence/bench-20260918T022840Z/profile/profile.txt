@@ -1,0 +1,8 @@
+commit           4afd8c1d494ad055763151874fc369991c33da64 (dirty=false)
+ref / event       / 
+run               attempt 
+firecracker      Firecracker v1.17.0
+guest kernel     947a09e2f89b488cdb5efb42eceb37a6ac414fcb0ddb1e5bba2ba0cd1a873a2d firecracker-ci/20260916-dcfc69b625d0-0/aarch64/vmlinux-6.18.48
+rootfs           ea7b615273214cecd5b45990f999ea585103a557cb3477cc37dfc8073d7d0fae
+host             Linux lima-tsls-kvm 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 03:33:01 UTC 2026 aarch64 GNU/Linux
+kvm / nested     rw / false

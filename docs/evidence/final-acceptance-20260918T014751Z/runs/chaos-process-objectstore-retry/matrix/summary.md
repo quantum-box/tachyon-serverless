@@ -1,0 +1,9 @@
+# PLT-4646 failure matrix — 20260918T042234Z
+
+commit `b29eeec46bd820519af9b95871ed65c62637bd12`, Linux 7.0.0-31-generic aarch64, rustc 1.95.0 (59807616e 2026-04-14), nats-server v2.14.7 (nats-server: v2.14.7), provider process (dev-only, no isolation), debug gateway with failpoints.
+
+Single host. These results are not a multi-host HA guarantee.
+
+| scenario | fault | outage_ms | recovery_ms | result | attempts | failed checks (last attempt) |
+|---|---|---|---|---|---|---|
+| object_store_unavailable | object root unreadable/unwritable (chmod 000) + orphan object from a SIGKILL after the put | 6138 | 1607 | pass | pass |  |

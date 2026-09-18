@@ -1,0 +1,15 @@
+== processes ==
+258980 /bin/bash /Users/takanorifukuyama/git/tachyon-serverless/.claude/worktrees/agent-af65d2ddfc8d8e218/.kvm/vm/watch-chaos.sh
+633169 bash -lc set -e; { echo "== processes =="; pgrep -af "tachyon|firecracker|jailer|nats-server" || echo none; echo "== cgroups =="; sudo find /sys/fs/cgroup -maxdepth 1 -name "tsls-*" -o -maxdepth 1 -name "tachyon*" | head || true; echo "== taps =="; ip -br link | grep -i tsls || echo none; echo "== nft =="; sudo nft list tables; echo "== lab dir =="; ls -a ~/lab/.lab; } 2>&1 | tee ~/plt4649/lab2/09-host-after-teardown.txt
+633193 bash -lc set -e; { echo "== processes =="; pgrep -af "tachyon|firecracker|jailer|nats-server" || echo none; echo "== cgroups =="; sudo find /sys/fs/cgroup -maxdepth 1 -name "tsls-*" -o -maxdepth 1 -name "tachyon*" | head || true; echo "== taps =="; ip -br link | grep -i tsls || echo none; echo "== nft =="; sudo nft list tables; echo "== lab dir =="; ls -a ~/lab/.lab; } 2>&1 | tee ~/plt4649/lab2/09-host-after-teardown.txt
+== cgroups ==
+== taps ==
+none
+== nft ==
+table ip nat
+== lab dir ==
+.
+..
+.tsls-lab
+logs
+manifest.env

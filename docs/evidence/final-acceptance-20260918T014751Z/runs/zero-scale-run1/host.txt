@@ -1,0 +1,27 @@
+== before 2026-09-18T02:21:53Z
+vm:  11:21:53 up 23:08,  1 user,  load average: 1.86, 1.57, 1.23
+               total        used        free      shared  buff/cache   available
+Mem:            7913         582        1008           1        6528        7330
+/dev/vda1        38G   12G   27G  30% /
+zero-scale exit=1
+== after 2026-09-18T02:24:03Z
+vm:  11:24:03 up 23:10,  1 user,  load average: 1.28, 1.54, 1.27
+               total        used        free      shared  buff/cache   available
+Mem:            7913         604         983           1        6531        7308
+/dev/vda1        38G   12G   27G  30% /
+-- processes (gateway, firecracker, jailer, nats-server)
+none
+-- cgroups
+(end cgroups)
+-- jails
+(end jails)
+-- run dir
+(end run dir)
+-- taps
+(end taps)
+-- netns
+(end netns)
+-- nft
+table ip nat
+-- disk
+/dev/vda1        38G   12G   27G  30% /

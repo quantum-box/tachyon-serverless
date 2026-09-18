@@ -1,0 +1,5 @@
+taps after the run: (none)
+table inet tachyon_egress after the run: absent
+net.json leases left under /home/takanorifukuyama.guest/lab/.kvm/run: 0
+--- nft list tables ---
+table ip nat
