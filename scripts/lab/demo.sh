@@ -243,12 +243,18 @@ demo_p2() {
 # then checks what has to survive it: the ledger and the alias P1 rolled back, the invocation
 # logs, the environments (reclaimed by the startup reconcile), async work accepted before the
 # restart, the cron schedule, and the usage ledger (no replay, no double count).
+# cron_fires TRIGGER_ID -> how many fires of the trigger were accepted
+cron_fires() {
+  ta triggers fires hello "$1" --limit 100 --json 2>/dev/null |
+    jq -r '[(.items // .)[] | select(.outcome == "accepted")] | length' 2>/dev/null
+}
+
 demo_restart() {
   section "restart: accepted async work, cron, ledger, logs and usage survive a gateway restart (provider $PROVIDER)"
   local stamp cbid axid inv n=4 i body
   local greeting_before greeting_after fn_before fn_after schema_before schema_after
   local logs_before logs_after log_offset this_start cron fires_before fires_after
-  local cb_before cb_after ax_before ax_after ids="" id s accepted=0 terminal=0 unknown=0 attempts_max=0 a deadline
+  local cb_before cb_after ax_before ax_after ids="" id s accepted=0 terminal=0 unknown=0 attempts_max=0 a deadline pending
   stamp="$(date -u +%H%M%S)$(random_hex 2)"
   cbid="$(ensure_function cpu-burn)"
   axid="$(ensure_function http-axum)"
@@ -267,12 +273,14 @@ demo_restart() {
   cb_before="$(jq -r --arg f "$cbid" '[.lines[] | select(.function_id == $f) | .usage.invocations] | add // 0' <<<"$OUT" 2>/dev/null)"
   ax_before="$(jq -r --arg f "$axid" '[.lines[] | select(.function_id == $f) | .usage.attempts] | add // 0' <<<"$OUT" 2>/dev/null)"
 
-  # a cron trigger that keeps firing across the restart
-  cron="$(ta triggers create hello --name "lab-restart-cron-$stamp" --kind cron --schedule '*/2 * * * * *' \
+  # A cron trigger that keeps firing across the restart. Every 5 s, and disabled as soon as the
+  # restart has been observed: a cron that fires faster than a cold start builds a backlog of
+  # invocations (on firecracker every fire boots a microVM), which would then delay P3.
+  cron="$(ta triggers create hello --name "lab-restart-cron-$stamp" --kind cron --schedule '*/5 * * * * *' \
     --timezone Asia/Tokyo --payload '{"name":"restart-cron"}' --missed-run skip --json | jq -r .id)"
-  check restart.cron_created "trigger=$cron schedule='*/2 * * * * *' (kept enabled across the restart)" test -n "$cron" -a "$cron" != null
-  sleep 5
-  fires_before="$(ta triggers fires hello "$cron" --limit 50 --json | jq -r '[(.items // .)[] | select(.outcome == "accepted")] | length' 2>/dev/null)"
+  check restart.cron_created "trigger=$cron schedule='*/5 * * * * *' (kept enabled across the restart)" test -n "$cron" -a "$cron" != null
+  sleep 6
+  fires_before="$(cron_fires "$cron")"
 
   # async work accepted (durably) just before the restart: cpu-burn, one at a time, 2 s each, so
   # the queue still holds most of it when the gateway goes down.
@@ -297,6 +305,14 @@ demo_restart() {
   check restart.started_healthy "every component healthy again after the restart (health table)" health_table quiet
   this_start="$DEMO_OUT/restart-gateway-start.log"
   tail -c +"$((log_offset + 1))" "$GATEWAY_LOG" >"$this_start" 2>/dev/null || true
+
+  # the cron keeps its schedule across the restart; disable it as soon as that is visible
+  sleep 11
+  fires_after="$(cron_fires "$cron")"
+  ta triggers update hello "$cron" --disable >&2 || true
+  ta triggers delete hello "$cron" >&2 || true
+  check restart.cron_fires_after_restart "accepted fires $fires_before -> $fires_after (the scheduler takes its lease again)" \
+    test "${fires_after:-0}" -gt "${fires_before:-0}"
 
   # --- what survived -------------------------------------------------------------------------
   schema_after="$(sqlite_ro "$DATA_DIR/state.db" 'SELECT MAX(version) FROM schema_version' || true)"
@@ -329,14 +345,6 @@ demo_restart() {
   check restart.async_attempts_bounded "most attempts on one invocation: $attempts_max (max_attempts 3; a retry after the restart is not a new invocation)" \
     test "$attempts_max" -ge 1 -a "$attempts_max" -le 3
 
-  # cron keeps its schedule across the restart
-  sleep 6
-  fires_after="$(ta triggers fires hello "$cron" --limit 50 --json | jq -r '[(.items // .)[] | select(.outcome == "accepted")] | length' 2>/dev/null)"
-  ta triggers update hello "$cron" --disable >&2 || true
-  ta triggers delete hello "$cron" >&2 || true
-  check restart.cron_fires_after_restart "accepted fires $fires_before -> $fires_after (the scheduler takes its lease again)" \
-    test "${fires_after:-0}" -gt "${fires_before:-0}"
-
   # usage: the async invocations are counted once each, and nothing is replayed for a function
   # that did not run across the restart
   deadline=$((SECONDS + 60))
@@ -352,6 +360,16 @@ demo_restart() {
     is "$((cb_after - cb_before))" "$n"
   check restart.no_replay_for_idle_function "http-axum attempts $ax_before -> $ax_after (it did not run across the restart; the journal is not replayed into the ledger twice)" \
     is "$ax_after" "$ax_before"
+  # leave no backlog behind: the disabled cron's fires must finish before P3 starts
+  deadline=$((SECONDS + 180))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    pending="$(ta functions invocations hello --limit 100 --json 2>/dev/null |
+      jq -r '[(.items // .)[] | select(.status != "succeeded" and .status != "failed" and .status != "cancelled")] | length' 2>/dev/null)"
+    [ "${pending:-0}" != 0 ] || break
+    sleep 2
+  done
+  check restart.cron_backlog_drained "hello invocations still running or queued after the cron was deleted: ${pending:-?}" \
+    is "${pending:-1}" 0
   note "the restart is a clean SIGTERM (in-flight synchronous invocations are cancelled). Crash, DB, queue and worker failures are the failure matrix (docs/failure-matrix.md), not this demo."
 }
 
