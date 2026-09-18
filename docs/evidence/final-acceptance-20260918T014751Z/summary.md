@@ -40,7 +40,7 @@
 - `runs/<名前>/stdout.txt` — その実行の全出力。`host.txt` は実行前後の VM の負荷・memory・disk と、実行後の残留監査（process / cgroup / jail / tap / nft / netns）。`vm-load.tsv` は 5 秒ごとの VM の load average。
 - `runs/lab-run1`・`runs/lab-run2` — lab の各コマンドの出力（`01-preflight.txt` … `07-teardown.txt`、`09-host-after-teardown.txt`）と `demo/` 以下の `results.txt`。
 - `runs/chaos-*/matrix/` — `summary.md`（シナリオ表）、`results.jsonl`、`profile.json`、`scenarios/<id>/attempt-<n>/`。
-- `scripts/` — この受入で使った VM 側の実行 script（`run-*.sh`、`common.sh`）。読み取り用の写し。
+- `scripts/` — この受入で使った VM 側の実行 script の写し。CI の shellcheck が拾わないよう `*.sh.txt` にしてある（`docs/evidence/kvm-final-scripts/` と同じ扱い）。
 - `mac-load.tsv` — 物理 host（Mac）の 1 分 load average。時間の値を読むときの前提。
 - 各 script が書いた evidence は `docs/evidence/` の元の名前のまま置いてある（上表の「出力」列の `../`）。
 
