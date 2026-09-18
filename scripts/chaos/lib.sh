@@ -189,6 +189,14 @@ nats_up() {
   fi
   NATS_ENABLED=1
   eval "$("$REPO_ROOT/scripts/queue/up.sh" 2>>"$WORK/nats-up.log")"
+  # up.sh prints the exports on stdout; when nats-server does not come up (a port taken between
+  # free_port and bind, no disk, ...) the eval sets nothing and the gateway config below would
+  # fail on an unbound variable, far from the cause. Say what happened instead.
+  if [ -z "${TACHYON_NATS_URL:-}" ]; then
+    printf 'nats-server did not start on port %s (scenario %s)\n' "${QUEUE_PORT:-?}" "${SC_ID:-?}" >&2
+    tail -n 5 "$QUEUE_STATE_DIR/nats-server.log" "$WORK/nats-up.log" 2>/dev/null >&2 || true
+    return 1
+  fi
 }
 nats_pid() { cat "$QUEUE_STATE_DIR/nats-server.pid" 2>/dev/null; }
 probe() {
