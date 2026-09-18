@@ -261,8 +261,10 @@ PASS  p3.cron_fired                                              accepted fires 
 PASS  p3.budget_hard_limit_stops                                 exit=2 code=budget_exhausted reason=budget
 PASS  secrets.not_leaked                                         20 locations x 5 values checked, 0 hits (config/ and secrets/ hold them by design)
 
-61 checks passed, 0 failed
+62 checks passed, 0 failed
 ```
+
+check の数は provider で変わる: process は 62、firecracker は `p1.provider_is_microvm` と `p1.guest_boot_id` が加わって 64。
 
 `tsls budget` と `tsls usage` の表は先頭に `PROVISIONAL - ... nothing is charged, billing is disabled in this prototype` を出す。
 
