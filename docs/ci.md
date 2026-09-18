@@ -96,13 +96,19 @@ PR は `base...merge commit`、main への push は `before...sha` の差分で�
 
 #### runner が無い間の運用（2026-09-18〜）
 
-self-hosted KVM runner は当面登録しない（§5 の手順は残すが、実施の見込みが立っていない）。その間、KVM 必要な PR では `kvm` job はどうやっても走らないので、label は「runner で実行してよい」ではなく **「maintainer が diff を読み、手元の KVM 実機での実行結果をもって受け入れた」** ことを表す。運用は次のとおり。
+self-hosted KVM runner は当面登録しない（§5 の手順は残すが、実施の見込みが立っていない）。
+
+> [!IMPORTANT]
+> runner が無い間は **`kvm` label を付けない**。label を付けると `kvm` job が schedule され、runner が来ないまま queued で止まり、`kvm-gate` は 24 時間 pending のあと GitHub の cancel で failure になる（この workflow の冒頭コメント参照）。付けない場合は即座に failure になるだけで、結果は変わらず待ち時間だけが増える。
+
+したがって runner が無い間、KVM 必要な PR の `kvm-gate` は **必ず赤**で、その赤は「**CI では実行していない**」という意味である（「実機で確かめていない」ではない）。実機で確かめたかどうかは label と PR コメントで区別する。
 
 1. PR の作成者は、変更した `scripts/kvm/**` / `scripts/e2e/**` を **実 Firecracker（KVM）で実行し、結果を `docs/evidence/` に入れる**。
-2. maintainer は diff とその証跡を確認し、`kvm` label を付ける。**どの実行で確かめたかを PR のコメントに残す**（証跡 directory と PASS 数）。
-3. 証跡の無い KVM 必要な変更に label を付けない。label の無い赤い `kvm-gate` は「まだ誰も確かめていない」という意味のまま残す。
+2. maintainer は diff とその証跡を確認し、**`kvm-verified-locally` label**（`kvm` job を起動しない印）を付け、**どの実行で確かめたかを PR のコメントに残す**（証跡 directory と PASS 数）。
+3. 証跡の無い KVM 必要な変更にこの label を付けない。label の無い赤い `kvm-gate` は「実機でも確かめていない」という意味になる。
+4. merge の判断は、`kvm-gate` 以外のすべてが green であることと、この label + コメントを見て行う。
 
-label を付けずに merge すると gate は赤のままになり、「未確認」と「いつもの赤」が区別できなくなる。**required check を常時赤のまま運用しない**ために、KVM 必要な PR は必ず上の 1〜3 を通す。runner を登録できたら（[known-constraints-and-beta-gap.md](known-constraints-and-beta-gap.md) §7.1 V8）この節は削除し、label は本来の「実行許可」に戻す。
+runner を登録できたら（[known-constraints-and-beta-gap.md](known-constraints-and-beta-gap.md) §7.1 V8）この節と `kvm-verified-locally` label は廃止し、`kvm` label を本来の「runner での実行許可」として使う。
 
 ### 4.3 workflow の `if:` は多層防御にすぎない
 
