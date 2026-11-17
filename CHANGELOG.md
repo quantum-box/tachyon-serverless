@@ -65,3 +65,7 @@
   - 文書 `docs/architecture.md`、`docs/protocol.md`、`docs/threat-model.md`、ADR 0001 / 0002、`docs/api.md`、`docs/cli.md`、`docs/kvm.md`、`docs/inventory-tachyon-apps.md`、`docs/acceptance.md`
   - 実行記録 `docs/evidence/20260915T073238Z-process/`（process provider、macOS、E2E 27/27）、`docs/evidence/kvm-20260915T080221Z/`（Firecracker microVM の smoke、aarch64 Linux/KVM、Lima の nested virtualization）、`docs/evidence/20260915T125610Z-firecracker/`（Firecracker provider の E2E 27/27）
   - 2026-09-16 のコードレビューで確認された指摘と、受入条件ごとの残りの未検証項目は `docs/acceptance.md` に記載
+
+### Security
+
+- TLS 証明書検証の依存を更新: rustls-webpki を 0.103.16、webpki-roots を 1.0.10 へ上げた。eMudhra 中間 CA の秘密鍵漏えいに伴い、該当チェーンを拒否し、該当ルート（emSign ECC Root CA - G3）を除外するため（lockfile のみの変更）
